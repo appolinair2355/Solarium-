@@ -67,6 +67,15 @@ export default function Admin() {
   const [tokenLoading, setTokenLoading] = useState(false);
   const [showToken, setShowToken] = useState(false);
 
+  // Format des messages Telegram
+  const [msgFormat, setMsgFormat] = useState(1);
+  const [msgFormatSaving, setMsgFormatSaving] = useState(false);
+  const [msgFormatMsg, setMsgFormatMsg] = useState('');
+
+  // Max rattrapage
+  const [maxRattrapage, setMaxRattrapage] = useState(2);
+  const [maxRSaving, setMaxRSaving] = useState(false);
+
   // Telegram channels
   const [tgChannels, setTgChannels] = useState([]);
   const [tgInput, setTgInput] = useState('');
@@ -161,6 +170,60 @@ export default function Admin() {
     } catch {}
   }, []);
 
+  const loadMsgFormat = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/msg-format', { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setMsgFormat(d.format_id || 1); }
+    } catch {}
+  }, []);
+
+  const loadMaxR = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/max-rattrapage', { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setMaxRattrapage(d.max_rattrapage ?? 2); }
+    } catch {}
+  }, []);
+
+  const saveMaxR = async (n) => {
+    setMaxRSaving(true);
+    try {
+      const r = await fetch('/api/admin/max-rattrapage', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_rattrapage: n }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMaxRattrapage(n);
+      setMsgFormatMsg('✅ Rattrapages max enregistré');
+      setTimeout(() => setMsgFormatMsg(''), 3000);
+    } catch (e) {
+      setMsgFormatMsg('❌ ' + e.message);
+      setTimeout(() => setMsgFormatMsg(''), 3000);
+    }
+    setMaxRSaving(false);
+  };
+
+  const saveMsgFormat = async (id) => {
+    setMsgFormatSaving(true);
+    try {
+      const r = await fetch('/api/admin/msg-format', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format_id: id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsgFormat(id);
+      setMsgFormatMsg('✅ Format enregistré');
+      setTimeout(() => setMsgFormatMsg(''), 3000);
+    } catch (e) {
+      setMsgFormatMsg('❌ ' + e.message);
+      setTimeout(() => setMsgFormatMsg(''), 3000);
+    }
+    setMsgFormatSaving(false);
+  };
+
   const openCreate = () => {
     setStratEditing(null);
     setStratForm({ ...BLANK_FORM });
@@ -248,7 +311,7 @@ export default function Admin() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadMsgFormat(); loadMaxR(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadMsgFormat, loadMaxR]);
 
   // Duration input helpers
   const setDur = (uid, field, val) =>
@@ -311,14 +374,14 @@ export default function Admin() {
   const startNameEdit = u =>
     setNameEdit(p => ({ ...p, [u.id]: { first_name: u.first_name || '', last_name: u.last_name || '' } }));
 
-  // Visibility modal
+  // Visibility modal (opt-in : l'admin assigne les canaux à chaque utilisateur)
   const openVisModal = async u => {
     setVisModal({ userId: u.id, username: u.username });
     setVisLoading(true);
     const res = await fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' });
     if (res.ok) {
       const d = await res.json();
-      setVisData(p => ({ ...p, [u.id]: new Set(d.hidden) }));
+      setVisData(p => ({ ...p, [u.id]: new Set(d.visible) }));
     }
     setVisLoading(false);
   };
@@ -333,13 +396,13 @@ export default function Admin() {
 
   const saveVisibility = async () => {
     const { userId } = visModal;
-    const hidden = [...(visData[userId] || new Set())];
+    const visible = [...(visData[userId] || new Set())];
     const res = await fetch(`/api/telegram/users/${userId}/visibility`, {
       method: 'PUT', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hidden_channel_ids: hidden }),
+      body: JSON.stringify({ visible_channel_ids: visible }),
     });
-    if (res.ok) { showMsg('Visibilité enregistrée'); setVisModal(null); }
+    if (res.ok) { showMsg('Canaux assignés avec succès'); setVisModal(null); }
     else showMsg('Erreur lors de la sauvegarde', true);
   };
 
@@ -596,6 +659,172 @@ export default function Admin() {
             )}
           </div>
         </div>
+
+        {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
+        {(() => {
+          const G = 1234;
+          const SUP = ['⁰','¹','²','³','⁴','⁵'];
+          const RE  = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣'];
+          const sup = SUP[maxRattrapage] ?? maxRattrapage;
+          const barP = '🟦' + '⬜'.repeat(maxRattrapage);
+          const barW = '🟩' + '⬜'.repeat(maxRattrapage > 0 ? maxRattrapage - 1 : 0) + (maxRattrapage === 0 ? '' : '');
+
+          const barLost = '🟥'.repeat(maxRattrapage + 1);
+
+          const FORMATS = [
+            {
+              id: 1, label: 'Style Russe', icon: '⚜',
+              preview: `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ⌛`,
+              result:  `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ✅ ${RE[0]}`,
+              perdu:   `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ❌ PERDU ❌`,
+            },
+            {
+              id: 2, label: 'Premium', icon: '🎲',
+              preview: `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nEn cours :⌛`,
+              result:  `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nStatut :✅ ${RE[0]}`,
+              perdu:   `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nStatut :❌ PERDU ❌`,
+            },
+            {
+              id: 3, label: 'Baccara Pro', icon: '🃏',
+              preview: `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:⌛\nMode: Dogon ${maxRattrapage}`,
+              result:  `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:✅ ${RE[0]}\nMode: Dogon ${maxRattrapage}`,
+              perdu:   `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:❌ PERDU ❌\nMode: Dogon ${maxRattrapage}`,
+            },
+            {
+              id: 4, label: 'Prédiction', icon: '🎰',
+              preview: `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: En cours ⏳\n🔍 Vérification en cours`,
+              result:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: ✅ ${RE[0]}\n🔍 Vérifié ✓`,
+              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: ❌ PERDU ❌\n🔍 Résultat final`,
+            },
+            {
+              id: 5, label: 'Barre de progression', icon: '🟦',
+              preview: `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n${barP}\n⏳ Analyse...`,
+              result:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n🟩${barP.slice(2)}\n✅ Gagné en R0`,
+              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n${barLost}\n❌ PERDU ❌`,
+            },
+            {
+              id: 6, label: 'Classique', icon: '✨',
+              preview: `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n⏳ Statut: En cours`,
+              result:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n✅ Statut: ✅ ${RE[0]} GAGNÉ`,
+              perdu:   `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\nStatut: ❌ PERDU ❌`,
+            },
+          ];
+
+          return (
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)' }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">📋</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Format des messages Telegram</h2>
+                  <p className="tg-admin-sub">
+                    Le message de prédiction est <strong>modifié en place</strong> après vérification (editMessage).
+                    Choisissez le style et le nombre max de rattrapages autorisés.
+                  </p>
+                </div>
+                {msgFormatMsg && (
+                  <span style={{ fontSize: 13, fontWeight: 700, color: msgFormatMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>
+                    {msgFormatMsg}
+                  </span>
+                )}
+              </div>
+
+              {/* ── Sélecteur de rattrapages max ── */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.2)',
+                borderRadius: 10, padding: '14px 18px', marginTop: 12,
+              }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: 13 }}>⚙️ Rattrapages max (Dogon)</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                    Nombre de jeux supplémentaires après la prédiction initiale. Affiché dans le message (ex: +²).
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
+                  {[0,1,2,3,4,5].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => saveMaxR(n)}
+                      disabled={maxRSaving}
+                      style={{
+                        width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer',
+                        fontWeight: 800, fontSize: 16,
+                        background: maxRattrapage === n ? '#f59e0b' : 'rgba(255,255,255,0.06)',
+                        color: maxRattrapage === n ? '#000' : '#94a3b8',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {['⁰','¹','²','³','⁴','⁵'][n]}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: '#fbbf24', minWidth: 80 }}>
+                  Actuel : <strong>+{['⁰','¹','²','³','⁴','⁵'][maxRattrapage]}</strong> ({maxRattrapage} rattrap.)
+                </div>
+              </div>
+
+              {/* ── Grille des formats ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, marginTop: 16 }}>
+                {FORMATS.map(fmt => {
+                  const active = msgFormat === fmt.id;
+                  return (
+                    <button
+                      key={fmt.id}
+                      onClick={() => saveMsgFormat(fmt.id)}
+                      disabled={msgFormatSaving}
+                      style={{
+                        textAlign: 'left', cursor: 'pointer',
+                        background: active ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
+                        border: `2px solid ${active ? '#22c55e' : 'rgba(255,255,255,0.08)'}`,
+                        borderRadius: 12, padding: '14px 16px',
+                        transition: 'all 0.2s', position: 'relative',
+                      }}
+                    >
+                      {active && (
+                        <span style={{
+                          position: 'absolute', top: 8, right: 10,
+                          fontSize: 11, fontWeight: 700, color: '#22c55e',
+                          background: 'rgba(34,197,94,0.15)', padding: '2px 8px', borderRadius: 20,
+                        }}>✓ Actif</span>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontSize: 20 }}>{fmt.icon}</span>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: active ? '#22c55e' : '#e2e8f0' }}>{fmt.label}</div>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>Format #{fmt.id}</div>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: '#1e2433', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
+                        border: '1px solid rgba(255,255,255,0.06)',
+                      }}>
+                        <div style={{ fontSize: 9, color: '#93c5fd', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Envoi initial (en attente) →</div>
+                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#cbd5e1', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.preview}</pre>
+                      </div>
+
+                      <div style={{
+                        background: '#1a2a1a', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
+                        border: '1px solid rgba(34,197,94,0.12)',
+                      }}>
+                        <div style={{ fontSize: 9, color: '#86efac', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Après vérif. — Gagné R0 →</div>
+                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#86efac', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.result}</pre>
+                      </div>
+
+                      <div style={{
+                        background: '#2a1a1a', borderRadius: 8, padding: '10px 12px',
+                        border: '1px solid rgba(239,68,68,0.15)',
+                      }}>
+                        <div style={{ fontSize: 9, color: '#fca5a5', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>❌ Après vérif. — Perdu →</div>
+                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#fca5a5', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.perdu}</pre>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── STRATÉGIES PERSONNALISÉES ── */}
         <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)' }}>
@@ -990,27 +1219,31 @@ export default function Admin() {
               <button className="vis-modal-close" onClick={() => setVisModal(null)}>✕</button>
             </div>
             <div className="vis-modal-sub">
-              Cochez les canaux que cet utilisateur peut voir.<br/>
-              Un canal décoché sera masqué pour cet utilisateur.
+              Cochez les canaux à assigner à cet utilisateur.<br/>
+              Par défaut, aucun canal n'est visible — vous devez les assigner manuellement.
             </div>
             {visLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><div className="spinner" /></div>
+            ) : tgChannels.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+                Aucun canal Telegram configuré.
+              </div>
             ) : (
               <div className="vis-channels-list">
                 {tgChannels.map(ch => {
-                  const hidden = visData[visModal.userId] || new Set();
-                  const isVisible = !hidden.has(ch.dbId);
+                  const assigned = visData[visModal.userId] || new Set();
+                  const isAssigned = assigned.has(ch.dbId);
                   return (
-                    <label key={ch.dbId} className={`vis-channel-toggle ${isVisible ? 'visible' : 'hidden'}`}>
+                    <label key={ch.dbId} className={`vis-channel-toggle ${isAssigned ? 'visible' : 'hidden'}`}>
                       <input
                         type="checkbox"
-                        checked={isVisible}
+                        checked={isAssigned}
                         onChange={() => toggleVisChannel(visModal.userId, ch.dbId)}
                       />
-                      <span className="vis-channel-icon">✈️</span>
+                      <span className="vis-channel-icon">📡</span>
                       <span className="vis-channel-name">{ch.name}</span>
-                      <span className={`vis-channel-badge ${isVisible ? 'on' : 'off'}`}>
-                        {isVisible ? 'Visible' : 'Masqué'}
+                      <span className={`vis-channel-badge ${isAssigned ? 'on' : 'off'}`}>
+                        {isAssigned ? 'Assigné' : 'Non assigné'}
                       </span>
                     </label>
                   );
