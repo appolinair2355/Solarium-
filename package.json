@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "build": "vite build",
-    "dev": "vite",
+    "build": "./node_modules/.bin/vite build",
+    "dev": "./node_modules/.bin/vite",
     "test": "echo \"No tests\" && exit 0"
   },
   "keywords": [],
