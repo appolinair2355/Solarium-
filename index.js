@@ -66,6 +66,16 @@ app.use('/api/games',       gamesRouter);
 app.use('/api/telegram',    telegramRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 
+// ── Vidéos tutoriels (public, page d'accueil) ──────────────────────
+const db = require('./db');
+app.get('/api/tutorial-videos', async (req, res) => {
+  try {
+    const raw = await db.getSetting('tutorial_videos');
+    const videos = raw ? JSON.parse(raw) : { video1: null, video2: null };
+    res.json(videos);
+  } catch (e) { res.json({ video1: null, video2: null }); }
+});
+
 // ── Client statique ────────────────────────────────────────────────
 const distPath = path.join(__dirname, 'dist');
 

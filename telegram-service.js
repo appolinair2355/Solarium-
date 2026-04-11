@@ -180,6 +180,24 @@ function removeSSEClient(res) {
   if (i !== -1) sseClients.splice(i, 1);
 }
 
+// Called by admin after assigning channels to a user — updates live SSE connections
+function updateUserVisibleSet(userId, channelDbIds) {
+  const newSet = new Set(channelDbIds);
+  for (const client of sseClients) {
+    if (client.isAdmin) continue;
+    if (client.userId !== userId) continue;
+    client.visibleSet = newSet;
+    // Push updated channel list to client
+    const visible = [...channelStore.values()]
+      .filter(ch => newSet.has(ch.dbId))
+      .map(ch => ({ dbId: ch.dbId, name: ch.name, messages: getMessages(ch.dbId).slice(0, 50) }));
+    try {
+      client.res.write(`data: ${JSON.stringify({ type: 'init', channels: visible })}\n\n`);
+      if (client.res.flush) client.res.flush();
+    } catch {}
+  }
+}
+
 // ── Message formatting (unified) ───────────────────────────────────
 
 const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
@@ -291,49 +309,109 @@ function buildResultMsg(formatId, data) {
   return buildTgMessage(formatId, { ...data, maxR: data.maxRattrapage ?? maxRattrapage });
 }
 
-// ── Send to ALL global channels + store message_id ─────────────────
+// ── Envoi bas niveau (un canal, un token) ──────────────────────────
 
-async function sendToGlobalChannelsAndStore(strategy, gameNumber, suit) {
+async function _sendOneMessage(token, tgChatId, text, parse_mode) {
+  const body = { chat_id: tgChatId, text };
+  if (parse_mode) body.parse_mode = parse_mode;
+  const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(err.slice(0, 160));
+  }
+  const d = await resp.json();
+  return d.result?.message_id || null;
+}
+
+// ── Routage par stratégie vers les canaux globaux ─────────────────
+//
+//  • Si des routes spécifiques existent pour cette stratégie → envoi
+//    uniquement sur ces canaux.
+//  • Sinon → envoi sur TOUS les canaux configurés (comportement actuel).
+//  • Dans les deux cas, le message_id est stocké en DB pour édition.
+
+async function sendToStrategyChannels(strategy, gameNumber, suit) {
   if (!TOKEN) return;
-  const channels = getChannels();
-  if (!channels.length) return;
 
   const { text, parse_mode } = buildTgMessage(currentFormat, {
     gameNumber, suit, strategy, maxR: maxRattrapage, status: null,
   });
 
-  for (const ch of channels) {
+  // Déterminer les canaux cibles
+  let targets;
+  try {
+    const routes = await db.getStrategyRoutes(strategy);
+    if (routes.length > 0) {
+      // Routage explicite : seulement les canaux assignés à cette stratégie
+      targets = routes.map(r => ({ tgId: r.tg_id, dbId: r.id, name: r.channel_name }));
+      console.log(`[TG] ${strategy} routé vers ${targets.length} canal(aux) spécifique(s)`);
+    } else {
+      // Pas de route → tous les canaux globaux
+      targets = getChannels().map(c => ({ tgId: c.tgId, dbId: c.dbId, name: c.name }));
+    }
+  } catch (e) {
+    console.error(`[TG] getStrategyRoutes error: ${e.message}`);
+    targets = getChannels().map(c => ({ tgId: c.tgId, dbId: c.dbId, name: c.name }));
+  }
+
+  for (const ch of targets) {
     try {
-      const body = { chat_id: ch.tgId, text };
-      if (parse_mode) body.parse_mode = parse_mode;
-      const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (resp.ok) {
-        const d = await resp.json();
-        const msgId = d.result?.message_id;
-        if (msgId) {
-          await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId).catch(() => {});
-          console.log(`[TG] Prédiction #${gameNumber} → ${ch.tgId} (msg_id=${msgId})`);
-        }
-      } else {
-        const err = await resp.text();
-        console.error(`[TG] Erreur sendMessage → ${ch.tgId}: ${err.slice(0, 120)}`);
+      const msgId = await _sendOneMessage(TOKEN, ch.tgId, text, parse_mode);
+      if (msgId) {
+        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null).catch(() => {});
+        console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} (msg_id=${msgId})`);
       }
-    } catch (e) { console.error(`[TG] Exception: ${e.message}`); }
+    } catch (e) { console.error(`[TG] sendToStrategyChannels ${ch.tgId}: ${e.message}`); }
   }
 }
 
-// ── Edit stored messages with result ──────────────────────────────
+// ── Stratégies personnalisées : envoi avec token custom + stockage ─
+//
+//  targets = [{ bot_token, channel_id }, ...]
+//  Stocke le message_id + le bot_token dans tg_pred_messages pour
+//  pouvoir éditer le message lors de la résolution.
 
-async function editGlobalChannelMessages(strategy, gameNumber, suit, status, rattrapage) {
-  if (!TOKEN) { console.warn('[TG Edit] Aucun TOKEN — édition ignorée'); return; }
+async function sendCustomAndStore(targets, strategyId, gameNumber, suit) {
+  if (!Array.isArray(targets) || targets.length === 0) return;
+
+  const { text, parse_mode } = buildTgMessage(currentFormat, {
+    gameNumber, suit, strategy: strategyId, maxR: maxRattrapage, status: null,
+  });
+
+  for (const { bot_token, channel_id } of targets) {
+    if (!bot_token || !channel_id) continue;
+    try {
+      const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
+      if (msgId) {
+        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token).catch(() => {});
+        console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} (msg_id=${msgId})`);
+      }
+    } catch (e) {
+      console.error(`[TG Custom] sendCustomAndStore ${channel_id}: ${e.message}`);
+    }
+  }
+}
+
+// ── Édition des messages stockés (globaux ET personnalisés) ────────
+//
+//  Utilise le bot_token stocké dans tg_pred_messages s'il est présent
+//  (stratégie custom), sinon le TOKEN global.
+
+async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage) {
   let stored;
-  try { stored = await db.getTgMsgIds(strategy, gameNumber, suit); } catch (e) { console.error('[TG Edit] getTgMsgIds error:', e.message); stored = []; }
+  try {
+    stored = await db.getTgMsgIds(strategy, gameNumber, suit);
+  } catch (e) {
+    console.error('[TG Edit] getTgMsgIds error:', e.message);
+    stored = [];
+  }
+
   if (!stored.length) {
-    console.warn(`[TG Edit] Aucun message_id trouvé pour ${strategy}/#${gameNumber}/${suit} — impossible d'éditer`);
+    console.warn(`[TG Edit] Aucun message_id pour ${strategy}/#${gameNumber}/${suit}`);
     return;
   }
 
@@ -341,55 +419,54 @@ async function editGlobalChannelMessages(strategy, gameNumber, suit, status, rat
     gameNumber, suit, strategy, maxR: maxRattrapage, status, rattrapage,
   });
 
-  for (const { channel_tg_id, message_id } of stored) {
+  for (const row of stored) {
+    const token  = row.bot_token || TOKEN;
+    if (!token) { console.warn(`[TG Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
+
     try {
-      const body = { chat_id: channel_tg_id, message_id: parseInt(message_id), text };
+      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text };
       if (parse_mode) body.parse_mode = parse_mode;
-      const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/editMessageText`, {
+      const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (resp.ok) {
-        console.log(`[TG] Édition #${gameNumber} → ${channel_tg_id} (${status} R${rattrapage})`);
+        console.log(`[TG Edit] ${strategy} #${gameNumber} → ${row.channel_tg_id} (${status} R${rattrapage})`);
       } else {
         const err = await resp.text();
-        console.error(`[TG] Erreur editMessage → ${channel_tg_id}: ${err.slice(0, 120)}`);
+        // 400 "message is not modified" est bénin — on l'ignore
+        if (!err.includes('message is not modified')) {
+          console.error(`[TG Edit] editMessage ${row.channel_tg_id}: ${err.slice(0, 120)}`);
+        }
       }
-    } catch (e) { console.error(`[TG] Exception edit: ${e.message}`); }
+    } catch (e) { console.error(`[TG Edit] Exception: ${e.message}`); }
   }
 
-  // Supprimer les message_ids après modification finale
   if (status === 'gagne' || status === 'perdu') {
     db.deleteTgMsgIds(strategy, gameNumber, suit).catch(() => {});
   }
 }
 
-// ── Legacy: send without storing (for custom strategy targets) ─────
+// ── Alias de compatibilité ─────────────────────────────────────────
+
+const sendToGlobalChannelsAndStore  = sendToStrategyChannels;
+const editGlobalChannelMessages     = editStoredMessages;
+
+// ── Compat: send without storing ──────────────────────────────────
 
 async function sendPredictionToTelegram(botToken, tgChannelId, strategyName, gameNumber, predictedSuit) {
   if (!botToken || !tgChannelId) return;
   try {
     const { text, parse_mode } = buildTgMessage(currentFormat, {
-      gameNumber, suit: predictedSuit, strategy: strategyName,
-      maxR: maxRattrapage, status: null,
+      gameNumber, suit: predictedSuit, strategy: strategyName, maxR: maxRattrapage, status: null,
     });
-    const body = { chat_id: tgChannelId, text };
-    if (parse_mode) body.parse_mode = parse_mode;
-    const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const err = await resp.text();
-      console.error(`[TG Pred] Erreur → ${tgChannelId}: ${err.slice(0, 120)}`);
-    } else {
-      console.log(`[TG Pred] #${gameNumber} → ${tgChannelId} (${strategyName})`);
-    }
+    await _sendOneMessage(botToken, tgChannelId, text, parse_mode);
+    console.log(`[TG Pred] #${gameNumber} → ${tgChannelId} (${strategyName})`);
   } catch (e) { console.error(`[TG Pred] Exception: ${e.message}`); }
 }
 
+// Ancienne version sans stockage (conservée pour compatibilité)
 async function sendPredictionToTargets(targets, strategyName, gameNumber, predictedSuit) {
   if (!Array.isArray(targets) || targets.length === 0) return;
   for (const { bot_token, channel_id } of targets) {
@@ -406,21 +483,15 @@ async function sendToGlobalChannels(text, parse_mode) {
   const channels = getChannels();
   for (const ch of channels) {
     try {
-      const body = { chat_id: ch.tgId, text };
-      if (parse_mode) body.parse_mode = parse_mode;
-      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-    } catch {}
+      await _sendOneMessage(TOKEN, ch.tgId, text, parse_mode);
+    } catch (e) { console.error(`[TG] sendToGlobalChannels: ${e.message}`); }
   }
 }
 
 module.exports = {
   loadConfig, addChannel, removeChannel, testChannel,
   getChannels, getMessages, getStatus,
-  addSSEClient, removeSSEClient,
+  addSSEClient, removeSSEClient, updateUserVisibleSet,
   saveToken, loadToken,
   getToken: () => TOKEN,
   startBotPublic: startBot,
@@ -428,8 +499,11 @@ module.exports = {
   getCurrentMaxRattrapage, loadMaxRattrapage, saveMaxRattrapage,
   buildTgMessage, buildPredictionMsg, buildResultMsg,
   sendToGlobalChannels,
-  sendToGlobalChannelsAndStore,
-  editGlobalChannelMessages,
+  sendToGlobalChannelsAndStore,    // alias → sendToStrategyChannels
+  sendToStrategyChannels,
+  editGlobalChannelMessages,       // alias → editStoredMessages
+  editStoredMessages,
+  sendCustomAndStore,
   sendPredictionToTelegram,
   sendPredictionToTargets,
   SUIT_EMOJI, SUIT_NAME,

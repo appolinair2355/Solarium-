@@ -5,8 +5,9 @@ const db  = require('./db');
 const { fetchGames } = require('./games');
 const {
   sendPredictionToTargets,
-  sendToGlobalChannelsAndStore,
-  editGlobalChannelMessages,
+  sendToStrategyChannels,
+  sendCustomAndStore,
+  editStoredMessages,
   getCurrentMaxRattrapage,
 } = require('./telegram-service');
 
@@ -36,7 +37,11 @@ async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy) 
   try {
     await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
-    await sendToGlobalChannelsAndStore(strategy, gameNumber, predictedSuit);
+    // Pour les stratégies globales (C1/C2/C3/DC), on route via sendToStrategyChannels.
+    // Les stratégies custom (Sxx) envoient via sendCustomAndStore depuis _processCustomStrategy.
+    if (!strategy.startsWith('S') || strategy === 'S') {
+      await sendToStrategyChannels(strategy, gameNumber, predictedSuit);
+    }
   } catch (e) { console.error('savePrediction error:', e.message); }
 }
 
@@ -49,7 +54,8 @@ async function resolvePrediction(strategy, gameNumber, predictedSuit, status, ra
         banker_cards: bankerCards ? JSON.stringify(bankerCards) : null,
       }
     );
-    editGlobalChannelMessages(strategy, gameNumber, predictedSuit, status, rattrapage).catch(() => {});
+    // editStoredMessages gère les deux cas : token global ou token custom (bot_token stocké en DB)
+    editStoredMessages(strategy, gameNumber, predictedSuit, status, rattrapage).catch(() => {});
   } catch (e) { console.error('resolvePrediction error:', e.message); }
 }
 
@@ -74,7 +80,7 @@ class Engine {
   _makeCustomState() {
     const counts = {};
     for (const s of ALL_SUITS) counts[s] = 0;
-    return { counts, processed: new Set(), pending: {} };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [] };
   }
 
   reloadCustomStrategies(list) {
@@ -231,20 +237,130 @@ class Engine {
     }
   }
 
+  /**
+   * Vérifie si une exception bloque l'émission d'une prédiction.
+   * @param {Array}  exceptions   - Liste des règles d'exception de la stratégie
+   * @param {string} predictedSuit - La carte qu'on voudrait prédire
+   * @param {string} triggerSuit  - La carte qui a déclenché le signal (absente ou apparente)
+   * @param {object} state        - État de la stratégie custom (history, lastOutcomes, pending)
+   * @returns {boolean} true = prédiction bloquée
+   */
+  _checkExceptions(exceptions, predictedSuit, triggerSuit, state) {
+    if (!Array.isArray(exceptions) || exceptions.length === 0) return false;
+
+    for (const ex of exceptions) {
+      switch (ex.type) {
+
+        // ── 1. Consécutives apparitions de la carte prédite ──────────
+        case 'consec_appearances': {
+          const n = Math.max(1, parseInt(ex.value) || 2);
+          if (state.history.length < n) break;
+          const recent = state.history.slice(-n);
+          if (recent.every(gameSuits => gameSuits.includes(predictedSuit))) {
+            console.log(`[Exception] consec_appearances(${n}): ${predictedSuit} apparu ${n}x consécutifs → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 2. Fréquence de la carte prédite sur une fenêtre de W parties ─
+        case 'recent_frequency': {
+          const n = Math.max(1, parseInt(ex.value) || 3);
+          const w = Math.max(2, parseInt(ex.window) || 5);
+          if (state.history.length < 2) break;
+          const recent = state.history.slice(-Math.min(w, state.history.length));
+          const count  = recent.filter(g => g.includes(predictedSuit)).length;
+          if (count >= n) {
+            console.log(`[Exception] recent_frequency(${n}/${w}): ${predictedSuit} apparu ${count} fois → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 3. Prédiction déjà en attente pour cette carte ────────────
+        case 'already_pending': {
+          const hasPending = Object.values(state.pending).some(p => p.suit === predictedSuit);
+          if (hasPending) {
+            console.log(`[Exception] already_pending: ${predictedSuit} déjà en attente → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 4. Série de défaites consécutives ─────────────────────────
+        case 'max_consec_losses': {
+          const n = Math.max(1, parseInt(ex.value) || 3);
+          if (state.lastOutcomes.length < n) break;
+          const recent = state.lastOutcomes.slice(-n);
+          if (recent.every(o => !o.won)) {
+            console.log(`[Exception] max_consec_losses(${n}): ${n} défaites consécutives → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 5. Carte déclencheur trop présente récemment ──────────────
+        case 'trigger_overload': {
+          const n = Math.max(1, parseInt(ex.value) || 3);
+          const w = Math.max(2, parseInt(ex.window) || 5);
+          if (state.history.length < 2) break;
+          const recent = state.history.slice(-Math.min(w, state.history.length));
+          const count  = recent.filter(g => g.includes(triggerSuit)).length;
+          if (count >= n) {
+            console.log(`[Exception] trigger_overload(${n}/${w}): ${triggerSuit} (déclencheur) apparu ${count} fois → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 6. Carte prédite dans la dernière partie ──────────────────
+        case 'last_game_appeared': {
+          if (state.history.length < 1) break;
+          const lastGame = state.history[state.history.length - 1];
+          if (lastGame.includes(predictedSuit)) {
+            console.log(`[Exception] last_game_appeared: ${predictedSuit} dans la dernière partie → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        default: break;
+      }
+    }
+    return false;
+  }
+
   async _processCustomStrategy(id, state, cfg, gn, suits, pCards, bCards) {
     if (state.processed.has(gn)) return;
     state.processed.add(gn);
 
     const channelId = `S${id}`;
-    await this._resolvePending(state.pending, channelId, gn, suits, pCards, bCards, null);
 
-    const { threshold: B, mode, mappings, tg_targets, name } = cfg;
+    // ── Mettre à jour l'historique des parties (fenêtre de 15) ──────
+    state.history.push([...suits]);
+    if (state.history.length > 15) state.history.shift();
+
+    // ── Résoudre les prédictions en attente + enregistrer les résultats ─
+    await this._resolvePending(state.pending, channelId, gn, suits, pCards, bCards, (won, ps) => {
+      state.lastOutcomes.push({ won, suit: ps });
+      if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+    });
+
+    const { threshold: B, mode, mappings, tg_targets, name, exceptions } = cfg;
 
     const emitPrediction = async (next, ps, suit) => {
-      await savePrediction(channelId, next, ps, suit);
+      // ── Vérification des exceptions avant d'émettre ───────────────
+      if (this._checkExceptions(exceptions, ps, suit, state)) return;
+
+      // Enregistre en DB et n'envoie PAS via sendToStrategyChannels (stratégie custom)
+      try {
+        await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
+        console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps}`);
+      } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
       state.pending[next] = { suit: ps, rattrapage: 0 };
+      // Envoi avec token custom + stockage du message_id pour édition ultérieure
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-        sendPredictionToTargets(tg_targets, name, next, ps).catch(() => {});
+        await sendCustomAndStore(tg_targets, channelId, next, ps).catch(() => {});
       }
     };
 

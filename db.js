@@ -77,6 +77,12 @@ async function initDB() {
         PRIMARY KEY(user_id, channel_id)
       );
 
+      CREATE TABLE IF NOT EXISTS user_strategy_visible (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        strategy_id TEXT NOT NULL,
+        PRIMARY KEY(user_id, strategy_id)
+      );
+
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -88,8 +94,16 @@ async function initDB() {
         predicted_suit TEXT NOT NULL,
         channel_tg_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
+        bot_token TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         PRIMARY KEY (strategy, game_number, predicted_suit, channel_tg_id)
+      );
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS bot_token TEXT;
+
+      CREATE TABLE IF NOT EXISTS strategy_channel_routes (
+        strategy TEXT NOT NULL,
+        channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
+        PRIMARY KEY (strategy, channel_id)
       );
     `);
     // Compte admin
@@ -366,32 +380,105 @@ async function setVisibleChannels(userId, channelIds) {
   _visibleStore.set(userId, [...channelIds]);
 }
 
+// ── USER STRATEGY VISIBLE ──────────────────────────────────────────
+
+async function getVisibleStrategies(userId) {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
+    return r.rows.map(r => r.strategy_id);
+  }
+  return [];
+}
+
+async function setVisibleStrategies(userId, strategyIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM user_strategy_visible WHERE user_id=$1', [userId]);
+    for (const sid of strategyIds) {
+      await pgPool.query(
+        'INSERT INTO user_strategy_visible (user_id,strategy_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
+        [userId, String(sid)]
+      );
+    }
+    return;
+  }
+}
+
+// ── STRATEGY CHANNEL ROUTES ────────────────────────────────────────
+
+async function getStrategyRoutes(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT tc.id, tc.channel_id AS tg_id, tc.channel_name
+       FROM strategy_channel_routes scr
+       JOIN telegram_config tc ON tc.id = scr.channel_id
+       WHERE scr.strategy = $1`,
+      [strategy]
+    );
+    return r.rows; // [{id, tg_id, channel_name}]
+  }
+  return [];
+}
+
+async function getAllStrategyRoutes() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT scr.strategy, tc.id, tc.channel_id AS tg_id, tc.channel_name
+       FROM strategy_channel_routes scr
+       JOIN telegram_config tc ON tc.id = scr.channel_id
+       ORDER BY scr.strategy`
+    );
+    // Return as { strategy: [{id, tg_id, channel_name}] }
+    const map = {};
+    for (const row of r.rows) {
+      if (!map[row.strategy]) map[row.strategy] = [];
+      map[row.strategy].push({ id: row.id, tg_id: row.tg_id, channel_name: row.channel_name });
+    }
+    return map;
+  }
+  return {};
+}
+
+async function setStrategyRoutes(strategy, channelDbIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM strategy_channel_routes WHERE strategy=$1', [strategy]);
+    for (const cid of channelDbIds) {
+      await pgPool.query(
+        'INSERT INTO strategy_channel_routes (strategy, channel_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
+        [strategy, parseInt(cid)]
+      );
+    }
+    return;
+  }
+}
+
 // ── TG PRED MESSAGE IDS ────────────────────────────────────────────
 
 const _tgMsgStore = new Map(); // fallback JSON
 
-async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId) {
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken) {
   if (USE_PG) {
     await pgPool.query(
-      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id)
-       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
-       DO UPDATE SET message_id = EXCLUDED.message_id`,
-      [strategy, gameNumber, suit, channelTgId, String(messageId)]
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null]
     );
     return;
   }
   const key = `${strategy}:${gameNumber}:${suit}`;
   const list = _tgMsgStore.get(key) || [];
   const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
-  if (idx !== -1) list[idx].message_id = String(messageId);
-  else list.push({ channel_tg_id: channelTgId, message_id: String(messageId) });
+  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null };
+  if (idx !== -1) list[idx] = entry;
+  else list.push(entry);
   _tgMsgStore.set(key, list);
 }
 
 async function getTgMsgIds(strategy, gameNumber, suit) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `SELECT channel_tg_id, message_id FROM tg_pred_messages WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
+      `SELECT channel_tg_id, message_id, bot_token FROM tg_pred_messages
+       WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
       [strategy, gameNumber, suit]
     );
     return r.rows;
@@ -437,6 +524,8 @@ module.exports = {
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,
   getVisibleChannels, setVisibleChannels,
+  getVisibleStrategies, setVisibleStrategies,
+  getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getUserStats,
 };

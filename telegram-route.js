@@ -124,6 +124,7 @@ router.put('/users/:userId/visibility', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'visible_channel_ids doit être un tableau' });
   try {
     await db.setVisibleChannels(userId, visible_channel_ids);
+    tg.updateUserVisibleSet(userId, visible_channel_ids);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

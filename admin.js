@@ -28,6 +28,16 @@ function fmtDuration(mins) {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
+// Route accessible aux utilisateurs normaux — retourne leurs propres stratégies visibles
+router.get('/my-strategies', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (req.session.isAdmin) return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] });
+  try {
+    const visible = await db.getVisibleStrategies(req.session.userId);
+    res.json({ visible });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/users', requireAdmin, async (req, res) => {
   try {
     const users = await db.getAllUsers();
@@ -100,19 +110,23 @@ router.get('/stats', requireAdmin, async (req, res) => {
 
 router.post('/generate-premium', requireAdmin, async (req, res) => {
   try {
+    const count = Math.min(Math.max(parseInt(req.body.count) || 5, 1), 50);
+    const domain = (req.body.domain || 'premium.pro').trim().replace(/^@/, '');
+    const durationH = Math.max(parseInt(req.body.durationH) || 750, 1);
     const accounts = [];
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= count; i++) {
       const username  = `premium${i}`;
+      const email     = `${username}@${domain}`;
       const password  = genPassword(10);
       const hash      = await bcrypt.hash(password, 10);
-      const expiresAt = new Date(Date.now() + 750 * 60 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + durationH * 60 * 60 * 1000);
       await db.createUser({
-        username, email: null, password_hash: hash,
+        username, email, password_hash: hash,
         first_name: 'Premium', last_name: String(i),
         is_approved: true, subscription_expires_at: expiresAt.toISOString(),
-        subscription_duration_minutes: 45000,
+        subscription_duration_minutes: durationH * 60,
       });
-      accounts.push({ username, password, expires_at: expiresAt });
+      accounts.push({ username, email, password, expires_at: expiresAt });
     }
     res.json({ ok: true, accounts });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -127,6 +141,23 @@ async function getStrategies() {
 
 async function saveStrategies(list) {
   await db.setSetting('custom_strategies', JSON.stringify(list));
+}
+
+const VALID_EXCEPTION_TYPES = [
+  'consec_appearances', 'recent_frequency', 'already_pending',
+  'max_consec_losses', 'trigger_overload', 'last_game_appeared',
+];
+
+function parseExceptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(e => e && VALID_EXCEPTION_TYPES.includes(e.type))
+    .map(e => {
+      const out = { type: e.type };
+      if (e.value  !== undefined) out.value  = Math.max(1, parseInt(e.value)  || 1);
+      if (e.window !== undefined) out.window = Math.max(2, parseInt(e.window) || 2);
+      return out;
+    });
 }
 
 function validateStrategyBody(body) {
@@ -172,6 +203,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     if (err) return res.status(400).json({ error: err });
     const { name, threshold, mode, mappings, visibility, enabled } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
+    const exceptions = parseExceptions(req.body.exceptions);
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
@@ -182,6 +214,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
+      exceptions,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -200,6 +233,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Stratégie introuvable' });
     const { name, threshold, mode, mappings, visibility, enabled } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
+    const exceptions = parseExceptions(req.body.exceptions);
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
@@ -208,6 +242,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
+      exceptions,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -255,6 +290,64 @@ router.get('/msg-format', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
+// ── STRATEGY → CHANNEL ROUTING ─────────────────────────────────────
+
+router.get('/strategy-routes', requireAdmin, async (req, res) => {
+  try {
+    const routes = await db.getAllStrategyRoutes();
+    res.json(routes);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/strategy-routes/:strategy', requireAdmin, async (req, res) => {
+  try {
+    const routes = await db.getStrategyRoutes(req.params.strategy);
+    res.json({ strategy: req.params.strategy, channel_ids: routes.map(r => r.id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/strategy-routes/:strategy', requireAdmin, async (req, res) => {
+  const { channel_ids } = req.body;
+  if (!Array.isArray(channel_ids))
+    return res.status(400).json({ error: 'channel_ids doit être un tableau' });
+  try {
+    await db.setStrategyRoutes(req.params.strategy, channel_ids);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── STRATEGY VISIBILITY PER USER ───────────────────────────────────
+router.get('/users/:userId/strategies', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  try {
+    const visible = await db.getVisibleStrategies(userId);
+    res.json({ visible });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/users/:userId/strategies', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const { strategy_ids } = req.body;
+  if (!Array.isArray(strategy_ids))
+    return res.status(400).json({ error: 'strategy_ids doit être un tableau' });
+  try {
+    await db.setVisibleStrategies(userId, strategy_ids);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── /api/admin/users/:userId/visible (GET) — retourne canaux + stratégies ──
+router.get('/users/:userId/visible', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  try {
+    const [channels, strategies] = await Promise.all([
+      db.getVisibleChannels(userId),
+      db.getVisibleStrategies(userId),
+    ]);
+    res.json({ channels, strategies });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/msg-format', requireAdmin, async (req, res) => {
   const id = parseInt(req.body.format_id);
   if (!id || id < 1 || id > 6) return res.status(400).json({ error: 'Format invalide (1–6)' });
@@ -263,6 +356,24 @@ router.post('/msg-format', requireAdmin, async (req, res) => {
     await tgService.saveFormat(id);
     res.json({ ok: true, format_id: id });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.get('/tutorial-videos', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('tutorial_videos');
+    res.json(raw ? JSON.parse(raw) : { video1: null, video2: null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/tutorial-videos', requireAdmin, async (req, res) => {
+  try {
+    const { video1, video2 } = req.body;
+    await db.setSetting('tutorial_videos', JSON.stringify({
+      video1: video1 || null,
+      video2: video2 || null,
+    }));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;
