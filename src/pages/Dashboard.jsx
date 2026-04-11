@@ -167,6 +167,8 @@ export default function Dashboard() {
     desc: 'Chargement de la stratégie…',
   };
 
+  const [visibleStratIds, setVisibleStratIds] = useState(null); // null = still loading
+
   const [predictions, setPredictions] = useState([]);
   const [games, setGames] = useState([]);
   const [stats, setStats] = useState([]);
@@ -202,6 +204,22 @@ export default function Dashboard() {
     es.onerror = () => setLoadingGames(false);
     return () => es.close();
   }, [hasAccess]);
+
+  // Fetch visible strategies for this user and enforce access
+  useEffect(() => {
+    if (user?.is_admin) { setVisibleStratIds(new Set(['C1','C2','C3','DC','ALL'])); return; }
+    fetch('/api/admin/my-strategies', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { visible: [] })
+      .then(d => {
+        const ids = new Set(d.visible || []);
+        setVisibleStratIds(ids);
+        // Redirect if current strategy not in visible set
+        if (channelId && !ids.has(channelId)) {
+          navigate('/select');
+        }
+      })
+      .catch(() => setVisibleStratIds(new Set()));
+  }, [user?.is_admin, channelId]); // eslint-disable-line
 
   // Fetch custom strategies (S7, S8…)
   useEffect(() => {

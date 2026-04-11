@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import TutorialCreateAccount from '../components/TutorialCreateAccount';
+import TutorialReadPredictions from '../components/TutorialReadPredictions';
 
 const STEPS = [
   {
@@ -144,6 +146,54 @@ export default function Home() {
             <div className="home-guide-icon">🏆</div>
             <h4>Format de l'historique</h4>
             <p><code>#N687. ✅9(9♣10♥) - 8(7♠A♦) #T17</code><br />Numéro · Résultat · Points joueur (cartes) - Points banquier (cartes) · Total</p>
+          </div>
+        </div>
+      </section>
+
+      {/* ── TUTORIAL VIDEOS ── */}
+      <section style={{
+        padding: '80px 24px',
+        background: 'linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%)',
+        position: 'relative', overflow: 'hidden',
+      }}>
+        {/* Background glow */}
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 600, height: 300, borderRadius: '50%', background: 'radial-gradient(ellipse, rgba(251,191,36,0.04), transparent)', pointerEvents: 'none' }} />
+
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div className="section-title" style={{ marginBottom: 52 }}>
+            <div className="section-badge" style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>TUTORIELS VIDÉO</div>
+            <h2 style={{ color: '#f8fafc' }}>Comment utiliser Baccarat Pro</h2>
+            <p style={{ color: '#475569' }}>Deux guides animés pour démarrer rapidement</p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 40, alignItems: 'start' }}>
+            {/* Video 1 */}
+            <div>
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,#d97706,#fbbf24)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>📝</div>
+                  <h3 style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', margin: 0 }}>Comment créer un compte</h3>
+                </div>
+                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, paddingLeft: 44, margin: 0 }}>
+                  De l'inscription jusqu'à la validation par l'administrateur — suivez chaque étape pour accéder aux signaux.
+                </p>
+              </div>
+              <TutorialCreateAccount />
+            </div>
+
+            {/* Video 2 */}
+            <div>
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>📡</div>
+                  <h3 style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', margin: 0 }}>Lire les prédictions</h3>
+                </div>
+                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, paddingLeft: 44, margin: 0 }}>
+                  Choisissez un canal, suivez les parties en direct et interprétez chaque prédiction et résultat en temps réel.
+                </p>
+              </div>
+              <TutorialReadPredictions />
+            </div>
           </div>
         </div>
       </section>

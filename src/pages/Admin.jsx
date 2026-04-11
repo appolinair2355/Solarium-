@@ -56,10 +56,18 @@ export default function Admin() {
   // Inline name editing
   const [nameEdit, setNameEdit] = useState({}); // { userId: { first_name, last_name } }
 
-  // Channel visibility modal
+  // Visibility modal (canaux Telegram + stratégies)
   const [visModal, setVisModal] = useState(null); // { userId, username }
-  const [visData, setVisData] = useState({}); // { userId: Set<dbId> of hidden }
+  const [visData, setVisData] = useState({}); // { userId: Set<dbId> } for channels
+  const [visStratData, setVisStratData] = useState({}); // { userId: Set<stratId> } for strategies
   const [visLoading, setVisLoading] = useState(false);
+
+  const ALL_STRATEGIES = [
+    { id: 'C1', name: 'Pique Noir', emoji: '♠' },
+    { id: 'C2', name: 'Cœur Rouge', emoji: '♥' },
+    { id: 'C3', name: 'Carreau Doré', emoji: '♦' },
+    { id: 'DC', name: 'Double Canal', emoji: '♣' },
+  ];
 
   // Bot token
   const [tokenInfo, setTokenInfo] = useState(null); // { token_set, token_preview }
@@ -87,12 +95,19 @@ export default function Admin() {
   const [premiumModal, setPremiumModal] = useState(false);
   const [premiumAccounts, setPremiumAccounts] = useState([]);
   const [premiumLoading, setPremiumLoading] = useState(false);
+  const [premiumCount, setPremiumCount] = useState(5);
+  const [premiumDomain, setPremiumDomain] = useState('premium.pro');
+  const [premiumDurH, setPremiumDurH] = useState(750);
 
   const generatePremium = async () => {
-    if (!confirm('Regénérer les 5 comptes premium ? Les anciens mots de passe seront remplacés.')) return;
+    if (!confirm(`Générer ${premiumCount} compte(s) premium ? Les comptes existants (premium1…) seront remplacés.`)) return;
     setPremiumLoading(true);
     try {
-      const r = await fetch('/api/admin/generate-premium', { method: 'POST', credentials: 'include' });
+      const r = await fetch('/api/admin/generate-premium', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: premiumCount, domain: premiumDomain, durationH: premiumDurH }),
+      });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setPremiumAccounts(d.accounts);
@@ -119,7 +134,8 @@ export default function Admin() {
       { label: 'Rotation ↻',       desc: '♠→♥→♦→♣→♠',              map: { '♠':'♥','♥':'♦','♦':'♣','♣':'♠' } },
     ],
   };
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':'♥','♥':'♠','♦':'♣','♣':'♦' }, visibility: 'admin', enabled: true, tg_targets: [] };
+  // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':'♥','♥':'♠','♦':'♣','♣':'♦' }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [] };
 
   const [strategies, setStrategies] = useState([]);
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
@@ -127,6 +143,13 @@ export default function Admin() {
   const [stratMsg, setStratMsg] = useState('');
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
+
+  // Routage C1/C2/C3/DC → canaux Telegram
+  const DEFAULT_STRATS = ['C1', 'C2', 'C3', 'DC'];
+  const DEFAULT_STRAT_LABELS = { C1: '♠ Pique Noir', C2: '♥ Cœur Rouge', C3: '♦ Carreau Doré', DC: '♣ Double Canal' };
+  const [routeData, setRouteData] = useState({}); // { 'C1': Set<dbId>, ... }
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeMsg, setRouteMsg] = useState('');
 
   const showStratMsg = (text, error = false) => {
     setStratMsg({ text, error });
@@ -167,6 +190,19 @@ export default function Admin() {
     try {
       const r = await fetch('/api/admin/strategies', { credentials: 'include' });
       if (r.ok) setStrategies(await r.json());
+    } catch {}
+  }, []);
+
+  const loadStrategyRoutes = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/strategy-routes', { credentials: 'include' });
+      if (!r.ok) return;
+      const data = await r.json(); // { C1: [{id,tg_id,channel_name}], ... }
+      const sets = {};
+      for (const [strat, chs] of Object.entries(data)) {
+        sets[strat] = new Set(chs.map(c => c.id));
+      }
+      setRouteData(sets);
     } catch {}
   }, []);
 
@@ -236,8 +272,39 @@ export default function Admin() {
     let tg_targets = Array.isArray(s.tg_targets) ? s.tg_targets.map(t => ({ ...t })) : [];
     if (!tg_targets.length && s.tg_bot_token && s.tg_channel_id)
       tg_targets = [{ bot_token: s.tg_bot_token, channel_id: s.tg_channel_id }];
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings: { ...s.mappings }, visibility: s.visibility, enabled: s.enabled, tg_targets });
+    // Détecter le type : si au moins une cible TG est configurée → 'telegram', sinon 'simple'
+    const stratType = tg_targets.some(t => t.bot_token && t.channel_id) ? 'telegram' : 'simple';
+    const exceptions = Array.isArray(s.exceptions) ? s.exceptions.map(e => ({ ...e })) : [];
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings: { ...s.mappings }, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions });
     setStratOpen(true);
+  };
+
+  // Routage C1/C2/C3/DC : toggle un canal pour une stratégie
+  const toggleRoute = (strategy, dbId) => {
+    setRouteData(p => {
+      const set = new Set(p[strategy] || []);
+      if (set.has(dbId)) set.delete(dbId); else set.add(dbId);
+      return { ...p, [strategy]: set };
+    });
+  };
+
+  const saveRoutes = async () => {
+    setRouteSaving(true);
+    try {
+      await Promise.all(DEFAULT_STRATS.map(s =>
+        fetch(`/api/admin/strategy-routes/${s}`, {
+          method: 'PUT', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel_ids: [...(routeData[s] || new Set())] }),
+        })
+      ));
+      setRouteMsg('✅ Routage enregistré');
+    } catch (e) {
+      setRouteMsg('❌ ' + e.message);
+    } finally {
+      setRouteSaving(false);
+      setTimeout(() => setRouteMsg(''), 3500);
+    }
   };
 
   const cancelStratForm = () => { setStratOpen(false); setStratEditing(null); };
@@ -311,7 +378,7 @@ export default function Admin() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadMsgFormat(); loadMaxR(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadMsgFormat, loadMaxR]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadMsgFormat, loadMaxR, loadStrategyRoutes]);
 
   // Duration input helpers
   const setDur = (uid, field, val) =>
@@ -374,14 +441,21 @@ export default function Admin() {
   const startNameEdit = u =>
     setNameEdit(p => ({ ...p, [u.id]: { first_name: u.first_name || '', last_name: u.last_name || '' } }));
 
-  // Visibility modal (opt-in : l'admin assigne les canaux à chaque utilisateur)
+  // Visibility modal (opt-in : canaux Telegram + stratégies)
   const openVisModal = async u => {
     setVisModal({ userId: u.id, username: u.username });
     setVisLoading(true);
-    const res = await fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' });
-    if (res.ok) {
-      const d = await res.json();
+    const [chRes, stRes] = await Promise.all([
+      fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }),
+      fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }),
+    ]);
+    if (chRes.ok) {
+      const d = await chRes.json();
       setVisData(p => ({ ...p, [u.id]: new Set(d.visible) }));
+    }
+    if (stRes.ok) {
+      const d = await stRes.json();
+      setVisStratData(p => ({ ...p, [u.id]: new Set(d.visible) }));
     }
     setVisLoading(false);
   };
@@ -394,15 +468,31 @@ export default function Admin() {
     });
   };
 
+  const toggleVisStrategy = (userId, stratId) => {
+    setVisStratData(p => {
+      const set = new Set(p[userId] || []);
+      if (set.has(stratId)) set.delete(stratId); else set.add(stratId);
+      return { ...p, [userId]: set };
+    });
+  };
+
   const saveVisibility = async () => {
     const { userId } = visModal;
-    const visible = [...(visData[userId] || new Set())];
-    const res = await fetch(`/api/telegram/users/${userId}/visibility`, {
-      method: 'PUT', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visible_channel_ids: visible }),
-    });
-    if (res.ok) { showMsg('Canaux assignés avec succès'); setVisModal(null); }
+    const visibleChannels = [...(visData[userId] || new Set())];
+    const visibleStrategies = [...(visStratData[userId] || new Set())];
+    const [r1, r2] = await Promise.all([
+      fetch(`/api/telegram/users/${userId}/visibility`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visible_channel_ids: visibleChannels }),
+      }),
+      fetch(`/api/admin/users/${userId}/strategies`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_ids: visibleStrategies }),
+      }),
+    ]);
+    if (r1.ok && r2.ok) { showMsg('Accès assignés avec succès'); setVisModal(null); }
     else showMsg('Erreur lors de la sauvegarde', true);
   };
 
@@ -457,19 +547,53 @@ export default function Admin() {
         <div className="tg-admin-card" style={{ borderColor: 'rgba(250,204,21,0.4)' }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">⭐</span>
-            <div>
+            <div style={{ flex: 1 }}>
               <h2 className="tg-admin-title">Comptes Premium</h2>
               <p className="tg-admin-sub">
-                Génère 5 comptes prêts à l'emploi (Premium 1 à 5) avec abonnement de 750h. Les mots de passe actuels seront remplacés.
+                Génère des comptes prêts à l'emploi (premium1, premium2…) avec email et mot de passe. Les comptes existants seront remplacés.
               </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Nombre</label>
+              <input
+                type="number" min={1} max={50}
+                value={premiumCount}
+                onChange={e => setPremiumCount(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+                style={{ width: 80, padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.3)',
+                  background: 'rgba(250,204,21,0.05)', color: '#e2e8f0', fontSize: 14, textAlign: 'center' }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 180 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Domaine email</label>
+              <input
+                type="text"
+                value={premiumDomain}
+                onChange={e => setPremiumDomain(e.target.value)}
+                placeholder="premium.pro"
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.3)',
+                  background: 'rgba(250,204,21,0.05)', color: '#e2e8f0', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 10, color: '#64748b' }}>Ex : premium1@{premiumDomain || 'premium.pro'}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Durée (heures)</label>
+              <input
+                type="number" min={1}
+                value={premiumDurH}
+                onChange={e => setPremiumDurH(Math.max(1, parseInt(e.target.value) || 750))}
+                style={{ width: 110, padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.3)',
+                  background: 'rgba(250,204,21,0.05)', color: '#e2e8f0', fontSize: 14, textAlign: 'center' }}
+              />
             </div>
             <button
               className="btn btn-gold btn-sm"
-              style={{ minWidth: 200 }}
+              style={{ minWidth: 200, height: 38, alignSelf: 'flex-end' }}
               onClick={generatePremium}
               disabled={premiumLoading}
             >
-              {premiumLoading ? '⏳ Génération...' : '⭐ Générer 5 comptes premium'}
+              {premiumLoading ? '⏳ Génération...' : `⭐ Générer ${premiumCount} compte${premiumCount > 1 ? 's' : ''}`}
             </button>
           </div>
         </div>
@@ -595,9 +719,7 @@ export default function Admin() {
                             {u.status === 'active' && (
                               <button className="btn btn-ghost btn-sm" onClick={() => extendUser(u.id)}>➕ Prolonger</button>
                             )}
-                            {tgChannels.length > 0 && (
-                              <button className="btn btn-tg btn-sm" onClick={() => openVisModal(u)}>📡 Canaux</button>
-                            )}
+                            <button className="btn btn-tg btn-sm" onClick={() => openVisModal(u)}>📡 Canaux</button>
                             {u.status !== 'pending' && (
                               <button className="btn btn-danger btn-sm" onClick={() => revokeUser(u.id)}>🔒 Révoquer</button>
                             )}
@@ -867,17 +989,34 @@ export default function Admin() {
                         background: s.visibility === 'all' ? 'rgba(34,197,94,0.15)' : 'rgba(100,100,120,0.2)',
                         color: s.visibility === 'all' ? '#22c55e' : '#94a3b8',
                       }}>{s.visibility === 'all' ? '🌐 Tous' : '🔒 Admin'}</span>
-                      {s.tg_targets?.length > 0 && (
-                        <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
-                          background: 'rgba(34,158,217,0.15)', color: '#229ed9',
+                      {/* Badge type : Simple vs Telegram */}
+                      {s.tg_targets?.some(t => t.bot_token && t.channel_id) ? (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
+                          background: 'rgba(34,158,217,0.18)', color: '#229ed9', border: '1px solid rgba(34,158,217,0.4)',
                         }} title={s.tg_targets.map(t => t.channel_id).join(', ')}>
-                          ✈️ {s.tg_targets.length} cible{s.tg_targets.length > 1 ? 's' : ''} TG
+                          ✈️ Telegram · {s.tg_targets.length} cible{s.tg_targets.length > 1 ? 's' : ''}
                         </span>
+                      ) : (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
+                          background: 'rgba(168,85,247,0.12)', color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)',
+                        }}>🧮 Local</span>
                       )}
                     </div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-                      B={s.threshold} · {s.mode} · {Object.entries(s.mappings).map(([k,v]) => `${k}→${v}`).join('  ')}
+                    {Array.isArray(s.exceptions) && s.exceptions.length > 0 && (
+                      <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+                        background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)',
+                      }} title={s.exceptions.map(e => e.type).join(', ')}>
+                        ⛔ {s.exceptions.length} exception{s.exceptions.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+                      B={s.threshold} · {s.mode === 'manquants' ? 'Absences' : 'Apparitions'} · {Object.entries(s.mappings).map(([k,v]) => `${k}→${v}`).join('  ')}
                     </div>
+                    {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                        Canaux : {s.tg_targets.filter(t=>t.channel_id).map(t => t.channel_id).join(', ')}
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => toggleStrat(s)}
@@ -955,81 +1094,132 @@ export default function Admin() {
                 </div>
               </div>
 
-              {/* Telegram multi-cibles — optionnel */}
-              <div style={{ marginTop: 16, background: 'rgba(34,158,217,0.06)', border: '1px solid rgba(34,158,217,0.2)', borderRadius: 10, padding: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div style={{ color: '#229ed9', fontSize: 12, fontWeight: 700 }}>
-                    ✈️ Envoi Telegram automatique
-                    <span style={{ fontWeight: 400, color: '#64748b', marginLeft: 6 }}>— optionnel · plusieurs cibles possibles</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setStratForm(p => ({ ...p, tg_targets: [...(p.tg_targets || []), { bot_token: '', channel_id: '' }] }))}
-                    style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(34,158,217,0.4)', background: 'rgba(34,158,217,0.12)', color: '#229ed9', cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    ＋ Ajouter cible
-                  </button>
+              {/* ── Type de stratégie : Simple vs Telegram ── */}
+              <div style={{ marginTop: 16, marginBottom: 4 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>
+                  Type de stratégie
+                </label>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {[
+                    { val: 'simple', icon: '🧮', title: 'Prédiction locale', desc: 'Affiché dans le tableau de bord uniquement. Aucun message Telegram envoyé.' },
+                    { val: 'telegram', icon: '✈️', title: 'Envoi Telegram', desc: 'Les prédictions sont envoyées vers un ou plusieurs canaux Telegram via un bot dédié. Les messages sont édités en place après vérification.' },
+                  ].map(opt => {
+                    const active = stratForm.stratType === opt.val;
+                    return (
+                      <button
+                        key={opt.val}
+                        type="button"
+                        onClick={() => setStratForm(p => ({
+                          ...p,
+                          stratType: opt.val,
+                          tg_targets: opt.val === 'simple' ? [] : (p.tg_targets.length ? p.tg_targets : [{ bot_token: '', channel_id: '' }]),
+                        }))}
+                        style={{
+                          flex: 1, textAlign: 'left', padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+                          background: active
+                            ? (opt.val === 'telegram' ? 'rgba(34,158,217,0.15)' : 'rgba(168,85,247,0.15)')
+                            : 'rgba(255,255,255,0.03)',
+                          border: `2px solid ${active
+                            ? (opt.val === 'telegram' ? '#229ed9' : '#a855f7')
+                            : 'rgba(255,255,255,0.08)'}`,
+                          transition: 'all 0.18s',
+                        }}
+                      >
+                        <div style={{ fontSize: 18, marginBottom: 4 }}>{opt.icon}</div>
+                        <div style={{ fontWeight: 700, fontSize: 12, color: active ? '#e2e8f0' : '#64748b', marginBottom: 3 }}>{opt.title}</div>
+                        <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.45 }}>{opt.desc}</div>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
-                {(!stratForm.tg_targets || stratForm.tg_targets.length === 0) && (
-                  <div style={{ fontSize: 12, color: '#475569', padding: '8px 0' }}>
-                    Aucune cible. Cliquez sur «&nbsp;Ajouter cible&nbsp;» pour envoyer les prédictions de cette stratégie vers un ou plusieurs canaux Telegram.
-                  </div>
-                )}
-
-                {(stratForm.tg_targets || []).map((tgt, i) => (
-                  <div key={i} style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr auto',
-                    gap: 8, marginBottom: 8, alignItems: 'end',
-                    background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 10px 8px',
-                    border: '1px solid rgba(34,158,217,0.18)',
-                  }}>
+              {/* ── Section Telegram (visible seulement si stratType === 'telegram') ── */}
+              {stratForm.stratType === 'telegram' && (
+                <div style={{ marginTop: 14, background: 'rgba(34,158,217,0.06)', border: '2px solid rgba(34,158,217,0.3)', borderRadius: 10, padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <div>
-                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, marginBottom: 3 }}>
-                        Cible {i + 1} — Token bot
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="123456789:AAFxxx…"
-                        value={tgt.bot_token}
-                        onChange={e => setStratForm(p => {
-                          const t = [...p.tg_targets];
-                          t[i] = { ...t[i], bot_token: e.target.value };
-                          return { ...p, tg_targets: t };
-                        })}
-                        style={{ width: '100%', padding: '6px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,158,217,0.3)', borderRadius: 6, color: '#fff', fontSize: 11, boxSizing: 'border-box', fontFamily: 'monospace' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, marginBottom: 3 }}>
-                        ID du canal
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="@moncanal ou -100123…"
-                        value={tgt.channel_id}
-                        onChange={e => setStratForm(p => {
-                          const t = [...p.tg_targets];
-                          t[i] = { ...t[i], channel_id: e.target.value };
-                          return { ...p, tg_targets: t };
-                        })}
-                        style={{ width: '100%', padding: '6px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,158,217,0.3)', borderRadius: 6, color: '#fff', fontSize: 11, boxSizing: 'border-box', fontFamily: 'monospace' }}
-                      />
+                      <div style={{ color: '#229ed9', fontSize: 13, fontWeight: 700 }}>✈️ Canaux Telegram cibles</div>
+                      <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                        Chaque prédiction est envoyée via le token bot configuré, puis le message est <strong style={{ color: '#93c5fd' }}>édité automatiquement</strong> après vérification.
+                      </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setStratForm(p => ({ ...p, tg_targets: p.tg_targets.filter((_, j) => j !== i) }))}
-                      style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', fontSize: 13 }}
-                      title="Supprimer cette cible"
-                    >🗑️</button>
+                      onClick={() => setStratForm(p => ({ ...p, tg_targets: [...(p.tg_targets || []), { bot_token: '', channel_id: '' }] }))}
+                      style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(34,158,217,0.5)', background: 'rgba(34,158,217,0.15)', color: '#229ed9', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
+                    >＋ Ajouter</button>
                   </div>
-                ))}
 
-                <div style={{ marginTop: 6, fontSize: 10, color: '#475569', lineHeight: 1.5 }}>
-                  Chaque cible = un bot Telegram différent + un canal cible.<br />
-                  Créez des bots via <strong style={{ color: '#64748b' }}>@BotFather</strong> et ajoutez-les comme administrateurs de chaque canal.
+                  {(!stratForm.tg_targets || stratForm.tg_targets.length === 0) && (
+                    <div style={{ fontSize: 12, color: '#475569', padding: '8px 0', textAlign: 'center' }}>
+                      Aucune cible. Cliquez sur «&nbsp;＋ Ajouter&nbsp;» pour configurer un canal.
+                    </div>
+                  )}
+
+                  {(stratForm.tg_targets || []).map((tgt, i) => {
+                    const isValid = tgt.bot_token?.trim() && tgt.channel_id?.trim();
+                    return (
+                      <div key={i} style={{
+                        background: isValid ? 'rgba(34,158,217,0.08)' : 'rgba(255,255,255,0.03)',
+                        borderRadius: 8, padding: '12px 12px 10px',
+                        border: `1px solid ${isValid ? 'rgba(34,158,217,0.35)' : 'rgba(239,68,68,0.2)'}`,
+                        marginBottom: 8,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: isValid ? '#229ed9' : '#6b7280' }}>
+                            {isValid ? '✅' : '⚠️'} Cible {i + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setStratForm(p => ({ ...p, tg_targets: p.tg_targets.filter((_, j) => j !== i) }))}
+                            style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', fontSize: 12 }}
+                          >✕ Supprimer</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <div>
+                            <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, marginBottom: 3 }}>
+                              Token bot (via @BotFather) *
+                            </label>
+                            <input
+                              type="password"
+                              placeholder="123456789:AAFxxx…"
+                              value={tgt.bot_token}
+                              onChange={e => setStratForm(p => {
+                                const t = [...p.tg_targets];
+                                t[i] = { ...t[i], bot_token: e.target.value };
+                                return { ...p, tg_targets: t };
+                              })}
+                              style={{ width: '100%', padding: '7px 10px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${tgt.bot_token ? 'rgba(34,158,217,0.4)' : 'rgba(239,68,68,0.3)'}`, borderRadius: 6, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, marginBottom: 3 }}>
+                              ID du canal *
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="@moncanal ou -100123456789"
+                              value={tgt.channel_id}
+                              onChange={e => setStratForm(p => {
+                                const t = [...p.tg_targets];
+                                t[i] = { ...t[i], channel_id: e.target.value };
+                                return { ...p, tg_targets: t };
+                              })}
+                              style={{ width: '100%', padding: '7px 10px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${tgt.channel_id ? 'rgba(34,158,217,0.4)' : 'rgba(239,68,68,0.3)'}`, borderRadius: 6, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ marginTop: 8, fontSize: 10, color: '#475569', lineHeight: 1.5 }}>
+                    Le bot doit être <strong style={{ color: '#64748b' }}>administrateur</strong> du canal cible.<br />
+                    Créez des bots via <strong style={{ color: '#64748b' }}>@BotFather</strong> sur Telegram.
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Presets de combinaison */}
               <div style={{ marginTop: 16 }}>
@@ -1076,6 +1266,107 @@ export default function Admin() {
                 </div>
               </div>
 
+              {/* ── Section Exceptions ─────────────────────────────── */}
+              <div style={{ marginTop: 20, padding: '14px 16px', background: 'rgba(239,68,68,0.05)', borderRadius: 10, border: '1px solid rgba(239,68,68,0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div>
+                    <span style={{ color: '#f87171', fontWeight: 700, fontSize: 13 }}>⛔ Règles d'exception</span>
+                    <div style={{ color: '#6b7280', fontSize: 11, marginTop: 2 }}>Empêche l'émission d'une prédiction selon des conditions spécifiques</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStratForm(p => ({
+                      ...p,
+                      exceptions: [...(p.exceptions || []), { type: 'consec_appearances', value: 2 }],
+                    }))}
+                    style={{ padding: '5px 12px', borderRadius: 7, background: 'rgba(239,68,68,0.15)',
+                      border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                    + Ajouter une exception
+                  </button>
+                </div>
+
+                {(!stratForm.exceptions || stratForm.exceptions.length === 0) && (
+                  <div style={{ color: '#4b5563', fontSize: 12, fontStyle: 'italic', textAlign: 'center', padding: '8px 0' }}>
+                    Aucune exception — toutes les prédictions seront émises
+                  </div>
+                )}
+
+                {(stratForm.exceptions || []).map((ex, i) => {
+                  const setEx = (patch) => setStratForm(p => {
+                    const updated = [...p.exceptions];
+                    updated[i] = { ...updated[i], ...patch };
+                    return { ...p, exceptions: updated };
+                  });
+                  const removeEx = () => setStratForm(p => ({
+                    ...p, exceptions: p.exceptions.filter((_, j) => j !== i),
+                  }));
+
+                  const EX_OPTS = [
+                    { val: 'consec_appearances', label: '🔁 Apparitions consécutives', desc: 'Bloquer si la carte prédite est apparue N fois de suite' },
+                    { val: 'recent_frequency',   label: '📊 Fréquence récente',        desc: 'Bloquer si la carte prédite est apparue N fois sur W parties' },
+                    { val: 'already_pending',    label: '⏳ Déjà en attente',           desc: 'Bloquer si une prédiction pour cette carte est déjà active' },
+                    { val: 'max_consec_losses',  label: '📉 Série de défaites',         desc: 'Bloquer si les N dernières prédictions ont été perdues' },
+                    { val: 'trigger_overload',   label: '⚡ Déclencheur surchargé',     desc: 'Bloquer si la carte déclencheur est trop fréquente (N fois/W parties)' },
+                    { val: 'last_game_appeared', label: '🎯 Présente au dernier jeu',   desc: 'Bloquer si la carte prédite était présente dans la dernière partie' },
+                  ];
+
+                  const needsValue  = ['consec_appearances', 'recent_frequency', 'max_consec_losses', 'trigger_overload'].includes(ex.type);
+                  const needsWindow = ['recent_frequency', 'trigger_overload'].includes(ex.type);
+                  const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
+
+                  return (
+                    <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', marginBottom: 8,
+                      background: 'rgba(239,68,68,0.07)', borderRadius: 8, border: '1px solid rgba(239,68,68,0.15)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <select
+                          value={ex.type}
+                          onChange={e => setEx({ type: e.target.value, value: 2, window: 5 })}
+                          style={{ flex: 1, padding: '6px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
+                            borderRadius: 6, color: '#f1f5f9', fontSize: 12 }}>
+                          {EX_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+                        </select>
+                        <button type="button" onClick={removeEx}
+                          style={{ padding: '4px 9px', borderRadius: 6, background: 'rgba(239,68,68,0.2)', border: 'none',
+                            color: '#f87171', cursor: 'pointer', fontSize: 14, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                      </div>
+
+                      <div style={{ color: '#6b7280', fontSize: 11, marginLeft: 2 }}>{currentOpt?.desc}</div>
+
+                      {(needsValue || needsWindow) && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          {needsValue && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>
+                                {ex.type === 'max_consec_losses' ? 'Défaites consécutives :' : 'N ='}
+                              </label>
+                              <input type="number" min="1" max="20" value={ex.value ?? 2}
+                                onChange={e => setEx({ value: parseInt(e.target.value) || 2 })}
+                                style={{ width: 60, padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
+                                  borderRadius: 6, color: '#fff', fontSize: 12 }} />
+                            </div>
+                          )}
+                          {needsWindow && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>fenêtre W =</label>
+                              <input type="number" min="2" max="20" value={ex.window ?? 5}
+                                onChange={e => setEx({ window: parseInt(e.target.value) || 5 })}
+                                style={{ width: 60, padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
+                                  borderRadius: 6, color: '#fff', fontSize: 12 }} />
+                            </div>
+                          )}
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            {ex.type === 'consec_appearances' && `→ bloque si la carte prédite a été vue ${ex.value ?? 2}x de suite`}
+                            {ex.type === 'recent_frequency'   && `→ bloque si ≥ ${ex.value ?? 3} fois dans les ${ex.window ?? 5} dernières parties`}
+                            {ex.type === 'max_consec_losses'  && `→ bloque après ${ex.value ?? 3} défaites d'affilée`}
+                            {ex.type === 'trigger_overload'   && `→ bloque si déclencheur ≥ ${ex.value ?? 3}x dans les ${ex.window ?? 5} parties`}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
                 <button className="btn btn-ghost btn-sm" onClick={cancelStratForm}>Annuler</button>
                 <button
@@ -1087,6 +1378,94 @@ export default function Admin() {
                   {stratSaving ? '⏳ Enregistrement…' : stratEditing !== null ? '💾 Mettre à jour' : `✅ Créer Stratégie ${strategies.length > 0 ? Math.max(...strategies.map(s=>s.id))+1 : 7}`}
                 </button>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── ROUTAGE STRATÉGIES PAR DÉFAUT → CANAUX ── */}
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.4)' }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔀</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Routage des 4 stratégies par défaut</h2>
+              <p className="tg-admin-sub">
+                Définissez quels canaux Telegram globaux reçoivent les prédictions de chaque stratégie.
+                Si aucun canal n'est sélectionné, la stratégie envoie vers <strong>tous</strong> les canaux.
+              </p>
+            </div>
+            {routeMsg && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: routeMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>{routeMsg}</span>
+            )}
+          </div>
+
+          {tgChannels.length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#475569', fontSize: 13, padding: '20px 0' }}>
+              Aucun canal Telegram configuré. Ajoutez des canaux dans la section ci-dessous.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14, marginTop: 14 }}>
+              {DEFAULT_STRATS.map(strat => {
+                const set = routeData[strat] || new Set();
+                return (
+                  <div key={strat} style={{
+                    background: 'rgba(34,158,217,0.05)', border: '1px solid rgba(34,158,217,0.2)',
+                    borderRadius: 12, padding: '14px 16px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <div>
+                        <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{DEFAULT_STRAT_LABELS[strat]}</span>
+                        <span style={{ fontSize: 11, color: '#64748b', marginLeft: 6 }}>({strat})</span>
+                      </div>
+                      {set.size === 0 ? (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontWeight: 600 }}>Tous</span>
+                      ) : (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(34,158,217,0.2)', color: '#229ed9', fontWeight: 600 }}>{set.size} canal{set.size > 1 ? 'aux' : ''}</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {tgChannels.map(ch => {
+                        const on = set.has(ch.dbId);
+                        return (
+                          <label key={ch.dbId} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                            padding: '6px 8px', borderRadius: 7,
+                            background: on ? 'rgba(34,158,217,0.12)' : 'rgba(255,255,255,0.03)',
+                            border: `1px solid ${on ? 'rgba(34,158,217,0.4)' : 'rgba(255,255,255,0.07)'}`,
+                            transition: 'all 0.15s',
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggleRoute(strat, ch.dbId)}
+                              style={{ accentColor: '#229ed9', width: 14, height: 14, cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 12, color: on ? '#7dd3fc' : '#64748b', fontWeight: on ? 600 : 400 }}>
+                              ✈️ {ch.name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {set.size === 0 && (
+                      <div style={{ fontSize: 10, color: '#475569', marginTop: 8, lineHeight: 1.4 }}>
+                        Aucun canal coché = envoi vers <em>tous</em> les canaux configurés.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tgChannels.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button
+                className="btn btn-gold btn-sm"
+                style={{ background: 'linear-gradient(135deg,#0369a1,#229ed9)', minWidth: 180 }}
+                onClick={saveRoutes}
+                disabled={routeSaving}
+              >
+                {routeSaving ? '⏳ Enregistrement…' : '💾 Enregistrer le routage'}
+              </button>
             </div>
           )}
         </div>
@@ -1164,31 +1543,38 @@ export default function Admin() {
       {/* ── PREMIUM CREDENTIALS MODAL ── */}
       {premiumModal && (
         <div className="vis-modal-overlay" onClick={() => setPremiumModal(false)}>
-          <div className="vis-modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+          <div className="vis-modal" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
             <div className="vis-modal-header">
-              <span className="vis-modal-title">⭐ Comptes Premium générés</span>
+              <span className="vis-modal-title">⭐ {premiumAccounts.length} Compte{premiumAccounts.length > 1 ? 's' : ''} Premium générés</span>
               <button className="vis-modal-close" onClick={() => setPremiumModal(false)}>✕</button>
             </div>
             <div className="vis-modal-sub" style={{ marginBottom: 16 }}>
-              Notez les mots de passe maintenant — ils ne seront plus affichés. Abonnement : <strong>750 heures</strong> chacun.
+              Notez les mots de passe maintenant — ils ne seront plus affichés après fermeture.
+              Abonnement : <strong>{premiumDurH}h</strong> chacun.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
               {premiumAccounts.map((a, i) => (
                 <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
                   background: 'rgba(250,204,21,0.07)', border: '1px solid rgba(250,204,21,0.25)',
-                  borderRadius: 10, padding: '10px 16px'
+                  borderRadius: 10, padding: '10px 16px',
                 }}>
-                  <span style={{ fontSize: 20, minWidth: 28 }}>⭐</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: 14 }}>Premium {i + 1}</div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-                      Login : <code style={{ color: '#e2e8f0' }}>{a.username}</code>
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <span style={{ fontSize: 18 }}>⭐</span>
+                    <span style={{ fontWeight: 700, color: '#fbbf24', fontSize: 14 }}>Premium {i + 1}</span>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Mot de passe</div>
-                    <code style={{ fontSize: 15, color: '#22c55e', letterSpacing: 1 }}>{a.password}</code>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Identifiant</div>
+                      <code style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600 }}>{a.username}</code>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Email</div>
+                      <code style={{ fontSize: 12, color: '#94a3b8' }}>{a.email}</code>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Mot de passe</div>
+                      <code style={{ fontSize: 14, color: '#22c55e', letterSpacing: 1, fontWeight: 700 }}>{a.password}</code>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1198,7 +1584,9 @@ export default function Admin() {
               <button
                 className="btn btn-gold btn-sm"
                 onClick={() => {
-                  const txt = premiumAccounts.map((a, i) => `Premium ${i+1}\nLogin: ${a.username}\nMot de passe: ${a.password}\nExpire: 750h`).join('\n\n');
+                  const txt = premiumAccounts.map((a, i) =>
+                    `Premium ${i+1}\nIdentifiant : ${a.username}\nEmail : ${a.email}\nMot de passe : ${a.password}\nAbonnement : ${premiumDurH}h`
+                  ).join('\n\n');
                   navigator.clipboard?.writeText(txt);
                   showMsg('✅ Identifiants copiés', false);
                 }}
@@ -1213,41 +1601,60 @@ export default function Admin() {
       {/* ── VISIBILITY MODAL ── */}
       {visModal && (
         <div className="vis-modal-overlay" onClick={() => setVisModal(null)}>
-          <div className="vis-modal" onClick={e => e.stopPropagation()}>
+          <div className="vis-modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div className="vis-modal-header">
-              <span className="vis-modal-title">📡 Canaux visibles — {visModal.username}</span>
+              <span className="vis-modal-title">🔐 Accès — {visModal.username}</span>
               <button className="vis-modal-close" onClick={() => setVisModal(null)}>✕</button>
             </div>
             <div className="vis-modal-sub">
-              Cochez les canaux à assigner à cet utilisateur.<br/>
-              Par défaut, aucun canal n'est visible — vous devez les assigner manuellement.
+              Définissez les stratégies et canaux Telegram accessibles.<br/>
+              Par défaut, rien n'est visible — assignez manuellement.
             </div>
             {visLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><div className="spinner" /></div>
-            ) : tgChannels.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                Aucun canal Telegram configuré.
-              </div>
             ) : (
-              <div className="vis-channels-list">
-                {tgChannels.map(ch => {
-                  const assigned = visData[visModal.userId] || new Set();
-                  const isAssigned = assigned.has(ch.dbId);
-                  return (
-                    <label key={ch.dbId} className={`vis-channel-toggle ${isAssigned ? 'visible' : 'hidden'}`}>
-                      <input
-                        type="checkbox"
-                        checked={isAssigned}
-                        onChange={() => toggleVisChannel(visModal.userId, ch.dbId)}
-                      />
-                      <span className="vis-channel-icon">📡</span>
-                      <span className="vis-channel-name">{ch.name}</span>
-                      <span className={`vis-channel-badge ${isAssigned ? 'on' : 'off'}`}>
-                        {isAssigned ? 'Assigné' : 'Non assigné'}
-                      </span>
-                    </label>
-                  );
-                })}
+              <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                {/* ── Stratégies ── */}
+                <div style={{ padding: '10px 16px 4px', fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  Stratégies de prédiction
+                </div>
+                <div className="vis-channels-list">
+                  {[...ALL_STRATEGIES, ...strategies.map(s => ({ id: `S${s.id}`, name: s.name, emoji: '⚙' }))].map(st => {
+                    const assignedS = visStratData[visModal.userId] || new Set();
+                    const isOn = assignedS.has(st.id);
+                    return (
+                      <label key={st.id} className={`vis-channel-toggle ${isOn ? 'visible' : 'hidden'}`}>
+                        <input type="checkbox" checked={isOn} onChange={() => toggleVisStrategy(visModal.userId, st.id)} />
+                        <span className="vis-channel-icon">{st.emoji}</span>
+                        <span className="vis-channel-name">{st.name} <span style={{ color: '#64748b', fontSize: 11 }}>({st.id})</span></span>
+                        <span className={`vis-channel-badge ${isOn ? 'on' : 'off'}`}>{isOn ? 'Assigné' : 'Non assigné'}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {/* ── Canaux Telegram ── */}
+                <div style={{ padding: '14px 16px 4px', fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  Canaux Telegram
+                </div>
+                {tgChannels.length === 0 ? (
+                  <div style={{ padding: '8px 16px 16px', color: '#64748b', fontSize: 13 }}>Aucun canal Telegram configuré.</div>
+                ) : (
+                  <div className="vis-channels-list">
+                    {tgChannels.map(ch => {
+                      const assigned = visData[visModal.userId] || new Set();
+                      const isAssigned = assigned.has(ch.dbId);
+                      return (
+                        <label key={ch.dbId} className={`vis-channel-toggle ${isAssigned ? 'visible' : 'hidden'}`}>
+                          <input type="checkbox" checked={isAssigned} onChange={() => toggleVisChannel(visModal.userId, ch.dbId)} />
+                          <span className="vis-channel-icon">📡</span>
+                          <span className="vis-channel-name">{ch.name}</span>
+                          <span className={`vis-channel-badge ${isAssigned ? 'on' : 'off'}`}>{isAssigned ? 'Assigné' : 'Non assigné'}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
             <div className="vis-modal-footer">

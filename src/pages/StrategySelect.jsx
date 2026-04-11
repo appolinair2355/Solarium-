@@ -47,18 +47,28 @@ export default function StrategySelect() {
   const [stats, setStats] = useState([]);
   const [selected, setSelected] = useState(null);
   const [entering, setEntering] = useState(false);
-  const [customStrategies, setCustomStrategies] = useState([]); // visible custom strategies
+  const [customStrategies, setCustomStrategies] = useState([]);
+  const [visibleStratIds, setVisibleStratIds] = useState(null); // null = loading
 
   useEffect(() => {
     fetch('/api/predictions/stats', { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
       .then(setStats)
       .catch(() => {});
-    fetch('/api/admin/strategies', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then(d => setCustomStrategies(Array.isArray(d) ? d : []))
-      .catch(() => {});
+    Promise.all([
+      fetch('/api/admin/strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : []),
+      fetch('/api/admin/my-strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
+    ]).then(([allStrats, myStrats]) => {
+      setCustomStrategies(Array.isArray(allStrats) ? allStrats : []);
+      setVisibleStratIds(new Set(myStrats.visible || []));
+    }).catch(() => setVisibleStratIds(new Set()));
   }, []);
+
+  const canSeeStrategy = id => {
+    if (user?.is_admin) return true;
+    if (visibleStratIds === null) return false; // still loading
+    return visibleStratIds.has(id);
+  };
 
   const CUSTOM_COLORS = [
     { color: '#a855f7', glow: 'rgba(168,85,247,0.35)' },
@@ -112,7 +122,27 @@ export default function StrategySelect() {
       </div>
 
       <div className="select-cards">
-        {CHANNELS.map((ch, i) => {
+        {visibleStratIds === null && !user?.is_admin && (
+          <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>
+            <div className="spinner" style={{ margin: '0 auto 12px' }} />
+            Chargement de vos accès…
+          </div>
+        )}
+        {(visibleStratIds !== null || user?.is_admin) && (() => {
+          const visChannels = CHANNELS.filter(ch => canSeeStrategy(ch.id));
+          const visCustom   = customStrategies.filter(s => canSeeStrategy(`S${s.id}`));
+          if (!user?.is_admin && visChannels.length === 0 && visCustom.length === 0) {
+            return (
+              <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>Aucun accès assigné</div>
+                <div style={{ fontSize: 14 }}>L'administrateur n'a pas encore activé de stratégie pour votre compte.<br/>Contactez l'administrateur pour obtenir l'accès.</div>
+              </div>
+            );
+          }
+          return null;
+        })()}
+        {(visibleStratIds !== null || user?.is_admin) && CHANNELS.filter(ch => canSeeStrategy(ch.id)).map((ch, i) => {
           const s = getStats(ch.id);
           const isSelected = selected === ch.id;
           return (
@@ -155,7 +185,7 @@ export default function StrategySelect() {
         })}
 
         {/* Stratégies personnalisées (S7, S8…) */}
-        {customStrategies.map((s, i) => {
+        {customStrategies.filter(s => canSeeStrategy(`S${s.id}`)).map((s, i) => {
           const cid = `S${s.id}`;
           const { color, glow } = CUSTOM_COLORS[i % CUSTOM_COLORS.length];
           const st = getStats(cid);
@@ -203,43 +233,6 @@ export default function StrategySelect() {
           );
         })}
 
-        {/* 5th card — Telegram channel */}
-        <div
-          className={`select-card select-card-tg ${entering ? 'fading' : ''}`}
-          style={{ '--ch-color': '#229ed9', '--ch-glow': 'rgba(34,158,217,0.35)', animationDelay: `${4 * 0.12}s` }}
-        >
-          <div className="select-card-top">
-            <div className="select-card-emoji">✈️</div>
-            <div className="select-card-badge tg-badge">LIVE</div>
-          </div>
-          <h2 className="select-card-name">Canal Telegram</h2>
-          <p className="select-card-desc">
-            Suivez en direct les messages du canal Telegram officiel. Signaux, alertes et annonces en temps réel.
-          </p>
-
-          <div className="select-card-stats tg-stats">
-            <div className="select-stat">
-              <span className="select-stat-val" style={{ color: '#229ed9' }}>∞</span>
-              <span className="select-stat-label">Messages</span>
-            </div>
-            <div className="select-stat">
-              <span className="select-stat-val" style={{ color: '#22c55e' }}>🔴</span>
-              <span className="select-stat-label">En direct</span>
-            </div>
-            <div className="select-stat">
-              <span className="select-stat-val" style={{ color: '#f59e0b' }}>📡</span>
-              <span className="select-stat-label">Flux SSE</span>
-            </div>
-          </div>
-
-          <button
-            className="select-card-btn tg-card-btn"
-            onClick={() => navigate('/canal-telegram')}
-            disabled={entering}
-          >
-            Voir les messages →
-          </button>
-        </div>
       </div>
 
       <div className="select-footer">
