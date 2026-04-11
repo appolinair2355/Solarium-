@@ -329,10 +329,13 @@ async function sendToGlobalChannelsAndStore(strategy, gameNumber, suit) {
 // ── Edit stored messages with result ──────────────────────────────
 
 async function editGlobalChannelMessages(strategy, gameNumber, suit, status, rattrapage) {
-  if (!TOKEN) return;
+  if (!TOKEN) { console.warn('[TG Edit] Aucun TOKEN — édition ignorée'); return; }
   let stored;
-  try { stored = await db.getTgMsgIds(strategy, gameNumber, suit); } catch { stored = []; }
-  if (!stored.length) return;
+  try { stored = await db.getTgMsgIds(strategy, gameNumber, suit); } catch (e) { console.error('[TG Edit] getTgMsgIds error:', e.message); stored = []; }
+  if (!stored.length) {
+    console.warn(`[TG Edit] Aucun message_id trouvé pour ${strategy}/#${gameNumber}/${suit} — impossible d'éditer`);
+    return;
+  }
 
   const { text, parse_mode } = buildTgMessage(currentFormat, {
     gameNumber, suit, strategy, maxR: maxRattrapage, status, rattrapage,

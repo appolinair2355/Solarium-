@@ -36,7 +36,7 @@ async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy) 
   try {
     await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
-    sendToGlobalChannelsAndStore(strategy, gameNumber, predictedSuit).catch(() => {});
+    await sendToGlobalChannelsAndStore(strategy, gameNumber, predictedSuit);
   } catch (e) { console.error('savePrediction error:', e.message); }
 }
 
