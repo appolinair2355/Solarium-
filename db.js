@@ -71,10 +71,25 @@ async function initDB() {
         PRIMARY KEY(user_id, channel_id)
       );
 
+      CREATE TABLE IF NOT EXISTS user_channel_visible (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
+        PRIMARY KEY(user_id, channel_id)
+      );
+
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tg_pred_messages (
+        strategy TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        predicted_suit TEXT NOT NULL,
+        channel_tg_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (strategy, game_number, predicted_suit, channel_tg_id)
       );
     `);
     // Compte admin
@@ -310,7 +325,7 @@ async function deleteTelegramConfig(id) {
   jsondb.deleteTelegramConfig(id);
 }
 
-// ── USER CHANNEL HIDDEN ────────────────────────────────────────────
+// ── USER CHANNEL HIDDEN (legacy) ───────────────────────────────────
 
 async function getHiddenChannels(userId) {
   if (USE_PG) { const r = await pgPool.query('SELECT channel_id FROM user_channel_hidden WHERE user_id=$1', [userId]); return r.rows.map(r => r.channel_id); }
@@ -326,6 +341,73 @@ async function setHiddenChannels(userId, channelIds) {
     return;
   }
   jsondb.setHiddenChannels(userId, channelIds);
+}
+
+// ── USER CHANNEL VISIBLE (opt-in) ─────────────────────────────────
+
+const _visibleStore = new Map(); // fallback JSON
+
+async function getVisibleChannels(userId) {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT channel_id FROM user_channel_visible WHERE user_id=$1', [userId]);
+    return r.rows.map(r => r.channel_id);
+  }
+  return _visibleStore.get(userId) || [];
+}
+
+async function setVisibleChannels(userId, channelIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM user_channel_visible WHERE user_id=$1', [userId]);
+    for (const cid of channelIds) {
+      await pgPool.query('INSERT INTO user_channel_visible (user_id,channel_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [userId, cid]);
+    }
+    return;
+  }
+  _visibleStore.set(userId, [...channelIds]);
+}
+
+// ── TG PRED MESSAGE IDS ────────────────────────────────────────────
+
+const _tgMsgStore = new Map(); // fallback JSON
+
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId)]
+    );
+    return;
+  }
+  const key = `${strategy}:${gameNumber}:${suit}`;
+  const list = _tgMsgStore.get(key) || [];
+  const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
+  if (idx !== -1) list[idx].message_id = String(messageId);
+  else list.push({ channel_tg_id: channelTgId, message_id: String(messageId) });
+  _tgMsgStore.set(key, list);
+}
+
+async function getTgMsgIds(strategy, gameNumber, suit) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT channel_tg_id, message_id FROM tg_pred_messages WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
+      [strategy, gameNumber, suit]
+    );
+    return r.rows;
+  }
+  return _tgMsgStore.get(`${strategy}:${gameNumber}:${suit}`) || [];
+}
+
+async function deleteTgMsgIds(strategy, gameNumber, suit) {
+  if (USE_PG) {
+    await pgPool.query(
+      `DELETE FROM tg_pred_messages WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
+      [strategy, gameNumber, suit]
+    );
+    return;
+  }
+  _tgMsgStore.delete(`${strategy}:${gameNumber}:${suit}`);
 }
 
 // ── ADMIN STATS ────────────────────────────────────────────────────
@@ -354,5 +436,7 @@ module.exports = {
   getSetting, setSetting, deleteSetting,
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,
+  getVisibleChannels, setVisibleChannels,
+  saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getUserStats,
 };

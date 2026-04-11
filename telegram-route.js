@@ -12,12 +12,15 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// ── CHANNELS ───────────────────────────────────────────────────────
+// Admin → voit tout
+// Utilisateur → voit seulement les canaux qui lui ont été assignés (opt-in)
 router.get('/channels', requireAuth, async (req, res) => {
   try {
     const all = tg.getChannels();
     if (req.session.isAdmin) return res.json(all);
-    const hidden = new Set(await db.getHiddenChannels(req.session.userId));
-    res.json(all.filter(ch => !hidden.has(ch.dbId)));
+    const visible = new Set(await db.getVisibleChannels(req.session.userId));
+    res.json(all.filter(ch => visible.has(ch.dbId)));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -42,17 +45,19 @@ router.delete('/channels/:id', requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── MESSAGES ───────────────────────────────────────────────────────
 router.get('/messages', requireAuth, async (req, res) => {
   const dbId = parseInt(req.query.channel_db_id);
   if (isNaN(dbId)) return res.status(400).json({ error: 'channel_db_id requis' });
   if (!req.session.isAdmin) {
-    const hidden = new Set(await db.getHiddenChannels(req.session.userId));
-    if (hidden.has(dbId)) return res.status(403).json({ error: 'Canal non autorisé' });
+    const visible = new Set(await db.getVisibleChannels(req.session.userId));
+    if (!visible.has(dbId)) return res.status(403).json({ error: 'Canal non autorisé' });
   }
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
   res.json(tg.getMessages(dbId).slice(0, limit));
 });
 
+// ── STATUS / TOKEN ─────────────────────────────────────────────────
 router.get('/status', requireAuth, (req, res) => {
   res.json({ ...tg.getStatus(), token_set: !!tg.getToken() });
 });
@@ -79,6 +84,7 @@ router.delete('/bot-token', requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── SSE STREAM ─────────────────────────────────────────────────────
 router.get('/stream', requireAuth, async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -91,8 +97,8 @@ router.get('/stream', requireAuth, async (req, res) => {
   if (isAdmin) {
     visible = all;
   } else {
-    const hidden = new Set(await db.getHiddenChannels(userId));
-    visible = all.filter(ch => !hidden.has(ch.dbId));
+    const visibleSet = new Set(await db.getVisibleChannels(userId));
+    visible = all.filter(ch => visibleSet.has(ch.dbId));
   }
   const init = visible.map(ch => ({ dbId: ch.dbId, name: ch.name, messages: tg.getMessages(ch.dbId).slice(0, 50) }));
   res.write(`data: ${JSON.stringify({ type: 'init', channels: init })}\n\n`);
@@ -101,20 +107,23 @@ router.get('/stream', requireAuth, async (req, res) => {
   req.on('close', () => tg.removeSSEClient(res));
 });
 
+// ── VISIBILITY (admin assigne les canaux par utilisateur) ──────────
+// GET → retourne la liste des canaux assignés (visibles) à cet utilisateur
 router.get('/users/:userId/visibility', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   try {
-    res.json({ hidden: await db.getHiddenChannels(userId) });
+    res.json({ visible: await db.getVisibleChannels(userId) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT → définit exactement quels canaux cet utilisateur peut voir
 router.put('/users/:userId/visibility', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
-  const { hidden_channel_ids } = req.body;
-  if (!Array.isArray(hidden_channel_ids))
-    return res.status(400).json({ error: 'hidden_channel_ids doit être un tableau' });
+  const { visible_channel_ids } = req.body;
+  if (!Array.isArray(visible_channel_ids))
+    return res.status(400).json({ error: 'visible_channel_ids doit être un tableau' });
   try {
-    await db.setHiddenChannels(userId, hidden_channel_ids);
+    await db.setVisibleChannels(userId, visible_channel_ids);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -3,7 +3,12 @@
  */
 const db  = require('./db');
 const { fetchGames } = require('./games');
-const { sendPredictionToTargets } = require('./telegram-service');
+const {
+  sendPredictionToTargets,
+  sendToGlobalChannelsAndStore,
+  editGlobalChannelMessages,
+  getCurrentMaxRattrapage,
+} = require('./telegram-service');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
 const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
@@ -31,6 +36,7 @@ async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy) 
   try {
     await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
+    sendToGlobalChannelsAndStore(strategy, gameNumber, predictedSuit).catch(() => {});
   } catch (e) { console.error('savePrediction error:', e.message); }
 }
 
@@ -43,6 +49,7 @@ async function resolvePrediction(strategy, gameNumber, predictedSuit, status, ra
         banker_cards: bankerCards ? JSON.stringify(bankerCards) : null,
       }
     );
+    editGlobalChannelMessages(strategy, gameNumber, predictedSuit, status, rattrapage).catch(() => {});
   } catch (e) { console.error('resolvePrediction error:', e.message); }
 }
 
@@ -109,13 +116,14 @@ class Engine {
   }
 
   async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss) {
+    const maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(pending)) {
       const pgNum = parseInt(pg);
       const ps    = info.suit;
       if (pgNum > gn) continue;
 
-      if (gn > pgNum + 2) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', 2, pCards, bCards);
+      if (gn > pgNum + maxR) {
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
         continue;
@@ -126,8 +134,8 @@ class Engine {
         await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards);
         delete pending[pg];
         if (onLoss) onLoss(true, ps, pgNum);
-      } else if (gn === pgNum + 2) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', 2, pCards, bCards);
+      } else if (gn === pgNum + maxR) {
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
       }
@@ -208,6 +216,7 @@ class Engine {
   }
 
   async _processDC(gn, suits, pCards, bCards) {
+    const maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(this.dc.pending)) {
       const pgNum = parseInt(pg);
       if (gn < pgNum) continue;
@@ -216,7 +225,7 @@ class Engine {
         await resolvePrediction('DC', pgNum, ps, 'gagne', info.rattrapage, pCards, bCards);
         delete this.dc.pending[pg];
       } else if (gn > pgNum) {
-        if (info.rattrapage < 2) { info.rattrapage++; }
+        if (info.rattrapage < maxR) { info.rattrapage++; }
         else { await resolvePrediction('DC', pgNum, ps, 'perdu', info.rattrapage, pCards, bCards); delete this.dc.pending[pg]; }
       }
     }
@@ -387,6 +396,12 @@ class Engine {
       }));
     }
     return null;
+  }
+
+  updateMaxRattrapage(n) {
+    console.log(`[Engine] Max rattrapage mis à jour → ${n}`);
+    // getCurrentMaxRattrapage() dans telegram-service est déjà mis à jour
+    // grâce à saveMaxRattrapage() appelé depuis admin.js
   }
 
   stop() {

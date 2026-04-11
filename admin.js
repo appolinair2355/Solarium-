@@ -228,4 +228,41 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Nombre max de rattrapages ─────────────────────────────────────
+router.get('/max-rattrapage', requireAdmin, async (req, res) => {
+  try {
+    const v = await db.getSetting('max_rattrapage');
+    res.json({ max_rattrapage: v !== null ? parseInt(v) : 2 });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/max-rattrapage', requireAdmin, async (req, res) => {
+  const n = parseInt(req.body.max_rattrapage);
+  if (isNaN(n) || n < 0 || n > 5) return res.status(400).json({ error: 'Valeur invalide (0–5)' });
+  try {
+    const tgService = require('./telegram-service');
+    await tgService.saveMaxRattrapage(n);
+    require('./engine').updateMaxRattrapage(n);
+    res.json({ ok: true, max_rattrapage: n });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── Format des messages Telegram ──────────────────────────────────
+router.get('/msg-format', requireAdmin, async (req, res) => {
+  try {
+    const v = await db.getSetting('tg_msg_format');
+    res.json({ format_id: parseInt(v) || 1 });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/msg-format', requireAdmin, async (req, res) => {
+  const id = parseInt(req.body.format_id);
+  if (!id || id < 1 || id > 6) return res.status(400).json({ error: 'Format invalide (1–6)' });
+  try {
+    const tgService = require('./telegram-service');
+    await tgService.saveFormat(id);
+    res.json({ ok: true, format_id: id });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
 module.exports = router;

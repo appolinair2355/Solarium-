@@ -2,20 +2,38 @@ const TelegramBot = require('node-telegram-bot-api');
 const fetch       = require('node-fetch');
 const db          = require('./db');
 
-let TOKEN = process.env.BOT_TOKEN || null;
+let TOKEN         = process.env.BOT_TOKEN || null;
+let currentFormat = 1;
+let maxRattrapage = 2;
+
+// ── Settings loaders ───────────────────────────────────────────────
 
 async function loadToken() {
-  try {
-    const val = await db.getSetting('bot_token');
-    if (val) TOKEN = val;
-  } catch {}
+  try { const v = await db.getSetting('bot_token'); if (v) TOKEN = v; } catch {}
   return TOKEN;
 }
+async function saveToken(token) { await db.setSetting('bot_token', token); TOKEN = token; }
 
-async function saveToken(token) {
-  await db.setSetting('bot_token', token);
-  TOKEN = token;
+async function loadFormat() {
+  try { const v = await db.getSetting('tg_msg_format'); if (v) currentFormat = parseInt(v) || 1; } catch {}
 }
+async function saveFormat(id) {
+  currentFormat = parseInt(id) || 1;
+  await db.setSetting('tg_msg_format', String(currentFormat));
+}
+function getCurrentFormat() { return currentFormat; }
+
+async function loadMaxRattrapage() {
+  try { const v = await db.getSetting('max_rattrapage'); if (v !== null) maxRattrapage = parseInt(v) || 2; } catch {}
+  return maxRattrapage;
+}
+async function saveMaxRattrapage(n) {
+  maxRattrapage = Math.max(0, Math.min(5, parseInt(n) || 2));
+  await db.setSetting('max_rattrapage', String(maxRattrapage));
+}
+function getCurrentMaxRattrapage() { return maxRattrapage; }
+
+// ── Bot & channels ─────────────────────────────────────────────────
 
 let bot     = null;
 let botInfo = null;
@@ -33,8 +51,8 @@ function broadcast(channelDbId, eventData) {
 
 function clientCanSee(client, channelDbId) {
   if (client.isAdmin) return true;
-  const hidden = client.hiddenSet;
-  return !hidden || !hidden.has(channelDbId);
+  if (!client.visibleSet) return false;
+  return client.visibleSet.has(channelDbId);
 }
 
 function formatMessage(msg, channelDbId) {
@@ -78,7 +96,6 @@ async function startBot() {
     const chatId   = String(msg.chat.id);
     const chatType = msg.chat.type;
     const text     = msg.text || msg.caption || '(media)';
-    console.log(`🔍 Bot reçu [${chatType}] id=${chatId} : ${text.slice(0, 80)}`);
     if (chatType === 'private') return;
     for (const [tgId, ch] of channelStore.entries()) {
       if (matchesChannel(msg, tgId)) {
@@ -90,19 +107,19 @@ async function startBot() {
         return;
       }
     }
-    console.log(`⚠️  Message reçu — aucun canal correspondant (chatId=${chatId})`);
   }
 
   bot.on('channel_post', handleIncoming);
   bot.on('message', handleIncoming);
   bot.on('polling_error', err => { if (!err.message?.includes('ETELEGRAM')) return; console.error('Telegram polling error:', err.message); });
-
   console.log(`📡 Bot actif sur ${channelStore.size} canal(aux)`);
 }
 
 async function loadConfig() {
   try {
     await loadToken();
+    await loadFormat();
+    await loadMaxRattrapage();
     const rows = await db.getTelegramConfigs(true);
     for (const cfg of rows) {
       channelStore.set(cfg.channel_id, { dbId: cfg.id, name: cfg.channel_name || cfg.channel_id, messages: [] });
@@ -150,12 +167,12 @@ function getStatus() {
 }
 
 async function addSSEClient(res, userId, isAdmin) {
-  let hiddenSet = null;
+  let visibleSet = null;
   if (!isAdmin) {
-    const hidden = await db.getHiddenChannels(userId);
-    hiddenSet = new Set(hidden);
+    const visible = await db.getVisibleChannels(userId);
+    visibleSet = new Set(visible);
   }
-  sseClients.push({ res, userId, isAdmin: !!isAdmin, hiddenSet });
+  sseClients.push({ res, userId, isAdmin: !!isAdmin, visibleSet });
 }
 
 function removeSSEClient(res) {
@@ -163,24 +180,203 @@ function removeSSEClient(res) {
   if (i !== -1) sseClients.splice(i, 1);
 }
 
-const SUIT_EMOJI = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
-const SUIT_NAME  = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
+// ── Message formatting (unified) ───────────────────────────────────
+
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
+const SUPERSCRIPT    = ['⁰', '¹', '²', '³', '⁴', '⁵'];
+const RATR_EMOJI     = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+// Compat exports
+const SUIT_EMOJI = SUIT_EMOJI_MAP;
+const SUIT_NAME  = SUIT_NAME_FR;
+
+function getSuitEmoji(suit) { return SUIT_EMOJI_MAP[suit] || suit; }
+function getSuitName(suit)  { return SUIT_NAME_FR[suit]  || suit; }
+
+/**
+ * buildTgMessage — message unifié pour prédiction ET résultat.
+ * status = null  → en cours (⌛)
+ * status = 'gagne'  → gagné (✅ + emoji rattrapage)
+ * status = 'perdu'  → perdu (❌)
+ */
+function buildTgMessage(formatId, {
+  gameNumber, suit, strategy,
+  maxR = 2,
+  status = null,
+  rattrapage = 0,
+}) {
+  const emoji   = getSuitEmoji(suit);
+  const name    = getSuitName(suit);
+  const sup     = SUPERSCRIPT[maxR] ?? String(maxR);
+
+  let statusLine;
+  if (status === null)         statusLine = '⌛';
+  else if (status === 'gagne') statusLine = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+  else                         statusLine = '❌ PERDU ❌';
+
+  switch (parseInt(formatId)) {
+    case 1:
+      return {
+        text: `⚜ #N${gameNumber} Игрок    +${sup} ⚜\n◽Масть ${emoji}\n◼️ Результат ${statusLine}`,
+        parse_mode: null,
+      };
+
+    case 2:
+      return {
+        text:
+          `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\n` +
+          `Game ${gameNumber} :${emoji}\n` +
+          `${status === null ? 'En cours' : 'Statut'} :${statusLine}`,
+        parse_mode: null,
+      };
+
+    case 3:
+      return {
+        text:
+          `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n` +
+          `🎮GAME: #N${gameNumber}\n` +
+          `🃏Carte ${emoji}:${status === null ? '⌛' : statusLine}\n` +
+          `Mode: Dogon ${maxR}`,
+        parse_mode: null,
+      };
+
+    case 4:
+      return {
+        text:
+          `🎰 PRÉDICTION #${gameNumber}\n` +
+          `🎯 Couleur: ${emoji} ${name}\n` +
+          `📊 Statut: ${status === null ? 'En cours ⏳' : statusLine}\n` +
+          `🔍 ${status === null ? 'Vérification en cours' : (status === 'gagne' ? 'Vérifié ✓' : 'Résultat final')}`,
+        parse_mode: null,
+      };
+
+    case 5: {
+      let bar;
+      if (status === null)         bar = '🟦' + '⬜'.repeat(maxR);
+      else if (status === 'gagne') bar = '🟩'.repeat(rattrapage + 1) + '⬜'.repeat(Math.max(0, maxR - rattrapage));
+      else                         bar = '🟥'.repeat(maxR + 1);
+      return {
+        text:
+          `🎰 PRÉDICTION #${gameNumber}\n` +
+          `🎯 Couleur: ${emoji} ${name}\n\n` +
+          `🔍 Vérification jeu #${gameNumber}\n` +
+          `${bar}\n` +
+          `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ Gagné en R${rattrapage}` : '❌ PERDU ❌')}`,
+        parse_mode: null,
+      };
+    }
+
+    case 6:
+    default:
+      return {
+        text:
+          `🏆 *PRÉDICTION #${gameNumber}*\n\n` +
+          `🎯 Couleur: ${emoji} ${name}\n` +
+          (status === null
+            ? `⏳ Statut: En cours`
+            : status === 'gagne'
+              ? `✅ Statut: ${statusLine} GAGNÉ`
+              : `Statut: ❌ PERDU ❌`),
+        parse_mode: 'Markdown',
+      };
+  }
+}
+
+// Compat shims for existing callers
+function buildPredictionMsg(formatId, data) {
+  return buildTgMessage(formatId, { ...data, maxR: data.maxRattrapage ?? maxRattrapage, status: null });
+}
+function buildResultMsg(formatId, data) {
+  return buildTgMessage(formatId, { ...data, maxR: data.maxRattrapage ?? maxRattrapage });
+}
+
+// ── Send to ALL global channels + store message_id ─────────────────
+
+async function sendToGlobalChannelsAndStore(strategy, gameNumber, suit) {
+  if (!TOKEN) return;
+  const channels = getChannels();
+  if (!channels.length) return;
+
+  const { text, parse_mode } = buildTgMessage(currentFormat, {
+    gameNumber, suit, strategy, maxR: maxRattrapage, status: null,
+  });
+
+  for (const ch of channels) {
+    try {
+      const body = { chat_id: ch.tgId, text };
+      if (parse_mode) body.parse_mode = parse_mode;
+      const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        const msgId = d.result?.message_id;
+        if (msgId) {
+          await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId).catch(() => {});
+          console.log(`[TG] Prédiction #${gameNumber} → ${ch.tgId} (msg_id=${msgId})`);
+        }
+      } else {
+        const err = await resp.text();
+        console.error(`[TG] Erreur sendMessage → ${ch.tgId}: ${err.slice(0, 120)}`);
+      }
+    } catch (e) { console.error(`[TG] Exception: ${e.message}`); }
+  }
+}
+
+// ── Edit stored messages with result ──────────────────────────────
+
+async function editGlobalChannelMessages(strategy, gameNumber, suit, status, rattrapage) {
+  if (!TOKEN) return;
+  let stored;
+  try { stored = await db.getTgMsgIds(strategy, gameNumber, suit); } catch { stored = []; }
+  if (!stored.length) return;
+
+  const { text, parse_mode } = buildTgMessage(currentFormat, {
+    gameNumber, suit, strategy, maxR: maxRattrapage, status, rattrapage,
+  });
+
+  for (const { channel_tg_id, message_id } of stored) {
+    try {
+      const body = { chat_id: channel_tg_id, message_id: parseInt(message_id), text };
+      if (parse_mode) body.parse_mode = parse_mode;
+      const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/editMessageText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        console.log(`[TG] Édition #${gameNumber} → ${channel_tg_id} (${status} R${rattrapage})`);
+      } else {
+        const err = await resp.text();
+        console.error(`[TG] Erreur editMessage → ${channel_tg_id}: ${err.slice(0, 120)}`);
+      }
+    } catch (e) { console.error(`[TG] Exception edit: ${e.message}`); }
+  }
+
+  // Supprimer les message_ids après modification finale
+  if (status === 'gagne' || status === 'perdu') {
+    db.deleteTgMsgIds(strategy, gameNumber, suit).catch(() => {});
+  }
+}
+
+// ── Legacy: send without storing (for custom strategy targets) ─────
 
 async function sendPredictionToTelegram(botToken, tgChannelId, strategyName, gameNumber, predictedSuit) {
   if (!botToken || !tgChannelId) return;
   try {
-    const emoji = SUIT_EMOJI[predictedSuit] || predictedSuit;
-    const name  = SUIT_NAME[predictedSuit]  || predictedSuit;
-    const text  =
-      `🎰 *BACCARAT PRO — ${strategyName}*\n\n` +
-      `⚡ *Nouvelle prédiction détectée*\n` +
-      `🎯 Partie *#${gameNumber}*\n` +
-      `🃏 Couleur attendue : *${emoji} ${name}*\n\n` +
-      `_Algorithme temps réel · Baccarat Pro_`;
+    const { text, parse_mode } = buildTgMessage(currentFormat, {
+      gameNumber, suit: predictedSuit, strategy: strategyName,
+      maxR: maxRattrapage, status: null,
+    });
+    const body = { chat_id: tgChannelId, text };
+    if (parse_mode) body.parse_mode = parse_mode;
     const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: tgChannelId, text, parse_mode: 'Markdown' }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const err = await resp.text();
@@ -200,6 +396,24 @@ async function sendPredictionToTargets(targets, strategyName, gameNumber, predic
   }
 }
 
+// ── Compat: simple sendToGlobalChannels (sans stockage) ───────────
+
+async function sendToGlobalChannels(text, parse_mode) {
+  if (!TOKEN) return;
+  const channels = getChannels();
+  for (const ch of channels) {
+    try {
+      const body = { chat_id: ch.tgId, text };
+      if (parse_mode) body.parse_mode = parse_mode;
+      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {}
+  }
+}
+
 module.exports = {
   loadConfig, addChannel, removeChannel, testChannel,
   getChannels, getMessages, getStatus,
@@ -207,6 +421,13 @@ module.exports = {
   saveToken, loadToken,
   getToken: () => TOKEN,
   startBotPublic: startBot,
+  getCurrentFormat, loadFormat, saveFormat,
+  getCurrentMaxRattrapage, loadMaxRattrapage, saveMaxRattrapage,
+  buildTgMessage, buildPredictionMsg, buildResultMsg,
+  sendToGlobalChannels,
+  sendToGlobalChannelsAndStore,
+  editGlobalChannelMessages,
   sendPredictionToTelegram,
   sendPredictionToTargets,
+  SUIT_EMOJI, SUIT_NAME,
 };

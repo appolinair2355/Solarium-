@@ -49,9 +49,11 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'baccarat-pro-secret-2025',
   resave: false,
   saveUninitialized: false,
+  rolling: true,
   cookie: {
     secure: IS_PROD,
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    maxAge: 30 * 24 * 60 * 60 * 1000,
     sameSite: IS_PROD ? 'none' : 'lax',
   },
 }));
