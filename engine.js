@@ -79,8 +79,9 @@ class Engine {
 
   _makeCustomState() {
     const counts = {};
-    for (const s of ALL_SUITS) counts[s] = 0;
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [] };
+    const mappingIndex = {};
+    for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; }
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], mappingIndex };
   }
 
   reloadCustomStrategies(list) {
@@ -364,12 +365,28 @@ class Engine {
       }
     };
 
+    // Résout le pool de cartes cibles + rotation cyclique par index
+    const resolvePredictedSuit = (suit) => {
+      const raw = mappings[suit];
+      // Supporte l'ancien format (string) et le nouveau (array)
+      const pool = Array.isArray(raw) ? raw.filter(s => ALL_SUITS.includes(s))
+                                      : (ALL_SUITS.includes(raw) ? [raw] : []);
+      if (!pool.length) return null;
+      if (pool.length === 1) return pool[0];
+      // Rotation : on avance l'index à chaque prédiction pour cette carte
+      if (!state.mappingIndex) state.mappingIndex = {};
+      const idx = (state.mappingIndex[suit] || 0) % pool.length;
+      state.mappingIndex[suit] = idx + 1;
+      console.log(`[${channelId}] Rotation ${suit}: pool=[${pool.join(',')}] idx=${idx} → ${pool[idx]}`);
+      return pool[idx];
+    };
+
     if (mode === 'manquants') {
       for (const suit of ALL_SUITS) {
         if (suits.includes(suit)) { state.counts[suit] = 0; continue; }
         state.counts[suit] = (state.counts[suit] || 0) + 1;
         if (state.counts[suit] === B) {
-          const ps = mappings[suit];
+          const ps = resolvePredictedSuit(suit);
           if (ps) await emitPrediction(gn + 1, ps, suit);
           state.counts[suit] = 0;
         }
@@ -379,7 +396,7 @@ class Engine {
         if (suits.includes(suit)) {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
           if (state.counts[suit] === B) {
-            const ps = mappings[suit];
+            const ps = resolvePredictedSuit(suit);
             if (ps) await emitPrediction(gn + 1, ps, suit);
             state.counts[suit] = 0;
           }
@@ -449,7 +466,8 @@ class Engine {
     try {
       const state = { c1: this.c1.absences, c2: this.c2.absences, c3: this.c3.absences };
       for (const [id, s] of Object.entries(this.custom)) {
-        state[`S${id}`] = s.counts;
+        state[`S${id}`]  = s.counts;
+        state[`SI${id}`] = s.mappingIndex || {};
       }
       await db.setSetting('engine_absences', JSON.stringify(state));
     } catch (e) { console.error('saveAbsences error:', e.message); }
@@ -464,7 +482,13 @@ class Engine {
       if (state.c2) for (const s of ALL_SUITS) this.c2.absences[s] = state.c2[s] || 0;
       if (state.c3) for (const s of ALL_SUITS) this.c3.absences[s] = state.c3[s] || 0;
       for (const [key, counts] of Object.entries(state)) {
-        if (key.startsWith('S')) {
+        if (key.startsWith('SI')) {
+          const id = parseInt(key.slice(2));
+          if (this.custom[id]) {
+            if (!this.custom[id].mappingIndex) this.custom[id].mappingIndex = {};
+            for (const s of ALL_SUITS) this.custom[id].mappingIndex[s] = counts[s] || 0;
+          }
+        } else if (key.startsWith('S')) {
           const id = parseInt(key.slice(1));
           if (this.custom[id]) for (const s of ALL_SUITS) this.custom[id].counts[s] = counts[s] || 0;
         }

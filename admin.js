@@ -160,6 +160,23 @@ function parseExceptions(raw) {
     });
 }
 
+function normalizeMappings(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const result = {};
+  for (const s of SUITS) {
+    const val = raw[s];
+    if (Array.isArray(val)) {
+      const pool = val.filter(t => SUITS.includes(t)).slice(0, 3);
+      result[s] = pool.length > 0 ? pool : null;
+    } else if (typeof val === 'string' && SUITS.includes(val)) {
+      result[s] = [val]; // ancienne format → tableau
+    } else {
+      result[s] = null;
+    }
+  }
+  return result;
+}
+
 function validateStrategyBody(body) {
   const { name, threshold, mode, mappings, visibility } = body;
   const B = parseInt(threshold);
@@ -167,8 +184,11 @@ function validateStrategyBody(body) {
   if (isNaN(B) || B < 1 || B > 50)                     return 'Seuil B invalide (1–50)';
   if (!['manquants', 'apparents'].includes(mode))       return 'Mode invalide';
   if (!['admin', 'all'].includes(visibility))           return 'Visibilité invalide';
+  const norm = normalizeMappings(mappings);
+  if (!norm) return 'Mappings invalides';
   for (const s of SUITS) {
-    if (!SUITS.includes(mappings?.[s])) return `Mapping invalide pour ${s}`;
+    if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
+    if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
   }
   return null;
 }
@@ -204,13 +224,14 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     const { name, threshold, mode, mappings, visibility, enabled } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
+    const normalizedMappings = normalizeMappings(mappings);
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
       id: nextId,
       name: name.trim().slice(0, 40),
       threshold: parseInt(threshold),
-      mode, mappings,
+      mode, mappings: normalizedMappings,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -234,11 +255,12 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const { name, threshold, mode, mappings, visibility, enabled } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
+    const normalizedMappings = normalizeMappings(mappings);
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
       threshold: parseInt(threshold),
-      mode, mappings,
+      mode, mappings: normalizedMappings,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
