@@ -3,7 +3,7 @@ services:
     name: baccarat-pro
     env: node
     plan: free
-    buildCommand: npm install && ./node_modules/.bin/vite build
+    buildCommand: npm install --omit=dev
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
