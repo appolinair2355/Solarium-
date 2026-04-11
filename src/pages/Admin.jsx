@@ -122,20 +122,20 @@ export default function Admin() {
   const SUIT_LABELS = { '♠': '♠ Pique', '♥': '♥ Cœur', '♦': '♦ Carreau', '♣': '♣ Trèfle' };
   const PRESETS = {
     manquants: [
-      { label: 'Contraire total',  desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':'♥','♥':'♠','♦':'♣','♣':'♦' } },
-      { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥', map: { '♠':'♣','♣':'♠','♥':'♦','♦':'♥' } },
-      { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥', map: { '♠':'♦','♦':'♠','♥':'♣','♣':'♥' } },
-      { label: 'Identique',        desc: '♠→♠ · ♥→♥ · ♦→♦ · ♣→♣', map: { '♠':'♠','♥':'♥','♦':'♦','♣':'♣' } },
+      { label: 'Contraire total',  desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥', map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥', map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+      { label: 'Identique',        desc: '♠→♠ · ♥→♥ · ♦→♦ · ♣→♣', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
     ],
     apparents: [
-      { label: 'Miroir contraire', desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':'♥','♥':'♠','♦':'♣','♣':'♦' } },
-      { label: 'Miroir couleur',   desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥', map: { '♠':'♣','♣':'♠','♥':'♦','♦':'♥' } },
-      { label: 'Miroir forme',     desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥', map: { '♠':'♦','♦':'♠','♥':'♣','♣':'♥' } },
-      { label: 'Rotation ↻',       desc: '♠→♥→♦→♣→♠',              map: { '♠':'♥','♥':'♦','♦':'♣','♣':'♠' } },
+      { label: 'Miroir contraire', desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Miroir couleur',   desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥', map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Miroir forme',     desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥', map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+      { label: 'Rotation ↻',       desc: '♠→♥→♦→♣→♠',              map: { '♠':['♥'],'♥':['♦'],'♦':['♣'],'♣':['♠'] } },
     ],
   };
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':'♥','♥':'♠','♦':'♣','♣':'♦' }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [] };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [] };
 
   const [strategies, setStrategies] = useState([]);
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
@@ -275,7 +275,13 @@ export default function Admin() {
     // Détecter le type : si au moins une cible TG est configurée → 'telegram', sinon 'simple'
     const stratType = tg_targets.some(t => t.bot_token && t.channel_id) ? 'telegram' : 'simple';
     const exceptions = Array.isArray(s.exceptions) ? s.exceptions.map(e => ({ ...e })) : [];
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings: { ...s.mappings }, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions });
+    // Normalise les mappings : string → array (compatibilité anciennes stratégies)
+    const mappings = {};
+    for (const suit of ['♠','♥','♦','♣']) {
+      const v = s.mappings?.[suit];
+      mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
+    }
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions });
     setStratOpen(true);
   };
 
@@ -1010,7 +1016,7 @@ export default function Admin() {
                       </span>
                     )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-                      B={s.threshold} · {s.mode === 'manquants' ? 'Absences' : 'Apparitions'} · {Object.entries(s.mappings).map(([k,v]) => `${k}→${v}`).join('  ')}
+                      B={s.threshold} · {s.mode === 'manquants' ? 'Absences' : 'Apparitions'} · {Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ')}
                     </div>
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
@@ -1242,27 +1248,80 @@ export default function Admin() {
                 </div>
               </div>
 
-              {/* Mappings manuels */}
+              {/* Mappings manuels — multi-sélection avec rotation */}
               <div style={{ marginTop: 16 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>
-                  Mapping manuel — si suit absent/fréquent → prédire :
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {SUITS.map(suit => (
-                    <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: 8,
-                      background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '8px 12px',
-                      border: '1px solid rgba(255,255,255,0.07)' }}>
-                      <span style={{ color: ['♥','♦'].includes(suit) ? '#ef4444' : '#e2e8f0', fontSize: 20, minWidth: 24 }}>{suit}</span>
-                      <span style={{ color: '#6b7280' }}>→</span>
-                      <select
-                        value={stratForm.mappings[suit] || '♠'}
-                        onChange={e => setStratForm(p => ({ ...p, mappings: { ...p.mappings, [suit]: e.target.value } }))}
-                        style={{ flex: 1, padding: '5px 8px', background: '#1e1b2e',
-                          border: '1px solid rgba(168,85,247,0.2)', borderRadius: 6, color: '#fff', fontSize: 13 }}>
-                        {SUITS.map(s => <option key={s} value={s}>{SUIT_LABELS[s]}</option>)}
-                      </select>
-                    </div>
-                  ))}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <label style={{ color: '#94a3b8', fontSize: 12 }}>
+                    Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
+                  </label>
+                  <span style={{ fontSize: 10, color: '#6b7280', fontStyle: 'italic' }}>
+                    ① → ② → ③ en rotation
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {SUITS.map(suit => {
+                    const pool = Array.isArray(stratForm.mappings[suit]) ? stratForm.mappings[suit] : (stratForm.mappings[suit] ? [stratForm.mappings[suit]] : []);
+                    const suitColor = ['♥','♦'].includes(suit) ? '#ef4444' : '#e2e8f0';
+                    const toggleTarget = (target) => {
+                      setStratForm(p => {
+                        const cur = Array.isArray(p.mappings[suit]) ? [...p.mappings[suit]] : (p.mappings[suit] ? [p.mappings[suit]] : []);
+                        const idx = cur.indexOf(target);
+                        let next;
+                        if (idx !== -1) {
+                          next = cur.filter(x => x !== target);
+                          if (next.length === 0) return p; // au moins 1 requis
+                        } else {
+                          if (cur.length >= 3) return p; // max 3
+                          next = [...cur, target];
+                        }
+                        return { ...p, mappings: { ...p.mappings, [suit]: next } };
+                      });
+                    };
+                    const ROTATION_LABELS = ['①','②','③'];
+                    return (
+                      <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '8px 12px',
+                        border: '1px solid rgba(255,255,255,0.07)' }}>
+                        <span style={{ color: suitColor, fontSize: 20, minWidth: 24, fontWeight: 700 }}>{suit}</span>
+                        <span style={{ color: '#4b5563', fontSize: 13 }}>→</span>
+                        <div style={{ display: 'flex', gap: 5, flex: 1 }}>
+                          {SUITS.map(target => {
+                            const pos = pool.indexOf(target);
+                            const selected = pos !== -1;
+                            const tColor = ['♥','♦'].includes(target) ? '#f87171' : '#e2e8f0';
+                            return (
+                              <button key={target} type="button"
+                                onClick={() => toggleTarget(target)}
+                                style={{
+                                  flex: 1, padding: '6px 4px', borderRadius: 7, cursor: 'pointer',
+                                  border: selected ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.08)',
+                                  background: selected ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
+                                  color: selected ? '#e2e8f0' : '#6b7280',
+                                  fontWeight: selected ? 700 : 400,
+                                  transition: 'all 0.15s',
+                                  position: 'relative',
+                                }}>
+                                {selected && (
+                                  <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 9, color: '#a855f7', fontWeight: 700 }}>
+                                    {ROTATION_LABELS[pos]}
+                                  </span>
+                                )}
+                                <span style={{ color: tColor, fontSize: 16 }}>{target}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ minWidth: 70, fontSize: 11, color: '#6b7280', textAlign: 'right' }}>
+                          {pool.length === 1 && <span style={{ color: '#64748b' }}>fixe</span>}
+                          {pool.length === 2 && <span style={{ color: '#a855f7' }}>rotation ×2</span>}
+                          {pool.length === 3 && <span style={{ color: '#7c3aed' }}>rotation ×3</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>
+                  Sélection unique = toujours cette carte · 2 cartes = alterne ①②①②… · 3 cartes = alterne ①②③①②③…
                 </div>
               </div>
 
