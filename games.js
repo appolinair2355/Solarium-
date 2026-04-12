@@ -36,7 +36,7 @@ function parseCards(scSList) {
     if (key === 'P') player = cards;
     else if (key === 'B') banker = cards;
   }
-  const fmt = cards => cards.map(c => ({ S: SUIT_MAP[c.S] || '?', R: c.R || '?', raw: c.S }));
+  const fmt = cards => cards.map(c => ({ S: SUIT_MAP[c.S] || '?', R: (c.R !== undefined && c.R !== null) ? c.R : '?', raw: c.S }));
   return { player: fmt(player), banker: fmt(banker) };
 }
 

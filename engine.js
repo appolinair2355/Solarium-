@@ -24,9 +24,9 @@ function normalizeSuit(s) {
   return RAW_TO_SUIT[s] || s.replace(/\ufe0f/g, '').replace('❤', '♥');
 }
 
-function extractSuits(playerCards) {
+function extractSuits(cards) {
   const suits = new Set();
-  for (const c of playerCards) {
+  for (const c of (cards || [])) {
     const n = normalizeSuit(c.S || '');
     if (ALL_SUITS.includes(n)) suits.add(n);
   }
@@ -86,14 +86,23 @@ class Engine {
 
   reloadCustomStrategies(list) {
     for (const cfg of list) {
-      if (!this.custom[cfg.id]) this.custom[cfg.id] = this._makeCustomState();
+      if (!this.custom[cfg.id]) {
+        // Nouvelle stratégie : initialiser l'état complet
+        const s = this._makeCustomState();
+        s.needsInit = true;
+        this.custom[cfg.id] = s;
+      }
+      // Ne PAS remettre les compteurs à 0 pour les stratégies existantes
+      // (sinon on perd la progression des absences/apparitions)
       this.custom[cfg.id].config = cfg;
-      for (const s of ALL_SUITS) this.custom[cfg.id].counts[s] = 0;
-      console.log(`[S${cfg.id}] "${cfg.name}" rechargée: mode=${cfg.mode}, B=${cfg.threshold}, enabled=${cfg.enabled}`);
+      console.log(`[S${cfg.id}] "${cfg.name}" rechargée: mode=${cfg.mode}, B=${cfg.threshold}, hand=${cfg.hand || 'joueur'}, enabled=${cfg.enabled}`);
     }
     const ids = new Set(list.map(c => c.id));
     for (const id of Object.keys(this.custom)) {
-      if (!ids.has(parseInt(id))) delete this.custom[id];
+      if (!ids.has(parseInt(id))) {
+        console.log(`[Engine] Stratégie S${id} supprimée de la mémoire`);
+        delete this.custom[id];
+      }
     }
   }
 
@@ -110,14 +119,14 @@ class Engine {
     } catch (e) { console.error('loadCustomStrategies error:', e.message); }
   }
 
-  async processGame(gn, suits, pCards, bCards) {
+  async processGame(gn, suits, bSuits, pCards, bCards) {
     await this._processC1(gn, suits, pCards, bCards);
     await this._processC2(gn, suits, pCards, bCards);
     await this._processC3(gn, suits, pCards, bCards);
     await this._processDC(gn, suits, pCards, bCards);
     for (const [id, state] of Object.entries(this.custom)) {
       if (state.config?.enabled) {
-        await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, pCards, bCards);
+        await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
       }
     }
   }
@@ -331,32 +340,44 @@ class Engine {
     return false;
   }
 
-  async _processCustomStrategy(id, state, cfg, gn, suits, pCards, bCards) {
+  async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
+    // Stratégie supprimée entre le début du tick et maintenant → on ignore
+    if (!this.custom[id]) return;
     if (state.processed.has(gn)) return;
     state.processed.add(gn);
 
     const channelId = `S${id}`;
 
+    // Détermine quelle main surveiller selon la config
+    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
+
     // ── Mettre à jour l'historique des parties (fenêtre de 15) ──────
-    state.history.push([...suits]);
+    state.history.push([...handSuits]);
     if (state.history.length > 15) state.history.shift();
 
     // ── Résoudre les prédictions en attente + enregistrer les résultats ─
-    await this._resolvePending(state.pending, channelId, gn, suits, pCards, bCards, (won, ps) => {
+    await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
       state.lastOutcomes.push({ won, suit: ps });
       if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
     });
 
-    const { threshold: B, mode, mappings, tg_targets, name, exceptions } = cfg;
+    const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
+    const offset = Math.max(1, parseInt(prediction_offset) || 1); // décalage de prédiction : +1, +2, etc.
+    const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
 
     const emitPrediction = async (next, ps, suit) => {
+      // ── Un seul signal par jeu cible — évite les doublons ────────
+      if (state.pending[next]) {
+        console.log(`[${channelId}] Doublon ignoré pour #${next} (déjà prédit: ${state.pending[next].suit})`);
+        return;
+      }
       // ── Vérification des exceptions avant d'émettre ───────────────
       if (this._checkExceptions(exceptions, ps, suit, state)) return;
 
       // Enregistre en DB et n'envoie PAS via sendToStrategyChannels (stratégie custom)
       try {
         await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
-        console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps}`);
+        console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
       state.pending[next] = { suit: ps, rattrapage: 0 };
       // Envoi avec token custom + stockage du message_id pour édition ultérieure
@@ -373,34 +394,44 @@ class Engine {
                                       : (ALL_SUITS.includes(raw) ? [raw] : []);
       if (!pool.length) return null;
       if (pool.length === 1) return pool[0];
-      // Rotation : on avance l'index à chaque prédiction pour cette carte
-      if (!state.mappingIndex) state.mappingIndex = {};
-      const idx = (state.mappingIndex[suit] || 0) % pool.length;
-      state.mappingIndex[suit] = idx + 1;
-      console.log(`[${channelId}] Rotation ${suit}: pool=[${pool.join(',')}] idx=${idx} → ${pool[idx]}`);
+      // Sélection aléatoire parmi les choix disponibles
+      const idx = Math.floor(Math.random() * pool.length);
+      console.log(`[${channelId}] Aléatoire ${suit}: pool=[${pool.join(',')}] choix → ${pool[idx]}`);
       return pool[idx];
     };
 
     if (mode === 'manquants') {
       for (const suit of ALL_SUITS) {
-        if (suits.includes(suit)) { state.counts[suit] = 0; continue; }
+        if (handSuits.includes(suit)) { state.counts[suit] = 0; continue; }
         state.counts[suit] = (state.counts[suit] || 0) + 1;
         if (state.counts[suit] === B) {
           const ps = resolvePredictedSuit(suit);
-          if (ps) await emitPrediction(gn + 1, ps, suit);
+          if (ps) await emitPrediction(gn + offset, ps, suit);
           state.counts[suit] = 0;
         }
       }
     } else if (mode === 'apparents') {
       for (const suit of ALL_SUITS) {
-        if (suits.includes(suit)) {
+        if (handSuits.includes(suit)) {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
           if (state.counts[suit] === B) {
             const ps = resolvePredictedSuit(suit);
-            if (ps) await emitPrediction(gn + 1, ps, suit);
+            if (ps) await emitPrediction(gn + offset, ps, suit);
             state.counts[suit] = 0;
           }
         } else { state.counts[suit] = 0; }
+      }
+    }
+  }
+
+  // Pré-remplit le set processed pour les nouvelles stratégies afin d'éviter le rattrapage historique
+  _initializeNewStrategies(games) {
+    const finishedNums = games.filter(g => g.is_finished).map(g => g.game_number);
+    for (const [id, state] of Object.entries(this.custom)) {
+      if (state.needsInit) {
+        for (const gn of finishedNums) state.processed.add(gn);
+        state.needsInit = false;
+        console.log(`[S${id}] Initialisation : ${finishedNums.length} jeux historiques ignorés, prédictions démarrent sur les prochains jeux`);
       }
     }
   }
@@ -409,6 +440,64 @@ class Engine {
     try {
       const games    = await fetchGames();
       const finished = games.filter(g => g.is_finished);
+      // Initialiser les nouvelles stratégies AVANT tout traitement
+      this._initializeNewStrategies(games);
+
+      // Mise à jour du numéro de jeu courant (utilisé par cleanupStale)
+      if (games.length > 0) {
+        const maxSeen = Math.max(...games.map(g => g.game_number));
+        if (maxSeen > (this.currentMaxGame || 0)) this.currentMaxGame = maxSeen;
+      }
+
+      // Capture la partie live en cours pour la prévisualisation des compteurs.
+      // On utilise la PHASE pour savoir quelle main a FINI de tirer :
+      //   - Phase 'PlayerMove'  → joueur encore en train de tirer → NE PAS projeter le joueur
+      //   - Phase 'BankerMove'  → banquier encore en train de tirer → NE PAS projeter le banquier
+      //   - Phase 'DealerMove' / 'ThirdCard' → joueur a fini, banquier peut encore tirer
+      //   - Aucune phase active → mise à jour uniquement si ≥ 2 cartes (donne initiale complète)
+      const PLAYER_DRAWING_PHASES = new Set(['PlayerMove']);
+      const BANKER_DRAWING_PHASES = new Set(['BankerMove']);
+
+      const liveGame = games.find(g =>
+        !g.is_finished && (
+          (g.player_cards && g.player_cards.length > 0) ||
+          (g.banker_cards && g.banker_cards.length > 0)
+        )
+      );
+
+      if (liveGame) {
+        const ph          = liveGame.phase || '';
+        const pSuits      = extractSuits(liveGame.player_cards || []);
+        const bSuits      = extractSuits(liveGame.banker_cards || []);
+
+        // Le joueur a fini de tirer si :
+        //  - Il a ≥ 2 cartes ET la phase n'est PAS 'PlayerMove'
+        //  - OU il a 3 cartes (tirage du troisième forcément terminé)
+        const playerDone = pSuits.length > 0 && (
+          liveGame.player_cards.length >= 3 ||
+          (liveGame.player_cards.length >= 2 && !PLAYER_DRAWING_PHASES.has(ph))
+        );
+
+        // Le banquier a fini de tirer si :
+        //  - Il a ≥ 2 cartes ET la phase n'est PAS 'BankerMove'
+        //  - OU il a 3 cartes
+        const bankerDone = bSuits.length > 0 && (
+          liveGame.banker_cards.length >= 3 ||
+          (liveGame.banker_cards.length >= 2 && !BANKER_DRAWING_PHASES.has(ph))
+        );
+
+        this.liveGameCards = {
+          gameNumber:  liveGame.game_number,
+          phase:       ph,
+          playerSuits: playerDone ? pSuits : [],
+          bankerSuits: bankerDone ? bSuits : [],
+          playerDone,
+          bankerDone,
+        };
+      } else {
+        this.liveGameCards = null;
+      }
+
       let hadNew = false;
       if (finished.length > 0 && finished.some(g => !this.c1.processed.has(g.game_number))) {
         console.log(`[Engine] ${games.length} jeux chargés, ${finished.length} terminés`);
@@ -421,13 +510,14 @@ class Engine {
           }
           continue;
         }
-        const suits = extractSuits(game.player_cards || []);
-        if (!suits.length) continue;
+        const suits  = extractSuits(game.player_cards  || []);
+        const bSuits = extractSuits(game.banker_cards  || []);
+        if (!suits.length && !bSuits.length) continue;
         if (!this.c1.processed.has(game.game_number)) {
-          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | suits: ${suits.join(',')} | gagnant: ${game.winner || '?'}`);
+          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
         }
-        await this.processGame(game.game_number, suits, game.player_cards, game.banker_cards);
+        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards);
       }
       if (hadNew) await this.saveAbsences();
     } catch (e) { console.error('Engine tick error:', e.message); }
@@ -435,10 +525,16 @@ class Engine {
 
   async cleanupStale() {
     try {
-      const mx = await db.getMaxResolvedGame();
-      if (mx <= 2) return;
-      const count = await db.expireStaleByGame(mx - 2);
-      if (count > 0) console.log(`🧹 ${count} prédiction(s) hors-fenêtre expirée(s)`);
+      // Utilise le numéro de jeu actuel (vu dans le dernier tick), jamais le max DB
+      // (le max DB peut contenir de très vieilles données d'anciennes sessions)
+      const mx = this.currentMaxGame || 0;
+      if (mx < 1) return;
+      const maxR = getCurrentMaxRattrapage();
+      // On n'expire que les prédictions qui ont dépassé leur fenêtre de rattrapage
+      const threshold = mx - maxR - 1;
+      if (threshold < 1) return;
+      const count = await db.expireStaleByGame(threshold, maxR);
+      if (count > 0) console.log(`🧹 ${count} prédiction(s) hors-fenêtre expirée(s) (jeu actuel: #${mx}, seuil: #${threshold})`);
     } catch (e) { console.error('cleanupStale error:', e.message); }
   }
 
@@ -528,12 +624,39 @@ class Engine {
       const id    = parseInt(channelId.slice(1));
       const entry = this.custom[id];
       if (!entry?.config) return null;
-      const { threshold, mode } = entry.config;
-      return ALL_SUITS.map(suit => ({
-        suit, display: SUIT_DISPLAY[suit] || suit,
-        count: entry.counts[suit] || 0, threshold,
-        mode, label: mode === 'apparents' ? 'Apparitions' : 'Absences',
-      }));
+      const { threshold, mode, hand } = entry.config;
+
+      // Si une partie est en cours et que la main concernée a déjà tiré ses cartes,
+      // on projette les compteurs en temps réel (sans attendre la fin du jeu)
+      let liveSuits = null;
+      if (this.liveGameCards) {
+        const projected = hand === 'banquier'
+          ? this.liveGameCards.bankerSuits
+          : this.liveGameCards.playerSuits;
+        if (projected.length > 0) liveSuits = projected;
+      }
+
+      return ALL_SUITS.map(suit => {
+        const base = entry.counts[suit] || 0;
+        let count  = base;
+        let isLive = false;
+
+        if (liveSuits !== null) {
+          isLive = true;
+          if (mode === 'manquants') {
+            count = liveSuits.includes(suit) ? 0 : base + 1;
+          } else {
+            count = liveSuits.includes(suit) ? base + 1 : 0;
+          }
+        }
+
+        return {
+          suit, display: SUIT_DISPLAY[suit] || suit,
+          count, threshold,
+          mode, label: mode === 'apparents' ? 'Apparitions' : 'Absences',
+          isLive,
+        };
+      });
     }
     return null;
   }

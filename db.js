@@ -273,15 +273,15 @@ async function getMaxResolvedGame() {
   return jsondb.getMaxResolvedGame();
 }
 
-async function expireStaleByGame(threshold) {
+async function expireStaleByGame(threshold, maxR) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `UPDATE predictions SET status='perdu', rattrapage=2, resolved_at=NOW() WHERE status='en_cours' AND game_number <= $1`,
-      [threshold]
+      `UPDATE predictions SET status='perdu', rattrapage=$2, resolved_at=NOW() WHERE status='en_cours' AND game_number <= $1`,
+      [threshold, typeof maxR === 'number' ? maxR : 2]
     );
     return r.rowCount;
   }
-  return jsondb.expireStaleByGame(threshold);
+  return jsondb.expireStaleByGame(threshold, maxR);
 }
 
 // ── SETTINGS ───────────────────────────────────────────────────────
@@ -497,6 +497,51 @@ async function deleteTgMsgIds(strategy, gameNumber, suit) {
   _tgMsgStore.delete(`${strategy}:${gameNumber}:${suit}`);
 }
 
+async function getTgMsgIdsForStrategy(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token FROM tg_pred_messages WHERE strategy=$1`,
+      [strategy]
+    );
+    return r.rows;
+  }
+  const result = [];
+  for (const [key, val] of _tgMsgStore.entries()) {
+    if (key.startsWith(`${strategy}:`)) result.push(...val);
+  }
+  return result;
+}
+
+async function deleteTgMsgIdsForStrategy(strategy) {
+  if (USE_PG) {
+    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy=$1`, [strategy]);
+    return;
+  }
+  for (const key of [..._tgMsgStore.keys()]) {
+    if (key.startsWith(`${strategy}:`)) _tgMsgStore.delete(key);
+  }
+}
+
+async function expireStrategyPredictions(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='perdu', resolved_at=NOW() WHERE status='en_cours' AND strategy=$1`,
+      [strategy]
+    );
+    return r.rowCount;
+  }
+  let count = 0;
+  const data = require('./jsondb');
+  for (const p of (data.d ? data.d().predictions : [])) {
+    if (p.status === 'en_cours' && p.strategy === strategy) {
+      Object.assign(p, { status: 'perdu', resolved_at: new Date().toISOString() });
+      count++;
+    }
+  }
+  if (count) try { require('./jsondb')._persist(); } catch {}
+  return count;
+}
+
 // ── ADMIN STATS ────────────────────────────────────────────────────
 
 async function getUserStats() {
@@ -527,5 +572,6 @@ module.exports = {
   getVisibleStrategies, setVisibleStrategies,
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
+  getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
   getUserStats,
 };

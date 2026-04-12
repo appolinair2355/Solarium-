@@ -190,6 +190,8 @@ function validateStrategyBody(body) {
     if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
     if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
   }
+  const offset = parseInt(body.prediction_offset);
+  if (!isNaN(offset) && (offset < 1 || offset > 10)) return 'Décalage de prédiction invalide (1–10)';
   return null;
 }
 
@@ -221,7 +223,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
   try {
     const err = validateStrategyBody(req.body);
     if (err) return res.status(400).json({ error: err });
-    const { name, threshold, mode, mappings, visibility, enabled } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
     const normalizedMappings = normalizeMappings(mappings);
@@ -236,6 +238,8 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       enabled: enabled !== false,
       tg_targets,
       exceptions,
+      prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
+      hand: hand === 'banquier' ? 'banquier' : 'joueur',
     };
     list.push(strat);
     await saveStrategies(list);
@@ -252,7 +256,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Stratégie introuvable' });
-    const { name, threshold, mode, mappings, visibility, enabled } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
     const normalizedMappings = normalizeMappings(mappings);
@@ -265,6 +269,8 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       enabled: enabled !== false,
       tg_targets,
       exceptions,
+      prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
+      hand: hand === 'banquier' ? 'banquier' : 'joueur',
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -281,6 +287,17 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
     if (list.length === before) return res.status(404).json({ error: 'Stratégie introuvable' });
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
+
+    // Nettoyer les prédictions et messages Telegram en suspens pour cette stratégie
+    const stratKey = `S${id}`;
+    const { cancelStrategyMessages } = require('./telegram-service');
+    await db.expireStrategyPredictions(stratKey).catch(e =>
+      console.warn(`[Admin] expireStrategyPredictions(${stratKey}) failed: ${e.message}`)
+    );
+    await cancelStrategyMessages(stratKey).catch(e =>
+      console.warn(`[Admin] cancelStrategyMessages(${stratKey}) failed: ${e.message}`)
+    );
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

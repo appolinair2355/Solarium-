@@ -179,11 +179,12 @@ function getMaxResolvedGame() {
   return mx;
 }
 
-function expireStaleByGame(threshold) {
+function expireStaleByGame(threshold, maxR) {
+  const r = typeof maxR === 'number' ? maxR : 2;
   let count = 0;
   for (const p of d().predictions) {
     if (p.status === 'en_cours' && p.game_number <= threshold) {
-      Object.assign(p, { status: 'perdu', rattrapage: 2, resolved_at: new Date().toISOString() });
+      Object.assign(p, { status: 'perdu', rattrapage: r, resolved_at: new Date().toISOString() });
       count++;
     }
   }

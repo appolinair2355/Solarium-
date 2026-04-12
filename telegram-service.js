@@ -286,7 +286,6 @@ function buildTgMessage(formatId, {
     }
 
     case 6:
-    default:
       return {
         text:
           `🏆 *PRÉDICTION #${gameNumber}*\n\n` +
@@ -297,6 +296,19 @@ function buildTgMessage(formatId, {
               ? `✅ Statut: ${statusLine} GAGNÉ`
               : `Statut: ❌ PERDU ❌`),
         parse_mode: 'Markdown',
+      };
+
+    case 7:
+    default:
+      return {
+        text:
+          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          (status === null
+            ? `⏳ <i>En attente du résultat...</i>`
+            : status === 'gagne'
+              ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+              : `❌ <b>PERDU</b> ❌`),
+        parse_mode: 'HTML',
       };
   }
 }
@@ -448,6 +460,37 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
   }
 }
 
+// ── Suppression propre d'une stratégie (annulation des prédictions TG) ─────
+//
+// Appelée lors de la suppression d'une stratégie depuis l'admin.
+// Supprime les messages Telegram en attente ("en cours") et nettoie la DB.
+
+async function cancelStrategyMessages(strategyId) {
+  let rows = [];
+  try { rows = await db.getTgMsgIdsForStrategy(strategyId); } catch {}
+
+  let deleted = 0;
+  for (const row of rows) {
+    const token = row.bot_token || TOKEN;
+    if (!token || !row.message_id || !row.channel_tg_id) continue;
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: row.channel_tg_id, message_id: parseInt(row.message_id) }),
+      });
+      deleted++;
+    } catch {}
+  }
+
+  try { await db.deleteTgMsgIdsForStrategy(strategyId); } catch {}
+
+  if (deleted > 0) {
+    console.log(`[TG] ${strategyId} supprimée → ${deleted} message(s) Telegram effacé(s)`);
+  }
+  return deleted;
+}
+
 // ── Alias de compatibilité ─────────────────────────────────────────
 
 const sendToGlobalChannelsAndStore  = sendToStrategyChannels;
@@ -506,5 +549,6 @@ module.exports = {
   sendCustomAndStore,
   sendPredictionToTelegram,
   sendPredictionToTargets,
+  cancelStrategyMessages,
   SUIT_EMOJI, SUIT_NAME,
 };
