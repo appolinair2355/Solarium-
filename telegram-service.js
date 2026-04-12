@@ -202,8 +202,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
 const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
-const SUPERSCRIPT    = ['⁰', '¹', '²', '³', '⁴', '⁵'];
-const RATR_EMOJI     = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
+const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
 // Compat exports
 const SUIT_EMOJI = SUIT_EMOJI_MAP;
@@ -231,7 +231,7 @@ function buildTgMessage(formatId, {
   let statusLine;
   if (status === null)         statusLine = '⌛';
   else if (status === 'gagne') statusLine = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
-  else                         statusLine = '❌ PERDU ❌';
+  else                         statusLine = '❌';
 
   switch (parseInt(formatId)) {
     case 1:
@@ -280,7 +280,7 @@ function buildTgMessage(formatId, {
           `🎯 Couleur: ${emoji} ${name}\n\n` +
           `🔍 Vérification jeu #${gameNumber}\n` +
           `${bar}\n` +
-          `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ Gagné en R${rattrapage}` : '❌ PERDU ❌')}`,
+          `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌')}`,
         parse_mode: null,
       };
     }
@@ -293,8 +293,8 @@ function buildTgMessage(formatId, {
           (status === null
             ? `⏳ Statut: En cours`
             : status === 'gagne'
-              ? `✅ Statut: ${statusLine} GAGNÉ`
-              : `Statut: ❌ PERDU ❌`),
+              ? `✅ Statut: ${statusLine}`
+              : `Statut: ❌`),
         parse_mode: 'Markdown',
       };
 
@@ -307,7 +307,7 @@ function buildTgMessage(formatId, {
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
               ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
-              : `❌ <b>PERDU</b> ❌`),
+              : `❌`),
         parse_mode: 'HTML',
       };
   }

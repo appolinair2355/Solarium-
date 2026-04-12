@@ -182,7 +182,7 @@ function validateStrategyBody(body) {
   const B = parseInt(threshold);
   if (!name || !name.trim())                            return 'Nom requis';
   if (isNaN(B) || B < 1 || B > 50)                     return 'Seuil B invalide (1–50)';
-  if (!['manquants', 'apparents'].includes(mode))       return 'Mode invalide';
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence'].includes(mode)) return 'Mode invalide';
   if (!['admin', 'all'].includes(visibility))           return 'Visibilité invalide';
   const norm = normalizeMappings(mappings);
   if (!norm) return 'Mappings invalides';
@@ -310,7 +310,7 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
 router.get('/max-rattrapage', requireAdmin, async (req, res) => {
   try {
     const v = await db.getSetting('max_rattrapage');
-    res.json({ max_rattrapage: v !== null ? parseInt(v) : 2 });
+    res.json({ max_rattrapage: v !== null ? parseInt(v) : 20 });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -355,6 +355,22 @@ router.put('/strategy-routes/:strategy', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'channel_ids doit être un tableau' });
   try {
     await db.setStrategyRoutes(req.params.strategy, channel_ids);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TELEGRAM CONFIG PAR STRATÉGIE PAR DÉFAUT (C1/C2/C3/DC) ─────────
+router.get('/default-tg', requireAdmin, async (req, res) => {
+  try {
+    const v = await db.getSetting('default_strategies_tg');
+    res.json(v ? JSON.parse(v) : {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/default-tg', requireAdmin, async (req, res) => {
+  try {
+    const config = req.body; // { C1: {bot_token, channel_id}, C2: {...}, ... }
+    await db.setSetting('default_strategies_tg', JSON.stringify(config));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -33,14 +33,18 @@ function extractSuits(cards) {
   return [...suits];
 }
 
-async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy) {
+async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy, customTg) {
   try {
     await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
     // Pour les stratégies globales (C1/C2/C3/DC), on route via sendToStrategyChannels.
-    // Les stratégies custom (Sxx) envoient via sendCustomAndStore depuis _processCustomStrategy.
+    // Si la stratégie a un token+canal propre → on utilise sendCustomAndStore.
     if (!strategy.startsWith('S') || strategy === 'S') {
-      await sendToStrategyChannels(strategy, gameNumber, predictedSuit);
+      if (customTg?.bot_token && customTg?.channel_id) {
+        await sendCustomAndStore([customTg], strategy, gameNumber, predictedSuit).catch(() => {});
+      } else {
+        await sendToStrategyChannels(strategy, gameNumber, predictedSuit);
+      }
     }
   } catch (e) { console.error('savePrediction error:', e.message); }
 }
@@ -69,6 +73,7 @@ class Engine {
     this.c3 = { absences: {}, processed: new Set(), pending: {}, consecLosses: 0 };
     this.dc = { pending: {} };
     this.custom = {};
+    this.defaultStratTg = {}; // { C1: {bot_token, channel_id}, ... }
 
     for (const s of ALL_SUITS) {
       this.c1.absences[s] = 0;
@@ -167,7 +172,7 @@ class Engine {
       if (this.c1.consecLosses >= 2) {
         this.c1.consecLosses = 0;
         const next = gn + 1;
-        savePrediction('DC', next, suit, suit);
+        savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
         this.dc.pending[next] = { suit, rattrapage: 0 };
       }
     });
@@ -176,7 +181,7 @@ class Engine {
       this.c1.absences[suit] = (this.c1.absences[suit] || 0) + 1;
       if (this.c1.absences[suit] === C1_B) {
         const ps = C1_MAP[suit]; const next = gn + 1;
-        await savePrediction('C1', next, ps, suit);
+        await savePrediction('C1', next, ps, suit, this.defaultStratTg['C1']);
         this.c1.pending[next] = { suit: ps, rattrapage: 0 };
         this.c1.absences[suit] = 0;
       }
@@ -191,7 +196,7 @@ class Engine {
       if (!this.c2.hadFirstLoss) { this.c2.hadFirstLoss = true; return; }
       this.c2.hadFirstLoss = false;
       const next = gn + 1;
-      savePrediction('DC', next, suit, suit);
+      savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
       this.dc.pending[next] = { suit, rattrapage: 0 };
     });
     for (const suit of ALL_SUITS) {
@@ -199,7 +204,7 @@ class Engine {
       this.c2.absences[suit] = (this.c2.absences[suit] || 0) + 1;
       if (this.c2.absences[suit] === C2_B) {
         const ps = C2_MAP[suit]; const next = gn + 1;
-        await savePrediction('C2', next, ps, suit);
+        await savePrediction('C2', next, ps, suit, this.defaultStratTg['C2']);
         this.c2.pending[next] = { suit: ps, rattrapage: 0 };
         this.c2.absences[suit] = 0;
       }
@@ -215,7 +220,7 @@ class Engine {
       if (this.c3.consecLosses >= 2) {
         this.c3.consecLosses = 0;
         const next = gn + 1;
-        savePrediction('DC', next, suit, suit);
+        savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
         this.dc.pending[next] = { suit, rattrapage: 0 };
       }
     });
@@ -224,7 +229,7 @@ class Engine {
       this.c3.absences[suit] = (this.c3.absences[suit] || 0) + 1;
       if (this.c3.absences[suit] === C3_B) {
         const ps = C3_MAP[suit]; const next = gn + 1;
-        await savePrediction('C3', next, ps, suit);
+        await savePrediction('C3', next, ps, suit, this.defaultStratTg['C3']);
         this.c3.pending[next] = { suit: ps, rattrapage: 0 };
         this.c3.absences[suit] = 0;
       }
@@ -432,6 +437,36 @@ class Engine {
           }
         } else { state.counts[suit] = 0; }
       }
+    } else if (mode === 'absence_apparition') {
+      // Compte les absences consécutives (sans seuil max).
+      // Dès que le costume réapparaît après >= B absences → prédit ce même costume.
+      for (const suit of ALL_SUITS) {
+        if (handSuits.includes(suit)) {
+          if ((state.counts[suit] || 0) >= B) {
+            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction`);
+            await emitPrediction(gn + offset, suit, suit);
+          }
+          state.counts[suit] = 0;
+        } else {
+          state.counts[suit] = (state.counts[suit] || 0) + 1;
+        }
+      }
+    } else if (mode === 'apparition_absence') {
+      // Compte les apparitions consécutives (sans seuil max).
+      // Dès que le costume disparaît après >= B apparitions → prédit la carte configurée (mapping).
+      // Si pas de mapping défini pour ce costume → prédit ce même costume.
+      for (const suit of ALL_SUITS) {
+        if (handSuits.includes(suit)) {
+          state.counts[suit] = (state.counts[suit] || 0) + 1;
+        } else {
+          if ((state.counts[suit] || 0) >= B) {
+            const ps = resolvePredictedSuit(suit) || suit;
+            console.log(`[${channelId}] ${suit} disparu après ${state.counts[suit]} apparitions (seuil≥${B}) → prédiction ${ps}`);
+            await emitPrediction(gn + offset, ps, suit);
+          }
+          state.counts[suit] = 0;
+        }
+      }
     }
   }
 
@@ -447,12 +482,125 @@ class Engine {
     }
   }
 
+  // ── Déclenchement en temps réel pour absence_apparition / apparition_absence ─
+  // Appelé dès que la main concernée a fini de tirer (avant la fin officielle du jeu).
+  // Vérifie en temps réel si une prédiction en attente est déjà gagnée dans le jeu live.
+  // Résout immédiatement en "gagne" si le costume prédit est visible dans la main live terminée.
+  // Les pertes restent gérées à la fin officielle du jeu (pas de résolution négative live).
+  async _verifyPendingLive() {
+    if (!this.liveGameCards) return;
+    const { gameNumber: gn, playerSuits, bankerSuits, playerDone, bankerDone, playerCards, bankerCards } = this.liveGameCards;
+
+    // Helper : tente de résoudre live un seul objet pending (ex: this.c1.pending)
+    const tryResolve = async (pending, strategyId, handSuits, handDone) => {
+      if (!handDone || handSuits.length === 0) return;
+      for (const [pg, info] of Object.entries(pending)) {
+        const pgNum = parseInt(pg);
+        if (pgNum > gn) continue;           // prédit pour un jeu futur → skip
+        if (!handSuits.includes(info.suit)) continue; // costume absent de la main live → attend
+        const rattrapage = gn - pgNum;
+        console.log(`[${strategyId}] ⚡ Live: costume ${info.suit} trouvé jeu #${gn} → gagne immédiat (R${rattrapage})`);
+        await resolvePrediction(strategyId, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards);
+        delete pending[pg];
+      }
+    };
+
+    // Stratégies par défaut C1/C2/C3/DC → main joueur
+    await tryResolve(this.c1.pending, 'C1', playerSuits, playerDone);
+    await tryResolve(this.c2.pending, 'C2', playerSuits, playerDone);
+    await tryResolve(this.c3.pending, 'C3', playerSuits, playerDone);
+    await tryResolve(this.dc.pending, 'DC', playerSuits, playerDone);
+
+    // Stratégies custom → main selon config
+    for (const [idStr, entry] of Object.entries(this.custom)) {
+      if (!entry.config?.enabled) continue;
+      const hand      = entry.config.hand === 'banquier' ? 'banquier' : 'joueur';
+      const handSuits = hand === 'banquier' ? bankerSuits : playerSuits;
+      const handDone  = hand === 'banquier' ? bankerDone  : playerDone;
+      await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone);
+    }
+  }
+
+  async _checkLiveTriggers(liveGame) {
+    if (!liveGame || !this.liveGameCards) return;
+    const gn = liveGame.game_number;
+
+    for (const [idStr, entry] of Object.entries(this.custom)) {
+      const { config } = entry;
+      if (!config?.enabled) continue;
+      const { mode, threshold: B, hand, tg_targets, prediction_offset, mappings } = config;
+      if (mode !== 'absence_apparition' && mode !== 'apparition_absence') continue;
+
+      // Une prédiction est déjà en attente → skip
+      if (Object.keys(entry.pending).length > 0) continue;
+
+      // Ce jeu live a déjà déclenché pour cette stratégie → skip
+      if (entry.liveTriggeredGame === gn) continue;
+
+      const handDone  = hand === 'banquier' ? this.liveGameCards.bankerDone  : this.liveGameCards.playerDone;
+      const handSuits = hand === 'banquier' ? this.liveGameCards.bankerSuits : this.liveGameCards.playerSuits;
+      if (!handDone || handSuits.length === 0) continue;
+
+      const channelId = `S${idStr}`;
+      const offset    = Math.max(1, parseInt(prediction_offset) || 1);
+      const next      = gn + offset;
+
+      // Résolution du costume prédit via mappings (pour apparition_absence)
+      const resolveLivePs = (suit) => {
+        if (mode === 'absence_apparition') return suit; // prédit le même costume
+        const raw  = mappings?.[suit];
+        const pool = Array.isArray(raw) ? raw.filter(s => ALL_SUITS.includes(s))
+                                        : (ALL_SUITS.includes(raw) ? [raw] : []);
+        if (!pool.length) return suit; // fallback même costume
+        return pool[Math.floor(Math.random() * pool.length)];
+      };
+
+      for (const suit of ALL_SUITS) {
+        let shouldTrigger = false;
+        if (mode === 'absence_apparition') {
+          // Costume absent depuis >= B jeux ET vient d'apparaître dans la main live
+          shouldTrigger = handSuits.includes(suit) && (entry.counts[suit] || 0) >= B;
+        } else {
+          // Costume présent depuis >= B jeux ET absent de la main live
+          shouldTrigger = !handSuits.includes(suit) && (entry.counts[suit] || 0) >= B;
+        }
+
+        if (!shouldTrigger) continue;
+
+        const ps = resolveLivePs(suit);
+        entry.liveTriggeredGame = gn;
+        console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, count=${entry.counts[suit]}, seuil≥${B}) → prédiction immédiate ${ps} #${next}`);
+
+        try {
+          await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit });
+          console.log(`[${channelId}] Prédiction live #${next} ${SUIT_DISPLAY[ps] || ps}`);
+          entry.pending[next] = { suit: ps, rattrapage: 0 };
+
+          if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+            await sendCustomAndStore(tg_targets, channelId, next, ps).catch(() => {});
+          } else {
+            await sendToStrategyChannels(channelId, next, ps).catch(() => {});
+          }
+        } catch (e) {
+          console.error(`[${channelId}] Live trigger error:`, e.message);
+        }
+        break; // Une seule prédiction par stratégie par jeu live
+      }
+    }
+  }
+
   async tick() {
     try {
       const games    = await fetchGames();
       const finished = games.filter(g => g.is_finished);
       // Initialiser les nouvelles stratégies AVANT tout traitement
       this._initializeNewStrategies(games);
+
+      // Recharger la config Telegram des stratégies par défaut (reflet des changements admin)
+      try {
+        const v = await db.getSetting('default_strategies_tg');
+        this.defaultStratTg = v ? JSON.parse(v) : {};
+      } catch (e) { /* conserver la config précédente */ }
 
       // currentMaxGame = max vu dans l'API (inclut les jeux en cours, pour info)
       if (games.length > 0) {
@@ -504,7 +652,13 @@ class Engine {
           bankerSuits: bankerDone ? bSuits : [],
           playerDone,
           bankerDone,
+          playerCards: liveGame.player_cards || [],
+          bankerCards: liveGame.banker_cards || [],
         };
+        // Vérification live des prédictions en attente (gagne immédiat si costume trouvé)
+        await this._verifyPendingLive();
+        // Vérification en temps réel pour absence_apparition / apparition_absence
+        await this._checkLiveTriggers(liveGame);
       } else {
         this.liveGameCards = null;
       }
@@ -669,17 +823,22 @@ class Engine {
 
         if (liveSuits !== null) {
           isLive = true;
-          if (mode === 'manquants') {
+          if (mode === 'manquants' || mode === 'absence_apparition') {
             count = liveSuits.includes(suit) ? 0 : base + 1;
           } else {
             count = liveSuits.includes(suit) ? base + 1 : 0;
           }
         }
 
+        const modeLabel = mode === 'apparents' ? 'Apparitions'
+          : mode === 'absence_apparition' ? 'Abs→App'
+          : mode === 'apparition_absence' ? 'App→Abs'
+          : 'Absences';
+
         return {
           suit, display: SUIT_DISPLAY[suit] || suit,
           count, threshold,
-          mode, label: mode === 'apparents' ? 'Apparitions' : 'Absences',
+          mode, label: modeLabel,
           isLive,
         };
       });

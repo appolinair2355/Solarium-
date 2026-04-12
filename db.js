@@ -8,7 +8,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('sslmode=require')
+    ssl: (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL.includes('render.com') || process.env.DATABASE_URL.includes('sslmode'))
       ? { rejectUnauthorized: false }
       : false,
   });

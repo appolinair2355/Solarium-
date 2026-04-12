@@ -22,10 +22,46 @@ const API_HEADERS = {
 };
 
 const SUIT_MAP = { 0: '♠️', 1: '♣️', 2: '♦️', 3: '♥️' };
-let gamesCache    = [];
-let lastFetch     = 0;
+let gamesCache     = [];
+let lastFetch      = 0;
 let lastClientPush = 0;
-const CACHE_TTL   = 4000;
+let lastFingerprint = '';
+const CACHE_TTL    = 1500;
+
+// ── SSE Broadcaster ──────────────────────────────────────────────────────────
+// Tous les clients SSE connectés sont stockés ici.
+// Dès que le cache change, on leur pousse immédiatement les nouvelles données.
+const sseClients = new Set();
+
+function gamesFingerprint(games) {
+  return games.map(g =>
+    `${g.game_number}:${g.player_cards.length}:${g.banker_cards.length}:${g.is_finished ? 1 : 0}:${g.phase || ''}`
+  ).join('|');
+}
+
+function broadcastGames(games) {
+  if (sseClients.size === 0) return;
+  const payload = `data: ${JSON.stringify(games)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+      if (res.flush) res.flush();
+    } catch { sseClients.delete(res); }
+  }
+}
+
+function updateCache(parsed, source) {
+  const fp = gamesFingerprint(parsed);
+  if (fp === lastFingerprint) return false; // rien de nouveau
+  gamesCache      = parsed;
+  lastFetch       = Date.now();
+  lastFingerprint = fp;
+  if (source === 'push') lastClientPush = Date.now();
+  broadcastGames(gamesCache); // push immédiat à tous les clients SSE
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseCards(scSList) {
   let player = [], banker = [];
@@ -75,17 +111,14 @@ async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
   try {
-    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 10000 });
+    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 8000 });
     if (!resp.ok) {
       console.error(`Games fetch HTTP error: ${resp.status}`);
       return gamesCache;
     }
     const data = await resp.json();
     const parsed = parseRawData(data);
-    if (parsed) {
-      gamesCache = parsed;
-      lastFetch  = now;
-    }
+    if (parsed) updateCache(parsed, 'server');
     return gamesCache;
   } catch (err) {
     console.error('Games fetch error:', err.message);
@@ -93,7 +126,6 @@ async function fetchGames() {
   }
 }
 
-// ── Relay client → serveur (quand le serveur ne peut pas atteindre 1xBet) ──
 function parseRawData(data) {
   if (!data?.Value || !Array.isArray(data.Value)) return null;
   let baccaratSport = null;
@@ -125,15 +157,14 @@ function parseRawData(data) {
 }
 
 // POST /api/games/client-push — le navigateur envoie les données brutes de 1xBet
+// Déclenche immédiatement un broadcast SSE si les données ont changé
 router.post('/client-push', async (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
     const parsed = parseRawData(req.body);
     if (!parsed) return res.status(400).json({ error: 'Données invalides' });
-    gamesCache     = parsed;
-    lastFetch      = Date.now();
-    lastClientPush = Date.now();
-    res.json({ ok: true, count: parsed.length });
+    const changed = updateCache(parsed, 'push');
+    res.json({ ok: true, count: parsed.length, changed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -156,22 +187,38 @@ router.get('/live', async (req, res) => {
   }
 });
 
+// GET /api/games/stream — SSE event-driven
+// Le client reçoit les données IMMÉDIATEMENT quand elles changent (via broadcast),
+// plus un keepalive toutes les 15s pour maintenir la connexion active.
 router.get('/stream', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-  const send = async () => {
+
+  // Envoyer les données actuelles immédiatement à la connexion
+  if (gamesCache.length > 0) {
     try {
-      const games = await fetchGames();
-      res.write(`data: ${JSON.stringify(games)}\n\n`);
+      res.write(`data: ${JSON.stringify(gamesCache)}\n\n`);
       if (res.flush) res.flush();
     } catch {}
-  };
-  send();
-  const interval = setInterval(send, 5000);
-  req.on('close', () => clearInterval(interval));
+  }
+
+  sseClients.add(res);
+
+  // Keepalive toutes les 15s pour éviter que les proxies ferment la connexion
+  const keepalive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+      if (res.flush) res.flush();
+    } catch { clearInterval(keepalive); sseClients.delete(res); }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    sseClients.delete(res);
+  });
 });
 
 module.exports = { router, fetchGames };

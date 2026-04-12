@@ -113,7 +113,7 @@ if (fs.existsSync(path.join(distPath, 'index.html'))) {
 // ── Démarrage ─────────────────────────────────────────────────────
 async function main() {
   await initDB();
-  engine.start(5000);
+  engine.start(2000);
   await telegramService.loadConfig();
   bilan.scheduleMidnight();
   app.listen(PORT, '0.0.0.0', () => {
