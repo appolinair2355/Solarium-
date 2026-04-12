@@ -135,7 +135,7 @@ export default function Admin() {
     ],
   };
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur' };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 2 };
 
   const [strategies, setStrategies] = useState([]);
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
@@ -281,7 +281,7 @@ export default function Admin() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 2 });
     setStratOpen(true);
   };
 
@@ -1171,6 +1171,42 @@ export default function Admin() {
                       </div>
                     );
                   })()}
+                </div>
+
+                {/* ── Rattrapages max par stratégie ── */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
+                    Rattrapages max — jeux supplémentaires si la carte prédite est absente
+                  </label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[0,1,2,3,4,5].map(n => {
+                      const active = (stratForm.max_rattrapage ?? 2) === n;
+                      return (
+                        <button key={n} type="button"
+                          onClick={() => setStratForm(p => ({ ...p, max_rattrapage: n }))}
+                          style={{
+                            flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                            border: active ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
+                            background: active ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.04)',
+                            color: active ? '#fcd34d' : '#6b7280',
+                            transition: 'all 0.15s',
+                          }}>
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{
+                    marginTop: 8, padding: '9px 13px', borderRadius: 9,
+                    background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
+                    fontSize: 11, color: '#d97706', lineHeight: 1.6,
+                  }}>
+                    {(() => {
+                      const r = stratForm.max_rattrapage ?? 2;
+                      if (r === 0) return '⚠️ Aucun rattrapage — la prédiction est vérifiée uniquement sur le jeu cible.';
+                      return `🔄 Si la carte prédite n'apparaît pas, le moteur attend jusqu'à ${r} jeu${r > 1 ? 'x' : ''} supplémentaire${r > 1 ? 's' : ''} avant de marquer ❌.`;
+                    })()}
+                  </div>
                 </div>
 
                 {/* Visibilité */}

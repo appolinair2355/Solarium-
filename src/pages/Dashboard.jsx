@@ -177,6 +177,8 @@ export default function Dashboard() {
   const [absences, setAbsences] = useState([]);
   const [tgMessages, setTgMessages] = useState([]);
   const [alertPred, setAlertPred] = useState(null);
+  const [dailyBilan, setDailyBilan] = useState(null);
+  const [bilanOpen, setBilanOpen] = useState(false);
   const [loadingGames, setLoadingGames] = useState(true);
   const [showRingSettings, setShowRingSettings] = useState(false);
   const [ringDuration, setRingDuration] = useState(() => {
@@ -228,6 +230,14 @@ export default function Dashboard() {
     fetch('/api/admin/strategies', { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
       .then(d => setCustomStrategies(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
+  // Fetch bilan quotidien
+  useEffect(() => {
+    fetch('/api/bilan/latest', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setDailyBilan(d))
       .catch(() => {});
   }, []);
 
@@ -797,6 +807,76 @@ export default function Dashboard() {
                 </div>
               );
             })()}
+
+            {/* ── Bilan quotidien ── */}
+            {dailyBilan && dailyBilan.data && dailyBilan.data.length > 0 && (
+              <div className="bilan-section">
+                <button
+                  className="bilan-toggle"
+                  onClick={() => setBilanOpen(o => !o)}
+                >
+                  <span>📊 Bilan du {dailyBilan.date}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 18 }}>{bilanOpen ? '▲' : '▼'}</span>
+                </button>
+
+                {bilanOpen && (
+                  <div className="bilan-body">
+                    {dailyBilan.data.map(entry => {
+                      const lossRate = 100 - entry.winRate;
+                      return (
+                        <div key={entry.stratId} className="bilan-strat-card">
+                          <div className="bilan-strat-header">
+                            <span className="bilan-strat-name">{entry.name}</span>
+                            <span className="bilan-strat-id">{entry.stratId}</span>
+                          </div>
+
+                          {/* Barre win/loss */}
+                          <div className="bilan-bar-wrap">
+                            {entry.total > 0 ? (
+                              <>
+                                <div className="bilan-bar-track">
+                                  <div className="bilan-bar-win"  style={{ width: `${entry.winRate}%` }} />
+                                  <div className="bilan-bar-loss" style={{ width: `${lossRate}%` }} />
+                                </div>
+                                <div className="bilan-bar-labels">
+                                  <span className="bilan-bar-label-win">✅ {entry.totalWins} ({entry.winRate}%)</span>
+                                  <span className="bilan-bar-label-loss">❌ {entry.totalLosses} ({lossRate}%)</span>
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ color: '#64748b', fontSize: 12, padding: '6px 0' }}>Aucune prédiction ce jour</div>
+                            )}
+                          </div>
+
+                          {/* Détail par rattrapage */}
+                          {entry.byRattrapage && entry.byRattrapage.length > 0 && (
+                            <div className="bilan-ratt-grid">
+                              {entry.byRattrapage.map(({ rattrapage, wins, losses }) => {
+                                const tot  = wins + losses;
+                                const rate = tot > 0 ? Math.round(wins / tot * 100) : 0;
+                                const icon = wins > losses ? '🟢' : wins === losses ? '🟡' : '🔴';
+                                return (
+                                  <div key={rattrapage} className="bilan-ratt-chip">
+                                    <span className="bilan-ratt-label">{icon} {rattrapage === 0 ? 'Direct' : `R${rattrapage}`}</span>
+                                    <span className="bilan-ratt-val">✅{wins} ❌{losses}</span>
+                                    <span className="bilan-ratt-rate">{rate}%</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="bilan-footer">
+                      Généré à {dailyBilan.generated_at
+                        ? new Date(dailyBilan.generated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                        : '—'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Telegram messages */}
             {tgMessages.length > 0 && (
