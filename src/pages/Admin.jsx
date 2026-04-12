@@ -81,7 +81,7 @@ export default function Admin() {
   const [msgFormatMsg, setMsgFormatMsg] = useState('');
 
   // Max rattrapage
-  const [maxRattrapage, setMaxRattrapage] = useState(2);
+  const [maxRattrapage, setMaxRattrapage] = useState(20);
   const [maxRSaving, setMaxRSaving] = useState(false);
 
   // Telegram channels
@@ -133,9 +133,15 @@ export default function Admin() {
       { label: 'Miroir forme',     desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥', map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
       { label: 'Rotation ↻',       desc: '♠→♥→♦→♣→♠',              map: { '♠':['♥'],'♥':['♦'],'♦':['♣'],'♣':['♠'] } },
     ],
+    apparition_absence: [
+      { label: 'Identique',        desc: 'Prédit le même costume disparu', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+      { label: 'Contraire total',  desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦',       map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',       map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+    ],
   };
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 2 };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20 };
 
   const [strategies, setStrategies] = useState([]);
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
@@ -150,6 +156,11 @@ export default function Admin() {
   const [routeData, setRouteData] = useState({}); // { 'C1': Set<dbId>, ... }
   const [routeSaving, setRouteSaving] = useState(false);
   const [routeMsg, setRouteMsg] = useState('');
+
+  // Config Telegram propre par stratégie par défaut (bot_token + channel_id)
+  const [defaultStratTg, setDefaultStratTg] = useState({ C1: { bot_token: '', channel_id: '' }, C2: { bot_token: '', channel_id: '' }, C3: { bot_token: '', channel_id: '' }, DC: { bot_token: '', channel_id: '' } });
+  const [defaultTgSaving, setDefaultTgSaving] = useState(false);
+  const [defaultTgMsg, setDefaultTgMsg] = useState('');
 
   const showStratMsg = (text, error = false) => {
     setStratMsg({ text, error });
@@ -206,6 +217,39 @@ export default function Admin() {
     } catch {}
   }, []);
 
+  const loadDefaultStratTg = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/default-tg', { credentials: 'include' });
+      if (!r.ok) return;
+      const data = await r.json();
+      setDefaultStratTg(prev => {
+        const next = { ...prev };
+        for (const s of ['C1','C2','C3','DC']) {
+          next[s] = { bot_token: data[s]?.bot_token || '', channel_id: data[s]?.channel_id || '' };
+        }
+        return next;
+      });
+    } catch {}
+  }, []);
+
+  const saveDefaultStratTg = async () => {
+    setDefaultTgSaving(true);
+    setDefaultTgMsg('');
+    try {
+      const payload = {};
+      for (const s of ['C1','C2','C3','DC']) {
+        const { bot_token, channel_id } = defaultStratTg[s] || {};
+        if (bot_token?.trim() && channel_id?.trim()) {
+          payload[s] = { bot_token: bot_token.trim(), channel_id: channel_id.trim() };
+        }
+      }
+      const r = await fetch('/api/admin/default-tg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
+      setDefaultTgMsg(r.ok ? '✅ Config sauvegardée' : '❌ Erreur');
+    } catch { setDefaultTgMsg('❌ Erreur réseau'); }
+    setDefaultTgSaving(false);
+    setTimeout(() => setDefaultTgMsg(''), 3000);
+  };
+
   const loadMsgFormat = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/msg-format', { credentials: 'include' });
@@ -216,7 +260,7 @@ export default function Admin() {
   const loadMaxR = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/max-rattrapage', { credentials: 'include' });
-      if (r.ok) { const d = await r.json(); setMaxRattrapage(d.max_rattrapage ?? 2); }
+      if (r.ok) { const d = await r.json(); setMaxRattrapage(d.max_rattrapage ?? 20); }
     } catch {}
   }, []);
 
@@ -281,7 +325,7 @@ export default function Admin() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 2 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20 });
     setStratOpen(true);
   };
 
@@ -384,7 +428,7 @@ export default function Admin() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadMsgFormat, loadMaxR, loadStrategyRoutes]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg]);
 
   // Duration input helpers
   const setDur = (uid, field, val) =>
@@ -788,6 +832,88 @@ export default function Admin() {
           </div>
         </div>
 
+        {/* ── BOT DÉDIÉ PAR STRATÉGIE PAR DÉFAUT ── */}
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.35)', marginBottom: 24 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🤖</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Bot Telegram dédié par stratégie</h2>
+              <p className="tg-admin-sub">
+                Configurez un bot et un canal propres pour chaque stratégie par défaut. Si renseigné, les prédictions et les bilans de cette stratégie seront envoyés via ce bot, indépendamment du bot global.
+              </p>
+            </div>
+            {defaultTgMsg && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: defaultTgMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>{defaultTgMsg}</span>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, marginTop: 14 }}>
+            {DEFAULT_STRATS.map(strat => {
+              const cfg = defaultStratTg[strat] || { bot_token: '', channel_id: '' };
+              const hasConfig = cfg.bot_token && cfg.channel_id;
+              return (
+                <div key={strat} style={{
+                  background: hasConfig ? 'rgba(34,197,94,0.06)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${hasConfig ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: 12, padding: '14px 16px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{DEFAULT_STRAT_LABELS[strat]}</span>
+                      <span style={{ fontSize: 11, color: '#64748b', marginLeft: 6 }}>({strat})</span>
+                    </div>
+                    {hasConfig
+                      ? <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.2)', color: '#86efac', fontWeight: 600 }}>✓ Configuré</span>
+                      : <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontWeight: 600 }}>Global</span>
+                    }
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>Token API Bot</div>
+                      <input
+                        type="password"
+                        placeholder="1234567890:AAFxxxxxxxx"
+                        value={cfg.bot_token}
+                        onChange={e => setDefaultStratTg(p => ({ ...p, [strat]: { ...p[strat], bot_token: e.target.value } }))}
+                        style={{ width: '100%', padding: '6px 10px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${cfg.bot_token ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 6, color: '#fff', fontSize: 11, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>ID Canal (ex: -100xxxxxxxxx)</div>
+                      <input
+                        type="text"
+                        placeholder="-100xxxxxxxxxx"
+                        value={cfg.channel_id}
+                        onChange={e => setDefaultStratTg(p => ({ ...p, [strat]: { ...p[strat], channel_id: e.target.value } }))}
+                        style={{ width: '100%', padding: '6px 10px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${cfg.channel_id ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 6, color: '#fff', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    {hasConfig && (
+                      <button
+                        style={{ marginTop: 4, padding: '4px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}
+                        onClick={() => setDefaultStratTg(p => ({ ...p, [strat]: { bot_token: '', channel_id: '' } }))}
+                      >
+                        ✕ Retirer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <button
+              className="btn btn-gold btn-sm"
+              style={{ background: 'linear-gradient(135deg,#166534,#22c55e)', minWidth: 200 }}
+              onClick={saveDefaultStratTg}
+              disabled={defaultTgSaving}
+            >
+              {defaultTgSaving ? '⏳ Enregistrement…' : '💾 Enregistrer les bots dédiés'}
+            </button>
+          </div>
+        </div>
+
         {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
         {(() => {
           const G = 1234;
@@ -804,43 +930,43 @@ export default function Admin() {
               id: 1, label: 'Style Russe', icon: '⚜',
               preview: `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ⌛`,
               result:  `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ✅ ${RE[0]}`,
-              perdu:   `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ❌ PERDU ❌`,
+              perdu:   `⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ❌`,
             },
             {
               id: 2, label: 'Premium', icon: '🎲',
               preview: `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nEn cours :⌛`,
               result:  `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nStatut :✅ ${RE[0]}`,
-              perdu:   `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nStatut :❌ PERDU ❌`,
+              perdu:   `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nStatut :❌`,
             },
             {
               id: 3, label: 'Baccara Pro', icon: '🃏',
               preview: `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:⌛\nMode: Dogon ${maxRattrapage}`,
               result:  `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:✅ ${RE[0]}\nMode: Dogon ${maxRattrapage}`,
-              perdu:   `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:❌ PERDU ❌\nMode: Dogon ${maxRattrapage}`,
+              perdu:   `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:❌\nMode: Dogon ${maxRattrapage}`,
             },
             {
               id: 4, label: 'Prédiction', icon: '🎰',
               preview: `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: En cours ⏳\n🔍 Vérification en cours`,
               result:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: ✅ ${RE[0]}\n🔍 Vérifié ✓`,
-              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: ❌ PERDU ❌\n🔍 Résultat final`,
+              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: ❌\n🔍 Résultat final`,
             },
             {
               id: 5, label: 'Barre de progression', icon: '🟦',
               preview: `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n${barP}\n⏳ Analyse...`,
-              result:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n🟩${barP.slice(2)}\n✅ Gagné en R0`,
-              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n${barLost}\n❌ PERDU ❌`,
+              result:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n🟩${barP.slice(2)}\n✅ ${RE[0]}`,
+              perdu:   `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n\n🔍 Vérification jeu #${G}\n${barLost}\n❌`,
             },
             {
               id: 6, label: 'Classique', icon: '✨',
               preview: `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n⏳ Statut: En cours`,
-              result:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n✅ Statut: ✅ ${RE[0]} GAGNÉ`,
-              perdu:   `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\nStatut: ❌ PERDU ❌`,
+              result:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n✅ Statut: ✅ ${RE[0]}`,
+              perdu:   `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\nStatut: ❌`,
             },
             {
               id: 7, label: 'Joueur Carte', icon: '🃏',
               preview: `Le joueur recevra une carte ♠️ Pique\n\n⏳ En attente du résultat...`,
               result:  `Le joueur recevra une carte ♠️ Pique\n\n✅ GAGNÉ ${RE[0]}`,
-              perdu:   `Le joueur recevra une carte ♠️ Pique\n\n❌ PERDU ❌`,
+              perdu:   `Le joueur recevra une carte ♠️ Pique\n\n❌`,
             },
           ];
 
@@ -874,26 +1000,36 @@ export default function Admin() {
                     Nombre de jeux supplémentaires après la prédiction initiale. Affiché dans le message (ex: +²).
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
-                  {[0,1,2,3,4,5].map(n => (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
+                  {[0,5,10,15,20].map(n => (
                     <button
                       key={n}
                       onClick={() => saveMaxR(n)}
                       disabled={maxRSaving}
                       style={{
                         width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer',
-                        fontWeight: 800, fontSize: 16,
+                        fontWeight: 800, fontSize: 14,
                         background: maxRattrapage === n ? '#f59e0b' : 'rgba(255,255,255,0.06)',
                         color: maxRattrapage === n ? '#000' : '#94a3b8',
                         transition: 'all 0.15s',
                       }}
                     >
-                      {['⁰','¹','²','³','⁴','⁵'][n]}
+                      {n}
                     </button>
                   ))}
+                  <input
+                    type="number" min="0" max="20" step="1"
+                    value={maxRattrapage}
+                    onChange={e => { const v = Math.max(0, Math.min(20, parseInt(e.target.value) || 0)); saveMaxR(v); }}
+                    style={{
+                      width: 56, height: 44, borderRadius: 8, border: '1px solid rgba(245,158,11,0.4)',
+                      background: 'rgba(255,255,255,0.06)', color: '#fcd34d',
+                      textAlign: 'center', fontWeight: 800, fontSize: 16,
+                    }}
+                  />
                 </div>
                 <div style={{ fontSize: 12, color: '#fbbf24', minWidth: 80 }}>
-                  Actuel : <strong>+{['⁰','¹','²','³','⁴','⁵'][maxRattrapage]}</strong> ({maxRattrapage} rattrap.)
+                  Actuel : <strong>R{maxRattrapage}</strong> ({maxRattrapage} rattrap.)
                 </div>
               </div>
 
@@ -1022,7 +1158,17 @@ export default function Admin() {
                       </span>
                     )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-                      B={s.threshold} · {s.mode === 'manquants' ? 'Absences' : 'Apparitions'} · {Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ')}
+                      {(() => {
+                        const mLabel = s.mode === 'manquants' ? 'Absences'
+                          : s.mode === 'apparents' ? 'Apparitions'
+                          : s.mode === 'absence_apparition' ? 'Abs→App'
+                          : s.mode === 'apparition_absence' ? 'App→Abs'
+                          : s.mode;
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence';
+                        const mappingStr = isAutoMode ? 'prédit costume déclencheur'
+                          : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
+                        return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
+                      })()}
                     </div>
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
@@ -1098,18 +1244,47 @@ export default function Admin() {
                 {/* Mode */}
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
-                  <select value={stratForm.mode} onChange={e => setStratForm(p => ({ ...p, mode: e.target.value }))}
+                  <select value={stratForm.mode} onChange={e => {
+                    const m = e.target.value;
+                    const isNew = m === 'absence_apparition' || m === 'apparition_absence';
+                    setStratForm(p => ({
+                      ...p,
+                      mode: m,
+                      ...(isNew ? { threshold: Math.max(p.threshold, 4), max_rattrapage: 20 } : {}),
+                    }));
+                  }}
                     style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
                     <option value="manquants">Manquants — prédit l'absent</option>
                     <option value="apparents">Apparents — prédit le fréquent</option>
+                    <option value="absence_apparition">Absence → Apparition</option>
+                    <option value="apparition_absence">Apparition → Absence</option>
                   </select>
+                  {stratForm.mode === 'absence_apparition' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
+                      ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
+                    </div>
+                  )}
+                  {stratForm.mode === 'apparition_absence' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', fontSize: 12, color: '#fcd34d', lineHeight: 1.6 }}>
+                      ⚡ Dès qu'un costume présent depuis ≥ B jeux consécutifs disparaît de la main, la <strong>carte configurée dans le mapping</strong> est prédite automatiquement pour le jeu suivant (déclenchement en temps réel, avant la fin officielle du jeu).
+                    </div>
+                  )}
                 </div>
 
                 {/* Seuil B */}
                 <div>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Seuil B (1–50)</label>
-                  <input type="number" min={1} max={50} value={stratForm.threshold}
-                    onChange={e => setStratForm(p => ({ ...p, threshold: parseInt(e.target.value) || 1 }))}
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
+                    {(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence')
+                      ? 'Minimum B (≥4 requis)'
+                      : 'Seuil B (1–50)'}
+                  </label>
+                  <input type="number"
+                    min={(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence') ? 4 : 1}
+                    max={50} value={stratForm.threshold}
+                    onChange={e => {
+                      const min = (stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence') ? 4 : 1;
+                      setStratForm(p => ({ ...p, threshold: Math.max(min, parseInt(e.target.value) || min) }));
+                    }}
                     style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 14 }}
                   />
                 </div>
@@ -1178,14 +1353,14 @@ export default function Admin() {
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Rattrapages max — jeux supplémentaires si la carte prédite est absente
                   </label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {[0,1,2,3,4,5].map(n => {
-                      const active = (stratForm.max_rattrapage ?? 2) === n;
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {[0,5,10,15,20].map(n => {
+                      const active = (stratForm.max_rattrapage ?? 20) === n;
                       return (
                         <button key={n} type="button"
                           onClick={() => setStratForm(p => ({ ...p, max_rattrapage: n }))}
                           style={{
-                            flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14,
+                            width: 42, height: 38, borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                             border: active ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
                             background: active ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.04)',
                             color: active ? '#fcd34d' : '#6b7280',
@@ -1195,6 +1370,17 @@ export default function Admin() {
                         </button>
                       );
                     })}
+                    <input
+                      type="number" min="0" max="20" step="1"
+                      value={stratForm.max_rattrapage ?? 20}
+                      onChange={e => { const v = Math.max(0, Math.min(20, parseInt(e.target.value) || 0)); setStratForm(p => ({ ...p, max_rattrapage: v })); }}
+                      style={{
+                        width: 54, height: 38, borderRadius: 8,
+                        border: '1px solid rgba(245,158,11,0.4)',
+                        background: 'rgba(255,255,255,0.06)', color: '#fcd34d',
+                        textAlign: 'center', fontWeight: 800, fontSize: 15,
+                      }}
+                    />
                   </div>
                   <div style={{
                     marginTop: 8, padding: '9px 13px', borderRadius: 9,
@@ -1202,7 +1388,7 @@ export default function Admin() {
                     fontSize: 11, color: '#d97706', lineHeight: 1.6,
                   }}>
                     {(() => {
-                      const r = stratForm.max_rattrapage ?? 2;
+                      const r = stratForm.max_rattrapage ?? 20;
                       if (r === 0) return '⚠️ Aucun rattrapage — la prédiction est vérifiée uniquement sur le jeu cible.';
                       return `🔄 Si la carte prédite n'apparaît pas, le moteur attend jusqu'à ${r} jeu${r > 1 ? 'x' : ''} supplémentaire${r > 1 ? 's' : ''} avant de marquer ❌.`;
                     })()}
@@ -1355,8 +1541,8 @@ export default function Admin() {
                 </div>
               )}
 
-              {/* Presets de combinaison */}
-              <div style={{ marginTop: 16 }}>
+              {/* Presets de combinaison — masqué pour absence_apparition uniquement */}
+              {stratForm.mode !== 'absence_apparition' && <div style={{ marginTop: 16 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -1374,10 +1560,10 @@ export default function Admin() {
                     );
                   })}
                 </div>
-              </div>
+              </div>}
 
-              {/* Mappings manuels — multi-sélection avec rotation */}
-              <div style={{ marginTop: 16 }}>
+              {/* Mappings manuels — multi-sélection avec rotation — masqué pour absence_apparition uniquement */}
+              {stratForm.mode !== 'absence_apparition' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -1451,7 +1637,7 @@ export default function Admin() {
                 <div style={{ marginTop: 6, fontSize: 10, color: '#4b5563', fontStyle: 'italic' }}>
                   Sélection unique = toujours cette carte · 2 cartes = alterne ①②①②… · 3 cartes = alterne ①②③①②③…
                 </div>
-              </div>
+              </div>}
 
               {/* ── Section Exceptions ─────────────────────────────── */}
               <div style={{ marginTop: 20, padding: '14px 16px', background: 'rgba(239,68,68,0.05)', borderRadius: 10, border: '1px solid rgba(239,68,68,0.2)' }}>
