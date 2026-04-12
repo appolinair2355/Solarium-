@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
       return;
     }
     relayGames();
-    relayRef.current = setInterval(relayGames, 5000);
+    relayRef.current = setInterval(relayGames, 1500);
     return () => { if (relayRef.current) clearInterval(relayRef.current); };
   }, [user]);
 
