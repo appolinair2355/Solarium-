@@ -14,6 +14,7 @@ const { router: gamesRouter } = require('./games');
 const telegramRoutes    = require('./telegram-route');
 const telegramService   = require('./telegram-service');
 const engine            = require('./engine');
+const bilan             = require('./bilan');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -66,8 +67,27 @@ app.use('/api/games',       gamesRouter);
 app.use('/api/telegram',    telegramRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 
-// ── Vidéos tutoriels (public, page d'accueil) ──────────────────────
+// ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
+app.get('/api/bilan/latest', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    const snapshot = await db.getLastBilanSnapshot();
+    res.json(snapshot || null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin : déclencher manuellement le bilan d'une date
+app.post('/api/bilan/send', async (req, res) => {
+  if (!req.session?.isAdmin) return res.status(403).json({ error: 'Admin requis' });
+  try {
+    const dateStr = req.body?.date || new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    bilan.sendDailyBilan(dateStr);
+    res.json({ ok: true, date: dateStr });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Vidéos tutoriels (public, page d'accueil) ──────────────────────
 app.get('/api/tutorial-videos', async (req, res) => {
   try {
     const raw = await db.getSetting('tutorial_videos');
@@ -95,6 +115,7 @@ async function main() {
   await initDB();
   engine.start(5000);
   await telegramService.loadConfig();
+  bilan.scheduleMidnight();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
   });

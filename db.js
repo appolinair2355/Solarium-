@@ -559,6 +559,51 @@ async function getUserStats() {
   return jsondb.getUserStats();
 }
 
+// ── BILAN QUOTIDIEN ─────────────────────────────────────────────────
+
+async function getDailyBilanStats(dateStr) {
+  // dateStr = 'YYYY-MM-DD'
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT strategy, COALESCE(rattrapage,0)::int AS rattrapage, status, COUNT(*)::int AS count
+       FROM predictions
+       WHERE resolved_at >= $1::date AND resolved_at < ($1::date + interval '1 day')
+         AND status IN ('gagne','perdu')
+       GROUP BY strategy, rattrapage, status
+       ORDER BY strategy, rattrapage`,
+      [dateStr]
+    );
+    return r.rows;
+  }
+  // JSON fallback
+  const all = jsondb.getPredictions({});
+  const start = new Date(dateStr);
+  const end   = new Date(dateStr); end.setDate(end.getDate() + 1);
+  const rows  = all.filter(p =>
+    ['gagne','perdu'].includes(p.status) && p.resolved_at &&
+    new Date(p.resolved_at) >= start && new Date(p.resolved_at) < end
+  );
+  const map = {};
+  for (const p of rows) {
+    const key = `${p.strategy}__${p.rattrapage ?? 0}__${p.status}`;
+    if (!map[key]) map[key] = { strategy: p.strategy, rattrapage: parseInt(p.rattrapage) || 0, status: p.status, count: 0 };
+    map[key].count++;
+  }
+  return Object.values(map).sort((a, b) => a.strategy.localeCompare(b.strategy) || a.rattrapage - b.rattrapage);
+}
+
+async function saveBilanSnapshot(dateStr, data) {
+  const payload = JSON.stringify({ date: dateStr, data, generated_at: new Date().toISOString() });
+  await setSetting('bilan_last', payload);
+}
+
+async function getLastBilanSnapshot() {
+  try {
+    const v = await getSetting('bilan_last');
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+
 module.exports = {
   pool, USE_PG, initDB,
   getUser, getUserByLogin, getUserByUsername, getAllUsers,
@@ -574,4 +619,5 @@ module.exports = {
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
   getUserStats,
+  getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
 };

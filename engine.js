@@ -131,8 +131,8 @@ class Engine {
     }
   }
 
-  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss) {
-    const maxR = getCurrentMaxRattrapage();
+  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null) {
+    if (maxR === null) maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(pending)) {
       const pgNum = parseInt(pg);
       const ps    = info.suit;
@@ -356,19 +356,23 @@ class Engine {
     if (state.history.length > 15) state.history.shift();
 
     // ── Résoudre les prédictions en attente + enregistrer les résultats ─
+    // On lit max_rattrapage ici avant de le déstructurer (cfg disponible maintenant)
+    const stratMaxRForResolve = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+      ? parseInt(cfg.max_rattrapage)
+      : getCurrentMaxRattrapage();
     await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
       state.lastOutcomes.push({ won, suit: ps });
       if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-    });
+    }, stratMaxRForResolve);
 
     const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
-    const offset = Math.max(1, parseInt(prediction_offset) || 1); // décalage de prédiction : +1, +2, etc.
+    const offset   = Math.max(1, parseInt(prediction_offset) || 1);
     const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
 
     const emitPrediction = async (next, ps, suit) => {
-      // ── Un seul signal par jeu cible — évite les doublons ────────
-      if (state.pending[next]) {
-        console.log(`[${channelId}] Doublon ignoré pour #${next} (déjà prédit: ${state.pending[next].suit})`);
+      // ── Bloque l'émission si une prédiction est encore en attente ─
+      if (Object.keys(state.pending).length > 0) {
+        console.log(`[${channelId}] Bloqué — prédiction en attente de vérification`);
         return;
       }
       // ── Vérification des exceptions avant d'émettre ───────────────

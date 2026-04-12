@@ -531,6 +531,28 @@ async function sendToGlobalChannels(text, parse_mode) {
   }
 }
 
+// ── Bilan : envoi d'un texte brut à un canal Telegram ──────────────
+
+async function sendRawMessage(token, chatId, text, parseMode = 'HTML') {
+  if (!token || !chatId) return null;
+  return _sendOneMessage(token, String(chatId), text, parseMode);
+}
+
+async function sendBilanToStrategyChannels(strategy, text) {
+  if (!TOKEN) return;
+  let targets;
+  try {
+    const routes = await db.getStrategyRoutes(strategy);
+    targets = routes.length > 0
+      ? routes.map(r => ({ tgId: r.tg_id }))
+      : getChannels().map(c => ({ tgId: c.tgId }));
+  } catch { targets = getChannels().map(c => ({ tgId: c.tgId })); }
+  for (const ch of targets) {
+    try { await _sendOneMessage(TOKEN, ch.tgId, text, 'HTML'); }
+    catch (e) { console.error(`[Bilan] TG ${strategy} → ${ch.tgId}: ${e.message}`); }
+  }
+}
+
 module.exports = {
   loadConfig, addChannel, removeChannel, testChannel,
   getChannels, getMessages, getStatus,
@@ -550,5 +572,6 @@ module.exports = {
   sendPredictionToTelegram,
   sendPredictionToTargets,
   cancelStrategyMessages,
+  sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
 };

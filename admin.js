@@ -223,7 +223,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
   try {
     const err = validateStrategyBody(req.body);
     if (err) return res.status(400).json({ error: err });
-    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
     const normalizedMappings = normalizeMappings(mappings);
@@ -240,6 +240,8 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       exceptions,
       prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
       hand: hand === 'banquier' ? 'banquier' : 'joueur',
+      max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
+        ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -256,7 +258,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Stratégie introuvable' });
-    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
     const normalizedMappings = normalizeMappings(mappings);
@@ -271,6 +273,8 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       exceptions,
       prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
       hand: hand === 'banquier' ? 'banquier' : 'joueur',
+      max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
+        ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
