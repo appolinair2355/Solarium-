@@ -343,27 +343,33 @@ class Engine {
   async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
     // Stratégie supprimée entre le début du tick et maintenant → on ignore
     if (!this.custom[id]) return;
-    if (state.processed.has(gn)) return;
-    state.processed.add(gn);
 
     const channelId = `S${id}`;
 
     // Détermine quelle main surveiller selon la config
     const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
 
-    // ── Mettre à jour l'historique des parties (fenêtre de 15) ──────
-    state.history.push([...handSuits]);
-    if (state.history.length > 15) state.history.shift();
-
-    // ── Résoudre les prédictions en attente + enregistrer les résultats ─
-    // On lit max_rattrapage ici avant de le déstructurer (cfg disponible maintenant)
+    // ── Résoudre les prédictions en attente AVANT le check "déjà traité" ──
+    // Important : même si ce jeu a déjà été traité pour la logique de déclenchement
+    // (ex. après _initializeNewStrategies), il faut quand même résoudre les prédictions
+    // en attente contre lui, sinon elles restent bloquées jusqu'à expiration (❌).
     const stratMaxRForResolve = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage)
       : getCurrentMaxRattrapage();
-    await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
-      state.lastOutcomes.push({ won, suit: ps });
-      if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-    }, stratMaxRForResolve);
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+        state.lastOutcomes.push({ won, suit: ps });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+      }, stratMaxRForResolve);
+    }
+
+    // ── Logique de déclenchement : ne traiter ce jeu qu'une seule fois ──
+    if (state.processed.has(gn)) return;
+    state.processed.add(gn);
+
+    // ── Mettre à jour l'historique des parties (fenêtre de 15) ──────
+    state.history.push([...handSuits]);
+    if (state.history.length > 15) state.history.shift();
 
     const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
     const offset   = Math.max(1, parseInt(prediction_offset) || 1);
@@ -378,15 +384,16 @@ class Engine {
       // ── Vérification des exceptions avant d'émettre ───────────────
       if (this._checkExceptions(exceptions, ps, suit, state)) return;
 
-      // Enregistre en DB et n'envoie PAS via sendToStrategyChannels (stratégie custom)
       try {
         await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
         console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
       state.pending[next] = { suit: ps, rattrapage: 0 };
-      // Envoi avec token custom + stockage du message_id pour édition ultérieure
+      // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
         await sendCustomAndStore(tg_targets, channelId, next, ps).catch(() => {});
+      } else {
+        await sendToStrategyChannels(channelId, next, ps).catch(() => {});
       }
     };
 
@@ -447,7 +454,7 @@ class Engine {
       // Initialiser les nouvelles stratégies AVANT tout traitement
       this._initializeNewStrategies(games);
 
-      // Mise à jour du numéro de jeu courant (utilisé par cleanupStale)
+      // currentMaxGame = max vu dans l'API (inclut les jeux en cours, pour info)
       if (games.length > 0) {
         const maxSeen = Math.max(...games.map(g => g.game_number));
         if (maxSeen > (this.currentMaxGame || 0)) this.currentMaxGame = maxSeen;
@@ -522,6 +529,8 @@ class Engine {
           hadNew = true;
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards);
+        // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
+        if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
       }
       if (hadNew) await this.saveAbsences();
     } catch (e) { console.error('Engine tick error:', e.message); }
@@ -529,16 +538,29 @@ class Engine {
 
   async cleanupStale() {
     try {
-      // Utilise le numéro de jeu actuel (vu dans le dernier tick), jamais le max DB
-      // (le max DB peut contenir de très vieilles données d'anciennes sessions)
-      const mx = this.currentMaxGame || 0;
+      // Utilise le numéro du DERNIER JEU RÉELLEMENT TRAITÉ par processGame,
+      // pas le max vu dans l'API (qui inclut les jeux en cours non terminés).
+      // Sans ça, cleanupStale expire des prédictions avant que le moteur ait
+      // pu les vérifier contre les jeux terminés disponibles.
+      const mx = this.maxProcessedGame || 0;
       if (mx < 1) return;
-      const maxR = getCurrentMaxRattrapage();
-      // On n'expire que les prédictions qui ont dépassé leur fenêtre de rattrapage
-      const threshold = mx - maxR - 1;
+
+      // Calcule le max_rattrapage effectif = max du global ET de tous les custom actifs.
+      // Sans ça, les stratégies custom avec un rattrapage plus grand que le global
+      // voient leurs prédictions expirées trop tôt par ce cleanup.
+      const globalMaxR = getCurrentMaxRattrapage();
+      let effectiveMaxR = globalMaxR;
+      for (const [, state] of Object.entries(this.custom)) {
+        if (state.config?.enabled && state.config?.max_rattrapage != null) {
+          effectiveMaxR = Math.max(effectiveMaxR, parseInt(state.config.max_rattrapage) || 0);
+        }
+      }
+
+      // On n'expire que les prédictions qui ont dépassé la fenêtre la plus large
+      const threshold = mx - effectiveMaxR - 1;
       if (threshold < 1) return;
-      const count = await db.expireStaleByGame(threshold, maxR);
-      if (count > 0) console.log(`🧹 ${count} prédiction(s) hors-fenêtre expirée(s) (jeu actuel: #${mx}, seuil: #${threshold})`);
+      const count = await db.expireStaleByGame(threshold, globalMaxR);
+      if (count > 0) console.log(`🧹 ${count} prédiction(s) hors-fenêtre expirée(s) (jeu actuel: #${mx}, seuil: #${threshold}, maxR effectif: ${effectiveMaxR})`);
     } catch (e) { console.error('cleanupStale error:', e.message); }
   }
 

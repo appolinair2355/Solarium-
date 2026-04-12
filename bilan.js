@@ -108,8 +108,8 @@ async function sendDailyBilan(dateStr) {
     for (const entry of bilanData) {
       const text = formatBilanText(entry, dateStr);
 
-      // Stratégies custom (S7, S8…) — token + canal propre
       if (entry.tgTargets && entry.tgTargets.length > 0) {
+        // Stratégies custom avec token + canal propre configurés
         for (const { bot_token, channel_id } of entry.tgTargets) {
           if (!bot_token || !channel_id) continue;
           try {
@@ -119,10 +119,9 @@ async function sendDailyBilan(dateStr) {
             console.error(`[Bilan] ${entry.stratId} → ${channel_id}: ${e.message}`);
           }
         }
-      }
-
-      // Stratégies standard (C1/C2/C3/DC) — token global + routes
-      if (['C1', 'C2', 'C3', 'DC'].includes(entry.stratId)) {
+      } else {
+        // Stratégies standard (C1/C2/C3/DC) ET custom sans tg_targets spécifiques
+        // → bot global + routage par stratégie (ou tous les canaux si pas de route)
         try {
           await tg.sendBilanToStrategyChannels(entry.stratId, text);
           console.log(`[Bilan] ${entry.stratId} → canaux globaux ✓`);

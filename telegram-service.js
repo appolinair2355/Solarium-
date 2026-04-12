@@ -347,7 +347,10 @@ async function _sendOneMessage(token, tgChatId, text, parse_mode) {
 //  • Dans les deux cas, le message_id est stocké en DB pour édition.
 
 async function sendToStrategyChannels(strategy, gameNumber, suit) {
-  if (!TOKEN) return;
+  if (!TOKEN) {
+    console.warn(`[TG] ${strategy} #${gameNumber} — pas de bot token configuré, envoi ignoré`);
+    return;
+  }
 
   const { text, parse_mode } = buildTgMessage(currentFormat, {
     gameNumber, suit, strategy, maxR: maxRattrapage, status: null,
@@ -364,6 +367,10 @@ async function sendToStrategyChannels(strategy, gameNumber, suit) {
     } else {
       // Pas de route → tous les canaux globaux
       targets = getChannels().map(c => ({ tgId: c.tgId, dbId: c.dbId, name: c.name }));
+      if (targets.length === 0) {
+        console.warn(`[TG] ${strategy} #${gameNumber} — aucun canal configuré, envoi ignoré`);
+        return;
+      }
     }
   } catch (e) {
     console.error(`[TG] getStrategyRoutes error: ${e.message}`);
