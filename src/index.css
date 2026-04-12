@@ -1845,6 +1845,64 @@ body {
 .tg-msg-time { color: var(--gold); font-weight: 700; flex-shrink: 0; font-size: 0.75rem; }
 .tg-msg-text { color: #cbd5e1; flex: 1; word-break: break-word; }
 
+/* ── Bilan quotidien ── */
+.bilan-section {
+  border: 1px solid rgba(251,191,36,0.3);
+  border-radius: 14px;
+  background: rgba(251,191,36,0.04);
+  overflow: hidden;
+  margin-top: 16px;
+}
+.bilan-toggle {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  background: none; border: none; cursor: pointer;
+  padding: 14px 18px; color: #fbbf24;
+  font-size: 0.9rem; font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  text-align: left;
+  border-bottom: 1px solid rgba(251,191,36,0.12);
+  transition: background 0.15s;
+}
+.bilan-toggle:hover { background: rgba(251,191,36,0.08); }
+.bilan-body { padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 12px; }
+.bilan-strat-card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px; padding: 12px 14px;
+}
+.bilan-strat-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+}
+.bilan-strat-name { font-weight: 800; font-size: 0.9rem; color: #e2e8f0; }
+.bilan-strat-id {
+  font-size: 0.7rem; font-weight: 700; color: #94a3b8;
+  background: rgba(255,255,255,0.06); border-radius: 5px; padding: 2px 7px;
+}
+.bilan-bar-wrap { margin-bottom: 10px; }
+.bilan-bar-track {
+  height: 10px; border-radius: 999px; overflow: hidden;
+  display: flex; background: rgba(255,255,255,0.07);
+}
+.bilan-bar-win  { background: #22c55e; border-radius: 999px 0 0 999px; transition: width 0.4s; }
+.bilan-bar-loss { background: #ef4444; border-radius: 0 999px 999px 0; transition: width 0.4s; }
+.bilan-bar-labels {
+  display: flex; justify-content: space-between;
+  margin-top: 5px; font-size: 11px; font-weight: 700;
+}
+.bilan-bar-label-win  { color: #4ade80; }
+.bilan-bar-label-loss { color: #f87171; }
+.bilan-ratt-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.bilan-ratt-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; padding: 5px 10px; font-size: 11px;
+}
+.bilan-ratt-label { color: #94a3b8; font-weight: 600; }
+.bilan-ratt-val   { color: #e2e8f0; }
+.bilan-ratt-rate  { color: #fbbf24; font-weight: 800; }
+.bilan-footer {
+  text-align: center; font-size: 10px; color: #475569; padding-top: 4px;
+}
+
 /* ── Telegram Dashboard Feed ── */
 .tg-section {
   background: #fff; border: 1px solid #e2e8f0; border-radius: var(--radius-lg);
