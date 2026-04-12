@@ -83,12 +83,13 @@ const SUIT_LABELS = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': '
 
 function suitLabel(s) { return SUIT_LABELS[s] || s || '—'; }
 
+const RANK_MAP = { 0:'A',1:'A',11:'J',12:'Q',13:'K','0':'A','1':'A','11':'J','12':'Q','13':'K' };
 function rankDisplay(r) {
-  if (r === 1 || r === '1') return 'A';
-  if (r === 11 || r === '11') return 'J';
-  if (r === 12 || r === '12') return 'Q';
-  if (r === 13 || r === '13') return 'K';
-  return r !== undefined && r !== null ? String(r) : '?';
+  if (r === undefined || r === null || r === '?') return '?';
+  if (RANK_MAP[r] !== undefined) return RANK_MAP[r];
+  const n = parseInt(r);
+  if (!isNaN(n) && n >= 10) return String(n === 10 ? '10' : n);
+  return String(r);
 }
 
 function baccPoints(cards) {
@@ -149,10 +150,11 @@ export default function Dashboard() {
     const { color, glow } = CUSTOM_COLORS[i % CUSTOM_COLORS.length];
     CHANNELS[`S${s.id}`] = {
       name: s.name,
-      emoji: '⚙',
+      emoji: s.hand === 'banquier' ? '🏦' : '🧑',
       color,
       glow,
       desc: `Stratégie ${s.id} · B=${s.threshold} · ${s.mode}`,
+      hand: s.hand || 'joueur',
     };
   });
 
@@ -321,6 +323,9 @@ export default function Dashboard() {
 
   const channelPreds = predictions.filter(p => p.strategy === channelId);
   const activePred = channelPreds.find(p => p.status === 'en_cours') || null;
+  const predCardBg = activePred?.status === 'gagne' ? '#f0fdf4' : activePred?.status === 'perdu' ? '#fff5f5' : '#ffffff';
+  const PRED_SUIT_COLORS = { '♥': '#dc2626', '♦': '#ea580c', '♠': '#1e293b', '♣': '#15803d' };
+  const activeSuitColor = PRED_SUIT_COLORS[activePred?.predicted_suit] || '#1d4ed8';
   const historyPreds = channelPreds.filter(p => p.status !== 'en_cours');
   const tabStats = getStats(channelId);
   const winRate = tabStats.wins + tabStats.losses > 0
@@ -599,22 +604,43 @@ export default function Dashboard() {
                               </span>
                             )}
                           </div>
+                          {/* Indicateur live si les cartes sont en cours de tirage */}
+                          {absences.some(a => a.isLive) && (
+                            <span style={{
+                              marginLeft: 'auto',
+                              fontSize: '0.6rem', fontWeight: 800,
+                              letterSpacing: '0.08em',
+                              color: '#4ade80',
+                              background: 'rgba(74,222,128,0.12)',
+                              border: '1px solid rgba(74,222,128,0.35)',
+                              borderRadius: 999,
+                              padding: '2px 7px',
+                              animation: 'pulse 1.5s infinite',
+                            }}>● LIVE</span>
+                          )}
                         </div>
                         {absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
                         ) : absences.map(a => (
-                          <div key={a.suit} className="absence-row">
+                          <div key={a.suit} className="absence-row"
+                               style={a.isLive ? { opacity: 1 } : {}}>
                             <span className="absence-suit">{a.display}</span>
                             <div className="absence-bar-wrap">
                               <div
                                 className="absence-bar-fill"
                                 style={{
                                   width: `${Math.min(100, (a.count / a.threshold) * 100)}%`,
-                                  background: a.count >= a.threshold ? '#ef4444' : a.count >= a.threshold - 1 ? '#f59e0b' : channel.color,
+                                  background: a.count >= a.threshold
+                                    ? '#ef4444'
+                                    : a.count >= a.threshold - 1
+                                    ? '#f59e0b'
+                                    : a.isLive ? '#4ade80' : channel.color,
+                                  transition: 'width 0.4s ease, background 0.3s ease',
                                 }}
                               />
                             </div>
-                            <span className="absence-count" style={{ color: a.count >= a.threshold ? '#ef4444' : '#475569' }}>
+                            <span className="absence-count"
+                                  style={{ color: a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: a.isLive ? 800 : 600 }}>
                               {a.count}/{a.threshold}
                             </span>
                           </div>
@@ -656,42 +682,75 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Current prediction zone */}
-            <div className="pred-zone-label">
-              <span style={{ color: channel.color }}>⚡</span> Zone de prédiction active
-            </div>
-            <div className={`current-pred-card ${activePred?.status || 'empty'}`} style={{ borderColor: `${channel.color}44` }}>
-              {!activePred ? (
-                <div className="current-pred-empty">
-                  <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>{channel.emoji}</div>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', color: channel.color }}>Aucune prédiction active</div>
-                  <div style={{ fontSize: '0.8rem', marginTop: 4, opacity: 0.6 }}>Le moteur analyse les parties en cours...</div>
-                </div>
-              ) : (
-                <>
-                  <div className="current-pred-title" style={{ color: channel.color }}>
-                    {channel.emoji} PRÉDICTION #{activePred.game_number}
+            {/* Current prediction zone — premium dark card */}
+            <div style={{ position: 'relative', marginTop: 24, marginBottom: 4 }}>
+
+              <div className={`current-pred-card ${activePred?.status || 'empty'}`}
+                   style={{ '--ch-color': channel.color, '--ch-glow': channel.glow }}>
+
+                {!activePred ? (
+                  /* ── Aucune prédiction ── */
+                  <div className="current-pred-empty">
+                    <div style={{ fontSize: '2.8rem', marginBottom: 6, opacity: 0.4 }}>{channel.emoji}</div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#64748b' }}>Aucune prédiction active</div>
+                    <div style={{ fontSize: '0.78rem', marginTop: 4, color: '#475569' }}>Le moteur analyse les parties en cours…</div>
                   </div>
-                  <div className="current-pred-detail">
-                    <span className="current-pred-suit-icon">🎯</span>
-                    <span>Couleur :</span>
-                    <span className="current-pred-suit">{activePred.suit_display} {suitLabel(activePred.suit_display || activePred.predicted_suit)}</span>
-                  </div>
-                  {activePred.rattrapage > 0 && (
-                    <div className="current-pred-detail">
-                      <span>📊</span>
-                      <span>Rattrapage :</span>
-                      <span>R{activePred.rattrapage}</span>
+                ) : (
+                  <>
+                    {/* ── Ligne haute : heure ── */}
+                    <div className="pred-top-row">
+                      <span className="pred-game-num">{channel.emoji} Partie prédite</span>
+                      <span className="pred-time-label">{formatTime(activePred.created_at)}</span>
                     </div>
-                  )}
-                  <div className="current-pred-detail">
-                    <span>⏳</span>
-                    <span>Statut :</span>
-                    <span className="status-en_cours">EN ATTENTE DU RÉSULTAT...</span>
-                  </div>
-                  <div className="current-pred-time">{formatTime(activePred.created_at)}</div>
-                </>
-              )}
+
+                    {/* ── Numéro de partie en grand rouge ── */}
+                    <div className="pred-game-number-big">
+                      #{activePred.game_number}
+                    </div>
+
+                    {/* ── Badge main (joueur / banquier) ── */}
+                    <div style={{ textAlign: 'center' }}>
+                      <span className="pred-hand-badge">
+                        {channel.hand === 'banquier' ? '🏦 Banquier' : '🧑 Joueur'}
+                      </span>
+                    </div>
+
+                    {/* ── Orbe central avec la carte ── */}
+                    <div className="pred-suit-orb"
+                         style={{ '--pred-glow': channel.glow }}>
+                      <span className="pred-suit-orb-inner"
+                            style={{ color: activeSuitColor }}>
+                        {activePred.suit_display || activePred.predicted_suit}
+                      </span>
+                    </div>
+
+                    {/* ── Nom de la carte ── */}
+                    <div className="pred-suit-name"
+                         style={{ '--ch-color': activeSuitColor }}>
+                      {suitLabel(activePred.suit_display || activePred.predicted_suit)}
+                    </div>
+
+                    {/* ── Sous-titre ── */}
+                    <div className="pred-subtitle">va recevoir cette carte</div>
+
+                    {/* ── Centre bas : statut + rattrapage ── */}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      {activePred.status === 'en_cours' && (
+                        <span className="pred-status-waiting">⏳ En attente du résultat</span>
+                      )}
+                      {activePred.status === 'gagne' && (
+                        <span className="pred-status-done gagne">✅ Prédiction gagnante</span>
+                      )}
+                      {activePred.status === 'perdu' && (
+                        <span className="pred-status-done perdu">❌ Prédiction perdue</span>
+                      )}
+                      {(parseInt(activePred.rattrapage) || 0) > 0 && (
+                        <span className="pred-ratt-chip">R{activePred.rattrapage}</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
 

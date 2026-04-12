@@ -135,7 +135,7 @@ export default function Admin() {
     ],
   };
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [] };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur' };
 
   const [strategies, setStrategies] = useState([]);
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
@@ -281,7 +281,7 @@ export default function Admin() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur' });
     setStratOpen(true);
   };
 
@@ -836,6 +836,12 @@ export default function Admin() {
               result:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\n✅ Statut: ✅ ${RE[0]} GAGNÉ`,
               perdu:   `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♠️ Pique\nStatut: ❌ PERDU ❌`,
             },
+            {
+              id: 7, label: 'Joueur Carte', icon: '🃏',
+              preview: `Le joueur recevra une carte ♠️ Pique\n\n⏳ En attente du résultat...`,
+              result:  `Le joueur recevra une carte ♠️ Pique\n\n✅ GAGNÉ ${RE[0]}`,
+              perdu:   `Le joueur recevra une carte ♠️ Pique\n\n❌ PERDU ❌`,
+            },
           ];
 
           return (
@@ -1062,6 +1068,33 @@ export default function Admin() {
                   />
                 </div>
 
+                {/* Main à surveiller : Joueur / Banquier */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>Main à surveiller</label>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    {[
+                      { val: 'joueur',   icon: '🧑', label: 'Joueur',   desc: 'Analyse les cartes du Joueur' },
+                      { val: 'banquier', icon: '🏦', label: 'Banquier', desc: 'Analyse les cartes du Banquier' },
+                    ].map(opt => {
+                      const active = (stratForm.hand || 'joueur') === opt.val;
+                      return (
+                        <button key={opt.val} type="button"
+                          onClick={() => setStratForm(p => ({ ...p, hand: opt.val }))}
+                          style={{
+                            flex: 1, textAlign: 'left', padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+                            background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
+                            border: `2px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
+                            transition: 'all 0.15s',
+                          }}>
+                          <div style={{ fontSize: 18, marginBottom: 2 }}>{opt.icon}</div>
+                          <div style={{ fontWeight: 700, fontSize: 12, color: active ? '#e2e8f0' : '#64748b', marginBottom: 2 }}>{opt.label}</div>
+                          <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.4 }}>{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Mode */}
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
@@ -1079,6 +1112,65 @@ export default function Admin() {
                     onChange={e => setStratForm(p => ({ ...p, threshold: parseInt(e.target.value) || 1 }))}
                     style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 14 }}
                   />
+                </div>
+
+                {/* Numéro à prédire (+1, +2, ...) */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
+                    Jeu à prédire — combien de parties après le signal
+                  </label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[1,2,3,4,5,6,7,8].map(n => {
+                      const active = (stratForm.prediction_offset || 1) === n;
+                      return (
+                        <button key={n} type="button"
+                          onClick={() => setStratForm(p => ({ ...p, prediction_offset: n }))}
+                          style={{
+                            flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                            border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                            background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
+                            color: active ? '#e2e8f0' : '#6b7280',
+                            transition: 'all 0.15s',
+                          }}>
+                          +{n}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Explication dynamique selon la valeur choisie */}
+                  {(() => {
+                    const off = stratForm.prediction_offset || 1;
+                    const exSignal = 70;
+                    const exTarget = exSignal + off;
+                    return (
+                      <div style={{
+                        marginTop: 10,
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        background: 'rgba(168,85,247,0.08)',
+                        border: '1px solid rgba(168,85,247,0.2)',
+                        fontSize: 12,
+                        color: '#c4b5fd',
+                        lineHeight: 1.7,
+                      }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4, color: '#a78bfa' }}>
+                          📡 Décalage sélectionné : <span style={{ color: '#f0abfc' }}>+{off}</span>
+                        </div>
+                        <div>
+                          Le signal se produit au jeu <strong style={{ color: '#e2e8f0' }}>#{exSignal}</strong>
+                          {' '}→ la prédiction cible le jeu{' '}
+                          <strong style={{ color: '#f0abfc' }}>#{exTarget}</strong>.
+                        </div>
+                        <div style={{ marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
+                          {off === 1
+                            ? 'Idéal pour réagir dès la partie suivante (recommandé).'
+                            : off <= 3
+                            ? `La prédiction est émise ${off} parties à l'avance — laisse le temps de se préparer.`
+                            : `Anticipation longue (+${off}) — adapté aux stratégies à signal lent.`}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Visibilité */}
