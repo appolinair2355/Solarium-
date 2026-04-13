@@ -54,7 +54,7 @@ function SceneHome({ progress }) {
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 28px' }}>
       <motion.div initial={{ opacity: 0, y: -18 }} animate={{ opacity: show ? 1 : 0, y: show ? 0 : -18 }} transition={{ duration: 0.5 }}
         style={{ fontWeight: 900, fontSize: 22, letterSpacing: -0.5, color: '#f8fafc', marginBottom: 6 }}>
-        🎰 BACCARAT PRO
+        🎲 Prediction Baccara Pro
       </motion.div>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: show ? 1 : 0 }} transition={{ duration: 0.5, delay: 0.15 }}
         style={{ fontSize: 11, color: '#64748b', marginBottom: 28 }}>
