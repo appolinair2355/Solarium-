@@ -115,7 +115,7 @@ export default function TelegramFeed() {
   return (
     <div className="tgfeed-page">
       <nav className="navbar">
-        <Link to="/" className="navbar-brand">🎰 BACCARAT PRO</Link>
+        <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/choisir')}>← Retour</button>
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}

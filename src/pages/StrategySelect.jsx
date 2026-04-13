@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ContactAdminModal from '../components/ContactAdminModal';
 
 const CHANNELS = [
   {
@@ -103,9 +104,10 @@ export default function StrategySelect() {
   return (
     <div className="select-page">
       <nav className="navbar">
-        <Link to="/" className="navbar-brand">🎰 BACCARAT PRO</Link>
+        <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
+          {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
       </nav>

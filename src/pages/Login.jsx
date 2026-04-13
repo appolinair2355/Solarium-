@@ -32,8 +32,8 @@ export default function Login() {
 
       <div className="auth-box">
         <div className="auth-logo">
-          <div className="auth-logo-icon">🎰</div>
-          <h1>BACCARAT PRO</h1>
+          <div className="auth-logo-icon">🎲</div>
+          <h1>Prediction Baccara Pro</h1>
           <p>Connectez-vous à votre compte</p>
         </div>
 

@@ -55,8 +55,8 @@ export default function Register() {
 
       <div className="auth-box">
         <div className="auth-logo">
-          <div className="auth-logo-icon">🎰</div>
-          <h1>BACCARAT PRO</h1>
+          <div className="auth-logo-icon">🎲</div>
+          <h1>Prediction Baccara Pro</h1>
           <p>Créer un nouveau compte</p>
         </div>
 

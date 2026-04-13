@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ContactAdminModal from '../components/ContactAdminModal';
 
 // Durées de sonnerie disponibles (0 = infini jusqu'au raccroché)
 const RING_DURATIONS = [
@@ -175,6 +176,7 @@ export default function Dashboard() {
   const [games, setGames] = useState([]);
   const [stats, setStats] = useState([]);
   const [absences, setAbsences] = useState([]);
+  const [lossSeqData, setLossSeqData] = useState({ streaks: {}, sequences: [] });
   const [tgMessages, setTgMessages] = useState([]);
   const [alertPred, setAlertPred] = useState(null);
   const [dailyBilan, setDailyBilan] = useState(null);
@@ -310,6 +312,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!hasAccess) return;
+    const load = () =>
+      fetch('/api/games/loss-streaks', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : { streaks: {}, sequences: [] })
+        .then(setLossSeqData);
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [hasAccess]);
+
+  useEffect(() => {
+    if (!hasAccess) return;
     const es = new EventSource('/api/telegram/stream');
     es.onmessage = e => {
       const data = JSON.parse(e.data);
@@ -420,10 +433,11 @@ export default function Dashboard() {
       )}
 
       <nav className="navbar">
-        <Link to="/" className="navbar-brand">🎰 BACCARAT PRO</Link>
+        <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
-          <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>⇄ Canaux</button>
+          {!user?.is_admin && <ContactAdminModal />}
+          <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>← Retour</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
       </nav>
@@ -631,33 +645,91 @@ export default function Dashboard() {
                         </div>
                         {absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
-                        ) : absences.map(a => (
+                        ) : absences.map(a => {
+                          const isMiroir = a.mode === 'taux_miroir';
+                          const barColor = isMiroir
+                            ? (a.count >= a.threshold ? '#6366f1' : a.count >= a.threshold * 0.7 ? '#f59e0b' : '#6366f1')
+                            : (a.count >= a.threshold ? '#ef4444' : a.count >= a.threshold - 1 ? '#f59e0b' : a.isLive ? '#4ade80' : channel.color);
+                          return (
                           <div key={a.suit} className="absence-row"
-                               style={a.isLive ? { opacity: 1 } : {}}>
+                               style={{ opacity: a.dimmed ? 0.35 : 1 }}>
                             <span className="absence-suit">{a.display}</span>
                             <div className="absence-bar-wrap">
                               <div
                                 className="absence-bar-fill"
                                 style={{
                                   width: `${Math.min(100, (a.count / a.threshold) * 100)}%`,
-                                  background: a.count >= a.threshold
-                                    ? '#ef4444'
-                                    : a.count >= a.threshold - 1
-                                    ? '#f59e0b'
-                                    : a.isLive ? '#4ade80' : channel.color,
+                                  background: barColor,
                                   transition: 'width 0.4s ease, background 0.3s ease',
                                 }}
                               />
                             </div>
                             <span className="absence-count"
-                                  style={{ color: a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: a.isLive ? 800 : 600 }}>
-                              {a.count}/{a.threshold}
+                                  style={{ color: isMiroir ? '#a5b4fc' : a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: isMiroir || a.isLive ? 800 : 600 }}>
+                              {a.count}
                             </span>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
+
+                  {/* ── Séquences de Relance — barres de progression pertes ── */}
+                  {(() => {
+                    const activeSeqs = (lossSeqData.sequences || []).filter(seq =>
+                      seq.enabled && (seq.rules || []).some(r => r.strategy_id === channelId)
+                    );
+                    if (activeSeqs.length === 0) return null;
+                    return (
+                      <div className="absence-counter-chip" style={{ borderColor: 'rgba(251,146,60,0.35)', marginTop: 12 }}>
+                        <div className="absence-chip-title">
+                          <span style={{ color: '#fb923c' }}>🔁</span>
+                          <span>Séquences de Relance</span>
+                        </div>
+                        {activeSeqs.map(seq => {
+                          const rule = (seq.rules || []).find(r => r.strategy_id === channelId);
+                          if (!rule) return null;
+                          const streak = lossSeqData.streaks?.[channelId] || 0;
+                          const thr = parseInt(rule.losses_threshold) || 1;
+                          const pct = Math.min(100, (streak / thr) * 100);
+                          const isReady = streak >= thr;
+                          return (
+                            <div key={seq.id} style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em' }}>
+                                {seq.name}
+                              </div>
+                              <div className="absence-row">
+                                <span className="absence-suit" style={{ fontSize: '1rem' }}>🔁</span>
+                                <div className="absence-bar-wrap">
+                                  <div
+                                    className="absence-bar-fill"
+                                    style={{
+                                      width: `${pct}%`,
+                                      background: isReady
+                                        ? '#22c55e'
+                                        : streak >= thr - 1
+                                        ? '#f59e0b'
+                                        : '#fb923c',
+                                      transition: 'width 0.4s ease, background 0.3s ease',
+                                    }}
+                                  />
+                                </div>
+                                <span className="absence-count" style={{ color: isReady ? '#22c55e' : streak > 0 ? '#fb923c' : '#475569', fontWeight: 700 }}>
+                                  {streak}/{thr}
+                                </span>
+                              </div>
+                              {isReady && (
+                                <div style={{ fontSize: '0.65rem', color: '#22c55e', fontWeight: 700, marginTop: 2, paddingLeft: 28 }}>
+                                  ✅ Relance déclenchée !
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
 
                   {/* Scrollable row: finished + upcoming */}
                   {(finishedGames.length > 0 || upcomingGames.length > 0) && (
