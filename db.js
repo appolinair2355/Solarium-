@@ -284,6 +284,32 @@ async function expireStaleByGame(threshold, maxR) {
   return jsondb.expireStaleByGame(threshold, maxR);
 }
 
+// Expire les prédictions en_cours créées il y a plus de N minutes (déblocage temporel)
+async function expireStaleByTime(minutesOld = 22) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='expire', resolved_at=NOW()
+       WHERE status='en_cours' AND created_at < NOW() - INTERVAL '${parseInt(minutesOld)} minutes'`
+    );
+    return r.rowCount;
+  }
+  // JSON fallback: expire les prédictions en_cours créées avant le seuil
+  const cutoff = Date.now() - minutesOld * 60 * 1000;
+  let count = 0;
+  const preds = jsondb.getPredictions({ status: 'en_cours', limit: 500 });
+  for (const p of preds) {
+    const created = new Date(p.created_at || 0).getTime();
+    if (created < cutoff) {
+      jsondb.updatePrediction(
+        { strategy: p.strategy, game_number: p.game_number, predicted_suit: p.predicted_suit, status_filter: 'en_cours' },
+        { status: 'expire', resolved_at: new Date().toISOString() }
+      );
+      count++;
+    }
+  }
+  return count;
+}
+
 // ── SETTINGS ───────────────────────────────────────────────────────
 
 async function getSetting(key) {
@@ -609,7 +635,7 @@ module.exports = {
   getUser, getUserByLogin, getUserByUsername, getAllUsers,
   createUser, updateUser, deleteUser,
   getPredictions, createPrediction, updatePrediction,
-  getPredictionStats, getMaxResolvedGame, expireStaleByGame,
+  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime,
   getSetting, setSetting, deleteSetting,
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,

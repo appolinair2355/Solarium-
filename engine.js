@@ -10,6 +10,7 @@ const {
   editStoredMessages,
   getCurrentMaxRattrapage,
 } = require('./telegram-service');
+const renderSync = require('./render-sync');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
 const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
@@ -49,17 +50,26 @@ async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy, 
   } catch (e) { console.error('savePrediction error:', e.message); }
 }
 
-async function resolvePrediction(strategy, gameNumber, predictedSuit, status, rattrapage, playerCards, bankerCards) {
+async function resolvePrediction(strategy, gameNumber, predictedSuit, status, rattrapage, playerCards, bankerCards, tgOpts = {}) {
   try {
+    const now = new Date().toISOString();
     await db.updatePrediction(
       { strategy, game_number: gameNumber, predicted_suit: predictedSuit, status_filter: 'en_cours' },
-      { status, rattrapage, resolved_at: new Date().toISOString(),
+      { status, rattrapage, resolved_at: now,
         player_cards: playerCards ? JSON.stringify(playerCards) : null,
         banker_cards: bankerCards ? JSON.stringify(bankerCards) : null,
       }
     );
+    // Sync vers la base Render externe (si configurée)
+    renderSync.syncVerifiedPrediction({
+      strategy, game_number: gameNumber, predicted_suit: predictedSuit,
+      status, rattrapage,
+      player_cards: playerCards ? JSON.stringify(playerCards) : null,
+      banker_cards: bankerCards ? JSON.stringify(bankerCards) : null,
+      resolved_at: now,
+    }).catch(() => {});
     // editStoredMessages gère les deux cas : token global ou token custom (bot_token stocké en DB)
-    editStoredMessages(strategy, gameNumber, predictedSuit, status, rattrapage).catch(() => {});
+    editStoredMessages(strategy, gameNumber, predictedSuit, status, rattrapage, tgOpts).catch(() => {});
   } catch (e) { console.error('resolvePrediction error:', e.message); }
 }
 
@@ -75,6 +85,9 @@ class Engine {
     this.custom = {};
     this.defaultStratTg = {}; // { C1: {bot_token, channel_id}, ... }
 
+    this.lossStreaks   = {}; // { 'C1': 0, 'C2': 0, 'S7': 0, ... } — pertes consécutives
+    this.lossSequences = []; // chargé depuis la DB
+
     for (const s of ALL_SUITS) {
       this.c1.absences[s] = 0;
       this.c2.absences[s] = 0;
@@ -85,8 +98,68 @@ class Engine {
   _makeCustomState() {
     const counts = {};
     const mappingIndex = {};
-    for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], mappingIndex };
+    const mirrorCounts = {};
+    for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; }
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], mappingIndex, mirrorCounts, mirrorLastHour: null };
+  }
+
+  async loadLossSequences() {
+    try {
+      const v = await db.getSetting('loss_sequences');
+      this.lossSequences = v ? JSON.parse(v) : [];
+      console.log(`[Engine] ${this.lossSequences.length} séquence(s) de relance chargée(s)`);
+    } catch (e) { console.error('loadLossSequences error:', e.message); }
+  }
+
+  // Appelé après chaque prédiction PERDUE — met à jour le streak et vérifie les séquences
+  _onStratLoss(stratId, gn, suit) {
+    this.lossStreaks[stratId] = (this.lossStreaks[stratId] || 0) + 1;
+    const streak = this.lossStreaks[stratId];
+    for (const seq of this.lossSequences) {
+      if (!seq.enabled) continue;
+      for (const rule of (seq.rules || [])) {
+        if (rule.strategy_id !== stratId) continue;
+        const thr = parseInt(rule.losses_threshold) || 1;
+        if (streak >= thr) {
+          console.log(`[Séquence] "${seq.name}" → ${stratId} a ${streak} perte(s) consécutive(s) (seuil: ${thr}) → relance au jeu #${gn + 1}`);
+          this.lossStreaks[stratId] = 0;
+          // Force une nouvelle prédiction pour ce canal au prochain jeu
+          this._forceNextPrediction(stratId, gn + 1, suit);
+        }
+      }
+    }
+  }
+
+  // Réinitialise le streak après un gain
+  _onStratWin(stratId) {
+    this.lossStreaks[stratId] = 0;
+  }
+
+  // Injecte une prédiction forcée (relance) sur le prochain jeu
+  _forceNextPrediction(stratId, nextGn, suit) {
+    if (!suit) return;
+    const tgOpts = {};
+    if (stratId === 'C1' || stratId === 'C2' || stratId === 'C3' || stratId === 'DC') {
+      const customTg = this.defaultStratTg[stratId] || {};
+      savePrediction(stratId, nextGn, suit, suit, customTg.bot_token ? customTg : null);
+      if (stratId === 'C1') this.c1.pending[nextGn] = { suit, rattrapage: 0 };
+      else if (stratId === 'C2') this.c2.pending[nextGn] = { suit, rattrapage: 0 };
+      else if (stratId === 'C3') this.c3.pending[nextGn] = { suit, rattrapage: 0 };
+      else if (stratId === 'DC') this.dc.pending[nextGn] = { suit, rattrapage: 0 };
+    } else if (stratId.startsWith('S')) {
+      const id = parseInt(stratId.slice(1));
+      const state = this.custom[id];
+      if (!state || !state.config?.enabled) return;
+      if (Object.keys(state.pending).length > 0) return; // déjà en attente
+      const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
+      db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).catch(() => {});
+      state.pending[nextGn] = { suit, rattrapage: 0 };
+      if (tgs.length > 0) {
+        sendPredictionToTargets(tgs, stratId, nextGn, suit, { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: state.config.max_rattrapage || 20 }).catch(() => {});
+      } else {
+        sendToStrategyChannels(stratId, nextGn, suit).catch(() => {});
+      }
+    }
   }
 
   reloadCustomStrategies(list) {
@@ -136,7 +209,7 @@ class Engine {
     }
   }
 
-  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null) {
+  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}) {
     if (maxR === null) maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(pending)) {
       const pgNum = parseInt(pg);
@@ -144,7 +217,7 @@ class Engine {
       if (pgNum > gn) continue;
 
       if (gn > pgNum + maxR) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards);
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
         continue;
@@ -152,11 +225,11 @@ class Engine {
 
       if (suits.includes(ps)) {
         const rattrapage = gn - pgNum;
-        await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards);
+        await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(true, ps, pgNum);
       } else if (gn === pgNum + maxR) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards);
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
       }
@@ -167,8 +240,9 @@ class Engine {
     if (this.c1.processed.has(gn)) return;
     this.c1.processed.add(gn);
     await this._resolvePending(this.c1.pending, 'C1', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c1.consecLosses = 0; return; }
+      if (won) { this.c1.consecLosses = 0; this._onStratWin('C1'); return; }
       this.c1.consecLosses++;
+      this._onStratLoss('C1', gn, suit);
       if (this.c1.consecLosses >= 2) {
         this.c1.consecLosses = 0;
         const next = gn + 1;
@@ -192,9 +266,10 @@ class Engine {
     if (this.c2.processed.has(gn)) return;
     this.c2.processed.add(gn);
     await this._resolvePending(this.c2.pending, 'C2', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c2.hadFirstLoss = false; return; }
+      if (won) { this.c2.hadFirstLoss = false; this._onStratWin('C2'); return; }
       if (!this.c2.hadFirstLoss) { this.c2.hadFirstLoss = true; return; }
       this.c2.hadFirstLoss = false;
+      this._onStratLoss('C2', gn, suit);
       const next = gn + 1;
       savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
       this.dc.pending[next] = { suit, rattrapage: 0 };
@@ -215,8 +290,9 @@ class Engine {
     if (this.c3.processed.has(gn)) return;
     this.c3.processed.add(gn);
     await this._resolvePending(this.c3.pending, 'C3', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c3.consecLosses = 0; return; }
+      if (won) { this.c3.consecLosses = 0; this._onStratWin('C3'); return; }
       this.c3.consecLosses++;
+      this._onStratLoss('C3', gn, suit);
       if (this.c3.consecLosses >= 2) {
         this.c3.consecLosses = 0;
         const next = gn + 1;
@@ -245,9 +321,14 @@ class Engine {
       if (suits.includes(ps)) {
         await resolvePrediction('DC', pgNum, ps, 'gagne', info.rattrapage, pCards, bCards);
         delete this.dc.pending[pg];
+        this._onStratWin('DC');
       } else if (gn > pgNum) {
         if (info.rattrapage < maxR) { info.rattrapage++; }
-        else { await resolvePrediction('DC', pgNum, ps, 'perdu', info.rattrapage, pCards, bCards); delete this.dc.pending[pg]; }
+        else {
+          await resolvePrediction('DC', pgNum, ps, 'perdu', info.rattrapage, pCards, bCards);
+          delete this.dc.pending[pg];
+          this._onStratLoss('DC', gn, ps);
+        }
       }
     }
   }
@@ -339,6 +420,18 @@ class Engine {
           break;
         }
 
+        // ── 7. Fenêtre horaire — bloque pendant la 1re ou 2e moitié de l'heure ─
+        case 'time_window_block': {
+          const nowMin  = new Date().getMinutes();
+          const half    = ex.half || 'second';
+          const blocked = half === 'first' ? (nowMin < 30) : (nowMin >= 30);
+          if (blocked) {
+            console.log(`[Exception] time_window_block(${half}): ${nowMin}min → bloqué`);
+            return true;
+          }
+          break;
+        }
+
         default: break;
       }
     }
@@ -361,11 +454,21 @@ class Engine {
     const stratMaxRForResolve = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage)
       : getCurrentMaxRattrapage();
+
+    // Options Telegram propres à cette stratégie (format + main + maxR)
+    const stratTgOpts = {
+      formatId: cfg.tg_format   || null,
+      hand:     cfg.hand        || 'joueur',
+      maxR:     stratMaxRForResolve,
+    };
+
     if (Object.keys(state.pending).length > 0) {
       await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-      }, stratMaxRForResolve);
+        if (won) this._onStratWin(channelId);
+        else this._onStratLoss(channelId, gn, ps);
+      }, stratMaxRForResolve, stratTgOpts);
     }
 
     // ── Logique de déclenchement : ne traiter ce jeu qu'une seule fois ──
@@ -396,7 +499,7 @@ class Engine {
       state.pending[next] = { suit: ps, rattrapage: 0 };
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-        await sendCustomAndStore(tg_targets, channelId, next, ps).catch(() => {});
+        await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
       } else {
         await sendToStrategyChannels(channelId, next, ps).catch(() => {});
       }
@@ -466,6 +569,81 @@ class Engine {
           }
           state.counts[suit] = 0;
         }
+      }
+    } else if (mode === 'taux_miroir') {
+      // ── MODE MIROIR TAUX ─────────────────────────────────────────────
+      // Compte le nombre TOTAL d'apparitions de chaque costume (cumulatif).
+      // Chaque carte de la main est comptée (ex: main ♠♠ = pique +2).
+      // Quand un costume A a B apparitions DE PLUS qu'un costume B → prédit le costume B.
+      // Après le déclenchement, remet les compteurs mirrorCounts à 0 (cycle repart).
+      // Les compteurs se remettent aussi à zéro toutes les heures pile.
+      // ─────────────────────────────────────────────────────────────────
+
+      // 0. Remise à zéro automatique toutes les heures pile
+      if (!state.mirrorCounts) state.mirrorCounts = {};
+      const currentHour = new Date().getHours();
+      if (state.mirrorLastHour === null) {
+        state.mirrorLastHour = currentHour;
+      } else if (state.mirrorLastHour !== currentHour) {
+        console.log(`[${channelId}] MiroirTaux ⏰ Nouvelle heure (${state.mirrorLastHour}h→${currentHour}h) — compteurs remis à zéro`);
+        for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;
+        state.mirrorLastHour = currentHour;
+      }
+
+      // 1. Mise à jour des compteurs cumulatifs
+      for (const suit of ALL_SUITS) {
+        const n = handSuits.filter(c => c === suit).length;
+        state.mirrorCounts[suit] = (state.mirrorCounts[suit] || 0) + n;
+      }
+
+      // Log des compteurs courants
+      const countsStr = ALL_SUITS.map(s => `${s}:${state.mirrorCounts[s] || 0}`).join(' ');
+      console.log(`[${channelId}] MiroirTaux compteurs → ${countsStr}`);
+
+      // 2. Si prédiction en attente → ne pas déclencher
+      if (Object.keys(state.pending).length > 0) return;
+
+      // 3. Trouver la paire (dominant, retardataire) avec le plus grand écart ≥ B
+      let bestDiff = 0;
+      let laggingSuit = null;
+      let dominantSuit = null;
+
+      // Paires à comparer : si mirror_pairs configuré, utiliser seulement celles-ci; sinon toutes
+      // Normalise le format : supporte [[a,b]] (ancien) et [{a,b,threshold}] (nouveau)
+      const normPairs = Array.isArray(cfg.mirror_pairs) && cfg.mirror_pairs.length > 0
+        ? cfg.mirror_pairs.map(p => Array.isArray(p)
+            ? { a: p[0], b: p[1], threshold: null }
+            : { a: p.a, b: p.b, threshold: p.threshold ?? null })
+        : null; // null = toutes les paires, seuil global B
+
+      for (const sA of ALL_SUITS) {
+        for (const sB of ALL_SUITS) {
+          if (sA === sB) continue;
+          let pairThreshold = B; // seuil global par défaut
+          if (normPairs) {
+            const pairCfg = normPairs.find(p =>
+              (p.a === sA && p.b === sB) || (p.a === sB && p.b === sA)
+            );
+            if (!pairCfg) continue; // paire non configurée → ignorer
+            // Seuil spécifique à la paire si défini, sinon seuil global
+            if (pairCfg.threshold && pairCfg.threshold > 0) pairThreshold = pairCfg.threshold;
+          }
+          const diff = (state.mirrorCounts[sA] || 0) - (state.mirrorCounts[sB] || 0);
+          if (diff >= pairThreshold && diff > bestDiff) {
+            bestDiff = diff;
+            dominantSuit = sA;
+            laggingSuit  = sB;
+          }
+        }
+      }
+
+      // 4. Déclenchement si une paire dépasse le seuil
+      if (laggingSuit) {
+        const ps = resolvePredictedSuit(laggingSuit) || laggingSuit;
+        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ ${B} → prédiction ${ps}`);
+        await emitPrediction(gn + offset, ps, laggingSuit);
+        // 5. Remise à zéro des compteurs miroir → nouveau cycle
+        for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;
       }
     }
   }
@@ -576,8 +754,12 @@ class Engine {
           console.log(`[${channelId}] Prédiction live #${next} ${SUIT_DISPLAY[ps] || ps}`);
           entry.pending[next] = { suit: ps, rattrapage: 0 };
 
+          const liveTgOpts = {
+            formatId: config.tg_format || null,
+            hand:     config.hand      || 'joueur',
+          };
           if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-            await sendCustomAndStore(tg_targets, channelId, next, ps).catch(() => {});
+            await sendCustomAndStore(tg_targets, channelId, next, ps, liveTgOpts).catch(() => {});
           } else {
             await sendToStrategyChannels(channelId, next, ps).catch(() => {});
           }
@@ -681,6 +863,8 @@ class Engine {
         if (!this.c1.processed.has(game.game_number)) {
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
+          // Détection jeu #1 → reset de la base externe Render
+          if (game.game_number === 1) renderSync.handleGameOne(1).catch(() => {});
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards);
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
@@ -778,13 +962,45 @@ class Engine {
     this.running = true;
     console.log('🚀 Moteur de prédiction démarré');
     await this.loadCustomStrategies();
+    await this.loadLossSequences();
     await this.loadAbsences();
     await this.cleanupStale();
     await this.loadExistingPending();
+    // Charger la config base Render externe
+    await renderSync.loadRenderUrl().catch(() => {});
     this.tick();
     this.interval = setInterval(() => this.tick(), intervalMs);
     setInterval(() => this.cleanupStale(), 60_000);
     setInterval(() => this.saveAbsences(), 30_000);
+    // Auto-nettoyage des prédictions bloquées en_cours depuis plus de 22 minutes
+    setInterval(() => this._clearExpiredByTime(), 2 * 60_000);
+    // Recharger l'URL Render toutes les 5 minutes (si modifiée en admin)
+    setInterval(() => renderSync.loadRenderUrl().catch(() => {}), 5 * 60_000);
+  }
+
+  async _clearExpiredByTime() {
+    try {
+      const count = await db.expireStaleByTime(22);
+      if (count > 0) {
+        console.log(`[Engine] ⏱️ Auto-expiration: ${count} prédiction(s) bloquée(s) depuis +22 min → statut 'expire'`);
+        // Supprimer du cache pending en mémoire
+        for (const strat of ['c1', 'c2', 'c3', 'dc']) {
+          const state = this[strat === 'dc' ? 'dc' : strat];
+          if (!state || !state.pending) continue;
+          for (const [key, p] of Object.entries(state.pending)) {
+            const age = Date.now() - new Date(p.created_at || 0).getTime();
+            if (age > 22 * 60 * 1000) delete state.pending[key];
+          }
+        }
+        for (const s of Object.values(this.custom || {})) {
+          if (!s.pending) continue;
+          for (const [key, p] of Object.entries(s.pending)) {
+            const age = Date.now() - new Date(p.created_at || 0).getTime();
+            if (age > 22 * 60 * 1000) delete s.pending[key];
+          }
+        }
+      }
+    } catch (e) { console.error('[Engine] _clearExpiredByTime error:', e.message); }
   }
 
   getAbsences(channelId) {
@@ -814,6 +1030,27 @@ class Engine {
           ? this.liveGameCards.bankerSuits
           : this.liveGameCards.playerSuits;
         if (projected.length > 0) liveSuits = projected;
+      }
+
+      // Mode Miroir Taux → afficher les compteurs d'apparitions cumulatifs
+      if (mode === 'taux_miroir') {
+        const mirrorCounts = entry.mirrorCounts || {};
+        const rawPairs = entry.config?.mirror_pairs;
+        const pairs = Array.isArray(rawPairs) && rawPairs.length > 0
+          ? rawPairs.map(p => Array.isArray(p) ? { a: p[0], b: p[1] } : p)
+          : null;
+        return ALL_SUITS.map(suit => {
+          // Si des paires sont configurées, marquer si ce costume est dans une paire surveillée
+          const inPair = !pairs || pairs.some(p => p.a === suit || p.b === suit);
+          return {
+            suit, display: SUIT_DISPLAY[suit] || suit,
+            count: mirrorCounts[suit] || 0,
+            threshold,
+            mode, label: 'Miroir',
+            isLive: false,
+            dimmed: !inPair,
+          };
+        });
       }
 
       return ALL_SUITS.map(suit => {

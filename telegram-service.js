@@ -223,6 +223,7 @@ function buildTgMessage(formatId, {
   maxR = 2,
   status = null,
   rattrapage = 0,
+  hand = null,
 }) {
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -299,6 +300,43 @@ function buildTgMessage(formatId, {
       };
 
     case 7:
+      return {
+        text:
+          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          (status === null
+            ? `⏳ <i>En attente du résultat...</i>`
+            : status === 'gagne'
+              ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+              : `❌`),
+        parse_mode: 'HTML',
+      };
+
+    case 8: {
+      const isBank      = hand === 'banquier';
+      const statusLine8 = status === null    ? '⌛'
+                        : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
+                        :                      '❌';
+      if (isBank) {
+        return {
+          text:
+            `🎮 banquier №${gameNumber}\n` +
+            `⚜️ Couleur de la carte:${emoji}\n` +
+            `🎰 Poursuite  🔰+${maxR} jeux\n` +
+            `🗯️ Résultats : ${statusLine8}`,
+          parse_mode: null,
+        };
+      } else {
+        return {
+          text:
+            `🤖 joueur :${gameNumber}\n` +
+            `🔰Couleur de la carte :${emoji}\n` +
+            `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
+            `🧨 Résultats : ${statusLine8}`,
+          parse_mode: null,
+        };
+      }
+    }
+
     default:
       return {
         text:
@@ -394,11 +432,15 @@ async function sendToStrategyChannels(strategy, gameNumber, suit) {
 //  Stocke le message_id + le bot_token dans tg_pred_messages pour
 //  pouvoir éditer le message lors de la résolution.
 
-async function sendCustomAndStore(targets, strategyId, gameNumber, suit) {
+async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts = {}) {
   if (!Array.isArray(targets) || targets.length === 0) return;
 
-  const { text, parse_mode } = buildTgMessage(currentFormat, {
-    gameNumber, suit, strategy: strategyId, maxR: maxRattrapage, status: null,
+  const formatId = tgOpts.formatId || currentFormat;
+  const hand     = tgOpts.hand     || null;
+  const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
+
+  const { text, parse_mode } = buildTgMessage(formatId, {
+    gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
   });
 
   for (const { bot_token, channel_id } of targets) {
@@ -420,7 +462,7 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit) {
 //  Utilise le bot_token stocké dans tg_pred_messages s'il est présent
 //  (stratégie custom), sinon le TOKEN global.
 
-async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage) {
+async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage, tgOpts = {}) {
   let stored;
   try {
     stored = await db.getTgMsgIds(strategy, gameNumber, suit);
@@ -434,8 +476,12 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     return;
   }
 
-  const { text, parse_mode } = buildTgMessage(currentFormat, {
-    gameNumber, suit, strategy, maxR: maxRattrapage, status, rattrapage,
+  const formatId = tgOpts.formatId || currentFormat;
+  const hand     = tgOpts.hand     || null;
+  const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
+
+  const { text, parse_mode } = buildTgMessage(formatId, {
+    gameNumber, suit, strategy, maxR, status, rattrapage, hand,
   });
 
   for (const row of stored) {

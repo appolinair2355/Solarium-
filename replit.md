@@ -46,3 +46,29 @@ See `.env.example` for all available options:
 ## Deployment
 
 Configured as a VM deployment (always-running) to support the persistent prediction engine and Telegram bot.
+
+## Admin Panel Tab Structure
+
+5 tabs, each with a clear domain:
+- **👥 Utilisateurs** — user management, premium generation, approvals
+- **⚙️ Créer Stratégie** — strategy list, "Séquences de Relance" card, creation/edit form
+- **📊 Bilan** — per-strategy win/loss statistics grid (C1, C2, C3, DC + custom)
+- **✈️ Telegram** — ALL Telegram configuration: global bot token, message format previews, canaux par défaut (C1-C4 with token+format+channelId), stratégies personnalisées, canaux globaux, announcements
+- **🔀 Routage** — ONLY routing: which global channels receive C1/C2/C3/DC predictions
+
+## Key Features
+
+- **Mirror pairs** (Miroir Taux mode): UI selector with 6 pair toggle buttons, per-pair threshold B, purple bars on Dashboard
+- **Per-pair threshold B**: `mirror_pairs` format `[{a, b, threshold}]`; null = use global B
+- **Clone strategy**: 📋 Dupliquer button pre-fills form with "Copie de [name]"
+- **Séquences de Relance** (in Créer Stratégie tab): loss-based relay sequences per strategy or per-strategy form
+- **Per-strategy relance form fields**: `relance_enabled`, `relance_pertes` (1-20), `relance_types` (1-20 multi-select), `relance_nombre`
+- **Announcements**: scheduled Telegram messages (interval or fixed times) in Telegram tab
+- **Bilan per strategy**: fetches `/api/predictions/stats` and displays wins/losses/win% per channel and custom strategy
+- **Auto-clear blocked predictions (22 min)**: engine runs `_clearExpiredByTime()` every 2 min; predictions `en_cours` older than 22 min are set to status `expire` in DB and removed from in-memory pending cache
+- **External Render DB sync** (`render-sync.js`): all resolved predictions synced to an external PostgreSQL URL (stored in settings key `render_db_url`); admin UI in Routage tab (🔀) with connect/disconnect/stats/reset actions
+- **Auto-reset on game #1**: when engine detects game_number === 1 for the first time in a session, it calls `renderSync.handleGameOne()` which deletes all rows in `predictions_export` table on Render DB
+
+## Deployment Package
+
+`baccarat-pro-deploy.zip` contains all production files (dist/, backend .js files, package.json, data/) excluding node_modules, src/, .git, .local.

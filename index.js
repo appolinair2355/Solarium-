@@ -96,6 +96,51 @@ app.get('/api/tutorial-videos', async (req, res) => {
   } catch (e) { res.json({ video1: null, video2: null }); }
 });
 
+// ── Styles UI (public — appliqués au démarrage du frontend) ─────────
+app.get('/api/settings/ui-styles', async (req, res) => {
+  try {
+    const raw = await db.getSetting('ui_styles');
+    res.json(raw ? JSON.parse(raw) : {});
+  } catch (e) { res.json({}); }
+});
+
+// ── Message utilisateur → admin ─────────────────────────────────────
+app.post('/api/user/message-admin', async (req, res) => {
+  try {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+    const user = await db.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+    const { text } = req.body;
+    if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message vide' });
+    const raw = await db.getSetting('user_messages');
+    const messages = raw ? JSON.parse(raw) : [];
+    messages.unshift({
+      id: Date.now(),
+      userId: user.id,
+      username: user.username,
+      text: String(text).trim().slice(0, 800),
+      date: new Date().toISOString(),
+      read: false,
+    });
+    // Garder les 100 derniers messages
+    if (messages.length > 100) messages.splice(100);
+    await db.setSetting('user_messages', JSON.stringify(messages));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Message broadcast (visible accueil si connecté) ─────────────────
+app.get('/api/broadcast-message', async (req, res) => {
+  try {
+    if (!req.session?.userId) return res.json(null);
+    const raw = await db.getSetting('broadcast_message');
+    if (!raw) return res.json(null);
+    const msg = JSON.parse(raw);
+    if (!msg.enabled || !msg.text) return res.json(null);
+    res.json({ text: msg.text, targets: msg.targets || [], updated_at: msg.updated_at });
+  } catch (e) { res.json(null); }
+});
+
 // ── Client statique ────────────────────────────────────────────────
 const distPath = path.join(__dirname, 'dist');
 
@@ -110,12 +155,72 @@ if (fs.existsSync(path.join(distPath, 'index.html'))) {
   app.use((req, res) => res.send('<p>Build en cours... Rafraîchissez dans quelques secondes.</p>'));
 }
 
+// ── Scheduler d'annonces Telegram ──────────────────────────────────
+const { sendAnnouncement } = require('./announcement-sender');
+
+async function runAnnouncementsScheduler() {
+  try {
+    const raw = await db.getSetting('tg_announcements');
+    if (!raw) return;
+    const announcements = JSON.parse(raw);
+    if (!Array.isArray(announcements) || announcements.length === 0) return;
+
+    const now = new Date();
+    const nowHHMM = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    let changed = false;
+
+    for (const ann of announcements) {
+      if (!ann.enabled) continue;
+      let shouldSend = false;
+
+      if (ann.schedule_type === 'interval' && ann.interval_hours > 0) {
+        if (!ann.last_sent) {
+          shouldSend = true;
+        } else {
+          const diffMs = now - new Date(ann.last_sent);
+          const diffHours = diffMs / 3600000;
+          shouldSend = diffHours >= ann.interval_hours;
+        }
+      } else if (ann.schedule_type === 'times' && Array.isArray(ann.times)) {
+        if (ann.times.includes(nowHHMM)) {
+          // N'envoyer qu'une fois par minute — vérifier que last_sent n'est pas dans la dernière minute
+          if (!ann.last_sent) {
+            shouldSend = true;
+          } else {
+            const diffMs = now - new Date(ann.last_sent);
+            shouldSend = diffMs >= 60000; // au moins 1 min d'écart
+          }
+        }
+      }
+
+      if (shouldSend) {
+        try {
+          await sendAnnouncement(ann);
+          ann.last_sent = now.toISOString();
+          changed = true;
+          console.log(`[Annonces] ✅ Annonce envoyée : "${ann.name}" → ${ann.channel_id}`);
+        } catch (err) {
+          console.error(`[Annonces] ❌ Erreur envoi "${ann.name}":`, err.message);
+        }
+      }
+    }
+
+    if (changed) {
+      await db.setSetting('tg_announcements', JSON.stringify(announcements));
+    }
+  } catch (e) {
+    console.error('[Annonces] Erreur scheduler:', e.message);
+  }
+}
+
 // ── Démarrage ─────────────────────────────────────────────────────
 async function main() {
   await initDB();
   engine.start(2000);
   await telegramService.loadConfig();
   bilan.scheduleMidnight();
+  // Lancer le scheduler d'annonces toutes les minutes
+  setInterval(runAnnouncementsScheduler, 60_000);
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
   });

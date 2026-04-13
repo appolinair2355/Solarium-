@@ -177,6 +177,17 @@ router.get('/absences', (req, res) => {
   res.json(data);
 });
 
+router.get('/loss-streaks', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    const engine = require('./engine');
+    const db     = require('./db');
+    const v      = await db.getSetting('loss_sequences');
+    const sequences = v ? JSON.parse(v) : [];
+    res.json({ streaks: engine.lossStreaks || {}, sequences });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/live', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
