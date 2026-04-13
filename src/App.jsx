@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Home from './pages/Home';
@@ -7,6 +8,21 @@ import StrategySelect from './pages/StrategySelect';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import TelegramFeed from './pages/TelegramFeed';
+
+function useUiStyles() {
+  useEffect(() => {
+    fetch('/api/settings/ui-styles')
+      .then(r => r.ok ? r.json() : {})
+      .then(styles => {
+        for (const [key, val] of Object.entries(styles)) {
+          if (key.startsWith('--')) {
+            document.documentElement.style.setProperty(key, val);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+}
 
 function ProtectedRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
@@ -24,6 +40,7 @@ function PublicRoute({ children }) {
 }
 
 export default function App() {
+  useUiStyles();
   return (
     <AuthProvider>
       <BrowserRouter>
