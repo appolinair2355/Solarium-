@@ -146,7 +146,9 @@ const SUITS = ['♠', '♥', '♦', '♣'];
 
 async function getStrategies() {
   const v = await db.getSetting('custom_strategies');
-  return v ? JSON.parse(v) : [];
+  if (!v) return [];
+  const parsed = JSON.parse(v);
+  return Array.isArray(parsed) ? parsed : [parsed];
 }
 
 async function saveStrategies(list) {

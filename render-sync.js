@@ -239,7 +239,8 @@ async function syncStrategies() {
   try {
     const raw = await db.getSetting('custom_strategies');
     if (!raw) return;
-    const list = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
     for (const s of list) {
       await renderPool.query(`
         INSERT INTO strategies_export (id, data, synced_at)

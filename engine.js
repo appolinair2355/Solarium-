@@ -349,7 +349,8 @@ class Engine {
     try {
       const v = await db.getSetting('custom_strategies');
       if (!v) return;
-      const list = JSON.parse(v);
+      const parsed = JSON.parse(v);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
       for (const cfg of list) {
         this.custom[cfg.id] = this._makeCustomState();
         this.custom[cfg.id].config = cfg;
