@@ -85,10 +85,12 @@ class Engine {
     this.custom = {};
     this.defaultStratTg = {}; // { C1: {bot_token, channel_id}, ... }
 
-    this.lossStreaks    = {}; // { stratId: N } — pertes consécutives
-    this.rattrapStreaks = {}; // { stratId: { level: N } } — rattrapages consécutifs par niveau
-    this.comboCounters  = {}; // { stratId: { level: N } } — total événements (perte+Rn)
+    this.lossStreaks        = {}; // { stratId: N }
+    this.rattrapStreaks     = {}; // { stratId: { level: N } }
+    this.comboCounters      = {}; // { stratId: { level: N } }
+    this.relanceCondCounters = {}; // { `${relanceId}_${sourceId}_D/E`: N } — compteurs conditions D et E
     this.lossSequences  = []; // chargé depuis la DB
+    this.gameCardsCache = {}; // { gameNumber: { player: ['♥','♦','♠'], banker: ['♣','♥'] } }
 
     for (const s of ALL_SUITS) {
       this.c1.absences[s] = 0;
@@ -171,6 +173,14 @@ class Engine {
           }
         }
 
+        // Reset compteurs D et E sur perte (séquence brisée)
+        const kD = `${relanceId}_${stratId}_D`;
+        const kE = `${relanceId}_${stratId}_E`;
+        if (!fired) {
+          if (rule.range_from    != null) this.relanceCondCounters[kD] = 0;
+          if (rule.interval_min  != null) this.relanceCondCounters[kE] = 0;
+        }
+
         if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
       }
     }
@@ -224,9 +234,66 @@ class Engine {
           }
         }
 
+        // Condition D : à partir de tel rattrapage (R >= range_from)
+        const rFrom  = rule.range_from  != null ? parseInt(rule.range_from)  : null;
+        const dCount = parseInt(rule.range_count) || 1;
+        if (!fired && rFrom !== null && R >= rFrom) {
+          const kD = `${relanceId}_${stratId}_D`;
+          this.relanceCondCounters[kD] = (this.relanceCondCounters[kD] || 0) + 1;
+          const cur = this.relanceCondCounters[kD];
+          if (cur >= dCount) {
+            fired = true;
+            this.relanceCondCounters[kD] = 0;
+            console.log(`[Relance-D] "${rcfg.name}" → ${stratId} R${R}≥R${rFrom} ×${cur} (seuil ×${dCount}) → ${relanceId} #${gn + 1}`);
+          }
+        }
+
+        // Condition E : intervalle de rattrapage (iMin <= R <= iMax)
+        const iMin   = rule.interval_min != null ? parseInt(rule.interval_min) : null;
+        const iMax   = rule.interval_max != null ? parseInt(rule.interval_max) : null;
+        const eCount = parseInt(rule.interval_count) || 1;
+        if (!fired && iMin !== null && iMax !== null && R >= iMin && R <= iMax) {
+          const kE = `${relanceId}_${stratId}_E`;
+          this.relanceCondCounters[kE] = (this.relanceCondCounters[kE] || 0) + 1;
+          const cur = this.relanceCondCounters[kE];
+          if (cur >= eCount) {
+            fired = true;
+            this.relanceCondCounters[kE] = 0;
+            console.log(`[Relance-E] "${rcfg.name}" → ${stratId} R${iMin}≤R${R}≤R${iMax} ×${cur} (seuil ×${eCount}) → ${relanceId} #${gn + 1}`);
+          }
+        }
+
         if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
       }
     }
+  }
+
+  // Retourne les compteurs relance pour l'API /relance-status
+  getRelanceStatus() {
+    const out = {};
+    for (const [rid, rstate] of Object.entries(this.custom)) {
+      const rcfg = rstate.config;
+      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
+      const relanceId = `S${rid}`;
+      out[relanceId] = { name: rcfg.name, sources: [] };
+      for (const rule of (rcfg.relance_rules || [])) {
+        const srcId = rule.strategy_id;
+        const srcName = this.custom[srcId.replace('S','')]?.config?.name || srcId;
+        const entry = { id: srcId, name: srcName };
+        if (rule.losses_threshold != null)
+          entry.A = { cur: this.lossStreaks[srcId] || 0, thr: parseInt(rule.losses_threshold) };
+        if (rule.rattrapage_level != null)
+          entry.B = { cur: (this.rattrapStreaks[srcId] || {})[parseInt(rule.rattrapage_level)] || 0, thr: parseInt(rule.rattrapage_count) || 1, lvl: parseInt(rule.rattrapage_level) };
+        if (rule.combo_level != null)
+          entry.C = { cur: (this.comboCounters[srcId] || {})[parseInt(rule.combo_level)] || 0, thr: parseInt(rule.combo_count) || 1, lvl: parseInt(rule.combo_level) };
+        if (rule.range_from != null)
+          entry.D = { cur: this.relanceCondCounters[`${relanceId}_${srcId}_D`] || 0, thr: parseInt(rule.range_count) || 1, from: parseInt(rule.range_from) };
+        if (rule.interval_min != null)
+          entry.E = { cur: this.relanceCondCounters[`${relanceId}_${srcId}_E`] || 0, thr: parseInt(rule.interval_count) || 1, min: parseInt(rule.interval_min), max: parseInt(rule.interval_max) };
+        out[relanceId].sources.push(entry);
+      }
+    }
+    return out;
   }
 
   // Injecte une prédiction forcée (relance) sur le prochain jeu
@@ -292,6 +359,10 @@ class Engine {
   }
 
   async processGame(gn, suits, bSuits, pCards, bCards) {
+    this.gameCardsCache[gn] = { player: suits || [], banker: bSuits || [] };
+    const cacheKeys = Object.keys(this.gameCardsCache).map(Number).sort((a, b) => a - b);
+    while (cacheKeys.length > 100) { delete this.gameCardsCache[cacheKeys.shift()]; }
+
     await this._processC1(gn, suits, pCards, bCards);
     await this._processC2(gn, suits, pCards, bCards);
     await this._processC3(gn, suits, pCards, bCards);

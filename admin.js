@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const fetch   = require('node-fetch');
 const db      = require('./db');
 const router  = express.Router();
 const fs      = require('fs');
@@ -57,6 +58,7 @@ router.post('/users/:id/approve', requireAdmin, async (req, res) => {
     const expires = new Date(Date.now() + mins * 60 * 1000);
     const user = await db.updateUser(id, { is_approved: true, subscription_expires_at: expires.toISOString(), subscription_duration_minutes: Math.round(mins) });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    renderSync.syncUser(user).catch(() => {});
     res.json({ message: `Accès accordé pour ${fmtDuration(mins)}`, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -75,13 +77,15 @@ router.post('/users/:id/extend', requireAdmin, async (req, res) => {
     const expires  = new Date(base.getTime() + mins * 60 * 1000);
     const totalMins = (current.subscription_duration_minutes || 0) + Math.round(mins);
     const user = await db.updateUser(id, { subscription_expires_at: expires.toISOString(), subscription_duration_minutes: totalMins });
+    renderSync.syncUser(user).catch(() => {});
     res.json({ message: `Prolongé de ${fmtDuration(mins)}`, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
 router.post('/users/:id/reject', requireAdmin, async (req, res) => {
   try {
-    await db.updateUser(parseInt(req.params.id), { is_approved: false, subscription_expires_at: null });
+    const rUser = await db.updateUser(parseInt(req.params.id), { is_approved: false, subscription_expires_at: null });
+    if (rUser) renderSync.syncUser(rUser).catch(() => {});
     res.json({ message: 'Accès révoqué' });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -91,6 +95,7 @@ router.put('/users/:id', requireAdmin, async (req, res) => {
   try {
     const user = await db.updateUser(parseInt(req.params.id), { first_name: first_name || null, last_name: last_name || null });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    renderSync.syncUser(user).catch(() => {});
     res.json({ ok: true, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -134,6 +139,8 @@ router.post('/generate-premium', requireAdmin, async (req, res) => {
     res.json({ ok: true, accounts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+const renderSync = require('./render-sync');
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 
@@ -268,7 +275,19 @@ router.post('/strategies', requireAdmin, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({ strategy_id: String(r.strategy_id), losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 3) })) : [] }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
+              strategy_id:     String(r.strategy_id),
+              losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+              rattrapage_level: r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
+              rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
+              combo_level:      r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
+              combo_count:      Math.max(1, parseInt(r.combo_count) || 1),
+              range_from:       r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+              range_count:      Math.max(1, parseInt(r.range_count) || 1),
+              interval_min:     r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+              interval_max:     r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+              interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
+            })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       visibility: visibility || 'admin',
       enabled: enabled !== false,
@@ -285,6 +304,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     list.push(strat);
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
+    renderSync.syncStrategies().catch(() => {});
     res.json({ ok: true, strategy: strat });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -314,7 +334,19 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({ strategy_id: String(r.strategy_id), losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 3) })) : [] }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
+              strategy_id:      String(r.strategy_id),
+              losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+              rattrapage_level:  r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
+              rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
+              combo_level:       r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
+              combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
+              range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+              range_count:       Math.max(1, parseInt(r.range_count) || 1),
+              interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+              interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+              interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
+            })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       visibility: visibility || 'admin',
       enabled: enabled !== false,
@@ -330,6 +362,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
+    renderSync.syncStrategies().catch(() => {});
     res.json({ ok: true, strategy: list[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -354,6 +387,7 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
       console.warn(`[Admin] cancelStrategyMessages(${stratKey}) failed: ${e.message}`)
     );
 
+    renderSync.syncStrategies().catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -375,6 +409,14 @@ router.post('/max-rattrapage', requireAdmin, async (req, res) => {
     require('./engine').updateMaxRattrapage(n);
     res.json({ ok: true, max_rattrapage: n });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── Statut en temps réel des compteurs relance ────────────────────
+router.get('/relance-status', requireAdmin, (req, res) => {
+  try {
+    const engine = require('./engine');
+    res.json(typeof engine.getRelanceStatus === 'function' ? engine.getRelanceStatus() : {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Format des messages Telegram ──────────────────────────────────
@@ -1200,14 +1242,145 @@ router.post('/render-db/reset', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Reset complet (retour usine) ─────────────────────────────────────────────
+router.post('/factory-reset', requireAdmin, async (req, res) => {
+  try {
+    const pool = db.getPool ? db.getPool() : db.pool;
+    await pool.query(`TRUNCATE predictions, tg_pred_messages, strategy_channel_routes, user_channel_hidden, user_channel_visible, user_strategy_visible RESTART IDENTITY CASCADE`);
+    await pool.query(`DELETE FROM telegram_config`);
+    const settingsToReset = [
+      'custom_strategies', 'loss_sequences', 'relance_rules',
+      'max_rattrapage', 'tg_msg_format', 'default_strategies_tg',
+      'tg_announcements', 'telegram_chat_config', 'engine_absences',
+      'broadcast_message',
+    ];
+    for (const key of settingsToReset) {
+      await pool.query(`DELETE FROM settings WHERE key = $1`, [key]);
+    }
+    const engine = require('./engine');
+    if (engine.instance) {
+      engine.instance.strategies = [];
+      engine.instance.relanceSequences = [];
+      engine.instance.relanceCondCounters = {};
+      engine.instance.predictions = {};
+      engine.instance.pendingPredictions = {};
+      if (engine.instance.counterState) {
+        engine.instance.counterState = { c1: {}, c2: {}, c3: {} };
+      }
+    }
+    _tgChat.messages = [];
+    _tgChat.offset = 0;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Telegram Canal Direct ───────────────────────────────────────────────────
+const _tgChat = { messages: [], offset: 0 };
+
+async function _fetchTgUpdates(token, channelId) {
+  try {
+    const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${_tgChat.offset}&allowed_updates=%5B%22channel_post%22%5D&limit=100`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!data.ok) return { error: data.description };
+    for (const upd of (data.result || [])) {
+      _tgChat.offset = upd.update_id + 1;
+      const msg = upd.channel_post;
+      if (!msg) continue;
+      _tgChat.messages.push({
+        id: msg.message_id,
+        from: msg.author_signature || msg.chat?.title || 'Canal',
+        isBot: false,
+        text: msg.text || msg.caption || '[média]',
+        date: new Date(msg.date * 1000).toISOString(),
+      });
+      if (_tgChat.messages.length > 150) _tgChat.messages.shift();
+    }
+    return { ok: true };
+  } catch (e) { return { error: e.message }; }
+}
+
+router.get('/telegram-chat/config', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('telegram_chat_config');
+    res.json(raw ? JSON.parse(raw) : { bot_token: '', channel_id: '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/telegram-chat/config', requireAdmin, async (req, res) => {
+  try {
+    const { bot_token, channel_id } = req.body;
+    const cfg = { bot_token: (bot_token || '').trim(), channel_id: (channel_id || '').trim() };
+    if (cfg.bot_token) {
+      const testResp = await fetch(`https://api.telegram.org/bot${cfg.bot_token}/getMe`);
+      const testData = await testResp.json();
+      if (!testData.ok) return res.status(400).json({ error: 'Token invalide : ' + (testData.description || 'erreur') });
+      cfg.bot_username = testData.result?.username || '';
+    }
+    await db.setSetting('telegram_chat_config', JSON.stringify(cfg));
+    _tgChat.messages = [];
+    _tgChat.offset   = 0;
+    res.json({ ok: true, bot_username: cfg.bot_username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/telegram-chat/config', requireAdmin, async (req, res) => {
+  try {
+    await db.setSetting('telegram_chat_config', '');
+    _tgChat.messages = [];
+    _tgChat.offset   = 0;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/telegram-chat/messages', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('telegram_chat_config');
+    const cfg = raw ? JSON.parse(raw) : {};
+    const configured = !!(cfg.bot_token && cfg.channel_id);
+    if (configured) await _fetchTgUpdates(cfg.bot_token, cfg.channel_id);
+    res.json({ messages: _tgChat.messages, configured, bot_username: cfg.bot_username || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/telegram-chat/send', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('telegram_chat_config');
+    const cfg = raw ? JSON.parse(raw) : {};
+    if (!cfg.bot_token || !cfg.channel_id) return res.status(400).json({ error: 'Bot non configuré' });
+    const { text } = req.body;
+    if (!text?.trim()) return res.status(400).json({ error: 'Message vide' });
+    const resp = await fetch(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: cfg.channel_id, text: text.trim(), parse_mode: 'HTML', disable_web_page_preview: true }),
+    });
+    const data = await resp.json();
+    if (!data.ok) return res.status(400).json({ error: data.description || 'Erreur Telegram' });
+    _tgChat.messages.push({
+      id: data.result?.message_id || Date.now(),
+      from: 'Vous (admin)',
+      isBot: true,
+      text: text.trim(),
+      date: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Stratégie Aléatoire : prédiction manuelle via le site ─────────────────────
+router.get('/game-cards-cache', requireAdmin, (req, res) => {
+  const engine = require('./engine');
+  res.json(engine.gameCardsCache || {});
+});
+
 router.post('/strategies/:id/aleatoire-predict', requireAdmin, async (req, res) => {
   const stratId = parseInt(req.params.id);
   const { hand, game_number } = req.body;
   if (!['joueur', 'banquier'].includes(hand))
     return res.status(400).json({ error: 'Main invalide (joueur|banquier)' });
-  const num = parseInt(game_number);
-  if (isNaN(num) || num < 1 || num > 1440)
+  const tgt = parseInt(game_number);
+  if (isNaN(tgt) || tgt < 1 || tgt > 1440)
     return res.status(400).json({ error: 'Numéro invalide (1–1440)' });
   try {
     const strats = await getStrategies();
@@ -1215,31 +1388,71 @@ router.post('/strategies/:id/aleatoire-predict', requireAdmin, async (req, res) 
     if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
     if (strat.mode !== 'aleatoire') return res.status(400).json({ error: 'Stratégie non aléatoire' });
 
-    // Vérifier qu'une prédiction n'existe pas déjà pour ce tour sur cette stratégie
+    const engine = require('./engine');
+
+    const currentGameNumber = engine.liveGameCards?.gameNumber || null;
+    if (currentGameNumber && tgt <= currentGameNumber)
+      return res.status(400).json({ error: `Le numéro doit être supérieur au jeu en cours (#${currentGameNumber})` });
+
     try {
       const existing = await db.pool.query(
         `SELECT 1 FROM predictions WHERE strategy=$1 AND game_number=$2 LIMIT 1`,
-        [stratId, num]
+        [stratId, tgt]
       );
       if (existing.rows.length > 0)
-        return res.status(400).json({ error: `Une prédiction existe déjà pour le tour #${num}` });
+        return res.status(400).json({ error: `Une prédiction existe déjà pour le tour #${tgt}` });
     } catch {}
 
-    // Calcul du costume par cycle de 4
-    const SUITS_JOUEUR   = ['♥', '♣', '♦', '♠'];
-    const SUITS_BANQUIER = ['♣', '♥', '♠', '♦'];
-    const arr  = hand === 'banquier' ? SUITS_BANQUIER : SUITS_JOUEUR;
-    const suit = arr[(num - 1) % 4];
+    let pool = [];
+    let sourceGn = currentGameNumber;
+
+    if (engine.liveGameCards) {
+      pool = hand === 'banquier' ? (engine.liveGameCards.bankerSuits || []) : (engine.liveGameCards.playerSuits || []);
+      sourceGn = engine.liveGameCards.gameNumber;
+    }
+    if (pool.length === 0) {
+      const cacheKeys = Object.keys(engine.gameCardsCache).map(Number).sort((a, b) => b - a);
+      for (const gn of cacheKeys) {
+        const cached = engine.gameCardsCache[gn];
+        const cards = hand === 'banquier' ? cached.banker : cached.player;
+        if (cards && cards.length > 0) { pool = cards; sourceGn = gn; break; }
+      }
+    }
+    if (pool.length === 0)
+      return res.status(400).json({ error: 'Aucune carte disponible pour le jeu en cours. Attendez qu\'un jeu soit en cours.' });
+
+    const count = pool.length <= 2 ? 1 : (Math.random() < 0.5 ? 1 : 2);
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const chosen = shuffled.slice(0, count);
+    const suit = chosen[0];
+
     const SUIT_EMOJI = { '♥': '❤️', '♣': '♣️', '♦': '♦️', '♠': '♠️' };
 
+    const channelId = `S${stratId}`;
     await db.createPrediction({
-      strategy: stratId,
-      game_number: num,
+      strategy: channelId,
+      game_number: tgt,
       predicted_suit: suit,
-      triggered_by: `aleatoire_web:${hand}`,
+      triggered_by: `aleatoire_web:${hand}:src${sourceGn}`,
     });
 
-    res.json({ success: true, game_number: num, predicted_suit: suit, suit_emoji: SUIT_EMOJI[suit] || suit, hand });
+    const stratState = engine.custom?.[stratId];
+    if (stratState) {
+      stratState.pending[tgt] = { suit, rattrapage: 0 };
+      if (stratState.config) stratState.config.hand = hand;
+    }
+
+    res.json({
+      success: true,
+      game_number: tgt,
+      source_game: sourceGn,
+      source_cards: pool,
+      source_cards_emoji: pool.map(s => SUIT_EMOJI[s] || s),
+      predicted_suit: suit,
+      suit_emoji: SUIT_EMOJI[suit] || suit,
+      hand,
+      current_game: currentGameNumber,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

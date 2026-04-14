@@ -1,0 +1,365 @@
+{
+  "fichier": "src/pages/Admin.jsx",
+  "date": "2026-04-14",
+  "total_fonctions": 54,
+  "composants": [
+    {
+      "nom": "AdminErrorBoundary",
+      "ligne": 5,
+      "type": "class",
+      "role": "Attrape les erreurs de rendu et affiche un message au lieu d'un écran noir"
+    },
+    {
+      "nom": "TgDirectChat",
+      "ligne": 69,
+      "type": "function",
+      "role": "Interface de chat Telegram en direct (onglet Canal Direct)"
+    },
+    {
+      "nom": "Admin",
+      "ligne": 263,
+      "type": "function",
+      "role": "Point d'entrée — enveloppe AdminPanel dans AdminErrorBoundary"
+    },
+    {
+      "nom": "AdminPanel",
+      "ligne": 267,
+      "type": "function",
+      "role": "Composant principal du panneau d'administration avec tous les onglets"
+    }
+  ],
+  "fonctions_utilitaires": [
+    {
+      "nom": "statusLabel",
+      "ligne": 29,
+      "role": "Retourne un badge HTML selon le statut utilisateur (pending, active, expired)"
+    },
+    {
+      "nom": "fmtDate",
+      "ligne": 36,
+      "role": "Formate une date ISO en format français JJ/MM/AA HH:MM"
+    },
+    {
+      "nom": "fmtDuration",
+      "ligne": 41,
+      "role": "Convertit un nombre de minutes en texte lisible (30 min, 2h 15min)"
+    },
+    {
+      "nom": "fmtRemaining",
+      "ligne": 50,
+      "role": "Calcule et affiche le temps restant avant expiration avec code couleur"
+    },
+    {
+      "nom": "minutesFromInput",
+      "ligne": 63,
+      "role": "Convertit valeur + unité (min/h) en nombre total de minutes"
+    }
+  ],
+  "fonctions_TgDirectChat": [
+    {
+      "nom": "saveCfg",
+      "ligne": 106,
+      "role": "Enregistre la configuration du bot Telegram (token + ID canal)"
+    },
+    {
+      "nom": "deleteCfg",
+      "ligne": 123,
+      "role": "Supprime la configuration du bot et réinitialise l'état"
+    },
+    {
+      "nom": "sendMsg",
+      "ligne": 130,
+      "role": "Envoie un message texte via le bot Telegram vers le canal"
+    },
+    {
+      "nom": "formatDate",
+      "ligne": 147,
+      "role": "Formate une date ISO en heure HH:MM pour l'affichage des messages"
+    },
+    {
+      "nom": "useEffect_config",
+      "ligne": 83,
+      "type": "useEffect",
+      "role": "Charge la configuration du bot au montage du composant"
+    },
+    {
+      "nom": "useEffect_polling",
+      "ligne": 89,
+      "type": "useEffect",
+      "role": "Poll les messages du canal toutes les 3 secondes"
+    },
+    {
+      "nom": "useEffect_scroll",
+      "ligne": 102,
+      "type": "useEffect",
+      "role": "Défile automatiquement vers le dernier message reçu"
+    }
+  ],
+  "fonctions_AdminPanel": {
+    "strategies": [
+      {
+        "nom": "loadStrategies",
+        "ligne": 525,
+        "type": "useCallback",
+        "role": "Charge toutes les stratégies — normalise tg_targets, exceptions, relance_rules en tableaux"
+      },
+      {
+        "nom": "loadStratStats",
+        "ligne": 540,
+        "type": "useCallback",
+        "role": "Charge les statistiques victoires/défaites par stratégie"
+      },
+      {
+        "nom": "saveStrat",
+        "ligne": 907,
+        "type": "async",
+        "role": "Crée ou met à jour une stratégie complète (mode, seuils, exceptions, relance, Telegram)"
+      },
+      {
+        "nom": "deleteStrat",
+        "ligne": 927,
+        "type": "async",
+        "role": "Supprime une stratégie après confirmation"
+      },
+      {
+        "nom": "toggleStrat",
+        "ligne": 937,
+        "type": "async",
+        "role": "Active ou désactive une stratégie"
+      },
+      {
+        "nom": "saveStratTg",
+        "ligne": 467,
+        "type": "async",
+        "role": "Sauvegarde la configuration Telegram d'une stratégie (bot token, channel ID, format)"
+      },
+      {
+        "nom": "submitAleatPrediction",
+        "ligne": 948,
+        "type": "async",
+        "role": "Soumet une prédiction manuelle en mode Aléatoire (main + jeu cible)"
+      }
+    ],
+    "telegram": [
+      {
+        "nom": "loadTokenInfo",
+        "ligne": 518,
+        "type": "useCallback",
+        "role": "Charge les informations du bot Telegram global (token, nom du bot)"
+      },
+      {
+        "nom": "handleSaveToken",
+        "ligne": 1004,
+        "type": "async",
+        "role": "Enregistre le token du bot Telegram global"
+      },
+      {
+        "nom": "handleDeleteToken",
+        "ligne": 1023,
+        "type": "async",
+        "role": "Supprime le token du bot Telegram global"
+      },
+      {
+        "nom": "loadMsgFormat",
+        "ligne": 761,
+        "type": "useCallback",
+        "role": "Charge les formats de message Telegram disponibles"
+      },
+      {
+        "nom": "saveMsgFormat",
+        "ligne": 804,
+        "type": "async",
+        "role": "Sauvegarde un format de message Telegram"
+      },
+      {
+        "nom": "loadAnnouncements",
+        "ligne": 721,
+        "type": "useCallback",
+        "role": "Charge les annonces Telegram programmées"
+      },
+      {
+        "nom": "loadDefaultStratTg",
+        "ligne": 728,
+        "type": "useCallback",
+        "role": "Charge la configuration Telegram par défaut pour les nouvelles stratégies"
+      },
+      {
+        "nom": "saveDefaultStratTg",
+        "ligne": 743,
+        "type": "async",
+        "role": "Sauvegarde la configuration Telegram par défaut"
+      },
+      {
+        "nom": "loadChannels",
+        "ligne": 511,
+        "type": "useCallback",
+        "role": "Charge la liste des canaux Telegram globaux"
+      },
+      {
+        "nom": "addChannel",
+        "ligne": 1151,
+        "type": "async",
+        "role": "Ajoute un nouveau canal Telegram global"
+      },
+      {
+        "nom": "removeChannel",
+        "ligne": 1165,
+        "type": "async",
+        "role": "Supprime un canal Telegram global"
+      }
+    ],
+    "utilisateurs": [
+      {
+        "nom": "loadUsers",
+        "ligne": 505,
+        "type": "useCallback",
+        "role": "Charge la liste des utilisateurs depuis l'API"
+      },
+      {
+        "nom": "approveUser",
+        "ligne": 1039,
+        "type": "async",
+        "role": "Approuve un utilisateur en attente et attribue un abonnement"
+      },
+      {
+        "nom": "extendUser",
+        "ligne": 1054,
+        "type": "async",
+        "role": "Prolonge l'abonnement d'un utilisateur"
+      },
+      {
+        "nom": "revokeUser",
+        "ligne": 1069,
+        "type": "async",
+        "role": "Révoque l'accès d'un utilisateur (statut → expiré)"
+      },
+      {
+        "nom": "deleteUser",
+        "ligne": 1075,
+        "type": "async",
+        "role": "Supprime définitivement un compte utilisateur"
+      },
+      {
+        "nom": "saveNames",
+        "ligne": 1081,
+        "type": "async",
+        "role": "Met à jour le nom/prénom d'un utilisateur"
+      },
+      {
+        "nom": "openVisModal",
+        "ligne": 1096,
+        "type": "async",
+        "role": "Ouvre la modale d'assignation des canaux/stratégies visibles"
+      },
+      {
+        "nom": "saveVisibility",
+        "ligne": 1130,
+        "type": "async",
+        "role": "Enregistre les canaux et stratégies visibles pour un utilisateur"
+      },
+      {
+        "nom": "generatePremium",
+        "ligne": 327,
+        "type": "async",
+        "role": "Génère un ou plusieurs codes premium avec durée configurable"
+      },
+      {
+        "nom": "loadUserMessages",
+        "ligne": 589,
+        "type": "useCallback",
+        "role": "Charge les messages envoyés par les utilisateurs via le formulaire de contact"
+      },
+      {
+        "nom": "loadBroadcastMessage",
+        "ligne": 596,
+        "type": "useCallback",
+        "role": "Charge le message de diffusion actuel (broadcast), ses destinataires et état"
+      }
+    ],
+    "systeme": [
+      {
+        "nom": "loadStrategyRoutes",
+        "ligne": 547,
+        "type": "useCallback",
+        "role": "Charge les routes de diffusion (quel canal reçoit quelles prédictions)"
+      },
+      {
+        "nom": "saveRoutes",
+        "ligne": 886,
+        "type": "async",
+        "role": "Sauvegarde les routes de diffusion des prédictions vers les canaux"
+      },
+      {
+        "nom": "loadRenderDbStatus",
+        "ligne": 560,
+        "type": "useCallback",
+        "role": "Vérifie l'état de la connexion à la base de données externe Render"
+      },
+      {
+        "nom": "loadUiStyles",
+        "ligne": 567,
+        "type": "useCallback",
+        "role": "Charge les styles UI personnalisés de l'admin"
+      },
+      {
+        "nom": "loadCustomCss",
+        "ligne": 582,
+        "type": "useCallback",
+        "role": "Charge et injecte le CSS personnalisé dans la page"
+      },
+      {
+        "nom": "loadModifiedFiles",
+        "ligne": 609,
+        "type": "useCallback",
+        "role": "Charge la liste des fichiers modifiés (système de mise à jour)"
+      },
+      {
+        "nom": "pollBuildStatus",
+        "ligne": 616,
+        "type": "useCallback",
+        "role": "Sondage périodique de l'état du build frontend en cours"
+      },
+      {
+        "nom": "applyUpdate",
+        "ligne": 681,
+        "type": "async",
+        "role": "Applique une mise à jour du système (pull fichiers modifiés, rebuild)"
+      },
+      {
+        "nom": "loadMaxR",
+        "ligne": 768,
+        "type": "useCallback",
+        "role": "Charge la valeur maximale de rattrapage autorisée"
+      },
+      {
+        "nom": "saveMaxR",
+        "ligne": 784,
+        "type": "async",
+        "role": "Sauvegarde la nouvelle valeur max de rattrapage"
+      },
+      {
+        "nom": "handleLogout",
+        "ligne": 1172,
+        "type": "async",
+        "role": "Déconnecte l'administrateur et redirige vers l'accueil"
+      }
+    ],
+    "useEffects": [
+      {
+        "nom": "useEffect_chargement_initial",
+        "ligne": 1032,
+        "role": "Au montage, appelle les 16 fonctions de chargement (loadUsers, loadChannels, loadStrategies, etc.)"
+      },
+      {
+        "nom": "useEffect_polling_relance",
+        "ligne": 776,
+        "role": "Sondage toutes les 3 secondes de l'état des compteurs de relance"
+      },
+      {
+        "nom": "useEffect_polling_aleatoire",
+        "ligne": 980,
+        "role": "Sondage toutes les 5 secondes du statut de la prédiction Aléatoire en cours"
+      }
+    ]
+  }
+}
