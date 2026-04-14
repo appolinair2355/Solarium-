@@ -161,7 +161,7 @@ export default function Admin() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1 };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [] };
 
   // 6 paires possibles pour le mode taux_miroir
   const MIRROR_PAIRS = [
@@ -179,6 +179,11 @@ export default function Admin() {
   const [stratMsg, setStratMsg] = useState('');
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
+
+  // Réponses admin aux messages utilisateurs
+  const [replyingId, setReplyingId]     = useState(null);
+  const [replyText, setReplyText]       = useState('');
+  const [replySending, setReplySending] = useState(false);
 
   // Routage C1/C2/C3/DC → canaux Telegram
   const DEFAULT_STRATS = ['C1', 'C2', 'C3', 'DC'];
@@ -221,15 +226,10 @@ export default function Admin() {
   const [defaultTgMsg, setDefaultTgMsg] = useState('');
   const [defaultChOpen, setDefaultChOpen] = useState(null); // canal ouvert pour édition inline : 'C1'|'C2'|'C3'|'DC'|null
   const [stratChOpen, setStratChOpen]     = useState(null); // id de stratégie perso ouverte pour édition TG inline
+  const [aleatPanel, setAleatPanel]       = useState(null); // { stratId, stratName, step:'hand'|'number'|'result', hand, gameInput, result, history }
   const [stratChForm, setStratChForm]     = useState({ bot_token: '', channel_id: '', tg_format: null });
   const [stratChSaving, setStratChSaving] = useState(false);
 
-  // ── Séquences de relance ─────────────────────────────────────────
-  const [lossSequences,  setLossSequences]  = useState([]);
-  const [lossSeqName,    setLossSeqName]    = useState('');
-  const [lossSeqRules,   setLossSeqRules]   = useState({}); // { [stratId]: losses_threshold|null }
-  const [lossSeqSaving,  setLossSeqSaving]  = useState(false);
-  const [lossSeqMsg,     setLossSeqMsg]     = useState('');
   const [stratStats,     setStratStats]     = useState([]); // wins/losses per strategy
 
   // ── Annonces planifiées Telegram ─────────────────────────────────
@@ -340,6 +340,21 @@ export default function Admin() {
     } catch {}
   }, []);
 
+  const [customCssInfo, setCustomCssInfo] = useState({ css: '', length: 0 });
+
+  const injectCustomCss = (css) => {
+    let el = document.getElementById('baccarat-custom-css');
+    if (!el) { el = document.createElement('style'); el.id = 'baccarat-custom-css'; document.head.appendChild(el); }
+    el.textContent = css || '';
+  };
+
+  const loadCustomCss = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/custom-css', { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setCustomCssInfo(d); injectCustomCss(d.css); }
+    } catch {}
+  }, []);
+
   const loadUserMessages = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/user-messages', { credentials: 'include' });
@@ -445,7 +460,7 @@ export default function Admin() {
       setUpdateResult(d);
       if (d.ok) {
         setUpdateFile(null); setUpdatePreview(null); setUpdateFileName('');
-        await Promise.all([loadStrategies(), loadLossSequences(), loadUiStyles(), loadModifiedFiles()]);
+        await Promise.all([loadStrategies(), loadUiStyles(), loadCustomCss(), loadModifiedFiles()]);
         // Appliquer les styles immédiatement
         if (d.results?.some(r2 => r2.type === 'styles' && r2.applied > 0)) {
           const sr = await fetch('/api/settings/ui-styles');
@@ -455,6 +470,11 @@ export default function Admin() {
               if (k.startsWith('--')) document.documentElement.style.setProperty(k, v);
             }
           }
+        }
+        // Injecter le CSS personnalisé immédiatement si type=css
+        if (d.results?.some(r2 => r2.type === 'css' && r2.applied > 0)) {
+          const cr = await fetch('/api/settings/custom-css');
+          if (cr.ok) { const css = await cr.text(); injectCustomCss(css); }
         }
         // Démarrer le polling si un rebuild est en cours
         if (d.results?.some(r2 => r2.rebuilding)) {
@@ -466,13 +486,6 @@ export default function Admin() {
     } catch { setUpdateResult({ ok: false, errors: ['Erreur réseau'] }); }
     setUpdateApplying(false);
   };
-
-  const loadLossSequences = useCallback(async () => {
-    try {
-      const r = await fetch('/api/admin/loss-sequences', { credentials: 'include' });
-      if (r.ok) setLossSequences(await r.json());
-    } catch {}
-  }, []);
 
   const loadAnnouncements = useCallback(async () => {
     try {
@@ -599,7 +612,7 @@ export default function Admin() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
     setStratOpen(true);
   };
 
@@ -616,7 +629,7 @@ export default function Admin() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -692,6 +705,55 @@ export default function Admin() {
     } catch {}
   };
 
+  // ── Stratégie Aléatoire : soumission de prédiction depuis le site ──────────
+  const submitAleatPrediction = async () => {
+    if (!aleatPanel || !aleatPanel.gameInput) return;
+    const num = parseInt(aleatPanel.gameInput);
+    if (isNaN(num) || num < 1 || num > 1440) return;
+    try {
+      const r = await fetch(`/api/admin/strategies/${aleatPanel.stratId}/aleatoire-predict`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hand: aleatPanel.hand, game_number: num }),
+      });
+      const data = await r.json();
+      if (!r.ok) { alert(data.error || 'Erreur'); return; }
+      const newEntry = { game_number: data.game_number, predicted_suit: data.predicted_suit, suit_emoji: data.suit_emoji, hand: aleatPanel.hand, status: 'en_cours' };
+      setAleatPanel(p => ({
+        ...p,
+        step: 'result',
+        result: data,
+        gameInput: '',
+        history: [...(p.history || []), newEntry],
+      }));
+    } catch (e) { alert('Erreur réseau : ' + e.message); }
+  };
+
+  // Polling pour mise à jour statut des prédictions aléatoires en cours
+  useEffect(() => {
+    if (!aleatPanel) return;
+    const pending = (aleatPanel.history || []).filter(h => h.status === 'en_cours');
+    if (pending.length === 0) return;
+    const iv = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/predictions?limit=100`, { credentials: 'include' });
+        if (!r.ok) return;
+        const rows = await r.json();
+        setAleatPanel(p => {
+          if (!p) return p;
+          const updated = (p.history || []).map(h => {
+            if (h.status !== 'en_cours') return h;
+            const found = rows.find(row => row.game_number === h.game_number && row.predicted_suit === h.predicted_suit && String(row.strategy) === String(p.stratId));
+            if (found && (found.status === 'gagne' || found.status === 'perdu')) return { ...h, status: found.status };
+            return h;
+          });
+          return { ...p, history: updated };
+        });
+      } catch {}
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [aleatPanel?.history?.map(h => h.game_number + h.status).join(','), aleatPanel?.stratId]);
+
   const handleSaveToken = async () => {
     if (!tokenInput.trim()) return;
     setTokenLoading(true);
@@ -720,7 +782,7 @@ export default function Admin() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadLossSequences(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadLossSequences, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
 
   // Duration input helpers
   const setDur = (uid, field, val) =>
@@ -1180,6 +1242,13 @@ export default function Admin() {
                         >✓ Lu</button>
                       )}
                       <button
+                        style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 10, padding: '1px 8px', cursor: 'pointer' }}
+                        onClick={() => {
+                          if (replyingId === msg.id) { setReplyingId(null); setReplyText(''); }
+                          else { setReplyingId(msg.id); setReplyText(msg.admin_reply?.text || ''); }
+                        }}
+                      >↩️ {msg.admin_reply ? 'Modifier' : 'Répondre'}</button>
+                      <button
                         style={{ fontSize: 10, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}
                         onClick={async () => {
                           await fetch(`/api/admin/user-messages/${msg.id}`, { method: 'DELETE', credentials: 'include' });
@@ -1190,6 +1259,68 @@ export default function Admin() {
                     </div>
                   </div>
                   <div style={{ fontSize: 13, color: msg.read ? '#94a3b8' : '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</div>
+
+                  {/* Réponse admin existante */}
+                  {msg.admin_reply && replyingId !== msg.id && (
+                    <div style={{ marginTop: 10, padding: '9px 12px', background: 'rgba(99,102,241,0.1)', borderRadius: 8, borderLeft: '3px solid #6366f1' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', marginBottom: 4 }}>
+                        ↩️ Votre réponse — {new Date(msg.admin_reply.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}{' '}
+                        {new Date(msg.admin_reply.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#c7d2fe', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.admin_reply.text}</div>
+                    </div>
+                  )}
+
+                  {/* Formulaire de réponse */}
+                  {replyingId === msg.id && (
+                    <div style={{ marginTop: 10, borderTop: '1px solid rgba(99,102,241,0.2)', paddingTop: 10 }}>
+                      <textarea
+                        rows={3} maxLength={1000}
+                        value={replyText}
+                        onChange={e => setReplyText(e.target.value)}
+                        placeholder="Tapez votre réponse…"
+                        style={{
+                          width: '100%', boxSizing: 'border-box',
+                          background: 'rgba(99,102,241,0.07)',
+                          border: '1px solid rgba(99,102,241,0.35)',
+                          borderRadius: 8, padding: '8px 10px',
+                          color: '#e2e8f0', fontSize: 12, lineHeight: 1.6,
+                          resize: 'vertical', fontFamily: 'inherit', outline: 'none',
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                        <button
+                          disabled={replySending || !replyText.trim()}
+                          onClick={async () => {
+                            if (!replyText.trim()) return;
+                            setReplySending(true);
+                            await fetch(`/api/admin/user-messages/${msg.id}/reply`, {
+                              method: 'POST', credentials: 'include',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ text: replyText.trim() }),
+                            });
+                            setReplyingId(null); setReplyText('');
+                            setReplySending(false);
+                            await loadUserMessages();
+                          }}
+                          style={{
+                            padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 700,
+                            background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none',
+                            color: '#fff', cursor: 'pointer',
+                            opacity: (replySending || !replyText.trim()) ? 0.5 : 1,
+                          }}
+                        >{replySending ? '⏳…' : '📨 Envoyer'}</button>
+                        <button
+                          onClick={() => { setReplyingId(null); setReplyText(''); }}
+                          style={{
+                            padding: '5px 12px', borderRadius: 7, fontSize: 12,
+                            background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.2)',
+                            color: '#64748b', cursor: 'pointer',
+                          }}
+                        >Annuler</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1630,6 +1761,10 @@ export default function Admin() {
                     )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
                       {(() => {
+                        if (s.mode === 'multi_strategy') {
+                          const srcs = (s.multi_source_ids || []).join(', ') || '—';
+                          return `🔗 Combinaison [${s.multi_require === 'all' ? 'toutes' : 'une'}] · Sources : ${srcs}`;
+                        }
                         const mLabel = s.mode === 'manquants' ? 'Absences'
                           : s.mode === 'apparents' ? 'Apparitions'
                           : s.mode === 'absence_apparition' ? 'Abs→App'
@@ -1657,6 +1792,13 @@ export default function Admin() {
                           color: s.enabled ? '#22c55e' : '#6b7280',
                         }}
                       >{s.enabled ? '● Actif' : '○ Inactif'}</button>
+                      {s.mode === 'aleatoire' && (
+                        <button
+                          onClick={() => setAleatPanel({ stratId: s.id, stratName: s.name, step: 'hand', hand: null, gameInput: '', result: null, history: [] })}
+                          title="Lancer une prédiction aléatoire"
+                          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.5)', cursor: 'pointer', fontWeight: 700, background: 'rgba(99,102,241,0.18)', color: '#a5b4fc' }}
+                        >🎲 Prédire</button>
+                      )}
                       <button className="btn btn-ghost btn-sm" onClick={() => openEdit(s)} title="Modifier">✏️</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => openClone(s)} title="Dupliquer cette stratégie" style={{ color: '#a78bfa' }}>📋</button>
                       <button className="btn btn-danger btn-sm" onClick={() => deleteStrat(s.id, s.name)} title="Supprimer">🗑️</button>
@@ -1688,194 +1830,6 @@ export default function Admin() {
           )}
         </div>
 
-        {/* ── SÉQUENCES DE RELANCE ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(251,146,60,0.4)', marginBottom: 20 }}>
-          <div className="tg-admin-header">
-            <span className="tg-admin-icon">🔁</span>
-            <div style={{ flex: 1 }}>
-              <h2 className="tg-admin-title">Séquences de Relance</h2>
-              <p className="tg-admin-sub">
-                Sélectionnez les stratégies à surveiller et définissez combien de prédictions perdues déclenchent la prochaine relance automatique.
-              </p>
-            </div>
-            {lossSequences.length > 0 && <span className="tg-badge-connected">{lossSequences.length} séquence{lossSequences.length > 1 ? 's' : ''}</span>}
-          </div>
-
-          {/* ── Liste des séquences existantes ── */}
-          {lossSequences.length > 0 && (
-            <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {lossSequences.map(seq => (
-                <div key={seq.id} style={{
-                  background: seq.enabled ? 'rgba(251,146,60,0.07)' : 'rgba(100,100,120,0.05)',
-                  border: `1px solid ${seq.enabled ? 'rgba(251,146,60,0.3)' : 'rgba(100,100,120,0.2)'}`,
-                  borderRadius: 10, padding: '12px 16px',
-                  display: 'flex', alignItems: 'flex-start', gap: 12,
-                }}>
-                  <div style={{ fontSize: 22, marginTop: 2 }}>🔁</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-                      <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{seq.name}</span>
-                      <span style={{
-                        fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 600,
-                        background: seq.enabled ? 'rgba(34,197,94,0.15)' : 'rgba(100,100,120,0.2)',
-                        color: seq.enabled ? '#22c55e' : '#94a3b8',
-                      }}>{seq.enabled ? '✅ Active' : '⏸ Inactive'}</span>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {(seq.rules || []).map(rule => {
-                        const defLabel = { C1: '♠ Pique Noir', C2: '♥ Cœur Rouge', C3: '♦ Carreau Doré', DC: '♣ Double Canal' };
-                        const custLabel = strategies.find(s => `S${s.id}` === rule.strategy_id)?.name;
-                        const label = defLabel[rule.strategy_id] || custLabel || rule.strategy_id;
-                        return (
-                          <span key={rule.strategy_id} style={{
-                            fontSize: 12, padding: '3px 10px', borderRadius: 20, fontWeight: 600,
-                            background: 'rgba(251,146,60,0.15)', color: '#fb923c',
-                            border: '1px solid rgba(251,146,60,0.35)',
-                          }}>
-                            {label} — {rule.losses_threshold} perte{rule.losses_threshold > 1 ? 's' : ''}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                    <button
-                      onClick={async () => {
-                        await fetch(`/api/admin/loss-sequences/${seq.id}`, {
-                          method: 'PATCH', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ enabled: !seq.enabled }),
-                        });
-                        loadLossSequences();
-                      }}
-                      style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(251,146,60,0.35)', background: 'transparent', color: '#fb923c', cursor: 'pointer', fontWeight: 600 }}
-                    >{seq.enabled ? '⏸ Désactiver' : '▶ Activer'}</button>
-                    <button
-                      onClick={async () => {
-                        if (!window.confirm(`Supprimer la séquence "${seq.name}" ?`)) return;
-                        await fetch(`/api/admin/loss-sequences/${seq.id}`, { method: 'DELETE', credentials: 'include' });
-                        loadLossSequences();
-                      }}
-                      style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.35)', background: 'transparent', color: '#f87171', cursor: 'pointer', fontWeight: 600 }}
-                    >🗑 Supprimer</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── Formulaire de création ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Nom de la séquence</label>
-              <input
-                type="text"
-                placeholder="ex: Relance après 3 pertes"
-                value={lossSeqName}
-                onChange={e => setLossSeqName(e.target.value)}
-                style={{ width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(251,146,60,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>
-                Stratégies à surveiller — cochez et définissez le nombre de pertes consécutives avant relance
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[
-                  { id: 'C1', label: '♠ Pique Noir (C1)' },
-                  { id: 'C2', label: '♥ Cœur Rouge (C2)' },
-                  { id: 'C3', label: '♦ Carreau Doré (C3)' },
-                  { id: 'DC', label: '♣ Double Canal (DC)' },
-                  ...strategies.map(s => ({ id: `S${s.id}`, label: `${s.name} (S${s.id})` })),
-                ].map(({ id, label }) => {
-                  const checked = id in lossSeqRules;
-                  const thr = lossSeqRules[id] || 2;
-                  return (
-                    <div key={id} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      background: checked ? 'rgba(251,146,60,0.08)' : 'rgba(255,255,255,0.02)',
-                      border: `1px solid ${checked ? 'rgba(251,146,60,0.3)' : 'rgba(255,255,255,0.07)'}`,
-                      borderRadius: 8, padding: '10px 14px', transition: 'all 0.15s',
-                    }}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={e => {
-                          setLossSeqRules(prev => {
-                            const next = { ...prev };
-                            if (e.target.checked) next[id] = 2;
-                            else delete next[id];
-                            return next;
-                          });
-                        }}
-                        style={{ accentColor: '#fb923c', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-                      />
-                      <span style={{ flex: 1, color: checked ? '#e2e8f0' : '#64748b', fontWeight: checked ? 600 : 400, fontSize: 13 }}>{label}</span>
-                      {checked && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>Pertes avant relance :</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={20}
-                            value={thr}
-                            onChange={e => setLossSeqRules(prev => ({ ...prev, [id]: Math.max(1, parseInt(e.target.value) || 1) }))}
-                            style={{ width: 60, padding: '5px 8px', background: 'rgba(251,146,60,0.1)', border: '1px solid rgba(251,146,60,0.4)', borderRadius: 6, color: '#fb923c', fontSize: 14, fontWeight: 700, textAlign: 'center' }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {lossSeqMsg && (
-              <div style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                background: lossSeqMsg.error ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
-                color: lossSeqMsg.error ? '#f87171' : '#4ade80',
-                border: `1px solid ${lossSeqMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
-              }}>{lossSeqMsg.text || lossSeqMsg}</div>
-            )}
-
-            <button
-              disabled={lossSeqSaving || !lossSeqName.trim() || Object.keys(lossSeqRules).length === 0}
-              onClick={async () => {
-                setLossSeqSaving(true);
-                try {
-                  const rules = Object.entries(lossSeqRules).map(([strategy_id, losses_threshold]) => ({ strategy_id, losses_threshold }));
-                  const r = await fetch('/api/admin/loss-sequences', {
-                    method: 'POST', credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: lossSeqName.trim(), rules, enabled: true }),
-                  });
-                  if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
-                  setLossSeqName('');
-                  setLossSeqRules({});
-                  setLossSeqMsg('✅ Séquence créée avec succès');
-                  setTimeout(() => setLossSeqMsg(''), 3500);
-                  loadLossSequences();
-                } catch (e) {
-                  setLossSeqMsg({ text: '❌ ' + e.message, error: true });
-                  setTimeout(() => setLossSeqMsg(''), 4000);
-                }
-                setLossSeqSaving(false);
-              }}
-              style={{
-                alignSelf: 'flex-end',
-                background: Object.keys(lossSeqRules).length > 0 && lossSeqName.trim()
-                  ? 'linear-gradient(135deg,#c2410c,#fb923c)' : 'rgba(100,100,120,0.2)',
-                color: '#fff', border: 'none', borderRadius: 8,
-                padding: '10px 24px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-                opacity: lossSeqSaving || !lossSeqName.trim() || Object.keys(lossSeqRules).length === 0 ? 0.5 : 1,
-              }}
-            >
-              {lossSeqSaving ? '⏳ Enregistrement…' : `🔁 Créer la séquence (${Object.keys(lossSeqRules).length} stratégie${Object.keys(lossSeqRules).length > 1 ? 's' : ''})`}
-            </button>
-          </div>
-        </div>
-
         {/* ── FORMULAIRE CRÉATION / MODIFICATION ── */}
         <div id="strat-form-card" className="tg-admin-card" style={{ borderColor: stratEditing !== null ? 'rgba(168,85,247,0.6)' : 'rgba(34,197,94,0.4)' }}>
 
@@ -1902,25 +1856,211 @@ export default function Admin() {
 
               <div style={{ padding: 20 }}>
 
+              {/* ══════════════ NOM ══════════════ */}
+              <div style={{ marginBottom: 18, padding: '14px 16px', borderRadius: 12, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                <label style={{ display: 'block', color: '#c4b5fd', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  Nom de la stratégie *
+                </label>
+                <input type="text" maxLength={40} placeholder="ex: Alpha, Nexus, Fusion…"
+                  value={stratForm.name}
+                  onChange={e => setStratForm(p => ({ ...p, name: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 9, color: '#fff', fontSize: 15, fontWeight: 600, boxSizing: 'border-box' }}
+                />
+              </div>
+
               {/* ══════════════ SECTION 1 — ALGORITHME ══════════════ */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                <div style={{ flex: 1, height: 1, background: 'rgba(168,85,247,0.25)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#a855f7', letterSpacing: 1.5, textTransform: 'uppercase' }}>① Algorithme de prédiction</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(168,85,247,0.25)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 14px', borderRadius: 9,
+                background: stratForm.mode === 'relance' ? 'rgba(251,146,60,0.08)' : 'rgba(168,85,247,0.08)',
+                border: `1px solid ${stratForm.mode === 'relance' ? 'rgba(251,146,60,0.2)' : 'rgba(168,85,247,0.2)'}`,
+              }}>
+                <span style={{ fontSize: 13 }}>
+                  {stratForm.mode === 'relance' ? '🔁' : '🎯'}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', flex: 1,
+                  color: stratForm.mode === 'relance' ? '#fb923c' : '#a855f7',
+                }}>
+                  {stratForm.mode === 'relance' ? 'Stratégies à surveiller' : 'Algorithme de prédiction'}
+                </span>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                {/* Nom */}
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Nom de la stratégie *</label>
-                  <input type="text" maxLength={40} placeholder="ex: Alpha, Nexus, Fusion…"
-                    value={stratForm.name}
-                    onChange={e => setStratForm(p => ({ ...p, name: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, boxSizing: 'border-box' }}
-                  />
-                </div>
+
+                {/* ── RELANCE : Sélection des stratégies à surveiller ── */}
+                {stratForm.mode === 'relance' && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ marginBottom: 12, fontSize: 12, color: '#94a3b8' }}>
+                      Cochez les stratégies à surveiller. Activez une ou plusieurs conditions — le premier déclencheur atteint lance la relance.
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {[
+                        { id: 'C1', label: '♠ Pique Noir', tag: 'C1' },
+                        { id: 'C2', label: '♥ Cœur Rouge', tag: 'C2' },
+                        { id: 'C3', label: '♦ Carreau Doré', tag: 'C3' },
+                        { id: 'DC', label: '♣ Double Canal', tag: 'DC' },
+                        ...strategies.map(s => ({ id: `S${s.id}`, label: s.name, tag: `S${s.id}` })),
+                      ].map(({ id, label, tag }) => {
+                        const rule = (stratForm.relance_rules || []).find(r => r.strategy_id === id);
+                        const checked = !!rule;
+                        const updateRule = (patch) => setStratForm(p => ({ ...p, relance_rules: p.relance_rules.map(r => r.strategy_id === id ? { ...r, ...patch } : r) }));
+
+                        const lThr    = rule?.losses_threshold ?? null;
+                        const rLevel  = rule?.rattrapage_level ?? null;
+                        const rCount  = rule?.rattrapage_count ?? 1;
+                        const cLevel  = rule?.combo_level ?? null;
+                        const cCount  = rule?.combo_count ?? 1;
+
+                        const summaryParts = [];
+                        if (lThr != null) summaryParts.push(`${lThr} perte${lThr > 1 ? 's' : ''} consécutive${lThr > 1 ? 's' : ''}`);
+                        if (rLevel != null) summaryParts.push(`${rCount}× R${rLevel} consécutif${rCount > 1 ? 's' : ''}`);
+                        if (cLevel != null) summaryParts.push(`${cCount} event${cCount > 1 ? 's' : ''} (perte ou R${cLevel})`);
+
+                        const BtnCount = ({ value, onChange, color }) => (
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {[1,2,3,4,5,6,7,8,9,10].map(n => {
+                              const active = value === n;
+                              return (
+                                <button key={n} type="button" onClick={() => onChange(n)}
+                                  style={{ width: 28, height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
+                                    border: active ? `2px solid ${color}` : '1px solid rgba(255,255,255,0.1)',
+                                    background: active ? `${color}33` : 'rgba(255,255,255,0.03)',
+                                    color: active ? color : '#6b7280', transition: 'all 0.1s' }}>{n}</button>
+                              );
+                            })}
+                          </div>
+                        );
+
+                        const BtnLevel = ({ value, onChange, color }) => (
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {[1,2,3,4,5].map(n => {
+                              const active = value === n;
+                              return (
+                                <button key={n} type="button" onClick={() => onChange(n)}
+                                  style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
+                                    border: active ? `2px solid ${color}` : '1px solid rgba(255,255,255,0.1)',
+                                    background: active ? `${color}33` : 'rgba(255,255,255,0.03)',
+                                    color: active ? color : '#6b7280', transition: 'all 0.1s' }}>R{n}</button>
+                              );
+                            })}
+                          </div>
+                        );
+
+                        const CondToggle = ({ active, color, onClick }) => (
+                          <button type="button" onClick={onClick} style={{
+                            width: 18, height: 18, borderRadius: '50%', border: `2px solid ${active ? color : 'rgba(255,255,255,0.15)'}`,
+                            background: active ? color : 'transparent', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
+                          }} />
+                        );
+
+                        return (
+                          <div key={id} style={{
+                            background: checked ? 'rgba(251,146,60,0.06)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${checked ? 'rgba(251,146,60,0.28)' : 'rgba(255,255,255,0.07)'}`,
+                            borderRadius: 10, overflow: 'hidden', transition: 'all 0.15s',
+                          }}>
+                            {/* En-tête */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px' }}>
+                              <input type="checkbox" checked={checked}
+                                onChange={e => {
+                                  setStratForm(p => {
+                                    const cur = p.relance_rules || [];
+                                    if (e.target.checked) return { ...p, relance_rules: [...cur, { strategy_id: id, losses_threshold: null, rattrapage_level: null, rattrapage_count: 1, combo_level: null, combo_count: 1 }] };
+                                    return { ...p, relance_rules: cur.filter(r => r.strategy_id !== id) };
+                                  });
+                                }}
+                                style={{ accentColor: '#fb923c', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                              />
+                              <span style={{ flex: 1, color: checked ? '#e2e8f0' : '#64748b', fontWeight: checked ? 600 : 400, fontSize: 13 }}>{label}</span>
+                              <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace', background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 5 }}>{tag}</span>
+                            </div>
+
+                            {/* Conditions (visible si coché) */}
+                            {checked && (
+                              <div style={{ padding: '2px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div style={{ height: 1, background: 'rgba(251,146,60,0.12)', marginBottom: 4 }} />
+
+                                {/* ── Condition A : Pertes consécutives ── */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: lThr != null ? 'rgba(251,146,60,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${lThr != null ? 'rgba(251,146,60,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <CondToggle active={lThr != null} color="#fb923c"
+                                      onClick={() => updateRule({ losses_threshold: lThr != null ? null : 2 })} />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: lThr != null ? '#fb923c' : '#475569' }}>Pertes consécutives</span>
+                                    {lThr != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>si ≥ {lThr} de suite → relance</span>}
+                                  </div>
+                                  {lThr != null && (
+                                    <BtnCount value={lThr} color="#fb923c" onChange={n => updateRule({ losses_threshold: n })} />
+                                  )}
+                                </div>
+
+                                {/* ── Condition B : Rattrapages consécutifs ── */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: rLevel != null ? 'rgba(129,140,248,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${rLevel != null ? 'rgba(129,140,248,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <CondToggle active={rLevel != null} color="#818cf8"
+                                      onClick={() => updateRule({ rattrapage_level: rLevel != null ? null : 3, rattrapage_count: 1 })} />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: rLevel != null ? '#818cf8' : '#475569' }}>Rattrapage consécutif</span>
+                                    {rLevel != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{rCount}× R{rLevel} de suite → relance</span>}
+                                  </div>
+                                  {rLevel != null && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveau :</span>
+                                        <BtnLevel value={rLevel} color="#818cf8" onChange={n => updateRule({ rattrapage_level: n })} />
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
+                                        <BtnCount value={rCount} color="#818cf8" onChange={n => updateRule({ rattrapage_count: n })} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* ── Condition C : Perte + Rattrapage (combo) ── */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: cLevel != null ? 'rgba(52,211,153,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${cLevel != null ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <CondToggle active={cLevel != null} color="#34d399"
+                                      onClick={() => updateRule({ combo_level: cLevel != null ? null : 3, combo_count: 1 })} />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: cLevel != null ? '#34d399' : '#475569' }}>Perte + Rattrapage</span>
+                                    {cLevel != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{cCount} événement{cCount > 1 ? 's' : ''} (perte ou R{cLevel}) → relance</span>}
+                                  </div>
+                                  {cLevel != null && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveau R :</span>
+                                        <BtnLevel value={cLevel} color="#34d399" onChange={n => updateRule({ combo_level: n })} />
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
+                                        <BtnCount value={cCount} color="#34d399" onChange={n => updateRule({ combo_count: n })} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Résumé */}
+                                {summaryParts.length > 0 ? (
+                                  <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic', paddingLeft: 4 }}>
+                                    → Déclenche si : {summaryParts.join(' OU ')}
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: 10, color: '#ef4444', fontStyle: 'italic', paddingLeft: 4 }}>
+                                    ⚠ Activez au moins une condition ci-dessus
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {(stratForm.relance_rules || []).length === 0 && (
+                      <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171' }}>
+                        ⚠️ Cochez au moins une stratégie source pour activer la relance
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Main à surveiller : Joueur / Banquier */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>Main à surveiller</label>
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -1946,8 +2086,10 @@ export default function Admin() {
                     })}
                   </div>
                 </div>
+                )}
 
-                {/* Mode */}
+                {/* Mode — masqué pour multi-stratégie */}
+                {(<>
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
                   <select value={stratForm.mode} onChange={e => {
@@ -1957,6 +2099,7 @@ export default function Admin() {
                       ...p,
                       mode: m,
                       ...(isNew ? { threshold: Math.max(p.threshold, 4), max_rattrapage: 20 } : {}),
+                      ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
                     }));
                   }}
                     style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
@@ -1965,6 +2108,8 @@ export default function Admin() {
                     <option value="absence_apparition">Absence → Apparition</option>
                     <option value="apparition_absence">Apparition → Absence</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
+                    <option value="relance">🔁 Séquences de Relance</option>
+                    <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
@@ -1986,10 +2131,42 @@ export default function Admin() {
                       </div>
                     </div>
                   )}
+                  {stratForm.mode === 'relance' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.25)', fontSize: 12, color: '#fdba74', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🔁 Mode Séquences de Relance — Comment ça fonctionne ?</div>
+                      <div>Ce mode <strong>ne prédit pas directement</strong> — il surveille les <strong>pertes consécutives</strong> des stratégies sélectionnées ci-dessus.</div>
+                      <div style={{ marginTop: 6 }}>Dès qu'une stratégie atteint son seuil de pertes, la relance se déclenche automatiquement et envoie une prédiction via le canal Telegram configuré.</div>
+                      <div style={{ marginTop: 6 }}>Les prédictions de relance apparaissent <strong>séparément</strong> dans le canal avec le type de perte/rattrapage choisi en Section 2.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'aleatoire' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.9 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎲 Mode Stratégie Aléatoire — Comment ça fonctionne ?</div>
+                      <div>Ce mode est <strong>manuel</strong> : l'administrateur ou l'utilisateur choisit le numéro à prédire directement via le bot Telegram.</div>
+                      <div style={{ marginTop: 6 }}>Dans le canal ou en privé avec le bot, tapez <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>/predire</code> → sélectionnez <strong>Joueur ❤️</strong> ou <strong>Banquier ♣️</strong> → entrez un numéro de <strong>1 à 1440</strong>.</div>
+                      <div style={{ marginTop: 6 }}>Si le numéro saisi est <strong>supérieur au tour en cours</strong>, le costume correspondant est prédit et envoyé automatiquement dans le canal.</div>
+                      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', lineHeight: 2.2 }}>
+                        <div>❤️ <strong>Joueur</strong> : ❤️♣️♦️♠️ — cycle de 4 sur les 1440 tours</div>
+                        <div>♣️ <strong>Banquier</strong> : ♣️❤️♠️♦️ — cycle de 4 sur les 1440 tours</div>
+                      </div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'aleatoire' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.9 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎲 Mode Stratégie Aléatoire — Comment ça fonctionne ?</div>
+                      <div>Ce mode est <strong>manuel</strong> : l'administrateur ou l'utilisateur choisit le numéro à prédire directement via le bot Telegram.</div>
+                      <div style={{ marginTop: 6 }}>Dans le canal ou en privé avec le bot, tapez <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>/predire</code> → sélectionnez <strong>Joueur ❤️</strong> ou <strong>Banquier ♣️</strong> → entrez un numéro de <strong>1 à 1440</strong>.</div>
+                      <div style={{ marginTop: 6 }}>Si le numéro saisi est <strong>supérieur au tour en cours</strong>, le costume correspondant est prédit et envoyé automatiquement dans le canal.</div>
+                      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', lineHeight: 2.2 }}>
+                        <div>❤️ <strong>Joueur</strong> : ❤️♣️♦️♠️ — cycle de 4 sur les 1440 tours</div>
+                        <div>♣️ <strong>Banquier</strong> : ♣️❤️♠️♦️ — cycle de 4 sur les 1440 tours</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Seuil B / Différence */}
-                <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance et aleatoire */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -2039,117 +2216,62 @@ export default function Admin() {
                       />
                     </div>
                   )}
-                </div>
+                </div>}
 
-                {/* ── Sélecteur de paires — MODE MIROIR UNIQUEMENT ── */}
+                {/* ── Paires fixes — MODE MIROIR UNIQUEMENT ── */}
                 {stratForm.mode === 'taux_miroir' && (
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
-                      🎯 Paires à surveiller — cliquez pour activer, puis définissez l'écart déclencheur par paire
-                    </label>
-
-                    {/* Boutons toggle des 6 paires */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                      {MIRROR_PAIRS.map(pair => {
-                        const mp = stratForm.mirror_pairs || [];
-                        const activePair = mp.find(p => (p.a === pair.a && p.b === pair.b) || (p.a === pair.b && p.b === pair.a));
-                        const active = !!activePair;
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#818cf8', marginBottom: 12 }}>
+                      ⚖️ Différence par combinaison
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {[
+                        { a: '♠', b: '♥', la: 'Pique',   lb: 'Cœur' },
+                        { a: '♦', b: '♣', la: 'Carreau', lb: 'Trèfle' },
+                        { a: '♠', b: '♦', la: 'Pique',   lb: 'Carreau' },
+                        { a: '♥', b: '♣', la: 'Cœur',    lb: 'Trèfle' },
+                      ].map(pair => {
+                        const found = (stratForm.mirror_pairs || []).find(p =>
+                          (p.a === pair.a && p.b === pair.b) || (p.a === pair.b && p.b === pair.a));
+                        const thr = found?.threshold ?? stratForm.threshold;
                         return (
-                          <button key={`${pair.a}|${pair.b}`} type="button"
-                            onClick={() => {
-                              setStratForm(prev => {
-                                const cur = prev.mirror_pairs || [];
-                                const exists = cur.find(p => (p.a === pair.a && p.b === pair.b) || (p.a === pair.b && p.b === pair.a));
-                                const next = exists
-                                  ? cur.filter(p => !((p.a === pair.a && p.b === pair.b) || (p.a === pair.b && p.b === pair.a)))
-                                  : [...cur, { a: pair.a, b: pair.b, threshold: null }];
-                                return { ...prev, mirror_pairs: next };
-                              });
-                            }}
-                            style={{
-                              padding: '9px 14px', borderRadius: 10, cursor: 'pointer',
-                              fontWeight: active ? 800 : 500, fontSize: 13,
-                              border: active ? '2px solid #6366f1' : '1px solid rgba(99,102,241,0.25)',
-                              background: active ? 'rgba(99,102,241,0.28)' : 'rgba(99,102,241,0.06)',
-                              color: active ? '#a5b4fc' : '#64748b',
-                              transition: 'all 0.15s',
-                              boxShadow: active ? '0 0 12px rgba(99,102,241,0.3)' : 'none',
-                              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-                            }}>
-                            <span style={{ fontSize: 14 }}>{pair.label}</span>
-                            <span style={{ fontSize: 9, opacity: 0.75 }}>{pair.desc}</span>
-                          </button>
+                          <div key={`${pair.a}${pair.b}`} style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
+                            borderRadius: 10, padding: '10px 14px',
+                          }}>
+                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{pair.a}</span>
+                            <span style={{ color: '#64748b', fontSize: 11, flexShrink: 0 }}>{pair.la}</span>
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                              <span style={{ color: '#475569', fontSize: 11 }}>écart</span>
+                              <input type="number" min={1} max={50} value={thr}
+                                onChange={e => {
+                                  const val = Math.max(1, parseInt(e.target.value) || 1);
+                                  setStratForm(p => {
+                                    const cur = (p.mirror_pairs || []).filter(x =>
+                                      !((x.a === pair.a && x.b === pair.b) || (x.a === pair.b && x.b === pair.a)));
+                                    return { ...p, mirror_pairs: [...cur, { a: pair.a, b: pair.b, threshold: val }] };
+                                  });
+                                }}
+                                style={{ width: 58, padding: '6px 6px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.45)', borderRadius: 8, color: '#a5b4fc', fontSize: 17, fontWeight: 800, textAlign: 'center' }}
+                              />
+                            </div>
+                            <span style={{ color: '#64748b', fontSize: 11, flexShrink: 0, textAlign: 'right' }}>{pair.lb}</span>
+                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{pair.b}</span>
+                          </div>
                         );
                       })}
                     </div>
-
-                    {/* Seuil par paire — visible seulement pour les paires activées */}
-                    {(stratForm.mirror_pairs || []).length > 0 && (
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 11, color: '#6366f1', fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
-                          ⚙️ ÉCART DÉCLENCHEUR PAR PAIRE
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                          {(stratForm.mirror_pairs || []).map(p => {
-                            const pairDef = MIRROR_PAIRS.find(mp => (mp.a === p.a && mp.b === p.b) || (mp.a === p.b && mp.b === p.a));
-                            return (
-                              <div key={`${p.a}|${p.b}`} style={{
-                                display: 'flex', alignItems: 'center', gap: 12,
-                                padding: '8px 14px', borderRadius: 9,
-                                background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)',
-                              }}>
-                                <span style={{ fontWeight: 700, fontSize: 14, color: '#a5b4fc', minWidth: 80 }}>
-                                  {p.a} vs {p.b}
-                                </span>
-                                <span style={{ fontSize: 11, color: '#64748b', flex: 1 }}>
-                                  {pairDef?.desc}
-                                </span>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <label style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>Écart :</label>
-                                  <input
-                                    type="number" min="1" max="50"
-                                    placeholder={`(global: ${stratForm.threshold})`}
-                                    value={p.threshold ?? ''}
-                                    onChange={e => {
-                                      setStratForm(prev => ({
-                                        ...prev,
-                                        mirror_pairs: prev.mirror_pairs.map(mp =>
-                                          (mp.a === p.a && mp.b === p.b)
-                                            ? { ...mp, threshold: e.target.value === '' ? null : parseInt(e.target.value) }
-                                            : mp
-                                        ),
-                                      }));
-                                    }}
-                                    style={{
-                                      width: 80, padding: '5px 8px', borderRadius: 7,
-                                      background: '#1e1b2e', border: '1px solid rgba(99,102,241,0.5)',
-                                      color: '#a5b4fc', fontSize: 13, fontWeight: 700, textAlign: 'center',
-                                    }}
-                                  />
-                                  {!p.threshold && (
-                                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>
-                                      ↳ seuil global ({stratForm.threshold})
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <div style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#94a3b8', lineHeight: 1.6 }}>
-                      {(stratForm.mirror_pairs || []).length === 0
-                        ? '🔍 Aucune sélection = toutes les paires sont surveillées avec le seuil global'
-                        : `🎯 ${(stratForm.mirror_pairs || []).map(p => `${p.a} vs ${p.b} (écart: ${p.threshold ?? stratForm.threshold})`).join(' · ')}`
-                      }
+                    <div style={{ marginTop: 10, fontSize: 11, color: '#6366f1', lineHeight: 1.5, padding: '7px 10px', borderRadius: 7, background: 'rgba(99,102,241,0.06)' }}>
+                      Dès qu'un costume dépasse l'autre de l'écart configuré, le costume en retard est prédit.
                     </div>
                   </div>
                 )}
 
+                </>)}
+
                 {/* Numéro à prédire (+1, +2, ...) */}
-                <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
@@ -2205,9 +2327,10 @@ export default function Admin() {
                       </div>
                     );
                   })()}
-                </div>
+                </div>}
 
                 {/* ── Rattrapages max par stratégie ── */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Rattrapages max — jeux supplémentaires si la carte prédite est absente
@@ -2253,6 +2376,7 @@ export default function Admin() {
                     })()}
                   </div>
                 </div>
+                )}
 
                 {/* Visibilité */}
                 <div>
@@ -2274,10 +2398,10 @@ export default function Admin() {
               </div>
 
               {/* ══════════════ SECTION 2 — SÉQUENCES DE RELANCE ══════════════ */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 14px' }}>
-                <div style={{ flex: 1, height: 1, background: 'rgba(251,146,60,0.3)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#fb923c', letterSpacing: 1.5, textTransform: 'uppercase' }}>② Séquences de Relance</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(251,146,60,0.3)' }} />
+              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)' }}>
+                <span style={{ fontSize: 13 }}>🔁</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#fb923c', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Séquences de Relance</span>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2397,30 +2521,18 @@ export default function Admin() {
                   </div>
                 </>)}
               </div>
-
-              {/* ══════════════ SECTION 3 — TELEGRAM ══════════════ */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 14px' }}>
-                <div style={{ flex: 1, height: 1, background: 'rgba(34,158,217,0.3)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#229ed9', letterSpacing: 1.5, textTransform: 'uppercase' }}>③ Envoi Telegram (optionnel)</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(34,158,217,0.3)' }} />
-              </div>
-
-              {/* Telegram configuré via l'onglet Canaux Telegram */}
-              <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(34,158,217,0.07)', border: '1px solid rgba(34,158,217,0.2)', fontSize: 12, color: '#64748b' }}>
-                ✈️ La configuration du canal Telegram (token + ID) se fait dans l'onglet <strong style={{ color: '#229ed9' }}>Canaux Telegram</strong>.
-              </div>
+              </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 14px' }}>
-                <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.2)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.5, textTransform: 'uppercase' }}>④ Mappings de prédiction</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(148,163,184,0.2)' }} />
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
+                <span style={{ fontSize: 13 }}>🗺️</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
               </div>
               )}
 
-              {/* Presets de combinaison — masqué pour absence_apparition uniquement */}
-              {stratForm.mode !== 'absence_apparition' && <div style={{ marginTop: 0 }}>
+              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -2440,8 +2552,8 @@ export default function Admin() {
                 </div>
               </div>}
 
-              {/* Mappings manuels — multi-sélection avec rotation — masqué pour absence_apparition uniquement */}
-              {stratForm.mode !== 'absence_apparition' && <div style={{ marginTop: 16 }}>
+              {/* Mappings manuels — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -2518,10 +2630,10 @@ export default function Admin() {
               </div>}
 
               {/* ══════════════ SECTION 5 — EXCEPTIONS ══════════════ */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '22px 0 14px' }}>
-                <div style={{ flex: 1, height: 1, background: 'rgba(239,68,68,0.25)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#f87171', letterSpacing: 1.5, textTransform: 'uppercase' }}>⑤ Règles d'exception (optionnel)</span>
-                <div style={{ flex: 1, height: 1, background: 'rgba(239,68,68,0.25)' }} />
+              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
+                <span style={{ fontSize: 13 }}>🚫</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#f87171', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Règles d'exception (optionnel)</span>
               </div>
 
               {/* ── Section Exceptions ─────────────────────────────── */}
@@ -2653,6 +2765,7 @@ export default function Admin() {
                   );
                 })}
               </div>
+              </>}
 
               {/* ── Boutons d'action ── */}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
@@ -2960,6 +3073,27 @@ export default function Admin() {
                     <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{v}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* CSS personnalisé actif */}
+          {customCssInfo.length > 0 && (
+            <div style={{ borderTop: '1px solid rgba(52,211,153,0.15)', paddingTop: 12, marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#34d399' }}>
+                  💉 CSS personnalisé actif — {customCssInfo.length} caractères (injecté sans rebuild)
+                </div>
+                <button
+                  className="btn btn-sm"
+                  style={{ fontSize: 11, color: '#f87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}
+                  onClick={async () => {
+                    if (!confirm('Supprimer tout le CSS personnalisé ?')) return;
+                    await fetch('/api/admin/custom-css', { method: 'DELETE', credentials: 'include' });
+                    setCustomCssInfo({ css: '', length: 0 });
+                    injectCustomCss('');
+                  }}
+                >🗑️ Supprimer</button>
               </div>
             </div>
           )}
@@ -3981,6 +4115,122 @@ export default function Admin() {
               <button className="btn btn-ghost btn-sm" onClick={() => setVisModal(null)}>Annuler</button>
               <button className="btn btn-gold btn-sm" onClick={saveVisibility}>💾 Enregistrer</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ PANEL STRATÉGIE ALÉATOIRE ══════════════ */}
+      {aleatPanel && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setAleatPanel(null); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
+          <div style={{ background: '#0f0d1a', border: '1px solid rgba(99,102,241,0.45)', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '90vh', overflowY: 'auto', position: 'relative', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>🎲 Stratégie Aléatoire</div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: '#e2e8f0' }}>{aleatPanel.stratName}</div>
+              </div>
+              <button onClick={() => setAleatPanel(null)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: 16, cursor: 'pointer', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
+            </div>
+
+            {/* STEP 1 — Choisir la main */}
+            {aleatPanel.step === 'hand' && (
+              <div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 18, textAlign: 'center' }}>Choisissez la main à prédire :</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <button
+                    onClick={() => setAleatPanel(p => ({ ...p, hand: 'joueur', step: 'number' }))}
+                    style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(239,68,68,0.45)', background: 'rgba(239,68,68,0.09)', cursor: 'pointer', color: '#f87171', fontWeight: 800, fontSize: 22, textAlign: 'center' }}
+                  >
+                    ❤️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Joueur</span>
+                  </button>
+                  <button
+                    onClick={() => setAleatPanel(p => ({ ...p, hand: 'banquier', step: 'number' }))}
+                    style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.09)', cursor: 'pointer', color: '#4ade80', fontWeight: 800, fontSize: 22, textAlign: 'center' }}
+                  >
+                    ♣️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Banquier</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2 — Saisir le numéro */}
+            {aleatPanel.step === 'number' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <button onClick={() => setAleatPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '' }))} style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0 }}>← Retour</button>
+                  <span style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 700 }}>{aleatPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</span>
+                </div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>Numéro de tour à prédire (1–1440) :</label>
+                <input
+                  type="number" min="1" max="1440"
+                  value={aleatPanel.gameInput}
+                  onChange={e => setAleatPanel(p => ({ ...p, gameInput: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && submitAleatPrediction()}
+                  placeholder="ex: 145"
+                  autoFocus
+                  style={{ width: '100%', padding: '16px', background: '#1a1730', border: '2px solid rgba(99,102,241,0.45)', borderRadius: 12, color: '#e2e8f0', fontSize: 26, fontWeight: 800, textAlign: 'center', boxSizing: 'border-box', marginBottom: 14, outline: 'none' }}
+                />
+                <button
+                  onClick={submitAleatPrediction}
+                  disabled={!aleatPanel.gameInput}
+                  style={{ width: '100%', padding: '15px', borderRadius: 12, border: 'none', cursor: aleatPanel.gameInput ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 14, background: aleatPanel.gameInput ? 'linear-gradient(135deg,#6366f1,#a855f7)' : 'rgba(99,102,241,0.15)', color: aleatPanel.gameInput ? '#fff' : '#6b7280', transition: 'all 0.2s' }}
+                >
+                  🎯 Lancer la prédiction
+                </button>
+              </div>
+            )}
+
+            {/* STEP 3 — Résultat */}
+            {aleatPanel.step === 'result' && aleatPanel.result && (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 64, marginBottom: 6 }}>{aleatPanel.result.suit_emoji}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>Tour #{aleatPanel.result.game_number}</div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
+                  {aleatPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} → <strong style={{ color: '#a5b4fc' }}>{aleatPanel.result.predicted_suit}</strong> prédit
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 20, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)', color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 22 }}>
+                  <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#fbbf24', animation: 'pulse 1.5s infinite' }} />
+                  En cours de vérification par le moteur…
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button
+                    onClick={() => setAleatPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '', result: null }))}
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}
+                  >🎲 Nouveau</button>
+                  <button
+                    onClick={() => setAleatPanel(p => ({ ...p, step: 'number', result: null, gameInput: '' }))}
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.12)', color: '#c084fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}
+                  >🔢 Autre numéro</button>
+                </div>
+              </div>
+            )}
+
+            {/* Historique de session */}
+            {(aleatPanel.history || []).length > 0 && (
+              <div style={{ marginTop: 24, borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 16 }}>
+                <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Historique de session</div>
+                {[...(aleatPanel.history || [])].reverse().map((h, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', marginBottom: 7 }}>
+                    <span style={{ fontSize: 22 }}>{h.suit_emoji}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Tour #{h.game_number}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{h.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} — {h.predicted_suit}</div>
+                    </div>
+                    <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 700, whiteSpace: 'nowrap',
+                      background: h.status === 'gagne' ? 'rgba(34,197,94,0.18)' : h.status === 'perdu' ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.12)',
+                      color:      h.status === 'gagne' ? '#4ade80'           : h.status === 'perdu' ? '#f87171'           : '#fbbf24',
+                      border:     `1px solid ${h.status === 'gagne' ? 'rgba(34,197,94,0.35)' : h.status === 'perdu' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.3)'}`,
+                    }}>
+                      {h.status === 'gagne' ? '✅ Gagné' : h.status === 'perdu' ? '❌ Perdu' : '⏳'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

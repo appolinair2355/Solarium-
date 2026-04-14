@@ -136,6 +136,7 @@ export default function Dashboard() {
   const { strategy } = useParams();
 
   const [customStrategies, setCustomStrategies] = useState([]); // list from /api/admin/strategies
+  const [aleatDashPanel, setAleatDashPanel]     = useState(null); // { stratId, stratName, step, hand, gameInput, result, history }
 
   // Build CHANNELS dynamically — add custom strategies as S7, S8, etc.
   const CUSTOM_COLORS = [
@@ -242,6 +243,52 @@ export default function Dashboard() {
       .then(d => d && setDailyBilan(d))
       .catch(() => {});
   }, []);
+
+  // Stratégie courante (pour mode aleatoire)
+  const currentStrat = customStrategies.find(s => `S${s.id}` === channelId) || null;
+  const isAleatoire  = currentStrat?.mode === 'aleatoire';
+
+  const submitAleatDashPrediction = async () => {
+    if (!aleatDashPanel || !aleatDashPanel.gameInput) return;
+    const num = parseInt(aleatDashPanel.gameInput);
+    if (isNaN(num) || num < 1 || num > 1440) return;
+    try {
+      const r = await fetch(`/api/admin/strategies/${aleatDashPanel.stratId}/aleatoire-predict`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hand: aleatDashPanel.hand, game_number: num }),
+      });
+      const data = await r.json();
+      if (!r.ok) { alert(data.error || 'Erreur'); return; }
+      const newEntry = { game_number: data.game_number, predicted_suit: data.predicted_suit, suit_emoji: data.suit_emoji, hand: aleatDashPanel.hand, status: 'en_cours' };
+      setAleatDashPanel(p => ({ ...p, step: 'result', result: data, gameInput: '', history: [...(p.history || []), newEntry] }));
+    } catch (e) { alert('Erreur réseau : ' + e.message); }
+  };
+
+  // Polling statut prédictions aléatoires (Dashboard)
+  useEffect(() => {
+    if (!aleatDashPanel) return;
+    const pending = (aleatDashPanel.history || []).filter(h => h.status === 'en_cours');
+    if (pending.length === 0) return;
+    const iv = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/predictions?limit=100`, { credentials: 'include' });
+        if (!r.ok) return;
+        const rows = await r.json();
+        setAleatDashPanel(p => {
+          if (!p) return p;
+          const updated = (p.history || []).map(h => {
+            if (h.status !== 'en_cours') return h;
+            const found = rows.find(row => row.game_number === h.game_number && row.predicted_suit === h.predicted_suit && String(row.strategy) === String(p.stratId));
+            if (found && (found.status === 'gagne' || found.status === 'perdu')) return { ...h, status: found.status };
+            return h;
+          });
+          return { ...p, history: updated };
+        });
+      } catch {}
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [aleatDashPanel?.history?.map(h => h.game_number + h.status).join(','), aleatDashPanel?.stratId]); // eslint-disable-line
 
   const dismissAlert = useCallback(() => {
     if (stopRingRef.current) { stopRingRef.current(); stopRingRef.current = null; }
@@ -773,9 +820,23 @@ export default function Dashboard() {
                 {!activePred ? (
                   /* ── Aucune prédiction ── */
                   <div className="current-pred-empty">
-                    <div style={{ fontSize: '2.8rem', marginBottom: 6, opacity: 0.4 }}>{channel.emoji}</div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#64748b' }}>Aucune prédiction active</div>
-                    <div style={{ fontSize: '0.78rem', marginTop: 4, color: '#475569' }}>Le moteur analyse les parties en cours…</div>
+                    {isAleatoire && user?.is_admin ? (
+                      <>
+                        <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>🎲</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#a5b4fc', marginBottom: 6 }}>Stratégie Aléatoire</div>
+                        <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 14 }}>Lancez une prédiction manuelle</div>
+                        <button
+                          onClick={() => setAleatDashPanel({ stratId: currentStrat.id, stratName: currentStrat.name, step: 'hand', hand: null, gameInput: '', result: null, history: [] })}
+                          style={{ padding: '12px 28px', borderRadius: 12, border: '2px solid rgba(99,102,241,0.6)', background: 'rgba(99,102,241,0.18)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 800, fontSize: 14, letterSpacing: 0.3 }}
+                        >🎲 Prédire maintenant</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '2.8rem', marginBottom: 6, opacity: 0.4 }}>{channel.emoji}</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#64748b' }}>Aucune prédiction active</div>
+                        <div style={{ fontSize: '0.78rem', marginTop: 4, color: '#475569' }}>Le moteur analyse les parties en cours…</div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -978,6 +1039,111 @@ export default function Dashboard() {
           </>
         )}
       </div>
+
+      {/* ══ PANEL ALÉATOIRE (Dashboard) ══ */}
+      {aleatDashPanel && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setAleatDashPanel(null); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        >
+          <div style={{ background: '#0f0d1a', border: '1px solid rgba(99,102,241,0.45)', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>🎲 Stratégie Aléatoire</div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: '#e2e8f0' }}>{aleatDashPanel.stratName}</div>
+              </div>
+              <button onClick={() => setAleatDashPanel(null)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: 16, cursor: 'pointer', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
+            </div>
+
+            {/* STEP 1 — Main */}
+            {aleatDashPanel.step === 'hand' && (
+              <div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 18, textAlign: 'center' }}>Choisissez la main à prédire :</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, hand: 'joueur', step: 'number' }))}
+                    style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(239,68,68,0.45)', background: 'rgba(239,68,68,0.09)', cursor: 'pointer', color: '#f87171', fontWeight: 800, fontSize: 22, textAlign: 'center' }}>
+                    ❤️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Joueur</span>
+                  </button>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, hand: 'banquier', step: 'number' }))}
+                    style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.09)', cursor: 'pointer', color: '#4ade80', fontWeight: 800, fontSize: 22, textAlign: 'center' }}>
+                    ♣️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Banquier</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2 — Numéro */}
+            {aleatDashPanel.step === 'number' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '' }))} style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0 }}>← Retour</button>
+                  <span style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 700 }}>{aleatDashPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</span>
+                </div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>Numéro de tour à prédire (1–1440) :</label>
+                <input
+                  type="number" min="1" max="1440"
+                  value={aleatDashPanel.gameInput}
+                  onChange={e => setAleatDashPanel(p => ({ ...p, gameInput: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && submitAleatDashPrediction()}
+                  placeholder="ex: 145"
+                  autoFocus
+                  style={{ width: '100%', padding: '16px', background: '#1a1730', border: '2px solid rgba(99,102,241,0.45)', borderRadius: 12, color: '#e2e8f0', fontSize: 26, fontWeight: 800, textAlign: 'center', boxSizing: 'border-box', marginBottom: 14, outline: 'none' }}
+                />
+                <button
+                  onClick={submitAleatDashPrediction}
+                  disabled={!aleatDashPanel.gameInput}
+                  style={{ width: '100%', padding: '15px', borderRadius: 12, border: 'none', cursor: aleatDashPanel.gameInput ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 14, background: aleatDashPanel.gameInput ? 'linear-gradient(135deg,#6366f1,#a855f7)' : 'rgba(99,102,241,0.15)', color: aleatDashPanel.gameInput ? '#fff' : '#6b7280' }}
+                >🎯 Lancer la prédiction</button>
+              </div>
+            )}
+
+            {/* STEP 3 — Résultat */}
+            {aleatDashPanel.step === 'result' && aleatDashPanel.result && (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 64, marginBottom: 6 }}>{aleatDashPanel.result.suit_emoji}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>Tour #{aleatDashPanel.result.game_number}</div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
+                  {aleatDashPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} → <strong style={{ color: '#a5b4fc' }}>{aleatDashPanel.result.predicted_suit}</strong> prédit
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 20, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)', color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 22 }}>
+                  ⏳ En cours de vérification par le moteur…
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '', result: null }))}
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🎲 Nouveau</button>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'number', result: null, gameInput: '' }))}
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.12)', color: '#c084fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🔢 Autre numéro</button>
+                </div>
+              </div>
+            )}
+
+            {/* Historique de session */}
+            {(aleatDashPanel.history || []).length > 0 && (
+              <div style={{ marginTop: 24, borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 16 }}>
+                <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Historique de session</div>
+                {[...(aleatDashPanel.history || [])].reverse().map((h, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', marginBottom: 7 }}>
+                    <span style={{ fontSize: 22 }}>{h.suit_emoji}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Tour #{h.game_number}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{h.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} — {h.predicted_suit}</div>
+                    </div>
+                    <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 700, whiteSpace: 'nowrap',
+                      background: h.status === 'gagne' ? 'rgba(34,197,94,0.18)' : h.status === 'perdu' ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.12)',
+                      color:      h.status === 'gagne' ? '#4ade80'           : h.status === 'perdu' ? '#f87171'           : '#fbbf24',
+                      border:     `1px solid ${h.status === 'gagne' ? 'rgba(34,197,94,0.35)' : h.status === 'perdu' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.3)'}`,
+                    }}>
+                      {h.status === 'gagne' ? '✅ Gagné' : h.status === 'perdu' ? '❌ Perdu' : '⏳'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
