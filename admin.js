@@ -253,9 +253,10 @@ router.get('/strategies', async (req, res) => {
 });
 
 router.post('/strategies', requireAdmin, async (req, res) => {
+  console.log('[Strategy POST] Requête reçue:', JSON.stringify(req.body).substring(0, 200));
   try {
     const err = validateStrategyBody(req.body);
-    if (err) return res.status(400).json({ error: err });
+    if (err) { console.log('[Strategy POST] Validation échouée:', err); return res.status(400).json({ error: err }); }
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
@@ -310,13 +311,14 @@ router.post('/strategies', requireAdmin, async (req, res) => {
 });
 
 router.put('/strategies/:id', requireAdmin, async (req, res) => {
+  console.log('[Strategy PUT] Requête reçue id=' + req.params.id);
   try {
     const id  = parseInt(req.params.id);
     const err = validateStrategyBody(req.body);
-    if (err) return res.status(400).json({ error: err });
+    if (err) { console.log('[Strategy PUT] Validation échouée:', err); return res.status(400).json({ error: err }); }
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
-    if (idx === -1) return res.status(404).json({ error: 'Stratégie introuvable' });
+    if (idx === -1) { console.log('[Strategy PUT] Stratégie introuvable id=' + id); return res.status(404).json({ error: 'Stratégie introuvable' }); }
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
