@@ -104,6 +104,16 @@ app.get('/api/settings/ui-styles', async (req, res) => {
   } catch (e) { res.json({}); }
 });
 
+// ── CSS personnalisé (public — injecté dynamiquement sans rebuild) ───
+app.get('/api/settings/custom-css', async (req, res) => {
+  try {
+    const raw = await db.getSetting('custom_css');
+    res.setHeader('Content-Type', 'text/css; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(raw || '');
+  } catch (e) { res.status(200).send(''); }
+});
+
 // ── Message utilisateur → admin ─────────────────────────────────────
 app.post('/api/user/message-admin', async (req, res) => {
   try {
@@ -126,6 +136,19 @@ app.post('/api/user/message-admin', async (req, res) => {
     if (messages.length > 100) messages.splice(100);
     await db.setSetting('user_messages', JSON.stringify(messages));
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Mes messages (utilisateur : voir ses propres messages + réponses admin) ──
+app.get('/api/user/my-messages', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    const raw = await db.getSetting('user_messages');
+    const all = raw ? JSON.parse(raw) : [];
+    const mine = all
+      .filter(m => m.userId === req.session.userId)
+      .map(m => ({ id: m.id, text: m.text, date: m.date, admin_reply: m.admin_reply || null }));
+    res.json(mine);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

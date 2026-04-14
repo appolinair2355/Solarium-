@@ -55,6 +55,9 @@ async function initDB() {
       );
       ALTER TABLE predictions ADD COLUMN IF NOT EXISTS player_cards TEXT;
       ALTER TABLE predictions ADD COLUMN IF NOT EXISTS banker_cards TEXT;
+      ALTER TABLE predictions ALTER COLUMN triggered_by TYPE TEXT;
+      ALTER TABLE predictions ALTER COLUMN predicted_suit TYPE TEXT;
+      ALTER TABLE predictions ALTER COLUMN strategy TYPE TEXT;
 
       CREATE TABLE IF NOT EXISTS telegram_config (
         id SERIAL PRIMARY KEY,

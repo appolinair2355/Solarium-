@@ -187,20 +187,37 @@ function normalizeMappings(raw) {
 }
 
 function validateStrategyBody(body) {
-  const { name, threshold, mode, mappings, visibility } = body;
+  const { name, threshold, mode, mappings, visibility, strategy_type } = body;
+  if (!name || !name.trim())         return 'Nom requis';
+  if (!['admin', 'all'].includes(visibility)) return 'Visibilité invalide';
+  const offset = parseInt(body.prediction_offset);
+  if (!isNaN(offset) && (offset < 1 || offset > 10)) return 'Décalage de prédiction invalide (1–10)';
+
+  if (strategy_type === 'combinaison') {
+    const sources = Array.isArray(body.multi_source_ids) ? body.multi_source_ids : [];
+    if (sources.length < 1) return 'Au moins 1 stratégie source requise pour la combinaison';
+    return null;
+  }
+
+  if (mode === 'relance') {
+    const rules = Array.isArray(body.relance_rules) ? body.relance_rules : [];
+    if (rules.length < 1) return 'Au moins 1 stratégie source requise pour les séquences de relance';
+    return null;
+  }
+
+  if (mode === 'aleatoire') {
+    return null;
+  }
+
   const B = parseInt(threshold);
-  if (!name || !name.trim())                            return 'Nom requis';
-  if (isNaN(B) || B < 1 || B > 50)                     return 'Seuil B invalide (1–50)';
+  if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir'].includes(mode)) return 'Mode invalide';
-  if (!['admin', 'all'].includes(visibility))           return 'Visibilité invalide';
   const norm = normalizeMappings(mappings);
   if (!norm) return 'Mappings invalides';
   for (const s of SUITS) {
     if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
     if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
   }
-  const offset = parseInt(body.prediction_offset);
-  if (!isNaN(offset) && (offset < 1 || offset > 10)) return 'Décalage de prédiction invalide (1–10)';
   return null;
 }
 
@@ -232,23 +249,34 @@ router.post('/strategies', requireAdmin, async (req, res) => {
   try {
     const err = validateStrategyBody(req.body);
     if (err) return res.status(400).json({ error: err });
-    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
-    const normalizedMappings = normalizeMappings(mappings);
+    const isComb     = strategy_type === 'combinaison';
+    const isRelance  = mode === 'relance';
+    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
       id: nextId,
       name: name.trim().slice(0, 40),
-      threshold: parseInt(threshold),
-      mode, mappings: normalizedMappings,
+      strategy_type: isComb ? 'combinaison' : 'simple',
+      ...(isComb
+        ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
+            multi_require:    multi_require || 'any',
+            mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({ strategy_id: String(r.strategy_id), losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 3) })) : [] }
+        : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
       exceptions,
       prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
       hand: hand === 'banquier' ? 'banquier' : 'joueur',
+      loss_type: ['sec', 'rattrapage', 'martingale'].includes(loss_type) ? loss_type : 'rattrapage',
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
@@ -269,21 +297,32 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Stratégie introuvable' });
-    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format } = req.body;
+    const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets = parseTgTargets(req.body.tg_targets);
     const exceptions = parseExceptions(req.body.exceptions);
-    const normalizedMappings = normalizeMappings(mappings);
+    const isComb    = strategy_type === 'combinaison';
+    const isRelance = mode === 'relance';
+    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
-      threshold: parseInt(threshold),
-      mode, mappings: normalizedMappings,
+      strategy_type: isComb ? 'combinaison' : 'simple',
+      ...(isComb
+        ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
+            multi_require:    multi_require || 'any',
+            mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({ strategy_id: String(r.strategy_id), losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 3) })) : [] }
+        : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
       exceptions,
       prediction_offset: Math.max(1, parseInt(prediction_offset) || 1),
       hand: hand === 'banquier' ? 'banquier' : 'joueur',
+      loss_type: ['sec', 'rattrapage', 'martingale'].includes(loss_type) ? loss_type : 'rattrapage',
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
@@ -541,7 +580,7 @@ router.get('/users/:userId/visible', requireAdmin, async (req, res) => {
 
 router.post('/msg-format', requireAdmin, async (req, res) => {
   const id = parseInt(req.body.format_id);
-  if (!id || id < 1 || id > 6) return res.status(400).json({ error: 'Format invalide (1–6)' });
+  if (!id || id < 1 || id > 8) return res.status(400).json({ error: 'Format invalide (1–8)' });
   try {
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
@@ -623,10 +662,32 @@ const ALLOWED_CSS_VARS = [
   '--font-family-base', '--font-size-base', '--font-size-sm',
   '--border-radius-card', '--border-radius-btn',
   '--color-win', '--color-loss', '--color-pending',
+  '--color-primary', '--color-secondary', '--color-danger', '--color-success',
+  '--color-warning', '--color-info', '--color-surface', '--color-overlay',
+  '--shadow-card', '--shadow-btn', '--transition-base',
+  '--navbar-bg', '--navbar-border', '--navbar-text',
 ];
 
 async function applyUpdateBlock(type, data) {
   const result = { type, applied: 0, errors: [] };
+
+  // ── CSS personnalisé injecté dynamiquement (sans rebuild) ──────────
+  if (type === 'css') {
+    const css = data?.css;
+    if (!css || typeof css !== 'string') { result.errors.push('data.css doit être une chaîne CSS valide'); return result; }
+    const mode = data?.mode || 'replace'; // 'replace' | 'append'
+    let stored = '';
+    if (mode === 'append') {
+      const existing = await db.getSetting('custom_css');
+      stored = (existing || '') + '\n\n' + css;
+    } else {
+      stored = css;
+    }
+    await db.setSetting('custom_css', stored);
+    result.applied = 1;
+    result.detail = `CSS personnalisé ${mode === 'append' ? 'ajouté (append)' : 'remplacé'} — ${css.length} caractères — appliqué instantanément sans rebuild`;
+    return result;
+  }
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
@@ -658,11 +719,26 @@ async function applyUpdateBlock(type, data) {
         result.detail = (result.detail || '') + `\n• Mise à jour: "${item.name.trim()}"`;
       } else {
         const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
-        list.push({ id: nextId, name: item.name.trim(), threshold: parseInt(item.threshold), mode: item.mode,
-          mappings, visibility: item.visibility || 'admin', enabled: item.enabled !== false,
-          tg_targets, exceptions,
+        const isCombJson    = item.strategy_type === 'combinaison';
+        const isRelanceJson = item.mode === 'relance';
+        const isAleatJson   = item.mode === 'aleatoire';
+        list.push({
+          id: nextId,
+          name: item.name.trim(),
+          strategy_type: isCombJson ? 'combinaison' : 'simple',
+          mode: isCombJson ? 'multi_strategy' : item.mode,
+          threshold: (isAleatJson || isCombJson || isRelanceJson) ? 0 : (parseInt(item.threshold) || 0),
+          mappings: (isCombJson || isRelanceJson || isAleatJson) ? null : mappings,
+          multi_source_ids: isCombJson ? (Array.isArray(item.multi_source_ids) ? item.multi_source_ids.map(String) : []) : undefined,
+          multi_require: isCombJson ? (item.multi_require || 'any') : undefined,
+          relance_rules: isRelanceJson ? (Array.isArray(item.relance_rules) ? item.relance_rules : []) : undefined,
+          visibility: item.visibility || 'admin',
+          enabled: item.enabled !== false,
+          tg_targets,
+          exceptions,
           prediction_offset: Math.max(1, parseInt(item.prediction_offset) || 1),
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
+          loss_type: ['sec', 'rattrapage', 'martingale'].includes(item.loss_type) ? item.loss_type : 'rattrapage',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
           tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(8, parseInt(item.tg_format) || 1)) : null,
         });
@@ -876,6 +952,21 @@ router.delete('/ui-styles', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CSS personnalisé (admin) ─────────────────────────────────────────
+router.get('/custom-css', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('custom_css');
+    res.json({ css: raw || '', length: (raw || '').length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/custom-css', requireAdmin, async (req, res) => {
+  try {
+    await db.deleteSetting('custom_css');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Statut du build frontend ────────────────────────────────────────
 router.get('/build-status', requireAdmin, (req, res) => {
   res.json(BUILD_STATE);
@@ -885,6 +976,52 @@ router.post('/build-status/trigger', requireAdmin, (req, res) => {
   if (BUILD_STATE.status === 'building') return res.json({ ok: false, message: 'Build déjà en cours' });
   triggerRebuild();
   res.json({ ok: true, message: 'Build lancé' });
+});
+
+// ── Restauration COMPLÈTE du système (tous les .bak + CSS + styles) ─
+router.post('/restore-all', requireAdmin, async (req, res) => {
+  try {
+    const restored = [];
+    let needsRebuild = false;
+
+    // 1. Restaurer tous les fichiers .bak
+    function scanAndRestore(dir) {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && !['node_modules', '.git', 'dist'].includes(entry.name)) {
+          scanAndRestore(full);
+        } else if (entry.isFile() && entry.name.endsWith('.bak')) {
+          const orig = full.slice(0, -4);
+          try {
+            fs.copyFileSync(full, orig);
+            fs.unlinkSync(full);
+            const rel = path.relative(PROJECT_ROOT, orig);
+            restored.push(rel);
+            if (rel.startsWith('src/') || rel.endsWith('.js')) needsRebuild = true;
+          } catch {}
+        }
+      }
+    }
+    scanAndRestore(PROJECT_ROOT);
+
+    // 2. Supprimer le CSS personnalisé
+    await db.deleteSetting('custom_css').catch(() => {});
+
+    // 3. Réinitialiser les styles CSS
+    await db.setSetting('ui_styles', '{}').catch(() => {});
+
+    // 4. Déclencher un rebuild si des fichiers source ont été restaurés
+    if (needsRebuild) {
+      const { exec } = require('child_process');
+      exec('npx vite build', { cwd: PROJECT_ROOT }, (err) => {
+        if (err) console.error('[RestoreAll] rebuild error:', err.message);
+        else console.log('[RestoreAll] Rebuild terminé');
+      });
+    }
+
+    res.json({ ok: true, restored, needsRebuild, css_cleared: true, styles_reset: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Restauration d'un fichier sauvegardé (.bak) ────────────────────
@@ -937,6 +1074,22 @@ router.post('/user-messages/:id/read', requireAdmin, async (req, res) => {
     const messages = raw ? JSON.parse(raw) : [];
     const msg = messages.find(m => m.id === id);
     if (msg) msg.read = true;
+    await db.setSetting('user_messages', JSON.stringify(messages));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/user-messages/:id/reply', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { text } = req.body;
+    if (!text || !String(text).trim()) return res.status(400).json({ error: 'Réponse vide' });
+    const raw = await db.getSetting('user_messages');
+    const messages = raw ? JSON.parse(raw) : [];
+    const msg = messages.find(m => m.id === id);
+    if (!msg) return res.status(404).json({ error: 'Message non trouvé' });
+    msg.admin_reply = { text: String(text).trim().slice(0, 1000), date: new Date().toISOString() };
+    msg.read = true;
     await db.setSetting('user_messages', JSON.stringify(messages));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1044,6 +1197,49 @@ router.post('/render-db/reset', requireAdmin, async (req, res) => {
     if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
     await renderSync.handleGameOne(1);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Stratégie Aléatoire : prédiction manuelle via le site ─────────────────────
+router.post('/strategies/:id/aleatoire-predict', requireAdmin, async (req, res) => {
+  const stratId = parseInt(req.params.id);
+  const { hand, game_number } = req.body;
+  if (!['joueur', 'banquier'].includes(hand))
+    return res.status(400).json({ error: 'Main invalide (joueur|banquier)' });
+  const num = parseInt(game_number);
+  if (isNaN(num) || num < 1 || num > 1440)
+    return res.status(400).json({ error: 'Numéro invalide (1–1440)' });
+  try {
+    const strats = await getStrategies();
+    const strat = strats.find(s => s.id === stratId);
+    if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
+    if (strat.mode !== 'aleatoire') return res.status(400).json({ error: 'Stratégie non aléatoire' });
+
+    // Vérifier qu'une prédiction n'existe pas déjà pour ce tour sur cette stratégie
+    try {
+      const existing = await db.pool.query(
+        `SELECT 1 FROM predictions WHERE strategy=$1 AND game_number=$2 LIMIT 1`,
+        [stratId, num]
+      );
+      if (existing.rows.length > 0)
+        return res.status(400).json({ error: `Une prédiction existe déjà pour le tour #${num}` });
+    } catch {}
+
+    // Calcul du costume par cycle de 4
+    const SUITS_JOUEUR   = ['♥', '♣', '♦', '♠'];
+    const SUITS_BANQUIER = ['♣', '♥', '♠', '♦'];
+    const arr  = hand === 'banquier' ? SUITS_BANQUIER : SUITS_JOUEUR;
+    const suit = arr[(num - 1) % 4];
+    const SUIT_EMOJI = { '♥': '❤️', '♣': '♣️', '♦': '♦️', '♠': '♠️' };
+
+    await db.createPrediction({
+      strategy: stratId,
+      game_number: num,
+      predicted_suit: suit,
+      triggered_by: `aleatoire_web:${hand}`,
+    });
+
+    res.json({ success: true, game_number: num, predicted_suit: suit, suit_emoji: SUIT_EMOJI[suit] || suit, hand });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

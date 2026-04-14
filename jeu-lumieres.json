@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "data": {
+    "files": [
+      {
+        "path": "src/index.css",
+        "append": "\n\n/* ═══════════════════════════════════════ */\n/* ══        JEU DE LUMIÈRES            ══ */\n/* ═══════════════════════════════════════ */\n\n@keyframes jeu-lumieres {\n  0%   { box-shadow: 0 0 50px 20px #22c55e, 0 0 100px 40px rgba(34, 197, 94, 0.25), inset 0 0 60px rgba(34, 197, 94, 0.05); }\n  45%  { box-shadow: 0 0 50px 20px #22c55e, 0 0 100px 40px rgba(34, 197, 94, 0.25), inset 0 0 60px rgba(34, 197, 94, 0.05); }\n  50%  { box-shadow: 0 0 50px 20px #ef4444, 0 0 100px 40px rgba(239, 68, 68, 0.25), inset 0 0 60px rgba(239, 68, 68, 0.05); }\n  95%  { box-shadow: 0 0 50px 20px #ef4444, 0 0 100px 40px rgba(239, 68, 68, 0.25), inset 0 0 60px rgba(239, 68, 68, 0.05); }\n  100% { box-shadow: 0 0 50px 20px #22c55e, 0 0 100px 40px rgba(34, 197, 94, 0.25), inset 0 0 60px rgba(34, 197, 94, 0.05); }\n}\n\nbody {\n  animation: jeu-lumieres 10s ease-in-out infinite;\n  overflow: hidden;\n}\n"
+      }
+    ],
+    "rebuild": true
+  }
+}

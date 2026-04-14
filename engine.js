@@ -85,8 +85,10 @@ class Engine {
     this.custom = {};
     this.defaultStratTg = {}; // { C1: {bot_token, channel_id}, ... }
 
-    this.lossStreaks   = {}; // { 'C1': 0, 'C2': 0, 'S7': 0, ... } — pertes consécutives
-    this.lossSequences = []; // chargé depuis la DB
+    this.lossStreaks    = {}; // { stratId: N } — pertes consécutives
+    this.rattrapStreaks = {}; // { stratId: { level: N } } — rattrapages consécutifs par niveau
+    this.comboCounters  = {}; // { stratId: { level: N } } — total événements (perte+Rn)
+    this.lossSequences  = []; // chargé depuis la DB
 
     for (const s of ALL_SUITS) {
       this.c1.absences[s] = 0;
@@ -115,24 +117,116 @@ class Engine {
   _onStratLoss(stratId, gn, suit) {
     this.lossStreaks[stratId] = (this.lossStreaks[stratId] || 0) + 1;
     const streak = this.lossStreaks[stratId];
+
+    // Une perte brise les rattrapages consécutifs
+    if (!this.rattrapStreaks[stratId]) this.rattrapStreaks[stratId] = {};
+    for (const lv of [1,2,3,4,5]) this.rattrapStreaks[stratId][lv] = 0;
+
+    // Une perte compte dans les compteurs combo pour tous les niveaux
+    if (!this.comboCounters[stratId]) this.comboCounters[stratId] = {};
+    for (const lv of [1,2,3,4,5]) {
+      this.comboCounters[stratId][lv] = (this.comboCounters[stratId][lv] || 0) + 1;
+    }
+
+    // Séquences de relance (legacy lossSequences)
     for (const seq of this.lossSequences) {
       if (!seq.enabled) continue;
       for (const rule of (seq.rules || [])) {
         if (rule.strategy_id !== stratId) continue;
         const thr = parseInt(rule.losses_threshold) || 1;
         if (streak >= thr) {
-          console.log(`[Séquence] "${seq.name}" → ${stratId} a ${streak} perte(s) consécutive(s) (seuil: ${thr}) → relance au jeu #${gn + 1}`);
+          console.log(`[Séquence] "${seq.name}" → ${stratId} ${streak} perte(s) (seuil ${thr}) → relance #${gn + 1}`);
           this.lossStreaks[stratId] = 0;
-          // Force une nouvelle prédiction pour ce canal au prochain jeu
           this._forceNextPrediction(stratId, gn + 1, suit);
         }
       }
     }
+
+    // Stratégies mode='relance'
+    for (const [rid, rstate] of Object.entries(this.custom)) {
+      const rcfg = rstate.config;
+      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
+      for (const rule of (rcfg.relance_rules || [])) {
+        if (rule.strategy_id !== stratId) continue;
+        const relanceId = `S${rid}`;
+        let fired = false;
+
+        // Condition A : pertes consécutives
+        const lThr = rule.losses_threshold != null ? parseInt(rule.losses_threshold) : null;
+        if (!fired && lThr !== null && streak >= lThr) {
+          fired = true;
+          console.log(`[Relance] "${rcfg.name}" → ${stratId} ${streak} perte(s) (seuil ${lThr}) → ${relanceId} #${gn + 1}`);
+          this.lossStreaks[stratId] = 0;
+        }
+
+        // Condition C : combo perte+Rn
+        const cLevel = rule.combo_level != null ? parseInt(rule.combo_level) : null;
+        const cCount = parseInt(rule.combo_count) || 1;
+        if (!fired && cLevel !== null) {
+          const cur = (this.comboCounters[stratId] || {})[cLevel] || 0;
+          if (cur >= cCount) {
+            fired = true;
+            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${cLevel} ×${cur} (seuil ×${cCount}) → ${relanceId} #${gn + 1}`);
+            this.comboCounters[stratId][cLevel] = 0;
+          }
+        }
+
+        if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
+      }
+    }
   }
 
-  // Réinitialise le streak après un gain
+  // Réinitialise les streaks de pertes après un gain
   _onStratWin(stratId) {
     this.lossStreaks[stratId] = 0;
+  }
+
+  // Appelé quand une prédiction est gagnée avec N rattrapages
+  _onStratRattrapage(stratId, gn, suit, R) {
+    // Suivi rattrapages consécutifs par niveau
+    if (!this.rattrapStreaks[stratId]) this.rattrapStreaks[stratId] = {};
+    for (const lv of [1,2,3,4,5]) {
+      if (lv !== R) this.rattrapStreaks[stratId][lv] = 0; // brise les autres niveaux
+    }
+    this.rattrapStreaks[stratId][R] = (this.rattrapStreaks[stratId][R] || 0) + 1;
+    const rStreak = this.rattrapStreaks[stratId][R];
+
+    // Un gain avec Rn compte aussi dans le compteur combo pour ce niveau
+    if (!this.comboCounters[stratId]) this.comboCounters[stratId] = {};
+    this.comboCounters[stratId][R] = (this.comboCounters[stratId][R] || 0) + 1;
+
+    for (const [rid, rstate] of Object.entries(this.custom)) {
+      const rcfg = rstate.config;
+      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
+      for (const rule of (rcfg.relance_rules || [])) {
+        if (rule.strategy_id !== stratId) continue;
+        const relanceId = `S${rid}`;
+        let fired = false;
+
+        // Condition B : rattrapages consécutifs
+        const rLevel = rule.rattrapage_level != null ? parseInt(rule.rattrapage_level) : null;
+        const rCount = parseInt(rule.rattrapage_count) || 1;
+        if (!fired && rLevel !== null && rLevel === R && rStreak >= rCount) {
+          fired = true;
+          console.log(`[Relance] "${rcfg.name}" → ${stratId} R${R} consécutif ×${rStreak} (seuil ×${rCount}) → ${relanceId} #${gn + 1}`);
+          this.rattrapStreaks[stratId][R] = 0;
+        }
+
+        // Condition C : combo perte+Rn
+        const cLevel = rule.combo_level != null ? parseInt(rule.combo_level) : null;
+        const cCount = parseInt(rule.combo_count) || 1;
+        if (!fired && cLevel !== null && cLevel === R) {
+          const cur = (this.comboCounters[stratId] || {})[R] || 0;
+          if (cur >= cCount) {
+            fired = true;
+            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${R} ×${cur} (seuil ×${cCount}) → ${relanceId} #${gn + 1}`);
+            this.comboCounters[stratId][R] = 0;
+          }
+        }
+
+        if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
+      }
+    }
   }
 
   // Injecte une prédiction forcée (relance) sur le prochain jeu
@@ -202,10 +296,121 @@ class Engine {
     await this._processC2(gn, suits, pCards, bCards);
     await this._processC3(gn, suits, pCards, bCards);
     await this._processDC(gn, suits, pCards, bCards);
+    // Passe 1 : stratégies simples (hors multi_strategy et relance)
     for (const [id, state] of Object.entries(this.custom)) {
-      if (state.config?.enabled) {
+      if (state.config?.enabled && state.config?.mode !== 'multi_strategy' && state.config?.mode !== 'relance') {
         await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
       }
+    }
+    // Passe 2 : stratégies combinaison (peuvent lire les pending des simples)
+    for (const [id, state] of Object.entries(this.custom)) {
+      if (state.config?.enabled && state.config?.mode === 'multi_strategy') {
+        await this._processMultiStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
+      }
+    }
+    // Passe 3 : stratégies relance (résolution de pending uniquement — le déclenchement se fait via _onStratLoss)
+    for (const [id, state] of Object.entries(this.custom)) {
+      if (state.config?.enabled && state.config?.mode === 'relance') {
+        await this._processRelanceStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
+      }
+    }
+  }
+
+  async _processMultiStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
+    if (!this.custom[id]) return;
+    const channelId = `S${id}`;
+    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
+    const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+      ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
+
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
+        state.lastOutcomes.push({ won, suit: ps });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        if (won) {
+          this._onStratWin(channelId);
+          if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
+        } else {
+          this._onStratLoss(channelId, gn, ps);
+        }
+      }, stratMaxR, stratTgOpts);
+    }
+
+    if (state.processed.has(gn)) return;
+    state.processed.add(gn);
+    state.history.push([...handSuits]);
+    if (state.history.length > 15) state.history.shift();
+
+    if (Object.keys(state.pending).length > 0) return;
+
+    const sources    = Array.isArray(cfg.multi_source_ids) ? cfg.multi_source_ids : [];
+    const matchMode  = cfg.multi_require || 'any';
+    const offset     = Math.max(1, parseInt(cfg.prediction_offset) || 1);
+    const targetGame = gn + offset;
+
+    // Resolve pending dict for any source ID (built-in or custom)
+    const _pendingFor = (sid) => {
+      const k = String(sid).toUpperCase();
+      if (k === 'C1') return this.c1.pending;
+      if (k === 'C2') return this.c2.pending;
+      if (k === 'C3') return this.c3.pending;
+      if (k === 'DC') return this.dc.pending;
+      const numId = parseInt(sid.toString().replace(/^S/i, ''));
+      return this.custom[numId]?.pending || null;
+    };
+
+    // Collect predictions emitted by source strategies for targetGame
+    const signals = [];
+    for (const srcId of sources) {
+      const pend = _pendingFor(srcId);
+      if (!pend) continue;
+      const pred = pend[targetGame];
+      if (pred) signals.push({ suit: pred.suit, srcId });
+    }
+
+    let triggered = false;
+    const activeSources = sources.filter(sid => _pendingFor(sid) !== null).length;
+    if (matchMode === 'all' && signals.length === activeSources && signals.length > 0) {
+      triggered = true;
+    } else if (matchMode === 'any' && signals.length > 0) {
+      triggered = true;
+    }
+
+    if (!triggered) return;
+
+    // Use the most common predicted suit among signals
+    const suitVotes = {};
+    for (const s of signals) { suitVotes[s.suit] = (suitVotes[s.suit] || 0) + 1; }
+    const ps = Object.entries(suitVotes).sort((a,b) => b[1]-a[1])[0][0];
+
+    try {
+      await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: ps, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
+      console.log(`[${channelId}] Multi-strat prédiction #${targetGame} ${SUIT_DISPLAY[ps]||ps} (${matchMode}, sources: ${signals.map(s=>s.srcId).join(',')})`);
+    } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
+    state.pending[targetGame] = { suit: ps, rattrapage: 0 };
+
+    const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
+    if (tgs.length > 0) {
+      sendPredictionToTargets(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
+    } else {
+      sendToStrategyChannels(channelId, targetGame, ps).catch(() => {});
+    }
+  }
+
+  async _processRelanceStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
+    if (!this.custom[id]) return;
+    const channelId = `S${id}`;
+    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
+    const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+      ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+        state.lastOutcomes.push({ won, suit: ps });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        // Ne pas déclencher de relance en cascade depuis une stratégie relance elle-même
+      }, stratMaxR, stratTgOpts);
     }
   }
 
@@ -227,11 +432,11 @@ class Engine {
         const rattrapage = gn - pgNum;
         await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
         delete pending[pg];
-        if (onLoss) onLoss(true, ps, pgNum);
+        if (onLoss) onLoss(true, ps, pgNum, rattrapage);
       } else if (gn === pgNum + maxR) {
         await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards, tgOpts);
         delete pending[pg];
-        if (onLoss) onLoss(false, ps, pgNum);
+        if (onLoss) onLoss(false, ps, pgNum, maxR);
       }
     }
   }
@@ -239,8 +444,8 @@ class Engine {
   async _processC1(gn, suits, pCards, bCards) {
     if (this.c1.processed.has(gn)) return;
     this.c1.processed.add(gn);
-    await this._resolvePending(this.c1.pending, 'C1', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c1.consecLosses = 0; this._onStratWin('C1'); return; }
+    await this._resolvePending(this.c1.pending, 'C1', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+      if (won) { this.c1.consecLosses = 0; this._onStratWin('C1'); if (rattrapR > 0) this._onStratRattrapage('C1', gn, suit, rattrapR); return; }
       this.c1.consecLosses++;
       this._onStratLoss('C1', gn, suit);
       if (this.c1.consecLosses >= 2) {
@@ -265,8 +470,8 @@ class Engine {
   async _processC2(gn, suits, pCards, bCards) {
     if (this.c2.processed.has(gn)) return;
     this.c2.processed.add(gn);
-    await this._resolvePending(this.c2.pending, 'C2', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c2.hadFirstLoss = false; this._onStratWin('C2'); return; }
+    await this._resolvePending(this.c2.pending, 'C2', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+      if (won) { this.c2.hadFirstLoss = false; this._onStratWin('C2'); if (rattrapR > 0) this._onStratRattrapage('C2', gn, suit, rattrapR); return; }
       if (!this.c2.hadFirstLoss) { this.c2.hadFirstLoss = true; return; }
       this.c2.hadFirstLoss = false;
       this._onStratLoss('C2', gn, suit);
@@ -289,8 +494,8 @@ class Engine {
   async _processC3(gn, suits, pCards, bCards) {
     if (this.c3.processed.has(gn)) return;
     this.c3.processed.add(gn);
-    await this._resolvePending(this.c3.pending, 'C3', gn, suits, pCards, bCards, (won, suit, pg) => {
-      if (won) { this.c3.consecLosses = 0; this._onStratWin('C3'); return; }
+    await this._resolvePending(this.c3.pending, 'C3', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+      if (won) { this.c3.consecLosses = 0; this._onStratWin('C3'); if (rattrapR > 0) this._onStratRattrapage('C3', gn, suit, rattrapR); return; }
       this.c3.consecLosses++;
       this._onStratLoss('C3', gn, suit);
       if (this.c3.consecLosses >= 2) {
@@ -322,6 +527,7 @@ class Engine {
         await resolvePrediction('DC', pgNum, ps, 'gagne', info.rattrapage, pCards, bCards);
         delete this.dc.pending[pg];
         this._onStratWin('DC');
+        if (info.rattrapage > 0) this._onStratRattrapage('DC', gn, ps, info.rattrapage);
       } else if (gn > pgNum) {
         if (info.rattrapage < maxR) { info.rattrapage++; }
         else {
@@ -603,44 +809,50 @@ class Engine {
       // 2. Si prédiction en attente → ne pas déclencher
       if (Object.keys(state.pending).length > 0) return;
 
-      // 3. Trouver la paire (dominant, retardataire) avec le plus grand écart ≥ B
+      // 3. Trouver la paire (dominant, retardataire) avec le plus grand écart ≥ seuil
       let bestDiff = 0;
       let laggingSuit = null;
       let dominantSuit = null;
 
-      // Paires à comparer : si mirror_pairs configuré, utiliser seulement celles-ci; sinon toutes
-      // Normalise le format : supporte [[a,b]] (ancien) et [{a,b,threshold}] (nouveau)
-      const normPairs = Array.isArray(cfg.mirror_pairs) && cfg.mirror_pairs.length > 0
-        ? cfg.mirror_pairs.map(p => Array.isArray(p)
-            ? { a: p[0], b: p[1], threshold: null }
-            : { a: p.a, b: p.b, threshold: p.threshold ?? null })
-        : null; // null = toutes les paires, seuil global B
+      // Utilise les paires configurées avec leurs seuils individuels.
+      // Si aucune paire configurée → seuil global B sur toutes les combinaisons.
+      const configuredPairs = Array.isArray(cfg.mirror_pairs) && cfg.mirror_pairs.length > 0
+        ? cfg.mirror_pairs
+        : null;
 
-      for (const sA of ALL_SUITS) {
-        for (const sB of ALL_SUITS) {
-          if (sA === sB) continue;
-          let pairThreshold = B; // seuil global par défaut
-          if (normPairs) {
-            const pairCfg = normPairs.find(p =>
-              (p.a === sA && p.b === sB) || (p.a === sB && p.b === sA)
-            );
-            if (!pairCfg) continue; // paire non configurée → ignorer
-            // Seuil spécifique à la paire si défini, sinon seuil global
-            if (pairCfg.threshold && pairCfg.threshold > 0) pairThreshold = pairCfg.threshold;
-          }
+      if (configuredPairs) {
+        for (const pairCfg of configuredPairs) {
+          const sA = pairCfg.a;
+          const sB = pairCfg.b;
+          const pairThreshold = (pairCfg.threshold && pairCfg.threshold > 0) ? pairCfg.threshold : B;
           const diff = (state.mirrorCounts[sA] || 0) - (state.mirrorCounts[sB] || 0);
-          if (diff >= pairThreshold && diff > bestDiff) {
-            bestDiff = diff;
-            dominantSuit = sA;
-            laggingSuit  = sB;
+          const absDiff = Math.abs(diff);
+          if (absDiff >= pairThreshold && absDiff > bestDiff) {
+            bestDiff     = absDiff;
+            dominantSuit = diff > 0 ? sA : sB;
+            laggingSuit  = diff > 0 ? sB : sA;
+          }
+        }
+      } else {
+        for (const sA of ALL_SUITS) {
+          for (const sB of ALL_SUITS) {
+            if (sA >= sB) continue;
+            const diff = (state.mirrorCounts[sA] || 0) - (state.mirrorCounts[sB] || 0);
+            const absDiff = Math.abs(diff);
+            if (absDiff >= B && absDiff > bestDiff) {
+              bestDiff     = absDiff;
+              dominantSuit = diff > 0 ? sA : sB;
+              laggingSuit  = diff > 0 ? sB : sA;
+            }
           }
         }
       }
 
       // 4. Déclenchement si une paire dépasse le seuil
+      // Prédit directement le costume retardataire (le plus faible) — aucun mapping
       if (laggingSuit) {
-        const ps = resolvePredictedSuit(laggingSuit) || laggingSuit;
-        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ ${B} → prédiction ${ps}`);
+        const ps = laggingSuit;
+        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ seuil → prédit le retardataire ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
         // 5. Remise à zéro des compteurs miroir → nouveau cycle
         for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;

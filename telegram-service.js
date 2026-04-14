@@ -38,7 +38,8 @@ function getCurrentMaxRattrapage() { return maxRattrapage; }
 let bot     = null;
 let botInfo = null;
 
-const channelStore = new Map();
+const channelStore     = new Map();
+const pendingAleatoire = new Map(); // userId → { stratId, stratName, hand, step }
 const sseClients   = [];
 
 function broadcast(channelDbId, eventData) {
@@ -84,7 +85,7 @@ async function startBot() {
   await new Promise(r => setTimeout(r, 2000));
 
   bot = new TelegramBot(TOKEN, {
-    polling: { allowedUpdates: ['channel_post', 'message'], interval: 3000, params: { timeout: 10 } },
+    polling: { allowedUpdates: ['channel_post', 'message', 'callback_query'], interval: 3000, params: { timeout: 10 } },
   });
 
   bot.getMe().then(info => {
@@ -112,6 +113,136 @@ async function startBot() {
   bot.on('channel_post', handleIncoming);
   bot.on('message', handleIncoming);
   bot.on('polling_error', err => { if (!err.message?.includes('ETELEGRAM')) return; console.error('Telegram polling error:', err.message); });
+
+  // ── Stratégie Aléatoire : machine d'état par utilisateur ──────────
+  // pendingAleatoire[userId] = { stratId, stratName, hand, targets, step: 'hand'|'number' }
+  const SUITS_JOUEUR   = ['♥', '♣', '♦', '♠']; // ❤️♣️♦️♠️
+  const SUITS_BANQUIER = ['♣', '♥', '♠', '♦']; // ♣️❤️♠️♦️
+  const HAND_LABEL     = { joueur: '❤️ Joueur', banquier: '♣️ Banquier' };
+
+  function suitForNumber(num, hand) {
+    const arr = hand === 'banquier' ? SUITS_BANQUIER : SUITS_JOUEUR;
+    return arr[(num - 1) % 4];
+  }
+
+  // Callback : sélection Joueur / Banquier
+  bot.on('callback_query', async (query) => {
+    const data   = query.data || '';
+    const userId = String(query.from.id);
+    const chatId = String(query.message?.chat?.id || query.from.id);
+    if (!data.startsWith('aleat_hand:')) return;
+    try { await bot.answerCallbackQuery(query.id); } catch {}
+
+    const [, stratId, hand] = data.split(':');
+    const pending = pendingAleatoire.get(userId);
+    if (!pending || String(pending.stratId) !== stratId) return;
+
+    pending.hand = hand;
+    pending.step = 'number';
+    pendingAleatoire.set(userId, pending);
+
+    const handLabel = HAND_LABEL[hand] || hand;
+    try {
+      await bot.sendMessage(chatId,
+        `${handLabel} sélectionné.\n\nEntrez le <b>numéro à prédire</b> (1–1440) :`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) { console.error('[Aléatoire] sendMessage number prompt:', e.message); }
+  });
+
+  // Message : saisie du numéro
+  bot.on('message', async (msg) => {
+    const userId  = String(msg.from?.id || '');
+    const chatId  = String(msg.chat?.id || '');
+    const text    = (msg.text || '').trim();
+    if (!userId) return;
+
+    // Commande /predire [stratId]
+    if (text.startsWith('/predire')) {
+      const parts   = text.split(/\s+/);
+      const stratId = parts[1] ? parseInt(parts[1]) : null;
+      let strats;
+      try { strats = await db.getStrategies(); } catch { return; }
+      const aleatStrats = strats.filter(s => s.mode === 'aleatoire' && s.enabled !== false && (stratId === null || s.id === stratId));
+      if (aleatStrats.length === 0) {
+        try { await bot.sendMessage(chatId, '❌ Aucune stratégie aléatoire active trouvée.'); } catch {}
+        return;
+      }
+      const s = aleatStrats[0];
+      pendingAleatoire.set(userId, { stratId: s.id, stratName: s.name, hand: null, step: 'hand' });
+      try {
+        await bot.sendMessage(chatId,
+          `🎲 <b>${s.name}</b>\n\nChoisissez le camp à prédire :`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '❤️ Joueur',   callback_data: `aleat_hand:${s.id}:joueur` },
+                { text: '♣️ Banquier', callback_data: `aleat_hand:${s.id}:banquier` },
+              ]]
+            }
+          }
+        );
+      } catch (e) { console.error('[Aléatoire] sendMessage hand prompt:', e.message); }
+      return;
+    }
+
+    // Saisie du numéro si étape 'number'
+    const pending = pendingAleatoire.get(userId);
+    if (!pending || pending.step !== 'number') return;
+    const num = parseInt(text, 10);
+    if (isNaN(num) || num < 1 || num > 1440) {
+      try { await bot.sendMessage(chatId, '⚠️ Numéro invalide. Entrez un nombre entre 1 et 1440.'); } catch {}
+      return;
+    }
+
+    pendingAleatoire.delete(userId);
+
+    // Vérifier si le numéro est supérieur au tour en cours
+    let currentGameNum = 0;
+    try {
+      const r = await db.pool.query('SELECT COALESCE(MAX(game_number),0) AS mx FROM predictions WHERE status IN (\'gagne\',\'perdu\')');
+      currentGameNum = parseInt(r.rows[0].mx) || 0;
+    } catch {}
+
+    if (num <= currentGameNum) {
+      try {
+        await bot.sendMessage(chatId,
+          `❌ Le numéro <b>#${num}</b> est déjà passé (tour actuel : #${currentGameNum}).\nEntrez un numéro supérieur à <b>${currentGameNum}</b>.`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+      return;
+    }
+
+    const suit      = suitForNumber(num, pending.hand);
+    const handLabel = HAND_LABEL[pending.hand] || pending.hand;
+    const suitEmoji = SUIT_EMOJI_MAP[suit] || suit;
+
+    // Envoyer la prédiction dans les canaux de la stratégie
+    try {
+      const { text: tgText, parse_mode } = buildTgMessage(currentFormat, {
+        gameNumber: num, suit, strategy: pending.stratId, maxR: maxRattrapage, status: null,
+        hand: pending.hand,
+      });
+      const routes  = await db.getStrategyRoutes(pending.stratId);
+      const targets = routes.length > 0
+        ? routes.map(r => ({ tgId: r.tg_id }))
+        : getChannels().map(c => ({ tgId: c.tgId }));
+      for (const ch of targets) {
+        try {
+          const msgId = await _sendOneMessage(TOKEN, ch.tgId, tgText, parse_mode);
+          if (msgId) await db.saveTgMsgId(pending.stratId, num, suit, ch.tgId, msgId, null).catch(() => {});
+        } catch (e) { console.error('[Aléatoire] sendToChannel:', e.message); }
+      }
+      try {
+        await bot.sendMessage(chatId,
+          `✅ Prédiction envoyée !\n${handLabel} — Tour <b>#${num}</b> → ${suitEmoji}`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+    } catch (e) { console.error('[Aléatoire] build/send prediction:', e.message); }
+  });
   console.log(`📡 Bot actif sur ${channelStore.size} canal(aux)`);
 }
 
