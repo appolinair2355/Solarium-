@@ -400,6 +400,7 @@ function AdminPanel() {
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
   const [stratEditing, setStratEditing] = useState(null); // id being edited, null = creating
   const [stratMsg, setStratMsg] = useState('');
+  const [successModal, setSuccessModal] = useState(null);
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
 
@@ -905,22 +906,35 @@ function AdminPanel() {
   const cancelStratForm = () => { setStratOpen(false); setStratEditing(null); };
 
   const saveStrat = async () => {
+    console.log('[saveStrat] Bouton cliqué, stratForm:', JSON.stringify(stratForm).substring(0, 300));
+    console.log('[saveStrat] stratEditing:', stratEditing);
     setStratSaving(true);
     try {
       const url = stratEditing !== null ? `/api/admin/strategies/${stratEditing}` : '/api/admin/strategies';
       const method = stratEditing !== null ? 'PUT' : 'POST';
+      console.log('[saveStrat] Envoi', method, url);
       const r = await fetch(url, {
         method, credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(stratForm),
       });
       const d = await r.json();
+      console.log('[saveStrat] Réponse:', r.status, JSON.stringify(d));
       if (!r.ok) throw new Error(d.error || 'Erreur');
-      showStratMsg(stratEditing !== null ? '✅ Stratégie mise à jour' : `✅ Stratégie ${d.strategy?.id} créée`, false);
-      setStratOpen(false);
+      const wasEditing = stratEditing !== null;
+      const s = d.strategy;
+      setSuccessModal({
+        type: wasEditing ? 'update' : 'create',
+        id: s?.id,
+        name: s?.name || stratForm.name,
+        mode: s?.mode || stratForm.mode,
+        hand: s?.hand || stratForm.hand,
+        visibility: s?.visibility || stratForm.visibility,
+      });
+      setStratForm(JSON.parse(JSON.stringify(BLANK_FORM)));
       setStratEditing(null);
       loadStrategies();
-    } catch (e) { showStratMsg('❌ ' + e.message, true); }
+    } catch (e) { console.error('[saveStrat] ERREUR:', e); showStratMsg('❌ ' + e.message, true); }
     finally { setStratSaving(false); }
   };
 
@@ -1172,8 +1186,78 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison' };
+
   return (
     <div className="admin-page">
+
+      {successModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setSuccessModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(165deg, #1a1533 0%, #0f172a 50%, #1a1533 100%)',
+            border: '1px solid rgba(34,197,94,0.4)',
+            borderRadius: 20, padding: '36px 44px', maxWidth: 440, width: '90%',
+            boxShadow: '0 0 60px rgba(34,197,94,0.15), 0 20px 40px rgba(0,0,0,0.4)',
+            textAlign: 'center', animation: 'fadeInScale 0.3s ease-out',
+          }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>
+              {successModal.type === 'create' ? '🎉' : '✏️'}
+            </div>
+            <div style={{
+              fontSize: 22, fontWeight: 800, color: '#22c55e', marginBottom: 8,
+              textShadow: '0 0 20px rgba(34,197,94,0.3)',
+            }}>
+              {successModal.type === 'create' ? 'Stratégie créée !' : 'Stratégie mise à jour !'}
+            </div>
+            <div style={{
+              background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)',
+              borderRadius: 14, padding: '18px 22px', marginBottom: 20, marginTop: 16,
+            }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: '#e2e8f0', marginBottom: 10 }}>
+                {successModal.name}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
+                  background: 'rgba(168,85,247,0.15)', color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)',
+                }}>S{successModal.id}</span>
+                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
+                  background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)',
+                }}>{modeLabels[successModal.mode] || successModal.mode}</span>
+                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
+                  background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)',
+                }}>{successModal.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</span>
+                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
+                  background: successModal.visibility === 'all' ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)',
+                  color: successModal.visibility === 'all' ? '#22c55e' : '#94a3b8',
+                  border: `1px solid ${successModal.visibility === 'all' ? 'rgba(34,197,94,0.3)' : 'rgba(100,116,139,0.3)'}`,
+                }}>{successModal.visibility === 'all' ? '🌐 Tous' : '🔒 Admin'}</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20, lineHeight: 1.6 }}>
+              {successModal.type === 'create'
+                ? 'La stratégie est active et prête à générer des prédictions.'
+                : 'Les modifications ont été appliquées avec succès.'}
+            </div>
+            <button onClick={() => setSuccessModal(null)} style={{
+              padding: '12px 36px', borderRadius: 12, border: 'none', cursor: 'pointer',
+              background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff',
+              fontWeight: 800, fontSize: 15, boxShadow: '0 4px 15px rgba(34,197,94,0.3)',
+              transition: 'transform 0.15s, box-shadow 0.15s',
+            }}>
+              ✓ Parfait
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes fadeInScale {
+          from { opacity: 0; transform: scale(0.85); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+
       <nav className="navbar">
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro ✨</Link>
         <div className="navbar-actions">
