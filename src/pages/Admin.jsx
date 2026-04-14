@@ -1,6 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+
+class AdminErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(err, info) { console.error('[AdminErrorBoundary]', err, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center', color: '#e2e8f0', background: '#0f172a', minHeight: '100vh' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ color: '#fbbf24', marginBottom: 12 }}>Erreur d'affichage</h2>
+          <p style={{ color: '#94a3b8', marginBottom: 20 }}>Une erreur est survenue dans le panneau admin.</p>
+          <pre style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: 16, color: '#fca5a5', fontSize: 12, maxWidth: 600, margin: '0 auto 20px', textAlign: 'left', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {this.state.error?.message || 'Erreur inconnue'}
+          </pre>
+          <button onClick={() => { this.setState({ hasError: false, error: null }); }} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#f0c060,#d4a843)', color: '#111', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+            🔄 Réessayer
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function statusLabel(s) {
   if (s === 'pending') return <span className="badge badge-pending">En attente</span>;
@@ -42,7 +66,205 @@ function minutesFromInput(val, unit) {
   return unit === 'h' ? n * 60 : n;
 }
 
+function TgDirectChat() {
+  const [cfg, setCfg]         = React.useState({ bot_token: '', channel_id: '' });
+  const [saved, setSaved]     = React.useState({ bot_token: '', channel_id: '', bot_username: '' });
+  const [messages, setMessages] = React.useState([]);
+  const [configured, setConfigured] = React.useState(false);
+  const [showConfig, setShowConfig] = React.useState(false);
+  const [draft, setDraft]     = React.useState('');
+  const [sending, setSending] = React.useState(false);
+  const [savingCfg, setSavingCfg] = React.useState(false);
+  const [cfgMsg, setCfgMsg]   = React.useState('');
+  const [sendErr, setSendErr] = React.useState('');
+  const msgEndRef = React.useRef(null);
+  const inputRef  = React.useRef(null);
+
+  React.useEffect(() => {
+    fetch('/api/admin/telegram-chat/config', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { bot_token: '', channel_id: '' })
+      .then(d => { setCfg(d); setSaved(d); if (d.bot_token && d.channel_id) setConfigured(true); }).catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    if (!configured) return;
+    const poll = () => {
+      fetch('/api/admin/telegram-chat/messages', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : { messages: [], configured: true })
+        .then(d => { setMessages(d.messages || []); if (d.configured === false) setConfigured(false); })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 3000);
+    return () => clearInterval(iv);
+  }, [configured]);
+
+  React.useEffect(() => {
+    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const saveCfg = async () => {
+    setSavingCfg(true); setCfgMsg('');
+    try {
+      const r = await fetch('/api/admin/telegram-chat/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      const d = await r.json();
+      if (!r.ok) { setCfgMsg('❌ ' + (d.error || 'Erreur')); return; }
+      setSaved({ ...cfg, bot_username: d.bot_username || '' });
+      setConfigured(true); setShowConfig(false);
+      setCfgMsg('✅ Connecté : @' + (d.bot_username || 'bot'));
+    } catch (e) { setCfgMsg('❌ ' + e.message); }
+    finally { setSavingCfg(false); }
+  };
+
+  const deleteCfg = async () => {
+    if (!confirm('Supprimer la configuration ?')) return;
+    await fetch('/api/admin/telegram-chat/config', { method: 'DELETE', credentials: 'include' });
+    setCfg({ bot_token: '', channel_id: '' }); setSaved({ bot_token: '', channel_id: '' });
+    setConfigured(false); setMessages([]); setShowConfig(true);
+  };
+
+  const sendMsg = async () => {
+    if (!draft.trim() || sending) return;
+    setSending(true); setSendErr('');
+    try {
+      const r = await fetch('/api/admin/telegram-chat/send', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: draft }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setSendErr(d.error || 'Erreur envoi'); return; }
+      setDraft('');
+      inputRef.current?.focus();
+    } catch (e) { setSendErr(e.message); }
+    finally { setSending(false); }
+  };
+
+  const formatDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#e2e8f0' }}>📨 Canal Telegram Direct</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+            {configured ? `Connecté${saved.bot_username ? ' — @' + saved.bot_username : ''} · ${saved.channel_id}` : 'Non configuré'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {configured && (
+            <button type="button" onClick={deleteCfg}
+              style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>
+              🗑 Déconnecter
+            </button>
+          )}
+          <button type="button" onClick={() => setShowConfig(v => !v)}
+            style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: showConfig ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.04)', color: showConfig ? '#fbbf24' : '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
+            ⚙️ Configuration
+          </button>
+        </div>
+      </div>
+
+      {showConfig && (
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 12, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>⚙️ Configuration du bot</div>
+          <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>
+            Le bot doit être <strong style={{color:'#e2e8f0'}}>administrateur</strong> du canal pour recevoir les messages.
+          </div>
+          <div>
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5 }}>API TOKEN BOT</label>
+            <input value={cfg.bot_token} onChange={e => setCfg(p => ({...p, bot_token: e.target.value}))}
+              placeholder="1234567890:AAF-xxxxxxxxxxxx"
+              style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5 }}>ID CANAL</label>
+            <input value={cfg.channel_id} onChange={e => setCfg(p => ({...p, channel_id: e.target.value}))}
+              placeholder="@mon_canal ou -100123456789"
+              style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+          </div>
+          {cfgMsg && (
+            <div style={{ padding: '8px 12px', borderRadius: 8, background: cfgMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${cfgMsg.startsWith('✅') ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, color: cfgMsg.startsWith('✅') ? '#86efac' : '#fca5a5', fontSize: 13 }}>
+              {cfgMsg}
+            </div>
+          )}
+          <button type="button" onClick={saveCfg} disabled={savingCfg || !cfg.bot_token || !cfg.channel_id}
+            style={{ alignSelf: 'flex-start', padding: '8px 22px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#f0c060,#d4a843)', color: '#111', fontWeight: 700, fontSize: 13, cursor: savingCfg ? 'wait' : 'pointer', opacity: (!cfg.bot_token || !cfg.channel_id) ? 0.5 : 1 }}>
+            {savingCfg ? 'Connexion…' : '✅ Connecter'}
+          </button>
+        </div>
+      )}
+
+      {configured ? (
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 480 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {messages.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#475569', fontSize: 13, marginTop: 40 }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>💬</div>
+                Aucun message reçu — les nouveaux messages apparaîtront ici automatiquement
+              </div>
+            ) : (
+              messages.map((m, i) => (
+                <div key={m.id || i} style={{
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                  alignSelf: m.isBot ? 'flex-end' : 'flex-start',
+                  maxWidth: '78%',
+                }}>
+                  <div style={{ fontSize: 10, color: '#475569', paddingLeft: m.isBot ? 0 : 4, paddingRight: m.isBot ? 4 : 0, textAlign: m.isBot ? 'right' : 'left' }}>
+                    {m.isBot ? '🟡 Vous' : `🔵 ${m.from}`} · {formatDate(m.date)}
+                  </div>
+                  <div style={{
+                    padding: '8px 12px', borderRadius: m.isBot ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
+                    background: m.isBot ? 'rgba(212,168,67,0.18)' : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${m.isBot ? 'rgba(212,168,67,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    color: '#e2e8f0', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {m.text}
+                  </div>
+                </div>
+              ))
+            )}
+            <div ref={msgEndRef} />
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', padding: 12, display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <textarea ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
+              placeholder="Écrire un message… (Entrée pour envoyer)"
+              rows={2}
+              style={{ flex: 1, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: 13, resize: 'none', fontFamily: 'inherit', lineHeight: 1.5, outline: 'none', boxSizing: 'border-box' }} />
+            <button type="button" onClick={sendMsg} disabled={!draft.trim() || sending}
+              style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: draft.trim() && !sending ? 'linear-gradient(135deg,#f0c060,#d4a843)' : 'rgba(255,255,255,0.08)', color: draft.trim() && !sending ? '#111' : '#475569', fontWeight: 700, fontSize: 14, cursor: !draft.trim() || sending ? 'not-allowed' : 'pointer', flexShrink: 0, minWidth: 52 }}>
+              {sending ? '…' : '➤'}
+            </button>
+          </div>
+          {sendErr && <div style={{ padding: '6px 14px 10px', color: '#f87171', fontSize: 12 }}>❌ {sendErr}</div>}
+        </div>
+      ) : (
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 12, padding: 48, textAlign: 'center' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📨</div>
+          <div style={{ fontSize: 15, color: '#64748b', marginBottom: 16 }}>Configurez le bot Telegram pour voir les messages du canal en temps réel</div>
+          <button type="button" onClick={() => setShowConfig(true)}
+            style={{ padding: '9px 24px', borderRadius: 10, border: '1px solid rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            ⚙️ Configurer maintenant
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
+  return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
+}
+
+function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -83,7 +305,8 @@ export default function Admin() {
   const [msgFormatMsg, setMsgFormatMsg] = useState('');
 
   // Max rattrapage
-  const [maxRattrapage, setMaxRattrapage] = useState(20);
+  const [maxRattrapage, setMaxRattrapage]   = useState(20);
+  const [relanceStatus, setRelanceStatus]   = useState({});
   const [maxRSaving, setMaxRSaving] = useState(false);
 
   // Telegram channels
@@ -302,7 +525,15 @@ export default function Admin() {
   const loadStrategies = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/strategies', { credentials: 'include' });
-      if (r.ok) setStrategies(await r.json());
+      if (r.ok) {
+        const data = await r.json();
+        setStrategies((Array.isArray(data) ? data : []).map(s => ({
+          ...s,
+          tg_targets: Array.isArray(s.tg_targets) ? s.tg_targets : [],
+          exceptions: Array.isArray(s.exceptions) ? s.exceptions : [],
+          relance_rules: Array.isArray(s.relance_rules) ? s.relance_rules : [],
+        })));
+      }
     } catch {}
   }, []);
 
@@ -358,7 +589,7 @@ export default function Admin() {
   const loadUserMessages = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/user-messages', { credentials: 'include' });
-      if (r.ok) setUserMessages(await r.json());
+      if (r.ok) { const d = await r.json(); setUserMessages(Array.isArray(d) ? d : []); }
     } catch {}
   }, []);
 
@@ -541,6 +772,15 @@ export default function Admin() {
     } catch {}
   }, []);
 
+  // Polling statut compteurs relance (toutes les 3s)
+  useEffect(() => {
+    const poll = () => fetch('/api/admin/relance-status', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : {}).then(setRelanceStatus).catch(() => {});
+    poll();
+    const iv = setInterval(poll, 3000);
+    return () => clearInterval(iv);
+  }, []);
+
   const saveMaxR = async (n) => {
     setMaxRSaving(true);
     try {
@@ -705,7 +945,6 @@ export default function Admin() {
     } catch {}
   };
 
-  // ── Stratégie Aléatoire : soumission de prédiction depuis le site ──────────
   const submitAleatPrediction = async () => {
     if (!aleatPanel || !aleatPanel.gameInput) return;
     const num = parseInt(aleatPanel.gameInput);
@@ -718,7 +957,15 @@ export default function Admin() {
       });
       const data = await r.json();
       if (!r.ok) { alert(data.error || 'Erreur'); return; }
-      const newEntry = { game_number: data.game_number, predicted_suit: data.predicted_suit, suit_emoji: data.suit_emoji, hand: aleatPanel.hand, status: 'en_cours' };
+      const newEntry = {
+        game_number: data.game_number,
+        source_game: data.source_game,
+        source_cards_emoji: data.source_cards_emoji,
+        predicted_suit: data.predicted_suit,
+        suit_emoji: data.suit_emoji,
+        hand: aleatPanel.hand,
+        status: 'en_cours',
+      };
       setAleatPanel(p => ({
         ...p,
         step: 'result',
@@ -743,7 +990,7 @@ export default function Admin() {
           if (!p) return p;
           const updated = (p.history || []).map(h => {
             if (h.status !== 'en_cours') return h;
-            const found = rows.find(row => row.game_number === h.game_number && row.predicted_suit === h.predicted_suit && String(row.strategy) === String(p.stratId));
+            const found = rows.find(row => row.game_number === h.game_number && row.predicted_suit === h.predicted_suit && (String(row.strategy) === String(p.stratId) || String(row.strategy) === `S${p.stratId}`));
             if (found && (found.status === 'gagne' || found.status === 'perdu')) return { ...h, status: found.status };
             return h;
           });
@@ -956,6 +1203,7 @@ export default function Admin() {
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'systeme',        icon: '🛠️', label: 'Système' },
+            { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
           ].map(tab => {
             const active = adminTab === tab.id;
             return (
@@ -1469,6 +1717,8 @@ export default function Admin() {
 
         </>}
 
+        {adminTab === 'tg-direct' && <TgDirectChat />}
+
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
         {adminTab === 'canaux' && <>
 
@@ -1740,11 +1990,11 @@ export default function Admin() {
                         color: s.visibility === 'all' ? '#22c55e' : '#94a3b8',
                       }}>{s.visibility === 'all' ? '🌐 Tous' : '🔒 Admin'}</span>
                       {/* Badge type : Simple vs Telegram */}
-                      {s.tg_targets?.some(t => t.bot_token && t.channel_id) ? (
+                      {(s.tg_targets || []).some(t => t.bot_token && t.channel_id) ? (
                         <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
                           background: 'rgba(34,158,217,0.18)', color: '#229ed9', border: '1px solid rgba(34,158,217,0.4)',
-                        }} title={s.tg_targets.map(t => t.channel_id).join(', ')}>
-                          ✈️ Telegram · {s.tg_targets.length} cible{s.tg_targets.length > 1 ? 's' : ''}
+                        }} title={(s.tg_targets || []).map(t => t.channel_id).join(', ')}>
+                          ✈️ Telegram · {(s.tg_targets || []).length} cible{(s.tg_targets || []).length > 1 ? 's' : ''}
                         </span>
                       ) : (
                         <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
@@ -1755,7 +2005,7 @@ export default function Admin() {
                     {Array.isArray(s.exceptions) && s.exceptions.length > 0 && (
                       <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
                         background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)',
-                      }} title={s.exceptions.map(e => e.type).join(', ')}>
+                      }} title={(s.exceptions || []).map(e => e.type).join(', ')}>
                         ⛔ {s.exceptions.length} exception{s.exceptions.length > 1 ? 's' : ''}
                       </span>
                     )}
@@ -1779,7 +2029,7 @@ export default function Admin() {
                     </div>
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                        Canaux : {s.tg_targets.filter(t=>t.channel_id).map(t => t.channel_id).join(', ')}
+                        Canaux : {(s.tg_targets || []).filter(t=>t.channel_id).map(t => t.channel_id).join(', ')}
                       </div>
                     )}
                   </div>
@@ -1907,12 +2157,19 @@ export default function Admin() {
                         const rLevel  = rule?.rattrapage_level ?? null;
                         const rCount  = rule?.rattrapage_count ?? 1;
                         const cLevel  = rule?.combo_level ?? null;
-                        const cCount  = rule?.combo_count ?? 1;
+                        const cCount  = rule?.combo_count      ?? 1;
+                        const rFrom   = rule?.range_from       ?? null;
+                        const dCount  = rule?.range_count      ?? 1;
+                        const iMin    = rule?.interval_min     ?? null;
+                        const iMax    = rule?.interval_max     ?? null;
+                        const eCount  = rule?.interval_count   ?? 1;
 
                         const summaryParts = [];
-                        if (lThr != null) summaryParts.push(`${lThr} perte${lThr > 1 ? 's' : ''} consécutive${lThr > 1 ? 's' : ''}`);
-                        if (rLevel != null) summaryParts.push(`${rCount}× R${rLevel} consécutif${rCount > 1 ? 's' : ''}`);
-                        if (cLevel != null) summaryParts.push(`${cCount} event${cCount > 1 ? 's' : ''} (perte ou R${cLevel})`);
+                        if (lThr != null)                summaryParts.push(`${lThr} perte${lThr > 1 ? 's' : ''} consécutive${lThr > 1 ? 's' : ''}`);
+                        if (rLevel != null)              summaryParts.push(`${rCount}× R${rLevel} consécutif${rCount > 1 ? 's' : ''}`);
+                        if (cLevel != null)              summaryParts.push(`${cCount} event${cCount > 1 ? 's' : ''} (perte ou R${cLevel})`);
+                        if (rFrom != null)               summaryParts.push(`${dCount}× R≥R${rFrom}`);
+                        if (iMin != null && iMax != null) summaryParts.push(`${eCount}× R${iMin}→R${iMax}`);
 
                         const BtnCount = ({ value, onChange, color }) => (
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -1963,7 +2220,7 @@ export default function Admin() {
                                 onChange={e => {
                                   setStratForm(p => {
                                     const cur = p.relance_rules || [];
-                                    if (e.target.checked) return { ...p, relance_rules: [...cur, { strategy_id: id, losses_threshold: null, rattrapage_level: null, rattrapage_count: 1, combo_level: null, combo_count: 1 }] };
+                                    if (e.target.checked) return { ...p, relance_rules: [...cur, { strategy_id: id, losses_threshold: null, rattrapage_level: null, rattrapage_count: 1, combo_level: null, combo_count: 1, range_from: null, range_count: 1, interval_min: null, interval_max: null, interval_count: 1 }] };
                                     return { ...p, relance_rules: cur.filter(r => r.strategy_id !== id) };
                                   });
                                 }}
@@ -2030,6 +2287,79 @@ export default function Admin() {
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
                                         <BtnCount value={cCount} color="#34d399" onChange={n => updateRule({ combo_count: n })} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* ── Condition D : À partir de tel rattrapage ── */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: rFrom != null ? 'rgba(251,191,36,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${rFrom != null ? 'rgba(251,191,36,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <CondToggle active={rFrom != null} color="#fbbf24"
+                                      onClick={() => updateRule({ range_from: rFrom != null ? null : 3, range_count: 1 })} />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: rFrom != null ? '#fbbf24' : '#475569' }}>À partir de tel rattrapage</span>
+                                    {rFrom != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{dCount}× (R≥R{rFrom}) → relance</span>}
+                                  </div>
+                                  {rFrom != null && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Déclencher si R ≥</span>
+                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
+                                            const active = rFrom === n;
+                                            return (
+                                              <button key={n} type="button" onClick={() => updateRule({ range_from: n })}
+                                                style={{ padding: '1px 6px', height: 24, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #fbbf24' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.03)', color: active ? '#fbbf24' : '#6b7280' }}>R{n}</button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Nombre de fois :</span>
+                                        <BtnCount value={dCount} color="#fbbf24" onChange={n => updateRule({ range_count: n })} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* ── Condition E : Intervalle de rattrapage ── */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: iMin != null ? 'rgba(168,85,247,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${iMin != null ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <CondToggle active={iMin != null} color="#a855f7"
+                                      onClick={() => updateRule({ interval_min: iMin != null ? null : 1, interval_max: iMax ?? 5, interval_count: 1 })} />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: iMin != null ? '#a855f7' : '#475569' }}>Intervalle de rattrapage</span>
+                                    {iMin != null && iMax != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{eCount}× R{iMin}→R{iMax} → relance</span>}
+                                  </div>
+                                  {iMin != null && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>De (R min) :</span>
+                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
+                                            const active = iMin === n;
+                                            return (
+                                              <button key={n} type="button" onClick={() => updateRule({ interval_min: n, interval_max: iMax != null && iMax < n ? n : iMax })}
+                                                style={{ padding: '1px 5px', height: 22, borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.03)', color: active ? '#a855f7' : '#6b7280' }}>R{n}</button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>À (R max) :</span>
+                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
+                                            const disabled = n < (iMin || 1);
+                                            const active = iMax === n;
+                                            return (
+                                              <button key={n} type="button" onClick={() => !disabled && updateRule({ interval_max: n })}
+                                                style={{ padding: '1px 5px', height: 22, borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(168,85,247,0.25)' : disabled ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)', color: active ? '#a855f7' : disabled ? '#334155' : '#6b7280', opacity: disabled ? 0.4 : 1 }}>R{n}</button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Nombre de fois :</span>
+                                        <BtnCount value={eCount} color="#a855f7" onChange={n => updateRule({ interval_count: n })} />
                                       </div>
                                     </div>
                                   )}
@@ -2137,18 +2467,6 @@ export default function Admin() {
                       <div>Ce mode <strong>ne prédit pas directement</strong> — il surveille les <strong>pertes consécutives</strong> des stratégies sélectionnées ci-dessus.</div>
                       <div style={{ marginTop: 6 }}>Dès qu'une stratégie atteint son seuil de pertes, la relance se déclenche automatiquement et envoie une prédiction via le canal Telegram configuré.</div>
                       <div style={{ marginTop: 6 }}>Les prédictions de relance apparaissent <strong>séparément</strong> dans le canal avec le type de perte/rattrapage choisi en Section 2.</div>
-                    </div>
-                  )}
-                  {stratForm.mode === 'aleatoire' && (
-                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.9 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎲 Mode Stratégie Aléatoire — Comment ça fonctionne ?</div>
-                      <div>Ce mode est <strong>manuel</strong> : l'administrateur ou l'utilisateur choisit le numéro à prédire directement via le bot Telegram.</div>
-                      <div style={{ marginTop: 6 }}>Dans le canal ou en privé avec le bot, tapez <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>/predire</code> → sélectionnez <strong>Joueur ❤️</strong> ou <strong>Banquier ♣️</strong> → entrez un numéro de <strong>1 à 1440</strong>.</div>
-                      <div style={{ marginTop: 6 }}>Si le numéro saisi est <strong>supérieur au tour en cours</strong>, le costume correspondant est prédit et envoyé automatiquement dans le canal.</div>
-                      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', lineHeight: 2.2 }}>
-                        <div>❤️ <strong>Joueur</strong> : ❤️♣️♦️♠️ — cycle de 4 sur les 1440 tours</div>
-                        <div>♣️ <strong>Banquier</strong> : ♣️❤️♠️♦️ — cycle de 4 sur les 1440 tours</div>
-                      </div>
                     </div>
                   )}
                   {stratForm.mode === 'aleatoire' && (
@@ -2921,6 +3239,55 @@ export default function Admin() {
 
         </>}
 
+        {/* ── RESET USINE ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(239,68,68,0.5)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔄</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Réinitialisation complète</h2>
+              <p className="tg-admin-sub">
+                Remet <strong style={{ color: '#f87171' }}>tout le système à zéro</strong> : stratégies, séquences de relance, prédictions, canaux Telegram, routage, annonces, compteurs, et tous les paramètres.
+                <br/><span style={{ color: '#f87171', fontWeight: 600, fontSize: 11 }}>⚠️ Cette action est irréversible.</span>
+              </p>
+            </div>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{
+              background: 'linear-gradient(135deg,#dc2626,#991b1b)',
+              border: 'none',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 13,
+              padding: '10px 28px',
+              borderRadius: 10,
+              cursor: 'pointer',
+              marginTop: 8,
+            }}
+            onClick={async () => {
+              const c1 = confirm('⚠️ ATTENTION : Cela va supprimer TOUTES les données (stratégies, prédictions, canaux, relances, annonces…)\n\nVoulez-vous vraiment continuer ?');
+              if (!c1) return;
+              const c2 = confirm('🔴 DERNIÈRE CONFIRMATION\n\nTout sera effacé définitivement.\nÊtes-vous absolument sûr ?');
+              if (!c2) return;
+              try {
+                const r = await fetch('/api/admin/factory-reset', { method: 'POST', credentials: 'include' });
+                const d = await r.json();
+                if (r.ok) {
+                  alert('✅ Système réinitialisé avec succès.\nLa page va se recharger.');
+                  window.location.reload();
+                } else {
+                  alert('❌ Erreur : ' + (d.error || 'Échec du reset'));
+                }
+              } catch (e) {
+                alert('❌ Erreur réseau : ' + e.message);
+              }
+            }}
+          >
+            🗑️ Réinitialiser tout le système
+          </button>
+        </div>)}
+
         {/* ── ROUTAGE STRATÉGIES PAR DÉFAUT → CANAUX (Config) ── */}
         {/* ── FICHIER DE MISE À JOUR ── */}
         {adminTab === 'systeme' && (
@@ -3011,7 +3378,7 @@ export default function Admin() {
               )}
               {updateResult.results?.some(r2 => r2.restart_needed) && (
                 <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 8, background: 'rgba(251,191,36,0.08)', padding: '6px 10px', borderRadius: 6 }}>
-                  ⚠️ Redémarrez le serveur depuis le panneau Replit pour appliquer les changements backend.
+                  ⚠️ Redémarrez le serveur par Sossou Kouamé, les changements backend seront appliqués en cours.
                 </div>
               )}
               <button className="btn btn-sm" style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.2)' }} onClick={() => setUpdateResult(null)}>
@@ -4157,17 +4524,20 @@ export default function Admin() {
               </div>
             )}
 
-            {/* STEP 2 — Saisir le numéro */}
+            {/* STEP 2 — Saisir le numéro à prédire */}
             {aleatPanel.step === 'number' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                   <button onClick={() => setAleatPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '' }))} style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0 }}>← Retour</button>
                   <span style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 700 }}>{aleatPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</span>
                 </div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>Numéro de tour à prédire (1–1440) :</label>
+                <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: '#a5b4fc', lineHeight: 1.6 }}>
+                  💡 Le système prend les <strong>cartes du jeu en cours</strong> et en choisit aléatoirement pour prédire le numéro saisi. Le numéro doit être <strong>supérieur au jeu actuel</strong>.
+                </div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>Numéro de tour à prédire :</label>
                 <input
                   type="number" min="1" max="1440"
-                  value={aleatPanel.gameInput}
+                  value={aleatPanel.gameInput || ''}
                   onChange={e => setAleatPanel(p => ({ ...p, gameInput: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && submitAleatPrediction()}
                   placeholder="ex: 145"
@@ -4189,8 +4559,11 @@ export default function Admin() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 64, marginBottom: 6 }}>{aleatPanel.result.suit_emoji}</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>Tour #{aleatPanel.result.game_number}</div>
-                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>
                   {aleatPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} → <strong style={{ color: '#a5b4fc' }}>{aleatPanel.result.predicted_suit}</strong> prédit
+                </div>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+                  Cartes du jeu #{aleatPanel.result.source_game} : {(aleatPanel.result.source_cards_emoji || []).join(' ')}
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 20, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)', color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 22 }}>
                   <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#fbbf24', animation: 'pulse 1.5s infinite' }} />
@@ -4218,7 +4591,10 @@ export default function Admin() {
                     <span style={{ fontSize: 22 }}>{h.suit_emoji}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Tour #{h.game_number}</div>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>{h.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} — {h.predicted_suit}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>
+                        {h.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} — {h.predicted_suit}
+                        {h.source_game ? ` (source: #${h.source_game} ${(h.source_cards_emoji || []).join('')})` : ''}
+                      </div>
                     </div>
                     <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 700, whiteSpace: 'nowrap',
                       background: h.status === 'gagne' ? 'rgba(34,197,94,0.18)' : h.status === 'perdu' ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.12)',
