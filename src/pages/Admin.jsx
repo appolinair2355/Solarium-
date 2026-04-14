@@ -1192,69 +1192,166 @@ function AdminPanel() {
     <div className="admin-page">
 
       {successModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)' }}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
           onClick={() => setSuccessModal(null)}>
           <div onClick={e => e.stopPropagation()} style={{
-            background: 'linear-gradient(165deg, #1a1533 0%, #0f172a 50%, #1a1533 100%)',
-            border: '1px solid rgba(34,197,94,0.4)',
-            borderRadius: 20, padding: '36px 44px', maxWidth: 440, width: '90%',
-            boxShadow: '0 0 60px rgba(34,197,94,0.15), 0 20px 40px rgba(0,0,0,0.4)',
-            textAlign: 'center', animation: 'fadeInScale 0.3s ease-out',
+            position: 'relative', overflow: 'hidden',
+            background: 'linear-gradient(160deg, #0d1f12 0%, #0a1628 45%, #0d1f12 100%)',
+            border: '1px solid rgba(34,197,94,0.5)',
+            borderRadius: 24, padding: '44px 48px 36px', maxWidth: 460, width: '92%',
+            boxShadow: '0 0 0 1px rgba(34,197,94,0.1), 0 0 80px rgba(34,197,94,0.2), 0 30px 60px rgba(0,0,0,0.6)',
+            textAlign: 'center', animation: 'smPopIn 0.45s cubic-bezier(0.34,1.56,0.64,1)',
           }}>
-            <div style={{ fontSize: 56, marginBottom: 16 }}>
-              {successModal.type === 'create' ? '🎉' : '✏️'}
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+              {[...Array(12)].map((_, i) => (
+                <div key={i} style={{
+                  position: 'absolute',
+                  width: i % 3 === 0 ? 6 : i % 3 === 1 ? 4 : 8,
+                  height: i % 3 === 0 ? 6 : i % 3 === 1 ? 4 : 8,
+                  borderRadius: i % 2 === 0 ? '50%' : 2,
+                  background: ['#22c55e','#fbbf24','#818cf8','#34d399','#f472b6','#60a5fa'][i % 6],
+                  left: `${8 + (i * 7.5) % 84}%`,
+                  top: `${5 + (i * 11) % 40}%`,
+                  opacity: 0,
+                  animation: `smParticle${i % 4} ${1.2 + (i % 5) * 0.3}s ${0.1 + i * 0.08}s ease-out forwards`,
+                }} />
+              ))}
             </div>
-            <div style={{
-              fontSize: 22, fontWeight: 800, color: '#22c55e', marginBottom: 8,
-              textShadow: '0 0 20px rgba(34,197,94,0.3)',
-            }}>
-              {successModal.type === 'create' ? 'Stratégie créée !' : 'Stratégie mise à jour !'}
-            </div>
-            <div style={{
-              background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)',
-              borderRadius: 14, padding: '18px 22px', marginBottom: 20, marginTop: 16,
-            }}>
-              <div style={{ fontSize: 24, fontWeight: 800, color: '#e2e8f0', marginBottom: 10 }}>
-                {successModal.name}
+
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 80, height: 80, borderRadius: '50%', marginBottom: 20,
+                background: successModal.type === 'create'
+                  ? 'radial-gradient(circle, rgba(34,197,94,0.25) 0%, rgba(34,197,94,0.05) 70%)'
+                  : 'radial-gradient(circle, rgba(99,102,241,0.25) 0%, rgba(99,102,241,0.05) 70%)',
+                border: `2px solid ${successModal.type === 'create' ? 'rgba(34,197,94,0.4)' : 'rgba(99,102,241,0.4)'}`,
+                animation: 'smPulseRing 2s ease-in-out infinite',
+                boxShadow: successModal.type === 'create'
+                  ? '0 0 30px rgba(34,197,94,0.2)'
+                  : '0 0 30px rgba(99,102,241,0.2)',
+              }}>
+                <span style={{ fontSize: 38, animation: 'smBounceIn 0.6s 0.2s cubic-bezier(0.34,1.56,0.64,1) both' }}>
+                  {successModal.type === 'create' ? '✅' : '✏️'}
+                </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
-                  background: 'rgba(168,85,247,0.15)', color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)',
-                }}>S{successModal.id}</span>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
-                  background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)',
-                }}>{modeLabels[successModal.mode] || successModal.mode}</span>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
-                  background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)',
-                }}>{successModal.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</span>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, fontWeight: 700,
-                  background: successModal.visibility === 'all' ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)',
-                  color: successModal.visibility === 'all' ? '#22c55e' : '#94a3b8',
-                  border: `1px solid ${successModal.visibility === 'all' ? 'rgba(34,197,94,0.3)' : 'rgba(100,116,139,0.3)'}`,
-                }}>{successModal.visibility === 'all' ? '🌐 Tous' : '🔒 Admin'}</span>
+
+              <div style={{
+                display: 'inline-block', fontSize: 11, fontWeight: 800, letterSpacing: 2,
+                color: successModal.type === 'create' ? '#22c55e' : '#818cf8',
+                background: successModal.type === 'create' ? 'rgba(34,197,94,0.12)' : 'rgba(99,102,241,0.12)',
+                border: `1px solid ${successModal.type === 'create' ? 'rgba(34,197,94,0.3)' : 'rgba(99,102,241,0.3)'}`,
+                borderRadius: 6, padding: '3px 12px', marginBottom: 12,
+                animation: 'smFadeUp 0.4s 0.25s ease-out both',
+              }}>
+                {successModal.type === 'create' ? '✦ NOUVELLE STRATÉGIE' : '✦ MISE À JOUR'}
               </div>
+
+              <div style={{
+                fontSize: 26, fontWeight: 900, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.2,
+                textShadow: successModal.type === 'create' ? '0 0 30px rgba(34,197,94,0.4)' : '0 0 30px rgba(99,102,241,0.4)',
+                animation: 'smFadeUp 0.4s 0.32s ease-out both',
+              }}>
+                {successModal.type === 'create' ? 'Enregistrement réussi !' : 'Modifications sauvegardées !'}
+              </div>
+
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 16, padding: '20px 24px', margin: '20px 0 18px',
+                animation: 'smFadeUp 0.4s 0.4s ease-out both',
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#475569', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8 }}>
+                  Stratégie
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#e2e8f0', marginBottom: 14, letterSpacing: -0.3 }}>
+                  {successModal.name}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
+                    background: 'rgba(168,85,247,0.18)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.35)',
+                    letterSpacing: 0.5,
+                  }}>#{successModal.id}</span>
+                  <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
+                    background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)',
+                    letterSpacing: 0.5,
+                  }}>{modeLabels[successModal.mode] || successModal.mode}</span>
+                  <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
+                    background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.35)',
+                    letterSpacing: 0.5,
+                  }}>{successModal.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</span>
+                  <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
+                    background: successModal.visibility === 'all' ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)',
+                    color: successModal.visibility === 'all' ? '#4ade80' : '#94a3b8',
+                    border: `1px solid ${successModal.visibility === 'all' ? 'rgba(34,197,94,0.35)' : 'rgba(100,116,139,0.3)'}`,
+                    letterSpacing: 0.5,
+                  }}>{successModal.visibility === 'all' ? '🌐 Publique' : '🔒 Admin'}</span>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, lineHeight: 1.7,
+                animation: 'smFadeUp 0.4s 0.48s ease-out both',
+              }}>
+                {successModal.type === 'create'
+                  ? '🚀 La stratégie est active et génère des prédictions en temps réel.'
+                  : '⚡ Les modifications sont appliquées instantanément au moteur.'}
+              </div>
+
+              <button
+                onClick={() => setSuccessModal(null)}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px) scale(1.03)'; e.currentTarget.style.boxShadow = '0 8px 25px rgba(34,197,94,0.45)'; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0) scale(1)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(34,197,94,0.3)'; }}
+                style={{
+                  padding: '14px 48px', borderRadius: 14, border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+                  color: '#fff', fontWeight: 800, fontSize: 15, letterSpacing: 0.3,
+                  boxShadow: '0 4px 20px rgba(34,197,94,0.3)',
+                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  animation: 'smFadeUp 0.4s 0.55s ease-out both',
+                }}>
+                ✓ &nbsp;Parfait !
+              </button>
             </div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20, lineHeight: 1.6 }}>
-              {successModal.type === 'create'
-                ? 'La stratégie est active et prête à générer des prédictions.'
-                : 'Les modifications ont été appliquées avec succès.'}
-            </div>
-            <button onClick={() => setSuccessModal(null)} style={{
-              padding: '12px 36px', borderRadius: 12, border: 'none', cursor: 'pointer',
-              background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff',
-              fontWeight: 800, fontSize: 15, boxShadow: '0 4px 15px rgba(34,197,94,0.3)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}>
-              ✓ Parfait
-            </button>
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes fadeInScale {
-          from { opacity: 0; transform: scale(0.85); }
-          to { opacity: 1; transform: scale(1); }
+        @keyframes smPopIn {
+          from { opacity: 0; transform: scale(0.7) translateY(30px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes smFadeUp {
+          from { opacity: 0; transform: translateY(14px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes smBounceIn {
+          from { opacity: 0; transform: scale(0.4); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+        @keyframes smPulseRing {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.3), 0 0 30px rgba(34,197,94,0.15); }
+          50%       { box-shadow: 0 0 0 8px rgba(34,197,94,0), 0 0 40px rgba(34,197,94,0.25); }
+        }
+        @keyframes smParticle0 {
+          0%   { opacity: 0; transform: translate(0,0) scale(0); }
+          30%  { opacity: 1; }
+          100% { opacity: 0; transform: translate(-40px, -80px) scale(1.5) rotate(180deg); }
+        }
+        @keyframes smParticle1 {
+          0%   { opacity: 0; transform: translate(0,0) scale(0); }
+          30%  { opacity: 1; }
+          100% { opacity: 0; transform: translate(50px, -90px) scale(1.2) rotate(-120deg); }
+        }
+        @keyframes smParticle2 {
+          0%   { opacity: 0; transform: translate(0,0) scale(0); }
+          30%  { opacity: 1; }
+          100% { opacity: 0; transform: translate(-20px, -70px) scale(1) rotate(90deg); }
+        }
+        @keyframes smParticle3 {
+          0%   { opacity: 0; transform: translate(0,0) scale(0); }
+          30%  { opacity: 1; }
+          100% { opacity: 0; transform: translate(30px, -60px) scale(1.3) rotate(200deg); }
         }
       `}</style>
 
