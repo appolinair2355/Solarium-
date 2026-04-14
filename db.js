@@ -1,14 +1,16 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
-const USE_PG = !!process.env.DATABASE_URL;
+const DEFAULT_PG_URL = 'postgresql://hebergement_user:4J9ejEAGFbXqY2qubeQhY6RHZMqRLF9C@dpg-d740h98ule4c73eq5edg-a.oregon-postgres.render.com/hebergement';
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const USE_PG = !!DB_URL;
 
 let pgPool = null;
 if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL.includes('render.com') || process.env.DATABASE_URL.includes('sslmode'))
+    connectionString: DB_URL,
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
       ? { rejectUnauthorized: false }
       : false,
   });
