@@ -553,6 +553,32 @@ async function deleteTgMsgIdsForStrategy(strategy) {
   }
 }
 
+async function deleteStrategyPredictions(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(`DELETE FROM predictions WHERE strategy=$1`, [strategy]);
+    return r.rowCount;
+  }
+  const data = require('./jsondb');
+  let count = 0;
+  if (data.d) {
+    const before = (data.d().predictions || []).length;
+    data.d().predictions = (data.d().predictions || []).filter(p => p.strategy !== strategy);
+    count = before - data.d().predictions.length;
+  }
+  return count;
+}
+
+async function deleteAllPredictions() {
+  if (USE_PG) {
+    const r = await pgPool.query(`DELETE FROM predictions`);
+    return r.rowCount;
+  }
+  const data = require('./jsondb');
+  let count = 0;
+  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
+  return count;
+}
+
 async function expireStrategyPredictions(strategy) {
   if (USE_PG) {
     const r = await pgPool.query(
@@ -649,6 +675,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
+  deleteStrategyPredictions, deleteAllPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
 };

@@ -594,21 +594,23 @@ async function sendToStrategyChannels(strategy, gameNumber, suit) {
 async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts = {}) {
   if (!Array.isArray(targets) || targets.length === 0) return;
 
-  const formatId = tgOpts.formatId || currentFormat;
-  const hand     = tgOpts.hand     || null;
-  const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
+  const defaultFormatId = tgOpts.formatId || currentFormat;
+  const hand = tgOpts.hand || null;
+  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
 
-  const { text, parse_mode } = buildTgMessage(formatId, {
-    gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
-  });
-
-  for (const { bot_token, channel_id } of targets) {
+  for (const { bot_token, channel_id, tg_format: targetFormat } of targets) {
     if (!bot_token || !channel_id) continue;
+    // ── Chaque canal peut avoir son propre format de message ──
+    const channelFormatId = (targetFormat !== undefined && targetFormat !== null)
+      ? parseInt(targetFormat) : defaultFormatId;
+    const { text, parse_mode } = buildTgMessage(channelFormatId, {
+      gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
+    });
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
         await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token).catch(() => {});
-        console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} (msg_id=${msgId})`);
+        console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} fmt=${channelFormatId} (msg_id=${msgId})`);
       }
     } catch (e) {
       console.error(`[TG Custom] sendCustomAndStore ${channel_id}: ${e.message}`);

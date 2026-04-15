@@ -396,6 +396,62 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Reset statistiques par stratégie ──────────────────────────────
+// Supprime tout l'historique de prédictions d'une stratégie (C1, C2, C3, DC ou Sn)
+router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // id peut être 'C1','C2','C3','DC' (strategies intégrées) ou un entier (custom → Sn)
+    const stratKey = /^\d+$/.test(id) ? `S${id}` : id;
+    const deleted = await db.deleteStrategyPredictions(stratKey);
+    // Nettoyer aussi les messages Telegram stockés pour cette stratégie
+    await db.deleteTgMsgIdsForStrategy(stratKey).catch(() => {});
+    // Réinitialiser les pending en mémoire moteur
+    const eng = require('./engine');
+    if (eng && eng.clearStrategyPending) eng.clearStrategyPending(stratKey);
+    console.log(`[Admin] Reset stats ${stratKey} — ${deleted} prédiction(s) supprimée(s)`);
+    res.json({ ok: true, strategy: stratKey, deleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Nettoyage complet des prédictions (sans toucher aux configs) ──
+// Supprime : predictions, tg_pred_messages
+// Remet à 0 : engine_absences, bilan_last, pending en mémoire, compteurs absences moteur
+// Conserve : users, telegram_config, strategy_channel_routes, custom_strategies,
+//            tg_msg_format, ui_styles, sessions, render_db_url, broadcast_message
+router.post('/reset-all-stats', requireAdmin, async (req, res) => {
+  try {
+    const pool = db.pool;
+    // 1. Supprimer toutes les prédictions
+    const r = await pool.query(`DELETE FROM predictions`);
+    const deleted = r.rowCount;
+    // 2. Supprimer les message_id Telegram stockés
+    await pool.query(`DELETE FROM tg_pred_messages`).catch(() => {});
+    // 3. Remettre les compteurs d'absences à zéro (engine_absences)
+    const SUITS = ['♠','♥','♦','♣'];
+    const zero  = Object.fromEntries(SUITS.map(s => [s, 0]));
+    const absReset = JSON.stringify({ c1: {...zero}, c2: {...zero}, c3: {...zero} });
+    await pool.query(`INSERT INTO settings(key,value) VALUES('engine_absences',$1)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [absReset]).catch(() => {});
+    // 4. Supprimer le bilan quotidien (obsolète sans prédictions)
+    await pool.query(`DELETE FROM settings WHERE key='bilan_last'`).catch(() => {});
+    // 5. Réinitialiser le moteur en mémoire
+    const eng = require('./engine');
+    if (eng) {
+      if (eng.clearAllPending) eng.clearAllPending();
+      if (eng.resetAbsences)   eng.resetAbsences();
+    }
+    console.log(`[Admin] Clean predictions — ${deleted} supprimée(s), absences remises à 0`);
+    res.json({ ok: true, deleted, details: {
+      predictions_deleted: deleted,
+      tg_messages_cleared: true,
+      absences_reset: true,
+      bilan_cleared: true,
+      configs_preserved: ['users','telegram_config','custom_strategies','tg_msg_format','ui_styles','render_db_url'],
+    }});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Nombre max de rattrapages ─────────────────────────────────────
 router.get('/max-rattrapage', requireAdmin, async (req, res) => {
   try {

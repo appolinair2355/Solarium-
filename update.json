@@ -1,84 +1,95 @@
 {
   "_meta": {
-    "version": "2.0",
+    "version": "3.0",
     "date": "2026-04-15",
     "project": "Baccarat Pro",
-    "description": "Mise à jour complète : corrections de bugs rattrapage, nouveaux formats de message (9 et 10), et fonctions d'export.",
+    "description": "Mise à jour : reset stats par stratégie, format Telegram indépendant par canal, gestion multi-canal.",
     "corrections": [
-      "Bug 1 — cleanupStale utilisait globalMaxR=2 pour TOUTES les stratégies : chaque stratégie custom expire maintenant avec son propre max_rattrapage.",
-      "Bug 2 — Les prédictions en mémoire (pending) n'étaient pas nettoyées après le cleanup SQL, causant des doubles tentatives de résolution.",
-      "Bug 3 — _verifyPendingLive ne transmettait pas les bonnes options Telegram (format, main, maxR) pour les stratégies custom lors des résolutions live.",
-      "Amélioration — Formats 9 et 10 ajoutés : joueur dédié et banquier dédié, indépendamment du paramètre 'main' de la stratégie.",
-      "Amélioration — Endpoint export-config ajouté pour télécharger toute la configuration en JSON."
+      "BUG CRITIQUE — Format Telegram unique pour tous les canaux : sendCustomAndStore utilisait un seul formatId pour TOUS les canaux d'une stratégie. Désormais chaque target stocke son propre tg_format et buildTgMessage est appelé séparément par canal.",
+      "BUG FRONTEND — saveStratTg n'incluait pas tg_format dans chaque target. Le format n'était sauvegardé qu'au niveau de la stratégie, pas par canal. Corrigé : newTarget inclut maintenant { bot_token, channel_id, tg_format }.",
+      "NOUVELLE FONCTIONNALITÉ — Bouton 'Remettre à 0' sur chaque carte de statistiques : supprime l'historique complet (GAGNANTS + PERDUS) d'une stratégie et remet ses compteurs à 0.",
+      "NOUVELLE FONCTIONNALITÉ — Bouton 'Reset tout' dans l'en-tête des statistiques : supprime l'historique de TOUTES les stratégies en une seule action.",
+      "NOUVELLE FONCTIONNALITÉ — Interface multi-canal repensée : chaque stratégie peut avoir plusieurs canaux Telegram, chacun avec son propre bot_token, channel_id et tg_format indépendant.",
+      "AMÉLIORATION — Indicateur de statut mis à jour : affiche le nombre de canaux configurés (ex: ✅ 2 canaux) et liste tous les canaux avec leur format dans le résumé.",
+      "NOUVEAU — clearStrategyPending() et clearAllPending() ajoutés au moteur pour réinitialiser la mémoire des prédictions en cours lors d'un reset.",
+      "NOUVEAU — Endpoints /admin/strategies/:id/reset-stats et /admin/reset-all-stats ajoutés : suppriment les prédictions en DB, les messages TG stockés, et vident la mémoire moteur."
     ]
   },
+
+  "_architecture": {
+    "format_par_canal": {
+      "ancien": "tg_targets = [{ bot_token, channel_id }] + tg_format au niveau stratégie → MÊME message pour tous les canaux",
+      "nouveau": "tg_targets = [{ bot_token, channel_id, tg_format }] → message DIFFÉRENT par canal selon son tg_format propre",
+      "fallback": "Si tg_format absent sur le target → utilise tg_format de la stratégie → sinon format global du système"
+    },
+    "reset_stats": {
+      "par_strategie": "POST /api/admin/strategies/:id/reset-stats — supprime prédictions + messages TG + vide pending mémoire",
+      "global": "POST /api/admin/reset-all-stats — supprime TOUT l'historique de prédictions"
+    }
+  },
+
   "type": "multi",
   "data": [
     {
-      "type": "format",
-      "data": {
-        "format_id": 9,
-        "_description": "Format 9 — 🤖 Joueur dédié (toujours joueur, indépendamment de la config 'main'). Exemple de rendu :\n🤖 joueur :811\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : 3(🔰+3)\n🧨 Résultats : ⌛\n\nAprès vérification :\n🤖 joueur :811\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : 3(🔰+3)\n🧨 Résultats : ✅0️⃣GAGNÉ"
-      }
-    },
-    {
       "type": "strategies",
+      "_comment": "Exemple de stratégie avec 2 canaux Telegram ayant chacun un format différent. Adapte les valeurs à ton cas.",
       "data": [
         {
-          "_description": "Exemple de stratégie joueur avec le nouveau format 9. Adapte les valeurs à ton cas.",
-          "name": "Joueur Pro F9",
+          "name": "Multi-Canal Pro",
           "mode": "manquants",
           "threshold": 5,
           "hand": "joueur",
           "max_rattrapage": 5,
-          "tg_format": 9,
+          "tg_format": 1,
           "prediction_offset": 1,
           "loss_type": "rattrapage",
           "visibility": "admin",
           "enabled": false,
-          "tg_targets": [],
           "exceptions": [],
-          "mappings": { "♠": ["♥"], "♥": ["♠"], "♦": ["♣"], "♣": ["♦"] }
-        },
-        {
-          "_description": "Exemple de stratégie banquier avec le nouveau format 10. Adapte les valeurs à ton cas.",
-          "name": "Banquier Pro F10",
-          "mode": "manquants",
-          "threshold": 5,
-          "hand": "banquier",
-          "max_rattrapage": 5,
-          "tg_format": 10,
-          "prediction_offset": 1,
-          "loss_type": "rattrapage",
-          "visibility": "admin",
-          "enabled": false,
-          "tg_targets": [],
-          "exceptions": [],
-          "mappings": { "♠": ["♥"], "♥": ["♠"], "♦": ["♣"], "♣": ["♦"] }
+          "mappings": { "♠": ["♥"], "♥": ["♠"], "♦": ["♣"], "♣": ["♦"] },
+          "tg_targets": [
+            {
+              "bot_token": "TON_BOT_TOKEN_1",
+              "channel_id": "@ton_canal_1",
+              "tg_format": 9
+            },
+            {
+              "bot_token": "TON_BOT_TOKEN_2",
+              "channel_id": "@ton_canal_2",
+              "tg_format": 3
+            }
+          ]
         }
       ]
     }
   ],
-  "_formats_reference": {
-    "format_9": {
-      "nom": "🤖 Joueur dédié",
-      "template_prediction": "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ⌛",
-      "template_gagne":      "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ✅{rattrapage_emoji}GAGNÉ",
-      "template_perdu":      "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ❌",
-      "notes": "Toujours affiche le template joueur, même pour une stratégie configurée en main 'banquier'."
+
+  "_fichiers_modifies": {
+    "telegram-service.js": {
+      "fonction": "sendCustomAndStore",
+      "ligne": "597–622",
+      "changement": "formatId résolu PAR canal (target.tg_format || tgOpts.formatId || currentFormat) ; buildTgMessage appelé à l'intérieur de la boucle, pas avant."
     },
-    "format_10": {
-      "nom": "🎮 Banquier dédié",
-      "template_prediction": "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ⌛",
-      "template_gagne":      "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ✅{rattrapage_emoji}GAGNÉ",
-      "template_perdu":      "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ❌",
-      "notes": "Toujours affiche le template banquier, même pour une stratégie configurée en main 'joueur'."
+    "src/pages/Admin.jsx": {
+      "saveStratTg": "newTarget inclut désormais tg_format: parseInt(stratChForm.tg_format) || null",
+      "removeStratTgTarget": "nouvelle fonction pour supprimer un canal individuel d'une stratégie",
+      "UI_multi_canal": "Panneau TG réécrit : liste de tous les canaux existants avec format + bouton 🗑️ individuel + formulaire d'ajout séparé",
+      "reset_stats_bouton": "Bouton '🔄 Remettre à 0' sur chaque carte stratégie (visible si total > 0)",
+      "reset_all_bouton": "Bouton '🗑️ Reset tout' dans l'en-tête des statistiques"
     },
-    "format_8": {
-      "nom": "🎮 Banquier / 🤖 Joueur Pro (automatique)",
-      "notes": "Choisit automatiquement le template joueur ou banquier selon le paramètre 'main' de chaque stratégie."
+    "admin.js": {
+      "POST /strategies/:id/reset-stats": "Supprime prédictions d'une stratégie (C1/C2/C3/DC ou Sn), messages TG, vide mémoire moteur",
+      "POST /reset-all-stats": "Supprime toutes les prédictions et messages TG"
+    },
+    "engine.js": {
+      "clearStrategyPending": "Vide le tableau pending en mémoire pour une stratégie donnée",
+      "clearAllPending": "Vide tous les tableaux pending en mémoire"
+    },
+    "db.js": {
+      "deleteStrategyPredictions": "DELETE FROM predictions WHERE strategy=$1",
+      "deleteAllPredictions": "DELETE FROM predictions"
     }
   },
-  "_comment_export": "Pour exporter toute la configuration du système en JSON, accédez à l'admin panel → section 'Mise à jour JSON' → bouton 'Télécharger config.json'. Vous pouvez aussi appeler directement l'endpoint : GET /api/admin/export-config (authentification requise).",
-  "_comment_import": "Pour importer cette mise à jour, collez le contenu de ce fichier dans le champ JSON de l'admin panel, vérifiez l'aperçu, puis cliquez sur 'Appliquer la mise à jour'."
+
+  "_comment_import": "Ce fichier documente les corrections appliquées directement dans le code. Le bloc 'data' contient un exemple de stratégie multi-canal importable via le panneau admin (section Mise à jour JSON)."
 }

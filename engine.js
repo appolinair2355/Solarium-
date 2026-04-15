@@ -1396,6 +1396,41 @@ class Engine {
     // grâce à saveMaxRattrapage() appelé depuis admin.js
   }
 
+  // ── Réinitialisation mémoire pour reset-stats ────────────────────
+  clearStrategyPending(stratKey) {
+    if (stratKey === 'C1') { this.c1.pending = {}; }
+    else if (stratKey === 'C2') { this.c2.pending = {}; }
+    else if (stratKey === 'C3') { this.c3.pending = {}; }
+    else if (stratKey === 'DC') { this.dc.pending = {}; }
+    else if (stratKey.startsWith('S')) {
+      const id = parseInt(stratKey.slice(1));
+      if (!isNaN(id) && this.custom[id]) this.custom[id].pending = {};
+    }
+    console.log(`[Engine] Pending mémoire vidé pour ${stratKey}`);
+  }
+
+  clearAllPending() {
+    this.c1.pending = {}; this.c2.pending = {}; this.c3.pending = {}; this.dc.pending = {};
+    for (const id of Object.keys(this.custom)) { this.custom[id].pending = {}; }
+    console.log('[Engine] Tous les pending mémoire vidés');
+  }
+
+  resetAbsences() {
+    const SUITS = ['♠','♥','♦','♣'];
+    for (const s of SUITS) {
+      this.c1.absences[s] = 0;
+      this.c2.absences[s] = 0;
+      this.c3.absences[s] = 0;
+    }
+    this.c1.consecLosses = 0;
+    this.c2.hadFirstLoss = false;
+    this.c3.consecLosses = 0;
+    for (const id of Object.keys(this.custom)) {
+      if (this.custom[id].absences) this.custom[id].absences = {};
+    }
+    console.log('[Engine] Compteurs d\'absences remis à 0');
+  }
+
   stop() {
     this.running = false;
     if (this.interval) clearInterval(this.interval);
