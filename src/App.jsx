@@ -8,6 +8,7 @@ import StrategySelect from './pages/StrategySelect';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import TelegramFeed from './pages/TelegramFeed';
+import Programmation from './pages/Programmation';
 
 function useUiStyles() {
   useEffect(() => {
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/dashboard/:strategy" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
           <Route path="/canal-telegram" element={<ProtectedRoute><TelegramFeed /></ProtectedRoute>} />
+          <Route path="/programmation" element={<Programmation />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
