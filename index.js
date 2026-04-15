@@ -274,9 +274,9 @@ const IS_RENDER = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
 async function autoSaveDeployFiles() {
   if (!USE_PG) return;
 
-  // ── Sur Render avec AUTO_INSTALL_FROM_DB=true → restaurer les fichiers depuis la DB ──
-  if (IS_RENDER && process.env.AUTO_INSTALL_FROM_DB === 'true') {
-    console.log('[Deploy] 📥 Render détecté + AUTO_INSTALL_FROM_DB=true → restauration depuis la DB…');
+  // ── Sur Render → restaurer automatiquement les fichiers depuis la DB ──
+  if (IS_RENDER) {
+    console.log('[Deploy] 📥 Render détecté → restauration automatique depuis la DB…');
     const { getAllProjectFiles } = require('./db');
     const dbFiles = await getAllProjectFiles().catch(() => []);
     if (dbFiles && dbFiles.length > 0) {
