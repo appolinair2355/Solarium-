@@ -67,6 +67,8 @@ export function AuthProvider({ children }) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Erreur de connexion');
+    // Redirection spéciale (ex: espace programmation)
+    if (data.redirect) return { redirect: data.redirect };
     setUser(data.user);
     return data.user;
   };
