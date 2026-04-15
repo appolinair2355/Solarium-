@@ -472,22 +472,39 @@ function AdminPanel() {
     try {
       const strat = strategies.find(s => s.id === id);
       if (!strat) throw new Error('Stratégie introuvable');
-      const existing = Array.isArray(strat.tg_targets) ? strat.tg_targets.filter(t => t.channel_id !== stratChForm.channel_id) : [];
+      const existing = Array.isArray(strat.tg_targets)
+        ? strat.tg_targets.filter(t => t.channel_id !== stratChForm.channel_id) : [];
       const newTarget = stratChForm.bot_token.trim() && stratChForm.channel_id.trim()
-        ? { bot_token: stratChForm.bot_token.trim(), channel_id: stratChForm.channel_id.trim() }
+        ? {
+            bot_token: stratChForm.bot_token.trim(),
+            channel_id: stratChForm.channel_id.trim(),
+            tg_format: stratChForm.tg_format ? parseInt(stratChForm.tg_format) : null,
+          }
         : null;
-      const tg_targets = newTarget ? [newTarget, ...existing] : existing;
-      const tg_format = stratChForm.tg_format ? parseInt(stratChForm.tg_format) : null;
+      const tg_targets = newTarget ? [...existing, newTarget] : existing;
       const r = await fetch(`/api/admin/strategies/${id}`, {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...strat, tg_targets, tg_format }),
+        body: JSON.stringify({ ...strat, tg_targets }),
       });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
-      setStratChOpen(null);
+      setStratChForm({ bot_token: '', channel_id: '', tg_format: null });
       loadStrategies();
     } catch (e) { alert('❌ ' + e.message); }
     finally { setStratChSaving(false); }
+  };
+
+  const removeStratTgTarget = async (id, channelId) => {
+    const strat = strategies.find(s => s.id === id);
+    if (!strat) return;
+    const tg_targets = (strat.tg_targets || []).filter(t => t.channel_id !== channelId);
+    const r = await fetch(`/api/admin/strategies/${id}`, {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...strat, tg_targets }),
+    });
+    if (r.ok) loadStrategies();
+    else alert('❌ Erreur lors de la suppression du canal');
   };
 
   const showStratMsg = (text, error = false) => {
@@ -2849,7 +2866,7 @@ function AdminPanel() {
                 </div>}
 
                 {/* ── Rattrapages max par stratégie ── */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && (
+                {stratForm.mode !== 'relance' && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Rattrapages max — jeux supplémentaires si la carte prédite est absente
@@ -3318,10 +3335,37 @@ function AdminPanel() {
               <h2 className="tg-admin-title">Bilan des prédictions par stratégie</h2>
               <p className="tg-admin-sub">Résultats depuis le début — wins, pertes et taux de réussite pour chaque canal et stratégie personnalisée.</p>
             </div>
-            <button
-              onClick={loadStratStats}
-              style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: 'transparent', color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
-            >🔄 Actualiser</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={loadStratStats}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: 'transparent', color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+              >🔄 Actualiser</button>
+              <button
+                onClick={async () => {
+                  if (!confirm(
+                    '🧹 NETTOYAGE DES PRÉDICTIONS\n\n' +
+                    'SERA SUPPRIMÉ :\n' +
+                    '✓ Tout l\'historique de prédictions (gains, pertes)\n' +
+                    '✓ Messages Telegram stockés\n' +
+                    '✓ Compteurs d\'absences (redémarrage à 0)\n' +
+                    '✓ Bilan quotidien\n\n' +
+                    'SERA CONSERVÉ :\n' +
+                    '✓ Comptes utilisateurs\n' +
+                    '✓ Canaux Telegram configurés\n' +
+                    '✓ Configuration des stratégies\n' +
+                    '✓ Format de message, styles\n\n' +
+                    'Confirmer ?'
+                  )) return;
+                  const r = await fetch('/api/admin/reset-all-stats', { method: 'POST', credentials: 'include' });
+                  const d = await r.json();
+                  if (d.ok) {
+                    alert(`✅ Base nettoyée — ${d.deleted} prédiction(s) supprimée(s)\nCompteurs remis à 0. Prêt à reprendre.`);
+                    loadStratStats();
+                  } else alert('❌ ' + (d.error || 'Erreur'));
+                }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+              >🧹 Repartir à zéro</button>
+            </div>
           </div>
 
           {/* Grille des statistiques */}
@@ -3403,6 +3447,23 @@ function AdminPanel() {
                         <div style={{ marginTop: 10, fontSize: 12, color: '#475569', textAlign: 'center', fontStyle: 'italic' }}>
                           Aucune prédiction enregistrée
                         </div>
+                      )}
+
+                      {/* ── Bouton reset stats ── */}
+                      {st.total > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Supprimer tout l'historique de ${ch.name} (${st.total} prédictions) ?\n\nCette action est irréversible.`)) return;
+                            const r = await fetch(`/api/admin/strategies/${ch.id}/reset-stats`, { method: 'POST', credentials: 'include' });
+                            const d = await r.json();
+                            if (d.ok) { alert(`✅ ${d.deleted} prédiction(s) supprimée(s)`); loadStratStats(); }
+                            else alert('❌ ' + (d.error || 'Erreur'));
+                          }}
+                          style={{ marginTop: 10, width: '100%', padding: '6px 0', borderRadius: 7, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)', color: '#f87171', fontWeight: 700, fontSize: 11, cursor: 'pointer', letterSpacing: 0.4 }}
+                        >
+                          🔄 Remettre à 0
+                        </button>
                       )}
                     </div>
                   );
@@ -4391,8 +4452,9 @@ function AdminPanel() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginTop: 8 }}>
             {strategies.map((s, idx) => {
-              const tgt = s.tg_targets?.find(t => t.bot_token && t.channel_id);
-              const isConfigured = !!tgt;
+              const validTargets = (s.tg_targets || []).filter(t => t.bot_token && t.channel_id);
+              const tgt = validTargets[0];
+              const isConfigured = validTargets.length > 0;
               const isOpen = stratChOpen === s.id;
               return (
                 <div key={s.id} style={{
@@ -4406,24 +4468,29 @@ function AdminPanel() {
                         <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{s.name}</span>
                         <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 5, fontWeight: 700, background: 'rgba(168,85,247,0.18)', color: '#a855f7', border: '1px solid rgba(168,85,247,0.35)' }}>S{s.id}</span>
                         {isConfigured ? (
-                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.35)' }}>✅ Telegram configuré</span>
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.35)' }}>
+                            ✅ {validTargets.length} canal{validTargets.length > 1 ? 'x' : ''}
+                          </span>
                         ) : (
                           <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>⚠️ Non configuré</span>
                         )}
                       </div>
                       {isConfigured && (
-                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                          <span style={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Canal : {tgt.channel_id}</span>
-                          {s.tg_format && <span style={{ color: '#a78bfa' }}>· Format {s.tg_format}</span>}
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 3, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {validTargets.map((t, i) => (
+                            <span key={i} style={{ fontFamily: 'monospace', background: 'rgba(168,85,247,0.1)', padding: '1px 6px', borderRadius: 4, color: '#a78bfa' }}>
+                              {t.channel_id}{t.tg_format ? ` F${t.tg_format}` : ''}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </div>
                     <button
                       type="button"
                       onClick={() => {
-                        if (isOpen) { setStratChOpen(null); return; }
+                        if (isOpen) { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); return; }
                         setStratChOpen(s.id);
-                        setStratChForm({ bot_token: tgt?.bot_token || '', channel_id: tgt?.channel_id || '', tg_format: s.tg_format != null ? String(s.tg_format) : '' });
+                        setStratChForm({ bot_token: '', channel_id: '', tg_format: null });
                       }}
                       style={{
                         fontSize: 11, padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontWeight: 700,
@@ -4439,9 +4506,40 @@ function AdminPanel() {
 
                   {isOpen && (
                     <div style={{ marginTop: 12, padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+
+                      {/* ── Liste des canaux existants ── */}
+                      {(s.tg_targets || []).filter(t => t.channel_id).length > 0 && (
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Canaux configurés</div>
+                          {(s.tg_targets || []).filter(t => t.channel_id).map((tgt, ti) => (
+                            <div key={ti} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 8, marginBottom: 6 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {tgt.channel_id}
+                                </div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                                  Format : <span style={{ color: '#a78bfa', fontWeight: 700 }}>
+                                    {tgt.tg_format ? (TG_FORMATS.find(f => String(f.value) === String(tgt.tg_format))?.label || `Format ${tgt.tg_format}`) : (TG_FORMATS[0]?.label || 'Par défaut')}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => { if (confirm(`Supprimer le canal ${tgt.channel_id} ?`)) removeStratTgTarget(s.id, tgt.channel_id); }}
+                                style={{ padding: '5px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer', fontSize: 12, fontWeight: 700, flexShrink: 0 }}
+                              >🗑️</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* ── Formulaire ajout d'un nouveau canal ── */}
+                      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
+                        ➕ Ajouter un canal
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
                         <div>
-                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 }}>Token Bot Telegram</label>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Token Bot Telegram</label>
                           <input
                             type="text"
                             placeholder="123456:ABCdef..."
@@ -4451,7 +4549,7 @@ function AdminPanel() {
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 }}>ID Canal Telegram</label>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>ID Canal Telegram</label>
                           <input
                             type="text"
                             placeholder="@moncanal ou -100123456789"
@@ -4461,10 +4559,9 @@ function AdminPanel() {
                           />
                         </div>
                       </div>
-                      {/* Format de prédiction dédié à cette stratégie */}
                       <div style={{ marginBottom: 12 }}>
-                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-                          📋 Format de prédiction
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>
+                          📋 Format de prédiction pour ce canal
                         </label>
                         <select
                           value={stratChForm.tg_format ?? ''}
@@ -4474,40 +4571,17 @@ function AdminPanel() {
                           {TG_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        {isConfigured && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!confirm('Supprimer la configuration Telegram de cette stratégie ?')) return;
-                              setStratChSaving(true);
-                              try {
-                                const r = await fetch(`/api/admin/strategies/${s.id}`, {
-                                  method: 'PUT', credentials: 'include',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ ...s, tg_targets: [] }),
-                                });
-                                if (!r.ok) throw new Error('Erreur');
-                                setStratChOpen(null);
-                                loadStrategies();
-                              } catch (e) { alert('❌ ' + e.message); }
-                              finally { setStratChSaving(false); }
-                            }}
-                            style={{ fontSize: 11, padding: '5px 12px', borderRadius: 7, background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer', fontWeight: 700 }}
-                          >🗑️ Retirer Telegram</button>
-                        )}
-                        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-                          <button className="btn btn-ghost btn-sm" type="button" onClick={() => setStratChOpen(null)}>Annuler</button>
-                          <button
-                            className="btn btn-gold btn-sm"
-                            type="button"
-                            disabled={stratChSaving || !stratChForm.bot_token.trim() || !stratChForm.channel_id.trim()}
-                            onClick={() => saveStratTg(s.id)}
-                            style={{ background: 'linear-gradient(135deg,#7e22ce,#a855f7)' }}
-                          >
-                            {stratChSaving ? '⏳ Sauvegarde…' : `💾 Enregistrer`}
-                          </button>
-                        </div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); }}>Fermer</button>
+                        <button
+                          className="btn btn-gold btn-sm"
+                          type="button"
+                          disabled={stratChSaving || !stratChForm.bot_token.trim() || !stratChForm.channel_id.trim()}
+                          onClick={() => saveStratTg(s.id)}
+                          style={{ background: 'linear-gradient(135deg,#7e22ce,#a855f7)' }}
+                        >
+                          {stratChSaving ? '⏳ Sauvegarde…' : '➕ Ajouter ce canal'}
+                        </button>
                       </div>
                     </div>
                   )}
