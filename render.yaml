@@ -1,16 +1,20 @@
 services:
   - type: web
-    name: baccarat-pro
-    env: node
+    name: vip-kouame-predictions
+    runtime: python
     plan: free
-    buildCommand: npm install
-    startCommand: node index.js
+    
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    
     disk:
       name: data
-      mountPath: /opt/render/project/src/data
+      mountPath: /data
       sizeGB: 1
+    
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: SESSION_SECRET
-        generateValue: true
+      - key: PORT
+        value: 10000
+      - key: DATA_DIR
+        value: /data
+      

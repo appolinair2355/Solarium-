@@ -36,6 +36,7 @@
     "wait-on": "^9.0.4"
   },
   "devDependencies": {
+    "jszip": "^3.10.1",
     "pdfkit": "^0.18.0"
   }
 }

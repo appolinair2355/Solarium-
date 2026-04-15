@@ -468,6 +468,34 @@ function buildTgMessage(formatId, {
       }
     }
 
+    case 9: {
+      const sl9 = status === null    ? '⌛'
+                : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
+                :                      '❌';
+      return {
+        text:
+          `🤖 joueur :${gameNumber}\n` +
+          `🔰Couleur de la carte :${emoji}\n` +
+          `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
+          `🧨 Résultats : ${sl9}`,
+        parse_mode: null,
+      };
+    }
+
+    case 10: {
+      const sl10 = status === null    ? '⌛'
+                 : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
+                 :                      '❌';
+      return {
+        text:
+          `🎮 banquier №${gameNumber}\n` +
+          `⚜️ Couleur de la carte:${emoji}\n` +
+          `🎰 Poursuite  🔰+${maxR} jeux\n` +
+          `🗯️ Résultats : ${sl10}`,
+        parse_mode: null,
+      };
+    }
+
     default:
       return {
         text:

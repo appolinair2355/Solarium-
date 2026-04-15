@@ -954,7 +954,7 @@ class Engine {
     const { gameNumber: gn, playerSuits, bankerSuits, playerDone, bankerDone, playerCards, bankerCards } = this.liveGameCards;
 
     // Helper : tente de résoudre live un seul objet pending (ex: this.c1.pending)
-    const tryResolve = async (pending, strategyId, handSuits, handDone) => {
+    const tryResolve = async (pending, strategyId, handSuits, handDone, tgOpts = {}) => {
       if (!handDone || handSuits.length === 0) return;
       for (const [pg, info] of Object.entries(pending)) {
         const pgNum = parseInt(pg);
@@ -962,7 +962,7 @@ class Engine {
         if (!handSuits.includes(info.suit)) continue; // costume absent de la main live → attend
         const rattrapage = gn - pgNum;
         console.log(`[${strategyId}] ⚡ Live: costume ${info.suit} trouvé jeu #${gn} → gagne immédiat (R${rattrapage})`);
-        await resolvePrediction(strategyId, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards);
+        await resolvePrediction(strategyId, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, tgOpts);
         delete pending[pg];
       }
     };
@@ -973,13 +973,17 @@ class Engine {
     await tryResolve(this.c3.pending, 'C3', playerSuits, playerDone);
     await tryResolve(this.dc.pending, 'DC', playerSuits, playerDone);
 
-    // Stratégies custom → main selon config
+    // Stratégies custom → main selon config, avec les bonnes options Telegram
     for (const [idStr, entry] of Object.entries(this.custom)) {
       if (!entry.config?.enabled) continue;
-      const hand      = entry.config.hand === 'banquier' ? 'banquier' : 'joueur';
+      const cfg       = entry.config;
+      const hand      = cfg.hand === 'banquier' ? 'banquier' : 'joueur';
       const handSuits = hand === 'banquier' ? bankerSuits : playerSuits;
       const handDone  = hand === 'banquier' ? bankerDone  : playerDone;
-      await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone);
+      const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+        ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
+      const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
+      await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone, stratTgOpts);
     }
   }
 
@@ -1162,27 +1166,46 @@ class Engine {
     try {
       // Utilise le numéro du DERNIER JEU RÉELLEMENT TRAITÉ par processGame,
       // pas le max vu dans l'API (qui inclut les jeux en cours non terminés).
-      // Sans ça, cleanupStale expire des prédictions avant que le moteur ait
-      // pu les vérifier contre les jeux terminés disponibles.
       const mx = this.maxProcessedGame || 0;
       if (mx < 1) return;
 
-      // Calcule le max_rattrapage effectif = max du global ET de tous les custom actifs.
-      // Sans ça, les stratégies custom avec un rattrapage plus grand que le global
-      // voient leurs prédictions expirées trop tôt par ce cleanup.
       const globalMaxR = getCurrentMaxRattrapage();
-      let effectiveMaxR = globalMaxR;
-      for (const [, state] of Object.entries(this.custom)) {
-        if (state.config?.enabled && state.config?.max_rattrapage != null) {
-          effectiveMaxR = Math.max(effectiveMaxR, parseInt(state.config.max_rattrapage) || 0);
+
+      // ── Phase 1 : cleanup par stratégie custom (avec le bon maxR de chaque) ──
+      // Résout correctement chaque prédiction orpheline avec la notification Telegram
+      // et le rattrapage exact de la stratégie concernée.
+      let customExpired = 0;
+      for (const [idStr, state] of Object.entries(this.custom)) {
+        if (!state.pending || Object.keys(state.pending).length === 0) continue;
+        const cfg      = state.config;
+        const stratMaxR = (cfg?.max_rattrapage !== undefined && cfg?.max_rattrapage !== null)
+          ? parseInt(cfg.max_rattrapage)
+          : globalMaxR;
+        const channelId = `S${idStr}`;
+        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR };
+
+        for (const [pgStr, info] of Object.entries(state.pending)) {
+          const pgNum = parseInt(pgStr);
+          // La prédiction a dépassé sa fenêtre de rattrapage → expiration propre
+          if (mx > pgNum + stratMaxR) {
+            await resolvePrediction(channelId, pgNum, info.suit, 'perdu', stratMaxR, null, null, stratTgOpts);
+            delete state.pending[pgStr];
+            customExpired++;
+          }
         }
       }
+      if (customExpired > 0) {
+        console.log(`🧹 ${customExpired} prédiction(s) custom expirée(s) (jeu actuel: #${mx})`);
+      }
 
-      // On n'expire que les prédictions qui ont dépassé la fenêtre la plus large
-      const threshold = mx - effectiveMaxR - 1;
-      if (threshold < 1) return;
-      const count = await db.expireStaleByGame(threshold, globalMaxR);
-      if (count > 0) console.log(`🧹 ${count} prédiction(s) hors-fenêtre expirée(s) (jeu actuel: #${mx}, seuil: #${threshold}, maxR effectif: ${effectiveMaxR})`);
+      // ── Phase 2 : cleanup SQL de sécurité pour les stratégies intégrées (C1/C2/C3/DC) ──
+      // et toute prédiction orpheline non gérée par la Phase 1 (ex: prédictions sans pending en mémoire).
+      // On utilise globalMaxR comme seuil de sécurité pour les stratégies intégrées.
+      const builtinThreshold = mx - globalMaxR - 1;
+      if (builtinThreshold >= 1) {
+        const count = await db.expireStaleByGame(builtinThreshold, globalMaxR);
+        if (count > 0) console.log(`🧹 ${count} prédiction(s) intégrées hors-fenêtre expirée(s) (seuil: #${builtinThreshold})`);
+      }
     } catch (e) { console.error('cleanupStale error:', e.message); }
   }
 

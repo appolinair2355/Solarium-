@@ -302,7 +302,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(8, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -362,7 +362,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(8, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -626,7 +626,7 @@ router.get('/users/:userId/visible', requireAdmin, async (req, res) => {
 
 router.post('/msg-format', requireAdmin, async (req, res) => {
   const id = parseInt(req.body.format_id);
-  if (!id || id < 1 || id > 8) return res.status(400).json({ error: 'Format invalide (1–8)' });
+  if (!id || id < 1 || id > 10) return res.status(400).json({ error: "Format invalide (1–10)" });
   try {
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
@@ -737,7 +737,7 @@ async function applyUpdateBlock(type, data) {
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
-    if (!id || id < 1 || id > 8) { result.errors.push('format_id invalide (1–8)'); return result; }
+    if (!id || id < 1 || id > 10) { result.errors.push(`format_id invalide (1–10)`); return result; }
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
     result.applied = 1;
@@ -760,7 +760,7 @@ async function applyUpdateBlock(type, data) {
           threshold: parseInt(item.threshold), prediction_offset: Math.max(1, parseInt(item.prediction_offset) || 1),
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(8, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
         };
         result.detail = (result.detail || '') + `\n• Mise à jour: "${item.name.trim()}"`;
       } else {
@@ -786,7 +786,7 @@ async function applyUpdateBlock(type, data) {
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           loss_type: ['sec', 'rattrapage', 'martingale'].includes(item.loss_type) ? item.loss_type : 'rattrapage',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(8, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
         });
         result.detail = (result.detail || '') + `\n• Créée: "${item.name.trim()}"`;
       }
@@ -981,6 +981,47 @@ router.post('/apply-update', requireAdmin, async (req, res) => {
     const totalApplied = results.reduce((s, r) => s + r.applied, 0);
     const allErrors    = results.flatMap(r => r.errors);
     res.json({ ok: allErrors.length === 0 || totalApplied > 0, results, total_applied: totalApplied, errors: allErrors });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Export complet de la configuration du projet en JSON ────────────
+router.get('/export-config', requireAdmin, async (req, res) => {
+  try {
+    const strategies   = await getStrategies();
+    const tgFormat     = await db.getSetting('tg_msg_format');
+    const maxRattrDB   = await db.getSetting('max_rattrapage');
+    const renderUrl    = await db.getSetting('render_external_url');
+    const customCss    = await db.getSetting('custom_css');
+    const uiStyles     = await db.getSetting('ui_styles');
+    const sequences    = await db.getSetting('loss_sequences');
+    const defaultTg    = await db.getSetting('default_tg_channels');
+    const channels     = await db.getAllStrategyRoutes().catch(() => []);
+
+    const payload = {
+      _meta: {
+        version: '1.0',
+        exported_at: new Date().toISOString(),
+        project: 'Baccarat Pro',
+        description: 'Export complet de la configuration — peut être réimporté via /admin/apply-update',
+      },
+      settings: {
+        tg_msg_format:       parseInt(tgFormat) || 1,
+        max_rattrapage:      parseInt(maxRattrDB) || 2,
+        render_external_url: renderUrl || null,
+      },
+      strategies,
+      channels,
+      ui: {
+        custom_css:  customCss  || '',
+        ui_styles:   uiStyles   ? JSON.parse(uiStyles)  : {},
+      },
+      sequences: sequences ? JSON.parse(sequences) : [],
+      default_tg: defaultTg ? JSON.parse(defaultTg) : {},
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="baccarat-pro-config-${new Date().toISOString().slice(0,10)}.json"`);
+    res.json(payload);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

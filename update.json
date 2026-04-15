@@ -1,0 +1,84 @@
+{
+  "_meta": {
+    "version": "2.0",
+    "date": "2026-04-15",
+    "project": "Baccarat Pro",
+    "description": "Mise à jour complète : corrections de bugs rattrapage, nouveaux formats de message (9 et 10), et fonctions d'export.",
+    "corrections": [
+      "Bug 1 — cleanupStale utilisait globalMaxR=2 pour TOUTES les stratégies : chaque stratégie custom expire maintenant avec son propre max_rattrapage.",
+      "Bug 2 — Les prédictions en mémoire (pending) n'étaient pas nettoyées après le cleanup SQL, causant des doubles tentatives de résolution.",
+      "Bug 3 — _verifyPendingLive ne transmettait pas les bonnes options Telegram (format, main, maxR) pour les stratégies custom lors des résolutions live.",
+      "Amélioration — Formats 9 et 10 ajoutés : joueur dédié et banquier dédié, indépendamment du paramètre 'main' de la stratégie.",
+      "Amélioration — Endpoint export-config ajouté pour télécharger toute la configuration en JSON."
+    ]
+  },
+  "type": "multi",
+  "data": [
+    {
+      "type": "format",
+      "data": {
+        "format_id": 9,
+        "_description": "Format 9 — 🤖 Joueur dédié (toujours joueur, indépendamment de la config 'main'). Exemple de rendu :\n🤖 joueur :811\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : 3(🔰+3)\n🧨 Résultats : ⌛\n\nAprès vérification :\n🤖 joueur :811\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : 3(🔰+3)\n🧨 Résultats : ✅0️⃣GAGNÉ"
+      }
+    },
+    {
+      "type": "strategies",
+      "data": [
+        {
+          "_description": "Exemple de stratégie joueur avec le nouveau format 9. Adapte les valeurs à ton cas.",
+          "name": "Joueur Pro F9",
+          "mode": "manquants",
+          "threshold": 5,
+          "hand": "joueur",
+          "max_rattrapage": 5,
+          "tg_format": 9,
+          "prediction_offset": 1,
+          "loss_type": "rattrapage",
+          "visibility": "admin",
+          "enabled": false,
+          "tg_targets": [],
+          "exceptions": [],
+          "mappings": { "♠": ["♥"], "♥": ["♠"], "♦": ["♣"], "♣": ["♦"] }
+        },
+        {
+          "_description": "Exemple de stratégie banquier avec le nouveau format 10. Adapte les valeurs à ton cas.",
+          "name": "Banquier Pro F10",
+          "mode": "manquants",
+          "threshold": 5,
+          "hand": "banquier",
+          "max_rattrapage": 5,
+          "tg_format": 10,
+          "prediction_offset": 1,
+          "loss_type": "rattrapage",
+          "visibility": "admin",
+          "enabled": false,
+          "tg_targets": [],
+          "exceptions": [],
+          "mappings": { "♠": ["♥"], "♥": ["♠"], "♦": ["♣"], "♣": ["♦"] }
+        }
+      ]
+    }
+  ],
+  "_formats_reference": {
+    "format_9": {
+      "nom": "🤖 Joueur dédié",
+      "template_prediction": "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ⌛",
+      "template_gagne":      "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ✅{rattrapage_emoji}GAGNÉ",
+      "template_perdu":      "🤖 joueur :{gameNumber}\n🔰Couleur de la carte :{suit}\n🔰 Rattrapages : {maxR}(🔰+{maxR})\n🧨 Résultats : ❌",
+      "notes": "Toujours affiche le template joueur, même pour une stratégie configurée en main 'banquier'."
+    },
+    "format_10": {
+      "nom": "🎮 Banquier dédié",
+      "template_prediction": "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ⌛",
+      "template_gagne":      "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ✅{rattrapage_emoji}GAGNÉ",
+      "template_perdu":      "🎮 banquier №{gameNumber}\n⚜️ Couleur de la carte:{suit}\n🎰 Poursuite  🔰+{maxR} jeux\n🗯️ Résultats : ❌",
+      "notes": "Toujours affiche le template banquier, même pour une stratégie configurée en main 'joueur'."
+    },
+    "format_8": {
+      "nom": "🎮 Banquier / 🤖 Joueur Pro (automatique)",
+      "notes": "Choisit automatiquement le template joueur ou banquier selon le paramètre 'main' de chaque stratégie."
+    }
+  },
+  "_comment_export": "Pour exporter toute la configuration du système en JSON, accédez à l'admin panel → section 'Mise à jour JSON' → bouton 'Télécharger config.json'. Vous pouvez aussi appeler directement l'endpoint : GET /api/admin/export-config (authentification requise).",
+  "_comment_import": "Pour importer cette mise à jour, collez le contenu de ce fichier dans le champ JSON de l'admin panel, vérifiez l'aperçu, puis cliquez sur 'Appliquer la mise à jour'."
+}
