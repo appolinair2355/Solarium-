@@ -16,8 +16,12 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const user = await login(form.username, form.password);
-      navigate(user.is_admin ? '/admin' : '/choisir', { replace: true });
+      const result = await login(form.username, form.password);
+      if (result?.redirect) {
+        navigate(result.redirect, { replace: true });
+        return;
+      }
+      navigate(result.is_admin ? '/admin' : '/choisir', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

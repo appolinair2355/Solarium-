@@ -260,6 +260,199 @@ function TgDirectChat() {
   );
 }
 
+function ProjectBackupPanel() {
+  const [status, setStatus]       = React.useState(null);
+  const [loading, setLoading]     = React.useState(false);
+  const [installing, setInstalling] = React.useState(false);
+  const [fileList, setFileList]   = React.useState(null);
+  const [log, setLog]             = React.useState([]);
+  const [loadingList, setLoadingList] = React.useState(false);
+
+  const loadList = async () => {
+    setLoadingList(true);
+    try {
+      const r = await fetch('/api/admin/project-backup/list', { credentials: 'include' });
+      const d = await r.json();
+      if (r.ok) setFileList(d);
+      else setStatus({ error: d.error });
+    } catch (e) { setStatus({ error: e.message }); }
+    finally { setLoadingList(false); }
+  };
+
+  React.useEffect(() => { loadList(); }, []);
+
+  const handleBackup = async () => {
+    if (!confirm('Enregistrer tous les fichiers du projet dans la base de données ? Les fichiers existants seront remplacés.')) return;
+    setLoading(true); setStatus(null); setLog([]);
+    try {
+      const r = await fetch('/api/admin/project-backup', { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) { setStatus({ error: d.error }); return; }
+      setStatus({ success: `✅ ${d.saved} fichier(s) enregistré(s) dans la base de données${d.errors > 0 ? ` (${d.errors} erreur(s))` : ''}.` });
+      await loadList();
+    } catch (e) { setStatus({ error: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Supprimer TOUS les fichiers sauvegardés de la base de données ?')) return;
+    try {
+      const r = await fetch('/api/admin/project-backup', { method: 'DELETE', credentials: 'include' });
+      const d = await r.json();
+      if (r.ok) { setStatus({ success: `🗑 ${d.deleted} fichier(s) supprimé(s).` }); setFileList(null); }
+      else setStatus({ error: d.error });
+    } catch (e) { setStatus({ error: e.message }); }
+  };
+
+  const handleInstall = async () => {
+    if (!confirm('⚠️ INSTALLER L\'APPLICATION ?\n\nTous les fichiers sauvegardés dans la base de données vont écraser les fichiers actuels sur le serveur, puis l\'application va redémarrer automatiquement.')) return;
+    setInstalling(true); setStatus(null); setLog([]);
+    try {
+      const r = await fetch('/api/admin/project-install', { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) { setStatus({ error: d.error }); setInstalling(false); return; }
+      setLog(d.log || []);
+      setStatus({ success: `✅ ${d.written} fichier(s) installé(s)${d.errors > 0 ? ` (${d.errors} erreur(s))` : ''}. Le serveur redémarre…` });
+      setTimeout(() => setInstalling(false), 4000);
+    } catch (e) { setStatus({ error: e.message }); setInstalling(false); }
+  };
+
+  const fmtSize = (b) => {
+    if (!b) return '—';
+    if (b < 1024) return `${b} o`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} Ko`;
+    return `${(b / (1024 * 1024)).toFixed(2)} Mo`;
+  };
+
+  const totalSize = fileList?.files?.reduce((s, f) => s + (f.size_bytes || 0), 0) || 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* En-tête */}
+      <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)' }}>
+        <div className="tg-admin-header">
+          <span className="tg-admin-icon">💾</span>
+          <div>
+            <div className="tg-admin-title">Mise à jour par base de données</div>
+            <div className="tg-admin-subtitle">Enregistrez tous les fichiers du projet dans la DB · Installez-les sur n'importe quel serveur en un clic</div>
+          </div>
+        </div>
+
+        {/* Statut */}
+        {status && (
+          <div style={{ padding: '12px 16px', borderRadius: 10, marginBottom: 16,
+            background: status.error ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
+            border: `1px solid ${status.error ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)'}`,
+            color: status.error ? '#f87171' : '#4ade80', fontSize: 13, fontWeight: 600,
+          }}>
+            {status.error || status.success}
+          </div>
+        )}
+
+        {/* Résumé de la sauvegarde actuelle */}
+        <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Fichiers en base de données</div>
+              {loadingList ? (
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#64748b' }}>…</div>
+              ) : fileList ? (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                  <span style={{ fontSize: 28, fontWeight: 800, color: '#22c55e' }}>{fileList.total}</span>
+                  <span style={{ fontSize: 13, color: '#64748b' }}>fichiers · {fmtSize(totalSize)}</span>
+                </div>
+              ) : (
+                <div style={{ fontSize: 14, color: '#64748b' }}>Aucun fichier sauvegardé</div>
+              )}
+              {fileList?.files?.[0]?.updated_at && (
+                <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
+                  Dernière mise à jour : {new Date(fileList.files[0].updated_at).toLocaleString('fr-FR')}
+                </div>
+              )}
+            </div>
+            <button onClick={loadList} disabled={loadingList}
+              style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
+              🔄 Actualiser
+            </button>
+          </div>
+        </div>
+
+        {/* Boutons principaux */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <button
+            onClick={handleBackup}
+            disabled={loading || installing}
+            style={{ padding: '18px 20px', borderRadius: 14, border: 'none', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14,
+              background: loading ? 'rgba(34,197,94,0.15)' : 'linear-gradient(135deg,#16a34a,#22c55e)',
+              color: loading ? '#4ade80' : '#fff', opacity: loading ? 0.7 : 1, transition: 'all 0.2s',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexDirection: 'column',
+            }}>
+            <span style={{ fontSize: 28 }}>{loading ? '⏳' : '📤'}</span>
+            <span>{loading ? 'Enregistrement…' : 'Enregistrer les fichiers'}</span>
+            <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>Replit → Base de données</span>
+          </button>
+
+          <button
+            onClick={handleInstall}
+            disabled={loading || installing || !fileList?.total}
+            style={{ padding: '18px 20px', borderRadius: 14, border: 'none', cursor: (installing || !fileList?.total) ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14,
+              background: installing ? 'rgba(59,130,246,0.15)' : !fileList?.total ? 'rgba(100,116,139,0.15)' : 'linear-gradient(135deg,#1d4ed8,#3b82f6)',
+              color: installing ? '#93c5fd' : !fileList?.total ? '#475569' : '#fff', opacity: (installing || !fileList?.total) ? 0.7 : 1, transition: 'all 0.2s',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexDirection: 'column',
+            }}>
+            <span style={{ fontSize: 28 }}>{installing ? '⏳' : '📥'}</span>
+            <span>{installing ? 'Installation…' : 'Installer l\'application'}</span>
+            <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>Base de données → Serveur</span>
+          </button>
+        </div>
+
+        {!fileList?.total && (
+          <div style={{ padding: '10px 14px', borderRadius: 9, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)', color: '#fbbf24', fontSize: 12, textAlign: 'center' }}>
+            ℹ️ Aucun fichier en DB — cliquez sur "Enregistrer les fichiers" d'abord
+          </div>
+        )}
+
+        {/* Log d'installation */}
+        {log.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Journal d'installation</div>
+            <div style={{ maxHeight: 220, overflowY: 'auto', background: '#0a0f1e', borderRadius: 10, padding: 14, border: '1px solid rgba(255,255,255,0.06)' }}>
+              {log.map((line, i) => (
+                <div key={i} style={{ fontSize: 11, color: line.startsWith('❌') ? '#f87171' : '#4ade80', fontFamily: 'monospace', lineHeight: 1.7 }}>{line}</div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Liste des fichiers sauvegardés */}
+      {fileList?.files?.length > 0 && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.3)' }}>
+          <div className="tg-admin-header" style={{ marginBottom: 14 }}>
+            <span className="tg-admin-icon">📂</span>
+            <div>
+              <div className="tg-admin-title">Fichiers sauvegardés ({fileList.total})</div>
+              <div className="tg-admin-subtitle">Liste de tous les fichiers actuellement stockés dans la base de données</div>
+            </div>
+            <button onClick={handleClear}
+              style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+              🗑 Vider
+            </button>
+          </div>
+          <div style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {fileList.files.map((f, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#a5b4fc', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file_path}</span>
+                <span style={{ fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>{fmtSize(f.size_bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
   return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
 }
@@ -372,17 +565,17 @@ function AdminPanel() {
   };
   // Formats de message Telegram (partagé dans tout l'admin)
   const TG_FORMATS = [
-    { value: '',   label: 'Global (paramètre général)' },
-    { value: '9',  label: 'Format 9 — 🤖 Joueur dédié (nouveau)' },
-    { value: '10', label: 'Format 10 — 🎮 Banquier dédié (nouveau)' },
-    { value: '8',  label: 'Format 8 — 🎮 Banquier / 🤖 Joueur Pro (auto selon main)' },
-    { value: '1',  label: 'Format 1 — Classique cyrillique' },
-    { value: '2',  label: 'Format 2 — Baccara Premium' },
-    { value: '3',  label: 'Format 3 — Baccara Pro' },
-    { value: '4',  label: 'Format 4 — Prédiction Standard' },
-    { value: '5',  label: 'Format 5 — Barre de progression' },
-    { value: '6',  label: 'Format 6 — Markdown Titre' },
-    { value: '7',  label: 'Format 7 — HTML joueur' },
+    { value: '',   label: '— Global (paramètre général) —' },
+    { value: '9',  label: 'Joueur dédié' },
+    { value: '10', label: 'Banquier dédié' },
+    { value: '8',  label: 'Banquier / Joueur Pro' },
+    { value: '1',  label: 'Style Russe' },
+    { value: '2',  label: 'Premium' },
+    { value: '3',  label: 'Baccara Pro' },
+    { value: '4',  label: 'Prédiction' },
+    { value: '5',  label: 'Barre de progression' },
+    { value: '6',  label: 'Classique' },
+    { value: '7',  label: 'Joueur Carte' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -405,6 +598,7 @@ function AdminPanel() {
   const [successModal, setSuccessModal] = useState(null);
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
+  const [mirrorCountsData, setMirrorCountsData] = useState({}); // { [stratId]: { counts, threshold } }
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -454,7 +648,14 @@ function AdminPanel() {
   const [stratChOpen, setStratChOpen]     = useState(null); // id de stratégie perso ouverte pour édition TG inline
   const [aleatPanel, setAleatPanel]       = useState(null); // { stratId, stratName, step:'hand'|'number'|'result', hand, gameInput, result, history }
   const [stratChForm, setStratChForm]     = useState({ bot_token: '', channel_id: '', tg_format: null });
+  const [tgSaveModal, setTgSaveModal]     = useState(null); // modal de confirmation post-save
   const [stratChSaving, setStratChSaving] = useState(false);
+
+  // Sous-formulaire d'annonce planifiée (par canal : C1/C2/C3/DC ou stratID)
+  const ANN_SUB_BLANK = { open: false, text: '', schedule_type: 'interval', interval_hours: 1, times_input: '', media_type: '', media_url: '' };
+  const [annSubForms, setAnnSubForms] = useState({});
+  const getAnnSub = (key) => annSubForms[key] || ANN_SUB_BLANK;
+  const setAnnSub = (key, patch) => setAnnSubForms(p => ({ ...p, [key]: { ...(p[key] || ANN_SUB_BLANK), ...patch } }));
 
   const [stratStats,     setStratStats]     = useState([]); // wins/losses per strategy
 
@@ -488,10 +689,57 @@ function AdminPanel() {
         body: JSON.stringify({ ...strat, tg_targets }),
       });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
+      // Afficher la modale de confirmation
+      const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
+      const st = stratStats.find(x => x.strategy === `S${id}`) || {};
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance' };
+      setTgSaveModal({
+        type: 'strategie',
+        id: `S${id}`,
+        name: strat.name,
+        mode: MODE_LABELS[strat.mode] || strat.mode,
+        hand: strat.hand === 'banquier' ? '🎮 Banquier' : '🤖 Joueur',
+        threshold: strat.threshold,
+        max_rattrapage: strat.max_rattrapage ?? maxRattrapage,
+        enabled: strat.enabled,
+        channel_id: stratChForm.channel_id.trim(),
+        bot_token_preview: stratChForm.bot_token.trim().slice(0,12) + '…',
+        format_label: fmtObj ? fmtObj.label : '— Global —',
+        wins:    parseInt(st.wins)    || 0,
+        losses:  parseInt(st.losses)  || 0,
+        pending: parseInt(st.pending) || 0,
+        total:   parseInt(st.total)   || 0,
+      });
       setStratChForm({ bot_token: '', channel_id: '', tg_format: null });
       loadStrategies();
     } catch (e) { alert('❌ ' + e.message); }
     finally { setStratChSaving(false); }
+  };
+
+  // Sauvegarder l'annonce du sous-formulaire si elle a du contenu
+  const saveAnnSub = async (key, botToken, channelId, label) => {
+    const annSub = annSubForms[key];
+    if (!annSub?.text?.trim() || !botToken?.trim() || !channelId?.trim()) return;
+    const times = annSub.schedule_type === 'times'
+      ? annSub.times_input.split(',').map(t => t.trim()).filter(Boolean)
+      : [];
+    await fetch('/api/admin/announcements', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `Annonce ${label}`,
+        bot_token: botToken.trim(),
+        channel_id: channelId.trim(),
+        text: annSub.text.trim(),
+        media_type: annSub.media_type || null,
+        media_url: annSub.media_url?.trim() || null,
+        schedule_type: annSub.schedule_type,
+        interval_hours: annSub.schedule_type === 'interval' ? parseFloat(annSub.interval_hours) : null,
+        times,
+      }),
+    });
+    loadAnnouncements();
+    setAnnSubForms(p => ({ ...p, [key]: ANN_SUB_BLANK }));
   };
 
   const removeStratTgTarget = async (id, channelId) => {
@@ -654,6 +902,40 @@ function AdminPanel() {
   }, []);
 
   const buildPreview = (parsed) => {
+    // ── Export complet v2/v3 (généré par "Exporter la configuration") ──
+    if (parsed?._meta?.project === 'Baccarat Pro') {
+      const items = [];
+      const strats   = parsed.strategies        || [];
+      const seqs     = parsed.sequences         || [];
+      const anns     = parsed.announcements     || [];
+      const keys     = parsed.prog_ai_keys      || [];
+      const bots     = parsed.prog_bots         || [];
+      const tgChs    = parsed.telegram_channels || [];
+      const dtg      = parsed.default_tg        || {};
+      const umsgs    = parsed.user_messages     || [];
+
+      if (strats.length)  items.push({ icon: '⚙️', label: `${strats.length} stratégie(s)`, detail: strats.map(s => `"${s.name}"`).join(', ') });
+      if (seqs.length)    items.push({ icon: '🔁', label: `${seqs.length} séquence(s) de relance`, detail: seqs.map(s => `"${s.name}"`).join(', ') });
+      if (anns.length)    items.push({ icon: '📢', label: `${anns.length} annonce(s) planifiée(s)`, detail: anns.map(a => `"${a.name}"`).join(', ') });
+      if (keys.length)    items.push({ icon: '🔑', label: `${keys.length} clé(s) API IA`, detail: keys.map(k => k.provider).join(', ') });
+      if (bots.length)    items.push({ icon: '🤖', label: `${bots.length} bot(s) Programmation`, detail: bots.map(b => `"${b.name}"`).join(', ') });
+      if (tgChs.length)   items.push({ icon: '📲', label: `${tgChs.length} canal/canaux Telegram personnalisé(s)`, detail: tgChs.map(c => c.channel_name || c.channel_id).join(', ') });
+      if (umsgs.length)   items.push({ icon: '💬', label: `${umsgs.length} message(s) utilisateurs`, detail: '' });
+      const dtgKeys = Object.keys(dtg);
+      if (dtgKeys.length) items.push({ icon: '📡', label: `Canaux par défaut (${dtgKeys.join(', ')})`, detail: dtgKeys.map(k => `${k}: ${dtg[k].channel_id || '?'}`).join(' · ') });
+      if (parsed.telegram_chat?.bot_token) items.push({ icon: '💬', label: 'Bot de chat Telegram', detail: `Canal: ${parsed.telegram_chat.channel_id || '?'}` });
+      if (parsed.broadcast_message?.text)  items.push({ icon: '📣', label: 'Message de diffusion', detail: String(parsed.broadcast_message.text).slice(0, 60) });
+      if (parsed.ui?.tutorial_videos?.video1 || parsed.ui?.tutorial_videos?.video2) items.push({ icon: '🎬', label: 'Vidéos tutoriels', detail: [parsed.ui.tutorial_videos.video1, parsed.ui.tutorial_videos.video2].filter(Boolean).join(' · ') });
+      if (parsed.ui?.custom_css)           items.push({ icon: '🎨', label: 'CSS personnalisé', detail: `${parsed.ui.custom_css.length} caractères` });
+      if (parsed.settings?.tg_msg_format)  items.push({ icon: '🔢', label: 'Format Telegram', detail: `→ Format #${parsed.settings.tg_msg_format}` });
+      if (parsed.settings?.bot_token)      items.push({ icon: '🔐', label: 'Token bot principal', detail: '***' });
+      if (parsed.settings?.render_db_url)  items.push({ icon: '🗄️', label: 'URL base Render', detail: '***' });
+      if (parsed.bilan_last)               items.push({ icon: '📊', label: 'Bilan journalier', detail: `Date: ${parsed.bilan_last.date || '?'}` });
+      if (parsed.engine_absences)          items.push({ icon: '🎯', label: 'Compteurs moteur (absences)', detail: `C1/C2/C3 restaurés` });
+      if (!items.length) items.push({ icon: 'ℹ️', label: 'Export vide', detail: 'Aucune donnée à importer' });
+      return items;
+    }
+    // ── Fichier de mise à jour standard ───────────────────────────────
     if (!parsed || !parsed.type) return null;
     const blocks = parsed.type === 'multi' ? (parsed.data || []) : [parsed];
     return blocks.map(b => {
@@ -661,6 +943,10 @@ function AdminPanel() {
       if (b.type === 'strategies') return { icon: '⚙️', label: 'Stratégies', detail: `${Array.isArray(b.data) ? b.data.length : 0} stratégie(s) à créer/mettre à jour : ${(b.data || []).map(s => `"${s.name}"`).join(', ')}` };
       if (b.type === 'sequences') return { icon: '🔁', label: 'Séquences de relance', detail: `${Array.isArray(b.data) ? b.data.length : 0} séquence(s) : ${(b.data || []).map(s => `"${s.name}"`).join(', ')}` };
       if (b.type === 'styles') return { icon: '🎨', label: 'Styles / Interface', detail: `${Object.keys(b.data || {}).length} variable(s) CSS : ${Object.keys(b.data || {}).join(', ')}` };
+      if (b.type === 'announcements') return { icon: '📢', label: 'Annonces planifiées', detail: `${Array.isArray(b.data) ? b.data.length : 0} annonce(s)` };
+      if (b.type === 'default_tg') return { icon: '📡', label: 'Canaux par défaut (C1/C2/C3/DC)', detail: Object.keys(b.data || {}).join(', ') };
+      if (b.type === 'prog_ai_keys') return { icon: '🔑', label: 'Clés API IA', detail: `${Array.isArray(b.data) ? b.data.length : 0} clé(s)` };
+      if (b.type === 'prog_bots') return { icon: '🤖', label: 'Bots Programmation', detail: `${Array.isArray(b.data) ? b.data.length : 0} bot(s)` };
       if (b.type === 'code') {
         const files = b.data?.files || [];
         const frontend = files.filter(f => f.path?.startsWith('src/') || f.path?.startsWith('public/'));
@@ -688,7 +974,12 @@ function AdminPanel() {
     reader.onload = (ev) => {
       try {
         const parsed = JSON.parse(ev.target.result);
-        setUpdateFile(parsed);
+        // Détecter si c'est un export complet v2.0 → encapsuler en full_config
+        if (parsed?._meta?.project === 'Baccarat Pro') {
+          setUpdateFile({ type: 'full_config', data: parsed });
+        } else {
+          setUpdateFile(parsed);
+        }
         setUpdatePreview(buildPreview(parsed));
       } catch {
         setUpdateResult({ ok: false, errors: ['Fichier JSON invalide — vérifiez la syntaxe'] });
@@ -760,7 +1051,7 @@ function AdminPanel() {
     } catch {}
   }, []);
 
-  const saveDefaultStratTg = async () => {
+  const saveDefaultStratTg = async (channelId, channelMeta) => {
     setDefaultTgSaving(true);
     setDefaultTgMsg('');
     try {
@@ -772,6 +1063,26 @@ function AdminPanel() {
         }
       }
       const r = await fetch('/api/admin/default-tg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
+      if (r.ok && channelId && channelMeta) {
+        const cfg = defaultStratTg[channelId] || {};
+        const fmtObj = TG_FORMATS.find(f => String(f.value) === String(cfg.tg_format ?? ''));
+        const st = stratStats.find(x => x.strategy === channelId) || {};
+        setTgSaveModal({
+          type: 'canal',
+          id: channelId,
+          name: channelMeta.name,
+          emoji: channelMeta.emoji,
+          color: channelMeta.color,
+          channel_id: cfg.channel_id?.trim() || '',
+          bot_token_preview: cfg.bot_token ? cfg.bot_token.trim().slice(0,12) + '…' : '',
+          format_label: fmtObj ? fmtObj.label : '— Global —',
+          max_rattrapage: maxRattrapage,
+          wins:    parseInt(st.wins)    || 0,
+          losses:  parseInt(st.losses)  || 0,
+          pending: parseInt(st.pending) || 0,
+          total:   parseInt(st.total)   || 0,
+        });
+      }
       setDefaultTgMsg(r.ok ? '✅ Config sauvegardée' : '❌ Erreur');
     } catch { setDefaultTgMsg('❌ Erreur réseau'); }
     setDefaultTgSaving(false);
@@ -949,6 +1260,12 @@ function AdminPanel() {
         mode: s?.mode || stratForm.mode,
         hand: s?.hand || stratForm.hand,
         visibility: s?.visibility || stratForm.visibility,
+        threshold: s?.threshold ?? stratForm.threshold,
+        max_rattrapage: s?.max_rattrapage ?? stratForm.max_rattrapage,
+        exceptions: Array.isArray(s?.exceptions) ? s.exceptions : (stratForm.exceptions || []),
+        tg_targets: Array.isArray(s?.tg_targets) ? s.tg_targets : (stratForm.tg_targets || []),
+        mirror_pairs: Array.isArray(s?.mirror_pairs) ? s.mirror_pairs : (stratForm.mirror_pairs || []),
+        enabled: s?.enabled ?? stratForm.enabled,
       });
       setStratForm(JSON.parse(JSON.stringify(BLANK_FORM)));
       setStratEditing(null);
@@ -1063,6 +1380,25 @@ function AdminPanel() {
   };
 
   useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
+
+  // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
+  useEffect(() => {
+    const fetchMirrorCounts = async () => {
+      const mirrorStrats = strategies.filter(s => s.mode === 'taux_miroir');
+      if (!mirrorStrats.length) return;
+      const updates = {};
+      await Promise.all(mirrorStrats.map(async s => {
+        try {
+          const r = await fetch(`/api/admin/strategies/${s.id}/mirror-counts`, { credentials: 'include' });
+          if (r.ok) { const d = await r.json(); updates[s.id] = d; }
+        } catch {}
+      }));
+      if (Object.keys(updates).length) setMirrorCountsData(p => ({ ...p, ...updates }));
+    };
+    fetchMirrorCounts();
+    const iv = setInterval(fetchMirrorCounts, 5000);
+    return () => clearInterval(iv);
+  }, [strategies]);
 
   // Duration input helpers
   const setDur = (uid, field, val) =>
@@ -1208,6 +1544,7 @@ function AdminPanel() {
   const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison' };
 
   return (
+    <>
     <div className="admin-page">
 
       {successModal && (
@@ -1305,11 +1642,52 @@ function AdminPanel() {
                     border: `1px solid ${successModal.visibility === 'all' ? 'rgba(34,197,94,0.35)' : 'rgba(100,116,139,0.3)'}`,
                     letterSpacing: 0.5,
                   }}>{successModal.visibility === 'all' ? '🌐 Publique' : '🔒 Admin'}</span>
+                  <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
+                    background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)',
+                    letterSpacing: 0.5,
+                  }}>{successModal.enabled !== false ? '● Active' : '○ Inactive'}</span>
                 </div>
               </div>
 
-              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, lineHeight: 1.7,
-                animation: 'smFadeUp 0.4s 0.48s ease-out both',
+              {/* ── Grille options détaillées ── */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+                margin: '0 0 18px', animation: 'smFadeUp 0.4s 0.44s ease-out both',
+              }}>
+                {[
+                  { icon: '⚖️', label: successModal.mode === 'taux_miroir' ? 'Différence' : 'Seuil B', value: successModal.threshold },
+                  { icon: '🔁', label: 'Rattrapages max', value: `R${successModal.max_rattrapage ?? 20}` },
+                  { icon: '⛔', label: 'Exceptions', value: (successModal.exceptions?.length || 0) === 0 ? 'Aucune' : `${successModal.exceptions.length} règle(s)` },
+                  { icon: '✈️', label: 'Canaux Telegram', value: (successModal.tg_targets?.filter(t => t.bot_token && t.channel_id).length || 0) === 0 ? 'Aucun' : `${successModal.tg_targets.filter(t=>t.bot_token&&t.channel_id).length} canal(aux)` },
+                ].map(item => (
+                  <div key={item.label} style={{
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
+                    borderRadius: 10, padding: '10px 14px', textAlign: 'left',
+                  }}>
+                    <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3 }}>{item.icon} {item.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0' }}>{item.value}</div>
+                  </div>
+                ))}
+                {successModal.mode === 'taux_miroir' && (successModal.mirror_pairs?.length || 0) > 0 && (
+                  <div style={{
+                    gridColumn: '1 / -1',
+                    background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)',
+                    borderRadius: 10, padding: '10px 14px', textAlign: 'left',
+                  }}>
+                    <div style={{ fontSize: 10, color: '#818cf8', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>⚖️ Paires surveillées</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {(successModal.mirror_pairs || []).map((p, i) => (
+                        <span key={i} style={{ fontSize: 12, padding: '2px 10px', borderRadius: 12, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.35)', fontWeight: 700 }}>
+                          {p.a} vs {p.b} {p.threshold ? `·${p.threshold}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 20, lineHeight: 1.7,
+                animation: 'smFadeUp 0.4s 0.50s ease-out both',
               }}>
                 {successModal.type === 'create'
                   ? '🚀 La stratégie est active et génère des prédictions en temps réel.'
@@ -1404,6 +1782,7 @@ function AdminPanel() {
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'systeme',        icon: '🛠️', label: 'Système' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
+            { id: 'maj-db',         icon: '💾', label: 'Mise à jour DB' },
           ].map(tab => {
             const active = adminTab === tab.id;
             return (
@@ -1922,53 +2301,6 @@ function AdminPanel() {
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
         {adminTab === 'canaux' && <>
 
-        {/* ── BOT TOKEN ── */}
-        <div className="tg-admin-card" style={{ marginBottom: 24 }}>
-          <div className="tg-admin-header">
-            <span className="tg-admin-icon">🔑</span>
-            <div>
-              <h2 className="tg-admin-title">Token API Telegram Bot</h2>
-              <p className="tg-admin-sub">
-                Entrez le token fourni par <strong>@BotFather</strong> pour connecter votre bot Telegram.
-                {tokenInfo?.token_set && tokenInfo.token_preview && (
-                  <span style={{ color: '#4ade80', marginLeft: 8 }}>
-                    ✅ Actif : <code style={{ fontSize: '0.75rem', background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>{tokenInfo.token_preview}</code>
-                  </span>
-                )}
-                {tokenInfo && !tokenInfo.token_set && (
-                  <span style={{ color: '#f87171', marginLeft: 8 }}>⚠️ Aucun token configuré</span>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="tg-input-row" style={{ marginTop: 12 }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                className="tg-channel-input"
-                type={showToken ? 'text' : 'password'}
-                placeholder="1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-                value={tokenInput}
-                onChange={e => setTokenInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSaveToken()}
-                style={{ paddingRight: 40, width: '100%' }}
-              />
-              <button
-                onClick={() => setShowToken(v => !v)}
-                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1rem' }}
-                title={showToken ? 'Masquer' : 'Afficher'}
-              >{showToken ? '🙈' : '👁️'}</button>
-            </div>
-            <button
-              className="btn btn-gold btn-sm"
-              onClick={handleSaveToken}
-              disabled={tokenLoading || !tokenInput.trim()}
-            >{tokenLoading ? '...' : '💾 Enregistrer'}</button>
-            {tokenInfo?.token_set && (
-              <button className="btn btn-danger btn-sm" onClick={handleDeleteToken} title="Supprimer le token">🗑️</button>
-            )}
-          </div>
-        </div>
-
         {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
         {(() => {
           const G = 1234;
@@ -2050,120 +2382,63 @@ function AdminPanel() {
                 <div style={{ flex: 1 }}>
                   <h2 className="tg-admin-title">Format des messages Telegram</h2>
                   <p className="tg-admin-sub">
-                    Le message de prédiction est <strong>modifié en place</strong> après vérification (editMessage).
-                    Choisissez le style et le nombre max de rattrapages autorisés.
+                    Référence visuelle des formats disponibles. Le format actif se sélectionne dans chaque <strong style={{ color: '#a78bfa' }}>Canal principal</strong> ou <strong style={{ color: '#f59e0b' }}>Stratégie personnalisée</strong>.
                   </p>
                 </div>
-                {msgFormatMsg && (
-                  <span style={{ fontSize: 13, fontWeight: 700, color: msgFormatMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>
-                    {msgFormatMsg}
-                  </span>
-                )}
               </div>
 
-              {/* ── Sélecteur de rattrapages max ── */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-                background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.2)',
-                borderRadius: 10, padding: '14px 18px', marginTop: 12,
-              }}>
-                <div>
-                  <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: 13 }}>⚙️ Rattrapages max (Dogon)</div>
-                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                    Nombre de jeux supplémentaires après la prédiction initiale. Affiché dans le message (ex: +²).
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
-                  {[0,5,10,15,20].map(n => (
-                    <button
-                      key={n}
-                      onClick={() => saveMaxR(n)}
-                      disabled={maxRSaving}
-                      style={{
-                        width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer',
-                        fontWeight: 800, fontSize: 14,
-                        background: maxRattrapage === n ? '#f59e0b' : 'rgba(255,255,255,0.06)',
-                        color: maxRattrapage === n ? '#000' : '#94a3b8',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                  <input
-                    type="number" min="0" max="20" step="1"
-                    value={maxRattrapage}
-                    onChange={e => { const v = Math.max(0, Math.min(20, parseInt(e.target.value) || 0)); saveMaxR(v); }}
-                    style={{
-                      width: 56, height: 44, borderRadius: 8, border: '1px solid rgba(245,158,11,0.4)',
-                      background: 'rgba(255,255,255,0.06)', color: '#fcd34d',
-                      textAlign: 'center', fontWeight: 800, fontSize: 16,
-                    }}
-                  />
-                </div>
-                <div style={{ fontSize: 12, color: '#fbbf24', minWidth: 80 }}>
-                  Actuel : <strong>R{maxRattrapage}</strong> ({maxRattrapage} rattrap.)
-                </div>
-              </div>
-
-              {/* ── Grille des formats ── */}
+              {/* ── Grille des formats (affichage référence, non-cliquable) ── */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, marginTop: 16 }}>
-                {FORMATS.map(fmt => {
-                  const active = msgFormat === fmt.id;
-                  return (
-                    <button
-                      key={fmt.id}
-                      onClick={() => saveMsgFormat(fmt.id)}
-                      disabled={msgFormatSaving}
-                      style={{
-                        textAlign: 'left', cursor: 'pointer',
-                        background: active ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
-                        border: `2px solid ${active ? '#22c55e' : 'rgba(255,255,255,0.08)'}`,
-                        borderRadius: 12, padding: '14px 16px',
-                        transition: 'all 0.2s', position: 'relative',
-                      }}
-                    >
-                      {active && (
-                        <span style={{
-                          position: 'absolute', top: 8, right: 10,
-                          fontSize: 11, fontWeight: 700, color: '#22c55e',
-                          background: 'rgba(34,197,94,0.15)', padding: '2px 8px', borderRadius: 20,
-                        }}>✓ Actif</span>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                        <span style={{ fontSize: 20 }}>{fmt.icon}</span>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: 13, color: active ? '#22c55e' : '#e2e8f0' }}>{fmt.label}</div>
-                          <div style={{ fontSize: 10, color: '#64748b' }}>Format #{fmt.id}</div>
-                        </div>
-                      </div>
+                {FORMATS.map(fmt => (
+                  <div
+                    key={fmt.id}
+                    style={{
+                      textAlign: 'left',
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 12, padding: '14px 16px',
+                      position: 'relative',
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: 10, right: 12,
+                      fontSize: 11, fontWeight: 700, color: '#64748b',
+                      background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 20,
+                    }}>#{fmt.id}</span>
 
-                      <div style={{
-                        background: '#1e2433', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
-                        border: '1px solid rgba(255,255,255,0.06)',
-                      }}>
-                        <div style={{ fontSize: 9, color: '#93c5fd', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Envoi initial (en attente) →</div>
-                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#cbd5e1', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.preview}</pre>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <span style={{ fontSize: 20 }}>{fmt.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: '#e2e8f0' }}>{fmt.label}</div>
+                        <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>Format #{fmt.id}</div>
                       </div>
+                    </div>
 
-                      <div style={{
-                        background: '#1a2a1a', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
-                        border: '1px solid rgba(34,197,94,0.12)',
-                      }}>
-                        <div style={{ fontSize: 9, color: '#86efac', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Après vérif. — Gagné R0 →</div>
-                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#86efac', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.result}</pre>
-                      </div>
+                    <div style={{
+                      background: '#1e2433', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }}>
+                      <div style={{ fontSize: 9, color: '#93c5fd', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Envoi initial (en attente) →</div>
+                      <pre style={{ margin: 0, fontSize: '0.7rem', color: '#cbd5e1', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.preview}</pre>
+                    </div>
 
-                      <div style={{
-                        background: '#2a1a1a', borderRadius: 8, padding: '10px 12px',
-                        border: '1px solid rgba(239,68,68,0.15)',
-                      }}>
-                        <div style={{ fontSize: 9, color: '#fca5a5', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>❌ Après vérif. — Perdu →</div>
-                        <pre style={{ margin: 0, fontSize: '0.7rem', color: '#fca5a5', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.perdu}</pre>
-                      </div>
-                    </button>
-                  );
-                })}
+                    <div style={{
+                      background: '#1a2a1a', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
+                      border: '1px solid rgba(34,197,94,0.12)',
+                    }}>
+                      <div style={{ fontSize: 9, color: '#86efac', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Après vérif. — Gagné R0 →</div>
+                      <pre style={{ margin: 0, fontSize: '0.7rem', color: '#86efac', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.result}</pre>
+                    </div>
+
+                    <div style={{
+                      background: '#2a1a1a', borderRadius: 8, padding: '10px 12px',
+                      border: '1px solid rgba(239,68,68,0.15)',
+                    }}>
+                      <div style={{ fontSize: 9, color: '#fca5a5', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>❌ Après vérif. — Perdu →</div>
+                      <pre style={{ margin: 0, fontSize: '0.7rem', color: '#fca5a5', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{fmt.perdu}</pre>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           );
@@ -2245,6 +2520,26 @@ function AdminPanel() {
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
                       })()}
                     </div>
+                    {/* ── Compteurs miroir temps réel ── */}
+                    {s.mode === 'taux_miroir' && mirrorCountsData[s.id] && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        {['♠','♥','♦','♣'].map(suit => {
+                          const cnt = mirrorCountsData[s.id]?.counts?.[suit] || 0;
+                          const thr = mirrorCountsData[s.id]?.threshold || s.threshold;
+                          const pct = Math.min(cnt / Math.max(thr, 1), 1);
+                          return (
+                            <span key={suit} style={{
+                              fontSize: 12, padding: '2px 8px', borderRadius: 8, fontWeight: 800,
+                              background: pct >= 0.8 ? 'rgba(239,68,68,0.2)' : pct >= 0.5 ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.12)',
+                              color: pct >= 0.8 ? '#f87171' : pct >= 0.5 ? '#fbbf24' : '#818cf8',
+                              border: `1px solid ${pct >= 0.8 ? 'rgba(239,68,68,0.35)' : pct >= 0.5 ? 'rgba(245,158,11,0.3)' : 'rgba(99,102,241,0.25)'}`,
+                            }}>
+                              {suit} +{cnt}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                         Canaux : {(s.tg_targets || []).filter(t=>t.channel_id).map(t => t.channel_id).join(', ')}
@@ -2608,7 +2903,7 @@ function AdminPanel() {
                 )}
 
                 {/* Main à surveiller : Joueur / Banquier */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && (
+                {stratForm.mode !== 'relance' && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>Main à surveiller</label>
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -2757,8 +3052,11 @@ function AdminPanel() {
                 {/* ── Paires fixes — MODE MIROIR UNIQUEMENT ── */}
                 {stratForm.mode === 'taux_miroir' && (
                   <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)' }}>
-                    <div style={{ fontWeight: 700, fontSize: 12, color: '#818cf8', marginBottom: 12 }}>
-                      ⚖️ Différence par combinaison
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#818cf8', marginBottom: 4 }}>
+                      ⚖️ Paires à surveiller — cochez pour activer
+                    </div>
+                    <div style={{ fontSize: 11, color: '#475569', marginBottom: 12 }}>
+                      Cochez les combinaisons à comparer. Pour chaque paire cochée, définissez l'écart déclenchant.
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {[
@@ -2766,40 +3064,73 @@ function AdminPanel() {
                         { a: '♦', b: '♣', la: 'Carreau', lb: 'Trèfle' },
                         { a: '♠', b: '♦', la: 'Pique',   lb: 'Carreau' },
                         { a: '♥', b: '♣', la: 'Cœur',    lb: 'Trèfle' },
+                        { a: '♠', b: '♣', la: 'Pique',   lb: 'Trèfle' },
+                        { a: '♥', b: '♦', la: 'Cœur',    lb: 'Carreau' },
                       ].map(pair => {
                         const found = (stratForm.mirror_pairs || []).find(p =>
                           (p.a === pair.a && p.b === pair.b) || (p.a === pair.b && p.b === pair.a));
+                        const isActive = !!found;
                         const thr = found?.threshold ?? stratForm.threshold;
+                        const togglePair = () => {
+                          setStratForm(p => {
+                            const cur = (p.mirror_pairs || []).filter(x =>
+                              !((x.a === pair.a && x.b === pair.b) || (x.a === pair.b && x.b === pair.a)));
+                            if (!isActive) return { ...p, mirror_pairs: [...cur, { a: pair.a, b: pair.b, threshold: stratForm.threshold }] };
+                            return { ...p, mirror_pairs: cur };
+                          });
+                        };
                         return (
-                          <div key={`${pair.a}${pair.b}`} style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
-                            borderRadius: 10, padding: '10px 14px',
-                          }}>
-                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{pair.a}</span>
-                            <span style={{ color: '#64748b', fontSize: 11, flexShrink: 0 }}>{pair.la}</span>
-                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                              <span style={{ color: '#475569', fontSize: 11 }}>écart</span>
-                              <input type="number" min={1} max={50} value={thr}
-                                onChange={e => {
-                                  const val = Math.max(1, parseInt(e.target.value) || 1);
-                                  setStratForm(p => {
-                                    const cur = (p.mirror_pairs || []).filter(x =>
-                                      !((x.a === pair.a && x.b === pair.b) || (x.a === pair.b && x.b === pair.a)));
-                                    return { ...p, mirror_pairs: [...cur, { a: pair.a, b: pair.b, threshold: val }] };
-                                  });
-                                }}
-                                style={{ width: 58, padding: '6px 6px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.45)', borderRadius: 8, color: '#a5b4fc', fontSize: 17, fontWeight: 800, textAlign: 'center' }}
-                              />
+                          <div key={`${pair.a}${pair.b}`}
+                            onClick={togglePair}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                              background: isActive ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.04)',
+                              border: isActive ? '2px solid rgba(99,102,241,0.55)' : '1px solid rgba(99,102,241,0.15)',
+                              borderRadius: 10, padding: '10px 14px',
+                              transition: 'all 0.15s',
+                            }}>
+                            {/* Checkbox visuel */}
+                            <div style={{
+                              width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                              border: isActive ? '2px solid #6366f1' : '2px solid rgba(99,102,241,0.3)',
+                              background: isActive ? '#6366f1' : 'transparent',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              transition: 'all 0.15s',
+                            }}>
+                              {isActive && <span style={{ color: '#fff', fontSize: 13, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                             </div>
-                            <span style={{ color: '#64748b', fontSize: 11, flexShrink: 0, textAlign: 'right' }}>{pair.lb}</span>
-                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{pair.b}</span>
+                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1, opacity: isActive ? 1 : 0.4 }}>{pair.a}</span>
+                            <span style={{ color: isActive ? '#94a3b8' : '#374151', fontSize: 11, flexShrink: 0 }}>{pair.la}</span>
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                              <span style={{ color: '#475569', fontSize: 11 }}>vs</span>
+                            </div>
+                            <span style={{ color: isActive ? '#94a3b8' : '#374151', fontSize: 11, flexShrink: 0, textAlign: 'right' }}>{pair.lb}</span>
+                            <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1, opacity: isActive ? 1 : 0.4 }}>{pair.b}</span>
+                            {/* Écart — visible seulement si activé */}
+                            {isActive && (
+                              <div onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                                <span style={{ color: '#6366f1', fontSize: 10, fontWeight: 700 }}>ÉCART</span>
+                                <input type="number" min={1} max={50} value={thr}
+                                  onChange={e => {
+                                    const val = Math.max(1, parseInt(e.target.value) || 1);
+                                    setStratForm(p => {
+                                      const cur = (p.mirror_pairs || []).filter(x =>
+                                        !((x.a === pair.a && x.b === pair.b) || (x.a === pair.b && x.b === pair.a)));
+                                      return { ...p, mirror_pairs: [...cur, { a: pair.a, b: pair.b, threshold: val }] };
+                                    });
+                                  }}
+                                  style={{ width: 50, padding: '4px 6px', background: 'rgba(99,102,241,0.25)', border: '1px solid rgba(99,102,241,0.55)', borderRadius: 7, color: '#a5b4fc', fontSize: 16, fontWeight: 900, textAlign: 'center' }}
+                                />
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                     <div style={{ marginTop: 10, fontSize: 11, color: '#6366f1', lineHeight: 1.5, padding: '7px 10px', borderRadius: 7, background: 'rgba(99,102,241,0.06)' }}>
-                      Dès qu'un costume dépasse l'autre de l'écart configuré, le costume en retard est prédit.
+                      {(stratForm.mirror_pairs?.length || 0) === 0
+                        ? '⚠️ Aucune paire cochée — toutes les combinaisons seront comparées avec le seuil global.'
+                        : `✓ ${stratForm.mirror_pairs.length} paire(s) active(s) — seules ces combinaisons seront surveillées.`}
                     </div>
                   </div>
                 )}
@@ -3166,7 +3497,7 @@ function AdminPanel() {
               </div>}
 
               {/* ══════════════ SECTION 5 — EXCEPTIONS ══════════════ */}
-              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <>
+              {stratForm.mode !== 'relance' && <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
                 <span style={{ fontSize: 13 }}>🚫</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#f87171', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Règles d'exception (optionnel)</span>
@@ -3627,8 +3958,8 @@ function AdminPanel() {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, color: '#22d3ee', fontSize: 13 }}>📤 Exporter la configuration</div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
-                Télécharge un fichier JSON complet : stratégies, paramètres, séquences, canaux.
-                Peut être réimporté via le bouton ci-dessus.
+                Télécharge un fichier JSON <strong style={{ color: '#22d3ee' }}>v3.0 — 100% complet</strong> : stratégies, séquences, canaux Telegram, annonces, messages utilisateurs, bot de chat, vidéos tutoriels, clés API IA, bots Programmation, CSS, styles, tokens &amp; URLs.
+                Peut être réimporté directement via le bouton "Fichier de mise à jour" ci-dessus — aucune donnée perdue.
               </div>
             </div>
             <button
@@ -4411,6 +4742,126 @@ function AdminPanel() {
                           {TG_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
+
+                      {/* ── Message d'annonce planifiée ── */}
+                      {(() => {
+                        const annSub = getAnnSub(ch.id);
+                        return (
+                          <div style={{ marginBottom: 14, borderRadius: 10, border: '1px solid rgba(251,191,36,0.25)', overflow: 'hidden' }}>
+                            {/* Toggle header */}
+                            <button type="button"
+                              onClick={() => setAnnSub(ch.id, { open: !annSub.open })}
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: annSub.open ? 'rgba(251,191,36,0.1)' : 'rgba(251,191,36,0.04)', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                              <span style={{ fontSize: 16 }}>📢</span>
+                              <span style={{ flex: 1, fontWeight: 700, fontSize: 12, color: annSub.open ? '#fbbf24' : '#94a3b8' }}>Message d'annonce planifiée</span>
+                              <span style={{ fontSize: 11, color: annSub.text.trim() ? '#fbbf24' : '#475569', fontWeight: 600 }}>
+                                {annSub.text.trim() ? (annSub.schedule_type === 'interval' ? `⏱ toutes les ${annSub.interval_hours}h` : `🕐 ${annSub.times_input || 'heures à définir'}`) : 'Optionnel'}
+                              </span>
+                              <span style={{ color: '#64748b', fontSize: 13 }}>{annSub.open ? '▲' : '▼'}</span>
+                            </button>
+                            {annSub.open && (
+                              <div style={{ padding: '14px', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                                {/* 1 — Texte */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>💬 Texte du message</label>
+                                  <textarea
+                                    rows={4} value={annSub.text}
+                                    onChange={e => setAnnSub(ch.id, { text: e.target.value })}
+                                    placeholder="Ex: 🎯 Nouvelle prédiction disponible ! Rejoignez notre canal..."
+                                    style={{ width: '100%', padding: '10px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+                                  />
+                                  <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>HTML supporté : &lt;b&gt;texte gras&lt;/b&gt; · &lt;i&gt;italique&lt;/i&gt; · &lt;a href="…"&gt;lien&lt;/a&gt;</div>
+                                </div>
+
+                                {/* 2 — Média : Image ou Vidéo */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>📎 Média accompagnateur</label>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                    {/* Carte Image */}
+                                    <div
+                                      onClick={() => setAnnSub(ch.id, { media_type: annSub.media_type === 'image' ? '' : 'image', media_url: '' })}
+                                      style={{ cursor: 'pointer', borderRadius: 10, padding: '14px 12px', border: annSub.media_type === 'image' ? '2px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)', background: annSub.media_type === 'image' ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)', transition: 'all 0.15s', textAlign: 'center' }}>
+                                      <div style={{ fontSize: 28, marginBottom: 6 }}>🖼️</div>
+                                      <div style={{ fontWeight: 700, fontSize: 12, color: annSub.media_type === 'image' ? '#38bdf8' : '#94a3b8' }}>Image</div>
+                                      <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>JPG, PNG, GIF, WebP</div>
+                                      {annSub.media_type === 'image' && <div style={{ marginTop: 6, fontSize: 11, color: '#38bdf8', fontWeight: 700 }}>✓ Sélectionnée</div>}
+                                    </div>
+                                    {/* Carte Vidéo */}
+                                    <div
+                                      onClick={() => setAnnSub(ch.id, { media_type: annSub.media_type === 'video' ? '' : 'video', media_url: '' })}
+                                      style={{ cursor: 'pointer', borderRadius: 10, padding: '14px 12px', border: annSub.media_type === 'video' ? '2px solid #a78bfa' : '1px solid rgba(255,255,255,0.1)', background: annSub.media_type === 'video' ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.03)', transition: 'all 0.15s', textAlign: 'center' }}>
+                                      <div style={{ fontSize: 28, marginBottom: 6 }}>🎬</div>
+                                      <div style={{ fontWeight: 700, fontSize: 12, color: annSub.media_type === 'video' ? '#a78bfa' : '#94a3b8' }}>Vidéo</div>
+                                      <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>MP4, MOV, AVI</div>
+                                      {annSub.media_type === 'video' && <div style={{ marginTop: 6, fontSize: 11, color: '#a78bfa', fontWeight: 700 }}>✓ Sélectionnée</div>}
+                                    </div>
+                                  </div>
+                                  {/* URL du média (si sélectionné) */}
+                                  {annSub.media_type && (
+                                    <div style={{ marginTop: 10 }}>
+                                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>
+                                        🔗 URL de {annSub.media_type === 'image' ? "l'image" : 'la vidéo'}
+                                      </label>
+                                      <input
+                                        value={annSub.media_url}
+                                        onChange={e => setAnnSub(ch.id, { media_url: e.target.value })}
+                                        placeholder={annSub.media_type === 'image' ? 'https://example.com/image.jpg' : 'https://example.com/video.mp4'}
+                                        style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: `1px solid ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.4)' : 'rgba(167,139,250,0.4)'}`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
+                                      />
+                                    </div>
+                                  )}
+                                  {!annSub.media_type && (
+                                    <div style={{ marginTop: 8, fontSize: 11, color: '#334155', textAlign: 'center' }}>Aucun média — texte seul envoyé dans Telegram</div>
+                                  )}
+                                </div>
+
+                                {/* 3 — Mode d'envoi */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>⏰ Planification</label>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    {[{ v: 'interval', l: '⏱ Intervalle régulier', d: 'ex: toutes les 2h' }, { v: 'times', l: '🕐 Heures fixes', d: 'ex: 13:00, 18:00' }].map(opt => (
+                                      <button key={opt.v} type="button"
+                                        onClick={() => setAnnSub(ch.id, { schedule_type: opt.v })}
+                                        style={{ flex: 1, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: annSub.schedule_type === opt.v ? '2px solid #fbbf24' : '1px solid rgba(251,191,36,0.2)', background: annSub.schedule_type === opt.v ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.03)', color: annSub.schedule_type === opt.v ? '#fbbf24' : '#64748b' }}>
+                                        <div style={{ fontWeight: 700, fontSize: 12 }}>{opt.l}</div>
+                                        <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{opt.d}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div style={{ marginTop: 10 }}>
+                                    {annSub.schedule_type === 'interval' ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>Toutes les</label>
+                                        <input type="number" min="0.5" max="168" step="0.5"
+                                          value={annSub.interval_hours}
+                                          onChange={e => setAnnSub(ch.id, { interval_hours: e.target.value })}
+                                          style={{ width: 90, padding: '8px 10px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 7, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                                        <span style={{ color: '#94a3b8', fontSize: 13 }}>heure(s)</span>
+                                        <span style={{ color: '#475569', fontSize: 11 }}>· 0.5 = 30 min · 1 = 1h · 24 = par jour</span>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Heures d'envoi (HH:MM, séparées par des virgules)</label>
+                                        <input value={annSub.times_input}
+                                          onChange={e => setAnnSub(ch.id, { times_input: e.target.value })}
+                                          placeholder="13:00, 18:00, 21:30"
+                                          style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                                        <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Fuseau horaire serveur · format 24h</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div style={{ fontSize: 11, color: '#334155', padding: '8px 12px', background: 'rgba(251,191,36,0.05)', borderRadius: 7, border: '1px solid rgba(251,191,36,0.1)' }}>
+                                  ℹ️ Le bot token et l'ID canal sont repris automatiquement depuis la configuration ci-dessus lors de la sauvegarde.
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                         <button className="btn btn-ghost btn-sm" type="button" onClick={() => setDefaultChOpen(null)}>Annuler</button>
                         <button
@@ -4418,7 +4869,8 @@ function AdminPanel() {
                           type="button"
                           disabled={defaultTgSaving}
                           onClick={async () => {
-                            await saveDefaultStratTg();
+                            await saveDefaultStratTg(ch.id, { name: ch.name, emoji: ch.emoji, color: ch.color });
+                            await saveAnnSub(ch.id, cfg.bot_token, cfg.channel_id, ch.name);
                             setDefaultChOpen(null);
                           }}
                           style={{ background: 'linear-gradient(135deg,#0369a1,#229ed9)' }}
@@ -4571,13 +5023,133 @@ function AdminPanel() {
                           {TG_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
+
+                      {/* ── Message d'annonce planifiée ── */}
+                      {(() => {
+                        const annKey = `strat_${s.id}`;
+                        const annSub = getAnnSub(annKey);
+                        return (
+                          <div style={{ marginBottom: 14, borderRadius: 10, border: '1px solid rgba(251,191,36,0.25)', overflow: 'hidden' }}>
+                            <button type="button"
+                              onClick={() => setAnnSub(annKey, { open: !annSub.open })}
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: annSub.open ? 'rgba(251,191,36,0.1)' : 'rgba(251,191,36,0.04)', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                              <span style={{ fontSize: 16 }}>📢</span>
+                              <span style={{ flex: 1, fontWeight: 700, fontSize: 12, color: annSub.open ? '#fbbf24' : '#94a3b8' }}>Message d'annonce planifiée</span>
+                              <span style={{ fontSize: 11, color: annSub.text.trim() ? '#fbbf24' : '#475569', fontWeight: 600 }}>
+                                {annSub.text.trim() ? (annSub.schedule_type === 'interval' ? `⏱ toutes les ${annSub.interval_hours}h` : `🕐 ${annSub.times_input || 'heures à définir'}`) : 'Optionnel'}
+                              </span>
+                              <span style={{ color: '#64748b', fontSize: 13 }}>{annSub.open ? '▲' : '▼'}</span>
+                            </button>
+                            {annSub.open && (
+                              <div style={{ padding: '14px', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                                {/* 1 — Texte */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>💬 Texte du message</label>
+                                  <textarea
+                                    rows={4} value={annSub.text}
+                                    onChange={e => setAnnSub(annKey, { text: e.target.value })}
+                                    placeholder="Ex: 🎯 Nouvelle prédiction disponible ! Rejoignez notre canal..."
+                                    style={{ width: '100%', padding: '10px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+                                  />
+                                  <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>HTML supporté : &lt;b&gt;texte gras&lt;/b&gt; · &lt;i&gt;italique&lt;/i&gt; · &lt;a href="…"&gt;lien&lt;/a&gt;</div>
+                                </div>
+
+                                {/* 2 — Média : Image ou Vidéo */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>📎 Média accompagnateur</label>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                    <div
+                                      onClick={() => setAnnSub(annKey, { media_type: annSub.media_type === 'image' ? '' : 'image', media_url: '' })}
+                                      style={{ cursor: 'pointer', borderRadius: 10, padding: '14px 12px', border: annSub.media_type === 'image' ? '2px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)', background: annSub.media_type === 'image' ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)', transition: 'all 0.15s', textAlign: 'center' }}>
+                                      <div style={{ fontSize: 28, marginBottom: 6 }}>🖼️</div>
+                                      <div style={{ fontWeight: 700, fontSize: 12, color: annSub.media_type === 'image' ? '#38bdf8' : '#94a3b8' }}>Image</div>
+                                      <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>JPG, PNG, GIF, WebP</div>
+                                      {annSub.media_type === 'image' && <div style={{ marginTop: 6, fontSize: 11, color: '#38bdf8', fontWeight: 700 }}>✓ Sélectionnée</div>}
+                                    </div>
+                                    <div
+                                      onClick={() => setAnnSub(annKey, { media_type: annSub.media_type === 'video' ? '' : 'video', media_url: '' })}
+                                      style={{ cursor: 'pointer', borderRadius: 10, padding: '14px 12px', border: annSub.media_type === 'video' ? '2px solid #a78bfa' : '1px solid rgba(255,255,255,0.1)', background: annSub.media_type === 'video' ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.03)', transition: 'all 0.15s', textAlign: 'center' }}>
+                                      <div style={{ fontSize: 28, marginBottom: 6 }}>🎬</div>
+                                      <div style={{ fontWeight: 700, fontSize: 12, color: annSub.media_type === 'video' ? '#a78bfa' : '#94a3b8' }}>Vidéo</div>
+                                      <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>MP4, MOV, AVI</div>
+                                      {annSub.media_type === 'video' && <div style={{ marginTop: 6, fontSize: 11, color: '#a78bfa', fontWeight: 700 }}>✓ Sélectionnée</div>}
+                                    </div>
+                                  </div>
+                                  {annSub.media_type && (
+                                    <div style={{ marginTop: 10 }}>
+                                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>
+                                        🔗 URL de {annSub.media_type === 'image' ? "l'image" : 'la vidéo'}
+                                      </label>
+                                      <input
+                                        value={annSub.media_url}
+                                        onChange={e => setAnnSub(annKey, { media_url: e.target.value })}
+                                        placeholder={annSub.media_type === 'image' ? 'https://example.com/image.jpg' : 'https://example.com/video.mp4'}
+                                        style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: `1px solid ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.4)' : 'rgba(167,139,250,0.4)'}`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
+                                      />
+                                    </div>
+                                  )}
+                                  {!annSub.media_type && (
+                                    <div style={{ marginTop: 8, fontSize: 11, color: '#334155', textAlign: 'center' }}>Aucun média — texte seul envoyé dans Telegram</div>
+                                  )}
+                                </div>
+
+                                {/* 3 — Mode d'envoi */}
+                                <div>
+                                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>⏰ Planification</label>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    {[{ v: 'interval', l: '⏱ Intervalle régulier', d: 'ex: toutes les 2h' }, { v: 'times', l: '🕐 Heures fixes', d: 'ex: 13:00, 18:00' }].map(opt => (
+                                      <button key={opt.v} type="button"
+                                        onClick={() => setAnnSub(annKey, { schedule_type: opt.v })}
+                                        style={{ flex: 1, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: annSub.schedule_type === opt.v ? '2px solid #fbbf24' : '1px solid rgba(251,191,36,0.2)', background: annSub.schedule_type === opt.v ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.03)', color: annSub.schedule_type === opt.v ? '#fbbf24' : '#64748b' }}>
+                                        <div style={{ fontWeight: 700, fontSize: 12 }}>{opt.l}</div>
+                                        <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{opt.d}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div style={{ marginTop: 10 }}>
+                                    {annSub.schedule_type === 'interval' ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>Toutes les</label>
+                                        <input type="number" min="0.5" max="168" step="0.5"
+                                          value={annSub.interval_hours}
+                                          onChange={e => setAnnSub(annKey, { interval_hours: e.target.value })}
+                                          style={{ width: 90, padding: '8px 10px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 7, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                                        <span style={{ color: '#94a3b8', fontSize: 13 }}>heure(s)</span>
+                                        <span style={{ color: '#475569', fontSize: 11 }}>· 0.5 = 30 min · 1 = 1h · 24 = par jour</span>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Heures d'envoi (HH:MM, séparées par des virgules)</label>
+                                        <input value={annSub.times_input}
+                                          onChange={e => setAnnSub(annKey, { times_input: e.target.value })}
+                                          placeholder="13:00, 18:00, 21:30"
+                                          style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                                        <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Fuseau horaire serveur · format 24h</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div style={{ fontSize: 11, color: '#334155', padding: '8px 12px', background: 'rgba(251,191,36,0.05)', borderRadius: 7, border: '1px solid rgba(251,191,36,0.1)' }}>
+                                  ℹ️ Le bot token et l'ID canal sont repris automatiquement depuis la configuration ci-dessus lors de la sauvegarde.
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost btn-sm" type="button" onClick={() => { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); }}>Fermer</button>
                         <button
                           className="btn btn-gold btn-sm"
                           type="button"
                           disabled={stratChSaving || !stratChForm.bot_token.trim() || !stratChForm.channel_id.trim()}
-                          onClick={() => saveStratTg(s.id)}
+                          onClick={async () => {
+                            await saveStratTg(s.id);
+                            await saveAnnSub(`strat_${s.id}`, stratChForm.bot_token, stratChForm.channel_id, s.name);
+                          }}
                           style={{ background: 'linear-gradient(135deg,#7e22ce,#a855f7)' }}
                         >
                           {stratChSaving ? '⏳ Sauvegarde…' : '➕ Ajouter ce canal'}
@@ -4918,6 +5490,156 @@ function AdminPanel() {
           </div>
         </div>
       )}
+
+      {/* ── TAB : MISE À JOUR PAR BASE DE DONNÉES ── */}
+      {adminTab === 'maj-db' && <ProjectBackupPanel />}
+
     </div>
+
+    {/* ══════════════════════════════════════════════
+        MODAL DE CONFIRMATION POST-SAVE TELEGRAM
+    ══════════════════════════════════════════════ */}
+    {tgSaveModal && (
+      <div
+        onClick={() => setTgSaveModal(null)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24,
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: 'linear-gradient(160deg,#0f172a,#1e293b)',
+            border: `2px solid ${tgSaveModal.color || 'rgba(34,197,94,0.5)'}`,
+            borderRadius: 20, padding: '32px 36px',
+            maxWidth: 520, width: '100%',
+            boxShadow: `0 0 60px ${tgSaveModal.color || '#22c55e'}33`,
+            fontFamily: 'sans-serif', position: 'relative',
+          }}
+        >
+          {/* Bouton fermer */}
+          <button
+            onClick={() => setTgSaveModal(null)}
+            style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.07)', border: 'none', borderRadius: 8, color: '#94a3b8', cursor: 'pointer', fontSize: 18, padding: '4px 10px' }}
+          >✕</button>
+
+          {/* En-tête */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 14,
+              background: `${tgSaveModal.color || '#22c55e'}22`,
+              border: `2px solid ${tgSaveModal.color || '#22c55e'}55`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0,
+            }}>
+              {tgSaveModal.emoji || '✅'}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 900, fontSize: 18, color: '#f8fafc' }}>{tgSaveModal.name}</span>
+                <span style={{ fontSize: 12, padding: '2px 10px', borderRadius: 20, fontWeight: 700, background: `${tgSaveModal.color || '#22c55e'}22`, color: tgSaveModal.color || '#22c55e', border: `1px solid ${tgSaveModal.color || '#22c55e'}44` }}>
+                  {tgSaveModal.id}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#22c55e' }}>✅ Configuration Telegram enregistrée</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Infos configuration */}
+          <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '18px 20px', marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>📡 Configuration Telegram</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Canal ID</div>
+                <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700, fontFamily: 'monospace', wordBreak: 'break-all' }}>{tgSaveModal.channel_id}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Bot Token</div>
+                <div style={{ fontSize: 13, color: '#94a3b8', fontFamily: 'monospace' }}>{tgSaveModal.bot_token_preview}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Format de prédiction</div>
+                <div style={{ fontSize: 13, color: '#a78bfa', fontWeight: 700 }}>📋 {tgSaveModal.format_label}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Max rattrapages</div>
+                <div style={{ fontSize: 13, color: '#fbbf24', fontWeight: 700 }}>🔄 {tgSaveModal.max_rattrapage} tentative{tgSaveModal.max_rattrapage > 1 ? 's' : ''}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Infos stratégie (uniquement pour stratégies perso) */}
+          {tgSaveModal.type === 'strategie' && (
+            <div style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 12, padding: '16px 20px', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>⚙️ Paramètres de la stratégie</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Mode</div>
+                  <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700 }}>🎯 {tgSaveModal.mode}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Main cible</div>
+                  <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700 }}>{tgSaveModal.hand}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Seuil de déclenchement</div>
+                  <div style={{ fontSize: 13, color: '#38bdf8', fontWeight: 700 }}>⚡ {tgSaveModal.threshold} parties</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Statut</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: tgSaveModal.enabled ? '#22c55e' : '#f87171' }}>
+                    {tgSaveModal.enabled ? '🟢 Active' : '🔴 Désactivée'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Compteurs */}
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>📊 Compteurs (total historique)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, textAlign: 'center' }}>
+              {[
+                { label: 'Total', value: tgSaveModal.total, color: '#e2e8f0', bg: 'rgba(255,255,255,0.06)' },
+                { label: '✅ Gagnés', value: tgSaveModal.wins, color: '#4ade80', bg: 'rgba(34,197,94,0.1)' },
+                { label: '❌ Perdus', value: tgSaveModal.losses, color: '#f87171', bg: 'rgba(239,68,68,0.1)' },
+                { label: '⏳ En cours', value: tgSaveModal.pending, color: '#fbbf24', bg: 'rgba(234,179,8,0.1)' },
+              ].map(c => (
+                <div key={c.label} style={{ background: c.bg, borderRadius: 10, padding: '12px 8px' }}>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: c.color }}>{c.value}</div>
+                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 3, fontWeight: 600 }}>{c.label}</div>
+                </div>
+              ))}
+            </div>
+            {(tgSaveModal.wins + tgSaveModal.losses) > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
+                  <span>Taux de réussite</span>
+                  <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                    {((tgSaveModal.wins / (tgSaveModal.wins + tgSaveModal.losses)) * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg,#22c55e,#4ade80)', width: `${(tgSaveModal.wins / (tgSaveModal.wins + tgSaveModal.losses)) * 100}%`, transition: 'width 0.5s' }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bouton fermer */}
+          <button
+            onClick={() => setTgSaveModal(null)}
+            style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 15, background: `linear-gradient(135deg,${tgSaveModal.color || '#22c55e'},${tgSaveModal.color || '#4ade80'})`, color: '#0f172a' }}
+          >
+            Parfait, fermer
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -327,13 +327,30 @@ export default function Home() {
         </section>
       )}
 
-      <footer className="footer" style={{ flexDirection: 'column', gap: 6, padding: '20px 24px' }}>
+      <footer className="footer" style={{ flexDirection: 'column', gap: 6, padding: '20px 24px', position: 'relative' }}>
         <span style={{ fontWeight: 800, fontSize: 15 }}>🎲 Prediction Baccara Pro</span>
         <span style={{ fontSize: 12, color: '#475569' }}>Prédictions algorithmiques — 1xBet Baccarat</span>
         <div style={{ display: 'flex', gap: 24, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center', fontSize: 12, color: '#374151' }}>
           <span>Promoteur : BUZZ INFLUENCE · <a href="https://wa.me/2250767202271" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+225 07 67 20 22 71</a></span>
           <span>Développeur : SOSSOU Kouamé · <a href="https://wa.me/2290195501564" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+229 01 95 50 15 64</a></span>
         </div>
+        <a
+          href="/programmation"
+          style={{
+            position: 'absolute', bottom: 14, right: 18,
+            fontSize: 10, color: '#1e293b', textDecoration: 'none',
+            padding: '4px 10px', borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.04)',
+            background: 'rgba(255,255,255,0.02)',
+            letterSpacing: 0.5, fontWeight: 600,
+            transition: 'color 0.2s, border-color 0.2s',
+          }}
+          onMouseOver={e => { e.currentTarget.style.color = '#334155'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+          onMouseOut={e => { e.currentTarget.style.color = '#1e293b'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.04)'; }}
+          title="Espace programmation"
+        >
+          Programmation
+        </a>
       </footer>
     </div>
   );
