@@ -323,6 +323,7 @@ async function autoSaveDeployFiles() {
 async function main() {
   await initDB();
   await autoSaveDeployFiles();
+
   engine.start(2000);
   await telegramService.loadConfig();
   bilan.scheduleMidnight();
