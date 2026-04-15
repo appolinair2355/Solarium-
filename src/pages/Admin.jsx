@@ -372,15 +372,17 @@ function AdminPanel() {
   };
   // Formats de message Telegram (partagé dans tout l'admin)
   const TG_FORMATS = [
-    { value: '',  label: 'Global (paramètre général)' },
-    { value: '8', label: 'Format 8 — 🎮 Banquier / 🤖 Joueur Pro (recommandé)' },
-    { value: '1', label: 'Format 1 — Classique cyrillique' },
-    { value: '2', label: 'Format 2 — Baccara Premium' },
-    { value: '3', label: 'Format 3 — Baccara Pro' },
-    { value: '4', label: 'Format 4 — Prédiction Standard' },
-    { value: '5', label: 'Format 5 — Barre de progression' },
-    { value: '6', label: 'Format 6 — Markdown Titre' },
-    { value: '7', label: 'Format 7 — HTML joueur' },
+    { value: '',   label: 'Global (paramètre général)' },
+    { value: '9',  label: 'Format 9 — 🤖 Joueur dédié (nouveau)' },
+    { value: '10', label: 'Format 10 — 🎮 Banquier dédié (nouveau)' },
+    { value: '8',  label: 'Format 8 — 🎮 Banquier / 🤖 Joueur Pro (auto selon main)' },
+    { value: '1',  label: 'Format 1 — Classique cyrillique' },
+    { value: '2',  label: 'Format 2 — Baccara Premium' },
+    { value: '3',  label: 'Format 3 — Baccara Pro' },
+    { value: '4',  label: 'Format 4 — Prédiction Standard' },
+    { value: '5',  label: 'Format 5 — Barre de progression' },
+    { value: '6',  label: 'Format 6 — Markdown Titre' },
+    { value: '7',  label: 'Format 7 — HTML joueur' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -2004,6 +2006,24 @@ function AdminPanel() {
               result:  `Le joueur recevra une carte ♠️ Pique\n\n✅ GAGNÉ ${RE[0]}`,
               perdu:   `Le joueur recevra une carte ♠️ Pique\n\n❌`,
             },
+            {
+              id: 8, label: 'Banquier / Joueur Pro', icon: '🎮',
+              preview: `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ⌛\n\n── joueur ──\n🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ⌛`,
+              result:  `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ✅${RE[0]}GAGNÉ`,
+              perdu:   `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ❌`,
+            },
+            {
+              id: 9, label: '🤖 Joueur dédié', icon: '🤖',
+              preview: `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ⌛`,
+              result:  `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ✅${RE[0]}GAGNÉ`,
+              perdu:   `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ❌`,
+            },
+            {
+              id: 10, label: '🎮 Banquier dédié', icon: '🎮',
+              preview: `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ⌛`,
+              result:  `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ✅${RE[0]}GAGNÉ`,
+              perdu:   `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ❌`,
+            },
           ];
 
           return (
@@ -3536,6 +3556,39 @@ function AdminPanel() {
               </button>
             </div>
           )}
+
+          {/* ── Export configuration ── */}
+          <div style={{
+            marginTop: 18, background: 'rgba(6,182,212,0.06)',
+            border: '1px solid rgba(6,182,212,0.25)', borderRadius: 12, padding: '14px 18px',
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: '#22d3ee', fontSize: 13 }}>📤 Exporter la configuration</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                Télécharge un fichier JSON complet : stratégies, paramètres, séquences, canaux.
+                Peut être réimporté via le bouton ci-dessus.
+              </div>
+            </div>
+            <button
+              className="btn btn-sm"
+              style={{ background: 'linear-gradient(135deg,#0891b2,#06b6d4)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 13, padding: '9px 20px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              onClick={async () => {
+                try {
+                  const r = await fetch('/api/admin/export-config', { credentials: 'include' });
+                  if (!r.ok) { alert('❌ Erreur lors de l\'export'); return; }
+                  const blob = await r.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `baccarat-pro-config-${new Date().toISOString().slice(0,10)}.json`;
+                  a.click(); URL.revokeObjectURL(url);
+                } catch (e) { alert('❌ Erreur : ' + e.message); }
+              }}
+            >
+              📥 Télécharger config.json
+            </button>
+          </div>
 
           {/* Résultat */}
           {updateResult && (
