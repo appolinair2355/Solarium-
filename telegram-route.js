@@ -74,13 +74,20 @@ router.post('/bot-token', requireAdmin, async (req, res) => {
   try {
     await tg.saveToken(token.trim());
     if (tg.getChannels().length > 0) tg.startBotPublic();
+    // Sync vers la base Render
+    try { require('./render-sync').syncSetting('bot_token', token.trim()).catch(() => {}); } catch {}
     const t = token.trim();
     res.json({ ok: true, token_preview: `${t.slice(0, 6)}…${t.slice(-4)}` });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete('/bot-token', requireAdmin, async (req, res) => {
-  try { await db.deleteSetting('bot_token'); res.json({ ok: true }); }
+  try {
+    await db.deleteSetting('bot_token');
+    // Sync suppression vers la base Render (valeur vide)
+    try { require('./render-sync').syncSetting('bot_token', '').catch(() => {}); } catch {}
+    res.json({ ok: true });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 

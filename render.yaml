@@ -1,20 +1,20 @@
 services:
   - type: web
-    name: vip-kouame-predictions
-    runtime: python
+    name: baccarat-pro
+    env: node
     plan: free
-    
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    
+    buildCommand: npm install && npm run build
+    startCommand: bash start.sh
     disk:
       name: data
-      mountPath: /data
+      mountPath: /opt/render/project/src/data
       sizeGB: 1
-    
     envVars:
-      - key: PORT
-        value: 10000
-      - key: DATA_DIR
-        value: /data
-      
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: OLLAMA_URL
+        value: http://localhost:11434
+      - key: OLLAMA_DEFAULT_MODEL
+        value: phi3:mini

@@ -396,6 +396,18 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Compteurs miroir (taux_miroir) en temps réel ──────────────────
+router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const entry = engine.custom?.[id];
+    if (!entry) return res.json({ counts: {}, threshold: 0 });
+    const counts = entry.mirrorCounts || {};
+    const threshold = entry.config?.threshold || 0;
+    res.json({ counts, threshold });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Reset statistiques par stratégie ──────────────────────────────
 // Supprime tout l'historique de prédictions d'une stratégie (C1, C2, C3, DC ou Sn)
 router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
@@ -1013,7 +1025,214 @@ async function applyUpdateBlock(type, data) {
     return result;
   }
 
-  result.errors.push(`Type "${type}" inconnu. Types valides: format, strategies, sequences, styles, code, multi`);
+  // ── Annonces Telegram planifiées ──────────────────────────────────
+  if (type === 'announcements') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau d\'annonces'); return result; }
+    const current = JSON.parse(await db.getSetting('tg_announcements') || '[]');
+    for (const item of data) {
+      if (!item.name || !item.bot_token || !item.channel_id) { result.errors.push(`Annonce "${item.name || '?'}": name, bot_token et channel_id requis`); continue; }
+      const existing = current.findIndex(a => a.id === item.id || a.name === item.name);
+      if (existing >= 0) {
+        current[existing] = { ...current[existing], ...item };
+        result.detail = (result.detail || '') + `\n• Mise à jour annonce: "${item.name}"`;
+      } else {
+        current.push({ ...item, id: item.id || Date.now() + result.applied });
+        result.detail = (result.detail || '') + `\n• Créée annonce: "${item.name}"`;
+      }
+      result.applied++;
+    }
+    await db.setSetting('tg_announcements', JSON.stringify(current));
+    return result;
+  }
+
+  // ── Canaux Telegram par défaut (C1/C2/C3/DC) ──────────────────────
+  if (type === 'default_tg') {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) { result.errors.push('data doit être un objet { C1:{...}, C2:{...}, ... }'); return result; }
+    const valid = ['C1','C2','C3','DC'];
+    const current = JSON.parse(await db.getSetting('default_strategies_tg') || '{}');
+    for (const [key, val] of Object.entries(data)) {
+      if (!valid.includes(key)) { result.errors.push(`Clé inconnue: ${key} (valides: C1, C2, C3, DC)`); continue; }
+      if (!val.bot_token || !val.channel_id) { result.errors.push(`Canal ${key}: bot_token et channel_id requis`); continue; }
+      current[key] = { bot_token: val.bot_token.trim(), channel_id: val.channel_id.trim(), tg_format: val.tg_format ?? null };
+      result.applied++;
+      result.detail = (result.detail || '') + `\n• Canal ${key} mis à jour`;
+    }
+    await db.setSetting('default_strategies_tg', JSON.stringify(current));
+    return result;
+  }
+
+  // ── Clés API IA (Espace Programmation) ────────────────────────────
+  if (type === 'prog_ai_keys') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de clés API'); return result; }
+    const current = JSON.parse(await db.getSetting('prog_ai_keys') || '[]');
+    for (const item of data) {
+      if (!item.provider || !item.key) { result.errors.push(`Clé "${item.provider || '?'}": provider et key requis`); continue; }
+      const existing = current.findIndex(k => k.provider === item.provider && k.label === item.label);
+      if (existing >= 0) {
+        current[existing] = { ...current[existing], ...item };
+        result.detail = (result.detail || '') + `\n• Mise à jour clé: ${item.provider} / ${item.label || ''}`;
+      } else {
+        current.push({ ...item, id: item.id || Date.now() + result.applied });
+        result.detail = (result.detail || '') + `\n• Ajouté clé: ${item.provider} / ${item.label || ''}`;
+      }
+      result.applied++;
+    }
+    await db.setSetting('prog_ai_keys', JSON.stringify(current));
+    return result;
+  }
+
+  // ── Bots Programmation ────────────────────────────────────────────
+  if (type === 'prog_bots') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de bots'); return result; }
+    const current = JSON.parse(await db.getSetting('prog_bots') || '[]');
+    for (const item of data) {
+      if (!item.name) { result.errors.push(`Bot sans nom ignoré`); continue; }
+      const existing = current.findIndex(b => b.id === item.id || b.name === item.name);
+      if (existing >= 0) {
+        current[existing] = { ...current[existing], ...item };
+        result.detail = (result.detail || '') + `\n• Mise à jour bot: "${item.name}"`;
+      } else {
+        current.push({ ...item, id: item.id || Date.now() + result.applied });
+        result.detail = (result.detail || '') + `\n• Créé bot: "${item.name}"`;
+      }
+      result.applied++;
+    }
+    await db.setSetting('prog_bots', JSON.stringify(current));
+    return result;
+  }
+
+  // ── Canaux Telegram personnalisés (table telegram_config) ────────────
+  if (type === 'telegram_channels') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de canaux Telegram'); return result; }
+    for (const item of data) {
+      if (!item.channel_id) { result.errors.push(`Canal sans channel_id ignoré`); continue; }
+      await db.upsertTelegramConfig({ channel_id: item.channel_id, channel_name: item.channel_name || item.channel_id });
+      result.applied++;
+      result.detail = (result.detail || '') + `\n• Canal: ${item.channel_name || item.channel_id}`;
+    }
+    return result;
+  }
+
+  // ── Messages utilisateurs in-app ───────────────────────────────────
+  if (type === 'user_messages') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de messages'); return result; }
+    await db.setSetting('user_messages', JSON.stringify(data));
+    result.applied = data.length;
+    result.detail = `${data.length} message(s) utilisateurs restaurés`;
+    return result;
+  }
+
+  // ── Message de diffusion (broadcast) ─────────────────────────────
+  if (type === 'broadcast_message') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { text, enabled, targets }'); return result; }
+    await db.setSetting('broadcast_message', JSON.stringify(data));
+    result.applied = 1;
+    result.detail = `Message broadcast restauré (enabled: ${data.enabled})`;
+    return result;
+  }
+
+  // ── Config bot de chat Telegram ───────────────────────────────────
+  if (type === 'telegram_chat') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { bot_token, channel_id }'); return result; }
+    await db.setSetting('telegram_chat_config', JSON.stringify(data));
+    result.applied = 1;
+    result.detail = `Config chat Telegram restaurée (channel: ${data.channel_id || '?'})`;
+    return result;
+  }
+
+  // ── Vidéos tutoriels ──────────────────────────────────────────────
+  if (type === 'tutorial_videos') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { video1, video2 }'); return result; }
+    await db.setSetting('tutorial_videos', JSON.stringify({ video1: data.video1 || null, video2: data.video2 || null }));
+    result.applied = 1;
+    result.detail = `Vidéos tutoriels restaurées`;
+    return result;
+  }
+
+  // ── Bilan dernière journée ────────────────────────────────────────
+  if (type === 'bilan_last') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet bilan'); return result; }
+    await db.setSetting('bilan_last', JSON.stringify(data));
+    result.applied = 1;
+    result.detail = `Bilan restauré (date: ${data.date || '?'})`;
+    return result;
+  }
+
+  // ── État moteur (compteurs d'absences) ────────────────────────────
+  if (type === 'engine_absences') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet absences'); return result; }
+    await db.setSetting('engine_absences', JSON.stringify(data));
+    result.applied = 1;
+    result.detail = `Compteurs d'absences restaurés`;
+    return result;
+  }
+
+  // ── Paramètres globaux bruts ──────────────────────────────────────
+  if (type === 'raw_settings') {
+    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet clé→valeur'); return result; }
+    const allowed = ['max_rattrapage', 'tg_msg_format', 'render_external_url', 'render_db_url', 'bot_token'];
+    for (const [key, val] of Object.entries(data)) {
+      if (!allowed.includes(key)) { result.errors.push(`Paramètre "${key}" non autorisé (valides: ${allowed.join(', ')})`); continue; }
+      if (val !== null && val !== undefined) {
+        await db.setSetting(key, String(val));
+        result.applied++;
+        result.detail = (result.detail || '') + `\n• ${key} = ${key.includes('token') || key.includes('url') ? '***' : val}`;
+      }
+    }
+    return result;
+  }
+
+  // ── Import d'un export complet (full_config v3.0) ─────────────────
+  if (type === 'full_config') {
+    const blocks = [];
+    if (Array.isArray(data.strategies)        && data.strategies.length)
+      blocks.push({ type: 'strategies',        data: data.strategies });
+    if (Array.isArray(data.sequences)          && data.sequences.length)
+      blocks.push({ type: 'sequences',         data: data.sequences });
+    if (Array.isArray(data.announcements)      && data.announcements.length)
+      blocks.push({ type: 'announcements',     data: data.announcements });
+    if (Array.isArray(data.prog_ai_keys)       && data.prog_ai_keys.length)
+      blocks.push({ type: 'prog_ai_keys',      data: data.prog_ai_keys });
+    if (Array.isArray(data.prog_bots)          && data.prog_bots.length)
+      blocks.push({ type: 'prog_bots',         data: data.prog_bots });
+    if (Array.isArray(data.telegram_channels)  && data.telegram_channels.length)
+      blocks.push({ type: 'telegram_channels', data: data.telegram_channels });
+    if (Array.isArray(data.user_messages)      && data.user_messages.length)
+      blocks.push({ type: 'user_messages',     data: data.user_messages });
+    if (data.default_tg && Object.keys(data.default_tg).length)
+      blocks.push({ type: 'default_tg',        data: data.default_tg });
+    if (data.telegram_chat && data.telegram_chat.bot_token)
+      blocks.push({ type: 'telegram_chat',     data: data.telegram_chat });
+    if (data.broadcast_message && data.broadcast_message.text)
+      blocks.push({ type: 'broadcast_message', data: data.broadcast_message });
+    if (data.ui?.tutorial_videos)
+      blocks.push({ type: 'tutorial_videos',   data: data.ui.tutorial_videos });
+    if (data.ui?.custom_css)
+      blocks.push({ type: 'css',               data: { css: data.ui.custom_css } });
+    if (data.ui?.ui_styles && Object.keys(data.ui.ui_styles).length)
+      blocks.push({ type: 'styles',            data: data.ui.ui_styles });
+    if (data.settings?.tg_msg_format)
+      blocks.push({ type: 'format',            data: { format_id: data.settings.tg_msg_format } });
+    // Paramètres bruts (render_db_url, bot_token, etc.)
+    const rawKeys = ['max_rattrapage', 'render_external_url', 'render_db_url', 'bot_token'];
+    const rawData = {};
+    for (const k of rawKeys) { if (data.settings?.[k]) rawData[k] = data.settings[k]; }
+    if (Object.keys(rawData).length) blocks.push({ type: 'raw_settings', data: rawData });
+    // État moteur & bilan
+    if (data.bilan_last      && typeof data.bilan_last === 'object')
+      blocks.push({ type: 'bilan_last',      data: data.bilan_last });
+    if (data.engine_absences && typeof data.engine_absences === 'object')
+      blocks.push({ type: 'engine_absences', data: data.engine_absences });
+
+    const subResults = [];
+    for (const b of blocks) subResults.push(await applyUpdateBlock(b.type, b.data));
+    result.applied = subResults.reduce((s, r) => s + r.applied, 0);
+    result.errors  = subResults.flatMap(r => r.errors);
+    result.detail  = subResults.map(r => `[${r.type}] ${r.detail || ''}`.trim()).filter(Boolean).join('\n');
+    return result;
+  }
+
+  result.errors.push(`Type "${type}" inconnu. Types valides: format, strategies, sequences, styles, code, announcements, default_tg, prog_ai_keys, prog_bots, telegram_channels, user_messages, broadcast_message, telegram_chat, tutorial_videos, bilan_last, engine_absences, raw_settings, full_config, multi`);
   return result;
 }
 
@@ -1043,36 +1262,91 @@ router.post('/apply-update', requireAdmin, async (req, res) => {
 // ── Export complet de la configuration du projet en JSON ────────────
 router.get('/export-config', requireAdmin, async (req, res) => {
   try {
-    const strategies   = await getStrategies();
-    const tgFormat     = await db.getSetting('tg_msg_format');
-    const maxRattrDB   = await db.getSetting('max_rattrapage');
-    const renderUrl    = await db.getSetting('render_external_url');
-    const customCss    = await db.getSetting('custom_css');
-    const uiStyles     = await db.getSetting('ui_styles');
-    const sequences    = await db.getSetting('loss_sequences');
-    const defaultTg    = await db.getSetting('default_tg_channels');
-    const channels     = await db.getAllStrategyRoutes().catch(() => []);
+    // ── Stratégies & routes ────────────────────────────────────────────
+    const strategies       = await getStrategies();
+    const channels         = await db.getAllStrategyRoutes().catch(() => ({}));
+    const tgChannels       = await db.getTelegramConfigs(false).catch(() => []);
+
+    // ── Paramètres globaux ─────────────────────────────────────────────
+    const tgFormat         = await db.getSetting('tg_msg_format');
+    const maxRattrDB       = await db.getSetting('max_rattrapage');
+    const renderUrl        = await db.getSetting('render_external_url');
+    const renderDbUrl      = await db.getSetting('render_db_url');
+    const botToken         = await db.getSetting('bot_token');
+
+    // ── Telegram ───────────────────────────────────────────────────────
+    const defaultTg        = await db.getSetting('default_strategies_tg');
+    const announcements    = await db.getSetting('tg_announcements');
+    const tgChatConfig     = await db.getSetting('telegram_chat_config');
+
+    // ── UI ─────────────────────────────────────────────────────────────
+    const customCss        = await db.getSetting('custom_css');
+    const uiStyles         = await db.getSetting('ui_styles');
+    const tutorialVideos   = await db.getSetting('tutorial_videos');
+
+    // ── Séquences & messages ───────────────────────────────────────────
+    const sequences        = await db.getSetting('loss_sequences');
+    const userMessages     = await db.getSetting('user_messages');
+    const broadcastMessage = await db.getSetting('broadcast_message');
+
+    // ── Espace Programmation ───────────────────────────────────────────
+    const progAiKeys       = await db.getSetting('prog_ai_keys');
+    const progBots         = await db.getSetting('prog_bots');
+
+    // ── État moteur & bilan ────────────────────────────────────────────
+    const bilanLast        = await db.getSetting('bilan_last');
+    const engineAbsences   = await db.getSetting('engine_absences');
+
+    const safeParse = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
     const payload = {
       _meta: {
-        version: '1.0',
+        version: '3.1',
         exported_at: new Date().toISOString(),
         project: 'Baccarat Pro',
-        description: 'Export complet de la configuration — peut être réimporté via /admin/apply-update',
+        description: 'Export COMPLET de la configuration — peut être réimporté via /admin/apply-update',
       },
-      settings: {
-        tg_msg_format:       parseInt(tgFormat) || 1,
-        max_rattrapage:      parseInt(maxRattrDB) || 2,
-        render_external_url: renderUrl || null,
-      },
+
+      // ── Stratégies ───────────────────────────────────────────────────
       strategies,
       channels,
-      ui: {
-        custom_css:  customCss  || '',
-        ui_styles:   uiStyles   ? JSON.parse(uiStyles)  : {},
+      telegram_channels: tgChannels,
+
+      // ── Paramètres ───────────────────────────────────────────────────
+      settings: {
+        tg_msg_format:       parseInt(tgFormat)  || 1,
+        max_rattrapage:      parseInt(maxRattrDB) || 2,
+        render_external_url: renderUrl  || null,
+        render_db_url:       renderDbUrl || null,
+        bot_token:           botToken   || null,
       },
-      sequences: sequences ? JSON.parse(sequences) : [],
-      default_tg: defaultTg ? JSON.parse(defaultTg) : {},
+
+      // ── Telegram ─────────────────────────────────────────────────────
+      default_tg:       safeParse(defaultTg,        {}),
+      announcements:    safeParse(announcements,     []),
+      telegram_chat:    safeParse(tgChatConfig,      {}),
+
+      // ── Séquences ────────────────────────────────────────────────────
+      sequences:        safeParse(sequences,         []),
+
+      // ── UI ───────────────────────────────────────────────────────────
+      ui: {
+        custom_css:      customCss || '',
+        ui_styles:       safeParse(uiStyles,        {}),
+        tutorial_videos: safeParse(tutorialVideos,  { video1: null, video2: null }),
+      },
+
+      // ── Messages utilisateurs ─────────────────────────────────────────
+      user_messages:    safeParse(userMessages,      []),
+      broadcast_message: safeParse(broadcastMessage, null),
+
+      // ── Espace Programmation ─────────────────────────────────────────
+      prog_ai_keys: safeParse(progAiKeys, []),
+      prog_bots:    safeParse(progBots,   []),
+
+      // ── État moteur & bilan ───────────────────────────────────────────
+      bilan_last:       safeParse(bilanLast,       null),
+      engine_absences:  safeParse(engineAbsences,  null),
     };
 
     res.setHeader('Content-Type', 'application/json');
@@ -1418,7 +1692,10 @@ router.post('/telegram-chat/config', requireAdmin, async (req, res) => {
       if (!testData.ok) return res.status(400).json({ error: 'Token invalide : ' + (testData.description || 'erreur') });
       cfg.bot_username = testData.result?.username || '';
     }
-    await db.setSetting('telegram_chat_config', JSON.stringify(cfg));
+    const cfgStr = JSON.stringify(cfg);
+    await db.setSetting('telegram_chat_config', cfgStr);
+    // Sync vers la base Render
+    try { require('./render-sync').syncSetting('telegram_chat_config', cfgStr).catch(() => {}); } catch {}
     _tgChat.messages = [];
     _tgChat.offset   = 0;
     res.json({ ok: true, bot_username: cfg.bot_username });
@@ -1428,6 +1705,8 @@ router.post('/telegram-chat/config', requireAdmin, async (req, res) => {
 router.delete('/telegram-chat/config', requireAdmin, async (req, res) => {
   try {
     await db.setSetting('telegram_chat_config', '');
+    // Sync suppression vers la base Render
+    try { require('./render-sync').syncSetting('telegram_chat_config', '').catch(() => {}); } catch {}
     _tgChat.messages = [];
     _tgChat.offset   = 0;
     res.json({ ok: true });
@@ -1554,6 +1833,112 @@ router.post('/strategies/:id/aleatoire-predict', requireAdmin, async (req, res) 
       hand,
       current_game: currentGameNumber,
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MISE À JOUR PAR BASE DE DONNÉES ─────────────────────────────────
+
+const EXCLUDED_DIRS  = ['node_modules', '.git', '.local', '.cache', '.npm', '.upm'];
+const EXCLUDED_FILES = ['.env', 'package-lock.json'];
+const INCLUDED_EXTS  = ['.js', '.jsx', '.ts', '.tsx', '.json', '.css', '.html', '.md', '.txt', '.sh', '.cjs', '.mjs'];
+const MAX_FILE_SIZE  = 2 * 1024 * 1024; // 2 Mo max par fichier
+
+function scanProjectFiles(dir, base) {
+  const results = [];
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return results; }
+  for (const entry of entries) {
+    if (EXCLUDED_DIRS.includes(entry)) continue;
+    const fullPath = path.join(dir, entry);
+    const relPath  = base ? `${base}/${entry}` : entry;
+    let stat;
+    try { stat = fs.statSync(fullPath); } catch { continue; }
+    if (stat.isDirectory()) {
+      results.push(...scanProjectFiles(fullPath, relPath));
+    } else if (stat.isFile()) {
+      if (EXCLUDED_FILES.includes(entry)) continue;
+      const ext = path.extname(entry).toLowerCase();
+      if (!INCLUDED_EXTS.includes(ext)) continue;
+      if (stat.size > MAX_FILE_SIZE) continue;
+      results.push({ fullPath, relPath, size: stat.size });
+    }
+  }
+  return results;
+}
+
+router.post('/project-backup', requireAdmin, async (req, res) => {
+  try {
+    const root  = path.join(__dirname);
+    const files = scanProjectFiles(root, '');
+    let saved = 0, errors = 0;
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(f.fullPath, 'utf8');
+        await db.upsertProjectFile(f.relPath, content, false);
+        saved++;
+      } catch { errors++; }
+    }
+    res.json({ ok: true, saved, errors, total: files.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/project-backup/list', requireAdmin, async (req, res) => {
+  try {
+    const files = await db.getAllProjectFiles();
+    const summary = files.map(f => ({
+      file_path: f.file_path,
+      size_bytes: f.size_bytes,
+      updated_at: f.updated_at,
+    }));
+    res.json({ files: summary, total: summary.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/project-backup', requireAdmin, async (req, res) => {
+  try {
+    const count = await db.clearProjectFiles();
+    res.json({ ok: true, deleted: count });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/project-install', requireAdmin, async (req, res) => {
+  try {
+    const files = await db.getAllProjectFiles();
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'Aucun fichier sauvegardé dans la base de données.' });
+    }
+    const root = path.join(__dirname);
+    let written = 0, errors = 0;
+    const log = [];
+    for (const f of files) {
+      try {
+        const dest = path.join(root, f.file_path);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, f.content, 'utf8');
+        written++;
+        log.push(`✅ ${f.file_path}`);
+      } catch (e) {
+        errors++;
+        log.push(`❌ ${f.file_path}: ${e.message}`);
+      }
+    }
+
+    res.json({ ok: true, written, errors, log });
+
+    // Relancer npm install si package.json a été restauré, puis redémarrer
+    setTimeout(async () => {
+      try {
+        const pkgChanged = files.some(f => f.file_path === 'package.json');
+        if (pkgChanged) {
+          await new Promise((resolve) => {
+            const proc = spawn('npm', ['install', '--prefer-offline'], { cwd: root, stdio: 'ignore' });
+            proc.on('close', resolve);
+          });
+        }
+      } catch {}
+      // Redémarrer le processus (le gestionnaire de processus Replit/Render le relance automatiquement)
+      process.exit(0);
+    }, 800);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

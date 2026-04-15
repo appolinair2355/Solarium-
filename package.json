@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "build": "echo 'dist pre-built'",
+    "build": "vite build",
     "dev": "./node_modules/.bin/vite",
     "test": "echo \"No tests\" && exit 0"
   },

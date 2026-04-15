@@ -264,13 +264,20 @@ async function addChannel(tgId, name) {
   const row = await db.upsertTelegramConfig({ channel_id: String(tgId), channel_name: name });
   channelStore.set(String(tgId), { dbId: row.id, name, messages: [] });
   await startBot();
+  // Sync vers la base Render
+  try { require('./render-sync').syncTelegramChannel(row).catch(() => {}); } catch {}
   return row;
 }
 
 async function removeChannel(dbId) {
   const entry = [...channelStore.entries()].find(([, ch]) => ch.dbId === dbId);
+  const channelId = entry ? entry[0] : null;
   if (entry) channelStore.delete(entry[0]);
   await db.deleteTelegramConfig(dbId);
+  // Sync suppression vers la base Render
+  if (channelId) {
+    try { require('./render-sync').syncDeleteTelegramChannel(channelId).catch(() => {}); } catch {}
+  }
   if (channelStore.size === 0 && bot) { try { await bot.stopPolling(); } catch {} bot = null; }
   else if (channelStore.size > 0) await startBot();
 }
@@ -609,7 +616,7 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
-        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token).catch(() => {});
+        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token, channelFormatId).catch(() => {});
         console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} fmt=${channelFormatId} (msg_id=${msgId})`);
       }
     } catch (e) {
@@ -637,17 +644,18 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     return;
   }
 
-  const formatId = tgOpts.formatId || currentFormat;
+  const defaultFormatId = tgOpts.formatId || currentFormat;
   const hand     = tgOpts.hand     || null;
   const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
-
-  const { text, parse_mode } = buildTgMessage(formatId, {
-    gameNumber, suit, strategy, maxR, status, rattrapage, hand,
-  });
 
   for (const row of stored) {
     const token  = row.bot_token || TOKEN;
     if (!token) { console.warn(`[TG Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
+    const formatId = (row.tg_format !== undefined && row.tg_format !== null)
+      ? parseInt(row.tg_format) : defaultFormatId;
+    const { text, parse_mode } = buildTgMessage(formatId, {
+      gameNumber, suit, strategy, maxR, status, rattrapage, hand,
+    });
 
     try {
       const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text };

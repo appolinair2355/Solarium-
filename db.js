@@ -100,15 +100,25 @@ async function initDB() {
         channel_tg_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
         bot_token TEXT,
+        tg_format INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         PRIMARY KEY (strategy, game_number, predicted_suit, channel_tg_id)
       );
       ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS bot_token TEXT;
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_format INTEGER;
 
       CREATE TABLE IF NOT EXISTS strategy_channel_routes (
         strategy TEXT NOT NULL,
         channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
         PRIMARY KEY (strategy, channel_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS project_files (
+        file_path  TEXT PRIMARY KEY,
+        content    TEXT NOT NULL,
+        is_binary  BOOLEAN DEFAULT FALSE,
+        size_bytes INTEGER DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
     // Compte admin
@@ -486,20 +496,20 @@ async function setStrategyRoutes(strategy, channelDbIds) {
 
 const _tgMsgStore = new Map(); // fallback JSON
 
-async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken) {
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat) {
   if (USE_PG) {
     await pgPool.query(
-      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
-       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token`,
-      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null]
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null]
     );
     return;
   }
   const key = `${strategy}:${gameNumber}:${suit}`;
   const list = _tgMsgStore.get(key) || [];
   const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
-  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null };
+  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null };
   if (idx !== -1) list[idx] = entry;
   else list.push(entry);
   _tgMsgStore.set(key, list);
@@ -508,7 +518,7 @@ async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, b
 async function getTgMsgIds(strategy, gameNumber, suit) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `SELECT channel_tg_id, message_id, bot_token FROM tg_pred_messages
+      `SELECT channel_tg_id, message_id, bot_token, tg_format FROM tg_pred_messages
        WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
       [strategy, gameNumber, suit]
     );
@@ -661,6 +671,43 @@ async function getLastBilanSnapshot() {
   } catch { return null; }
 }
 
+// ── PROJECT FILES ───────────────────────────────────────────────────
+
+async function upsertProjectFile(filePath, content, isBinary = false) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO project_files (file_path, content, is_binary, size_bytes, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (file_path) DO UPDATE SET content = EXCLUDED.content, is_binary = EXCLUDED.is_binary, size_bytes = EXCLUDED.size_bytes, updated_at = NOW()`,
+      [filePath, content, isBinary, Buffer.byteLength(content, 'utf8')]
+    );
+    return;
+  }
+}
+
+async function getAllProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, content, is_binary, size_bytes, updated_at FROM project_files ORDER BY file_path');
+    return r.rows;
+  }
+  return [];
+}
+
+async function deleteProjectFile(filePath) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM project_files WHERE file_path = $1', [filePath]);
+    return;
+  }
+}
+
+async function clearProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('DELETE FROM project_files');
+    return r.rowCount;
+  }
+  return 0;
+}
+
 module.exports = {
   pool, USE_PG, initDB,
   getUser, getUserByLogin, getUserByUsername, getAllUsers,
@@ -678,4 +725,5 @@ module.exports = {
   deleteStrategyPredictions, deleteAllPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
+  upsertProjectFile, getAllProjectFiles, deleteProjectFile, clearProjectFiles,
 };

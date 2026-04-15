@@ -6,13 +6,14 @@ const path     = require('path');
 const fs       = require('fs');
 const compression = require('compression');
 
-const { initDB, USE_PG, pool } = require('./db');
+const { initDB, USE_PG, pool, upsertProjectFile } = require('./db');
 const authRoutes        = require('./auth');
 const adminRoutes       = require('./admin');
 const predictionsRoutes = require('./predictions');
 const { router: gamesRouter } = require('./games');
 const telegramRoutes    = require('./telegram-route');
 const telegramService   = require('./telegram-service');
+const progRoutes        = require('./prog');
 const engine            = require('./engine');
 const bilan             = require('./bilan');
 
@@ -65,6 +66,7 @@ app.use('/api/admin',       adminRoutes);
 app.use('/api/predictions', predictionsRoutes);
 app.use('/api/games',       gamesRouter);
 app.use('/api/telegram',    telegramRoutes);
+app.use('/api/prog',        progRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 
 // ── Bilan quotidien ────────────────────────────────────────────────
@@ -236,9 +238,91 @@ async function runAnnouncementsScheduler() {
   }
 }
 
+// ── Sauvegarde automatique complète du projet en DB ───────────────
+const EXCLUDED_DIRS_AUTO  = ['node_modules', '.git', '.local', '.cache', '.npm', '.upm'];
+const EXCLUDED_FILES_AUTO = ['.env', 'package-lock.json'];
+const INCLUDED_EXTS_AUTO  = ['.js', '.jsx', '.ts', '.tsx', '.json', '.css', '.html', '.md', '.txt', '.sh', '.cjs', '.mjs'];
+const MAX_FILE_SIZE_AUTO  = 2 * 1024 * 1024; // 2 Mo max
+
+function scanAllFiles(dir, base) {
+  const results = [];
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return results; }
+  for (const entry of entries) {
+    if (EXCLUDED_DIRS_AUTO.includes(entry)) continue;
+    const fullPath = path.join(dir, entry);
+    const relPath  = base ? `${base}/${entry}` : entry;
+    let stat;
+    try { stat = fs.statSync(fullPath); } catch { continue; }
+    if (stat.isDirectory()) {
+      results.push(...scanAllFiles(fullPath, relPath));
+    } else if (stat.isFile()) {
+      if (EXCLUDED_FILES_AUTO.includes(entry)) continue;
+      const ext = path.extname(entry).toLowerCase();
+      if (!INCLUDED_EXTS_AUTO.includes(ext)) continue;
+      if (stat.size > MAX_FILE_SIZE_AUTO) continue;
+      results.push({ fullPath, relPath, size: stat.size });
+    }
+  }
+  return results;
+}
+
+// Détecte l'environnement : Replit = sauvegarde → DB | Render = restaure ← DB
+const IS_REPLIT = !!(process.env.REPL_ID || process.env.REPLIT_ENV || process.env.REPL_SLUG);
+const IS_RENDER = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+
+async function autoSaveDeployFiles() {
+  if (!USE_PG) return;
+
+  // ── Sur Render avec AUTO_INSTALL_FROM_DB=true → restaurer les fichiers depuis la DB ──
+  if (IS_RENDER && process.env.AUTO_INSTALL_FROM_DB === 'true') {
+    console.log('[Deploy] 📥 Render détecté + AUTO_INSTALL_FROM_DB=true → restauration depuis la DB…');
+    const { getAllProjectFiles } = require('./db');
+    const dbFiles = await getAllProjectFiles().catch(() => []);
+    if (dbFiles && dbFiles.length > 0) {
+      let written = 0, errors = 0;
+      for (const f of dbFiles) {
+        try {
+          const dest = path.join(__dirname, f.file_path);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, f.content, 'utf8');
+          written++;
+        } catch (e) { errors++; }
+      }
+      console.log(`[Deploy] ✅ ${written} fichier(s) restauré(s) depuis la DB${errors > 0 ? ` (${errors} erreur(s))` : ''}`);
+      // Redémarrer après restauration pour charger les nouveaux fichiers
+      setTimeout(() => { console.log('[Deploy] 🔄 Redémarrage pour appliquer les fichiers restaurés…'); process.exit(0); }, 1000);
+    } else {
+      console.log('[Deploy] ℹ️  Aucun fichier en base — démarrage normal');
+    }
+    return;
+  }
+
+  // ── Sur Replit (ou en dev) → sauvegarder les fichiers du disque vers la DB ──
+  if (!IS_REPLIT && !process.env.FORCE_SAVE_TO_DB) {
+    console.log('[Deploy] ℹ️  Sauvegarde DB ignorée (ni Replit ni FORCE_SAVE_TO_DB)');
+    return;
+  }
+
+  const files = scanAllFiles(__dirname, '');
+  let saved = 0, errors = 0;
+  for (const f of files) {
+    try {
+      const content = fs.readFileSync(f.fullPath, 'utf8');
+      await upsertProjectFile(f.relPath, content, false);
+      saved++;
+    } catch (e) {
+      errors++;
+      console.error(`[Deploy] Erreur sauvegarde ${f.relPath}:`, e.message);
+    }
+  }
+  console.log(`[Deploy] ✅ ${saved} fichier(s) sauvegardé(s) en base${errors > 0 ? ` (${errors} erreur(s))` : ''}`);
+}
+
 // ── Démarrage ─────────────────────────────────────────────────────
 async function main() {
   await initDB();
+  await autoSaveDeployFiles();
   engine.start(2000);
   await telegramService.loadConfig();
   bilan.scheduleMidnight();

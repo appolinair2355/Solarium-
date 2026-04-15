@@ -109,6 +109,13 @@ async function initRenderDb() {
         value     TEXT NOT NULL,
         synced_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS telegram_channels_export (
+        channel_id   TEXT PRIMARY KEY,
+        channel_name TEXT,
+        enabled      BOOLEAN DEFAULT TRUE,
+        synced_at    TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
     console.log('[RenderSync] Tables initialisées');
   } catch (e) {
@@ -164,6 +171,15 @@ async function _pullFromExternal() {
     }
     if (settingsRes.rows.length) console.log(`[RenderSync] ← ${settingsRes.rows.length} setting(s) importé(s)`);
 
+    // 4. Importer les canaux Telegram
+    try {
+      const tgRes = await renderPool.query('SELECT * FROM telegram_channels_export');
+      for (const ch of tgRes.rows) {
+        try { await db.upsertTelegramConfig({ channel_id: ch.channel_id, channel_name: ch.channel_name || ch.channel_id }); } catch {}
+      }
+      if (tgRes.rows.length) console.log(`[RenderSync] ← ${tgRes.rows.length} canal(aux) Telegram importé(s)`);
+    } catch {}
+
   } catch (e) {
     console.error('[RenderSync] Erreur extraction externe:', e.message);
   }
@@ -176,6 +192,7 @@ async function _pushAllToExternal() {
   await syncAllUsers();
   await syncStrategies();
   await syncAllSettings();
+  await syncTelegramChannels();
   await _pushVerifiedPredictions();
 }
 
@@ -254,12 +271,13 @@ async function syncStrategies() {
   }
 }
 
-// ── Sync settings clés (messages, bilan, etc.) ───────────────────────
+// ── Sync settings clés (messages, bilan, telegram, etc.) ─────────────
 
 const SYNC_SETTINGS_KEYS = [
   'bilan_last', 'broadcast_message', 'tg_announcements',
   'user_messages', 'tg_msg_format', 'max_rattrapage',
   'loss_sequences', 'default_strategies_tg', 'ui_styles', 'custom_css',
+  'bot_token', 'telegram_chat_config',
 ];
 
 async function syncAllSettings() {
@@ -289,6 +307,54 @@ async function _upsertSetting(key, value) {
     `, [key, value]);
   } catch (e) {
     console.error(`[RenderSync] Erreur upsert setting ${key}:`, e.message);
+  }
+}
+
+// ── Sync canaux Telegram (table telegram_config) ─────────────────────
+
+async function syncTelegramChannels() {
+  if (!renderPool) return;
+  try {
+    const channels = await db.getTelegramConfigs(false);
+    if (!channels || !channels.length) return;
+    for (const ch of channels) {
+      await _upsertTelegramChannel(ch);
+    }
+    console.log(`[RenderSync] → ${channels.length} canal(aux) Telegram synchronisé(s)`);
+  } catch (e) {
+    console.error('[RenderSync] Erreur sync canaux Telegram:', e.message);
+  }
+}
+
+async function syncTelegramChannel(ch) {
+  if (!renderPool || !ch) return;
+  await _upsertTelegramChannel(ch);
+}
+
+async function syncDeleteTelegramChannel(channelId) {
+  if (!renderPool || !channelId) return;
+  try {
+    await renderPool.query(
+      `DELETE FROM telegram_channels_export WHERE channel_id = $1`,
+      [String(channelId)]
+    );
+  } catch (e) {
+    console.error('[RenderSync] Erreur suppression canal Telegram:', e.message);
+  }
+}
+
+async function _upsertTelegramChannel(ch) {
+  try {
+    await renderPool.query(`
+      INSERT INTO telegram_channels_export (channel_id, channel_name, enabled, synced_at)
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (channel_id) DO UPDATE SET
+        channel_name = EXCLUDED.channel_name,
+        enabled      = EXCLUDED.enabled,
+        synced_at    = NOW()
+    `, [String(ch.channel_id), ch.channel_name || ch.channel_id, ch.enabled !== false]);
+  } catch (e) {
+    console.error('[RenderSync] Erreur upsert canal Telegram:', e.message);
   }
 }
 
@@ -387,6 +453,9 @@ module.exports = {
   syncStrategies,
   syncSetting,
   syncAllSettings,
+  syncTelegramChannels,
+  syncTelegramChannel,
+  syncDeleteTelegramChannel,
   handleGameOne,
   testConnection,
   getRenderStats,
