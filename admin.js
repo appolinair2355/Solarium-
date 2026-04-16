@@ -235,10 +235,15 @@ function validateStrategyBody(body) {
 function parseTgTargets(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map(t => ({
-      bot_token:  String(t.bot_token  || '').trim(),
-      channel_id: String(t.channel_id || '').trim(),
-    }))
+    .map(t => {
+      const obj = {
+        bot_token:  String(t.bot_token  || '').trim(),
+        channel_id: String(t.channel_id || '').trim(),
+      };
+      if (t.tg_format !== undefined && t.tg_format !== null && t.tg_format !== '')
+        obj.tg_format = Math.max(1, Math.min(11, parseInt(t.tg_format) || 1));
+      return obj;
+    })
     .filter(t => t.bot_token && t.channel_id);
 }
 
