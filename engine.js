@@ -741,6 +741,160 @@ class Engine {
           break;
         }
 
+        // ── 8. Intervalle de minutes précis dans l'heure ──────────────
+        // ex: from=0,to=10 bloque H:00–H:10 / from=10,to=20 bloque H:10–H:20
+        case 'minute_interval_block': {
+          const nowMin = new Date().getMinutes();
+          const from   = Math.max(0,  parseInt(ex.from) || 0);
+          const to     = Math.min(59, parseInt(ex.to)   || 10);
+          if (nowMin >= from && nowMin <= to) {
+            console.log(`[Exception] minute_interval_block(${from}–${to}): ${nowMin}min → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 9. Historique insuffisant ──────────────────────────────────
+        case 'min_history': {
+          const n = Math.max(1, parseInt(ex.value) || 5);
+          if (state.history.length < n) {
+            console.log(`[Exception] min_history(${n}): seulement ${state.history.length} parties → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 10. Série de victoires consécutives ───────────────────────
+        case 'consec_wins': {
+          const n = Math.max(1, parseInt(ex.value) || 3);
+          if (state.lastOutcomes.length < n) break;
+          const recent = state.lastOutcomes.slice(-n);
+          if (recent.every(o => o.won)) {
+            console.log(`[Exception] consec_wins(${n}): ${n} victoires consécutives → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 11. Carte prédite absente depuis trop longtemps ───────────
+        case 'suit_absent_long': {
+          const n = Math.max(1, parseInt(ex.value) || 5);
+          if (state.history.length < n) break;
+          const recent = state.history.slice(-n);
+          const allAbsent = recent.every(g => !g.includes(predictedSuit));
+          if (allAbsent) {
+            console.log(`[Exception] suit_absent_long(${n}): ${predictedSuit} absent ${n} dernières parties → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 12. Taux de victoire récent déjà très élevé ───────────────
+        case 'high_win_rate': {
+          const n = Math.max(1, parseInt(ex.value)  || 4);
+          const w = Math.max(2, parseInt(ex.window) || 5);
+          if (state.lastOutcomes.length < 2) break;
+          const recent = state.lastOutcomes.slice(-Math.min(w, state.lastOutcomes.length));
+          const wins   = recent.filter(o => o.won).length;
+          if (wins >= n) {
+            console.log(`[Exception] high_win_rate(${n}/${w}): ${wins} victoires → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 13. Trop de prédictions en attente simultanées ────────────
+        case 'pending_overload': {
+          const n = Math.max(1, parseInt(ex.value) || 2);
+          const pendingCount = Object.keys(state.pending).length;
+          if (pendingCount >= n) {
+            console.log(`[Exception] pending_overload(${n}): ${pendingCount} en attente → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 14. Parité du numéro de jeu ───────────────────────────────
+        case 'game_parity': {
+          const parity = ex.parity || 'even';
+          const gNum   = state.history.length;
+          const isEven = (gNum % 2 === 0);
+          if ((parity === 'even' && isEven) || (parity === 'odd' && !isEven)) {
+            console.log(`[Exception] game_parity(${parity}): jeu #${gNum} → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 15. Même costume dominant N parties consécutives ──────────
+        case 'dominant_streak': {
+          const n = Math.max(2, parseInt(ex.value) || 3);
+          if (state.history.length < n) break;
+          const recent = state.history.slice(-n);
+          const allSame = recent.every(g => g.includes(predictedSuit));
+          if (allSame) {
+            console.log(`[Exception] dominant_streak(${n}): ${predictedSuit} présent dans les ${n} dernières → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 16. Démarrage à froid — bloque les N premières parties ────
+        case 'cold_start': {
+          const n = Math.max(1, parseInt(ex.value) || 10);
+          if (state.history.length < n) {
+            console.log(`[Exception] cold_start(${n}): seulement ${state.history.length} parties jouées → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 17. Tranche horaire de la journée ─────────────────────────
+        // Bloque entre from_hour (inclus) et to_hour (exclu)
+        case 'bad_hour': {
+          const nowH     = new Date().getHours();
+          const fromH    = Math.max(0,  parseInt(ex.from_hour) || 0);
+          const toH      = Math.min(23, parseInt(ex.to_hour)   || 6);
+          const blocked  = fromH <= toH
+            ? (nowH >= fromH && nowH < toH)
+            : (nowH >= fromH || nowH < toH); // chevauchement minuit
+          if (blocked) {
+            console.log(`[Exception] bad_hour(${fromH}h–${toH}h): il est ${nowH}h → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 18. Dernier jeu contenait la prédite ET le déclencheur ───
+        case 'double_suit_last': {
+          if (state.history.length < 1) break;
+          const last = state.history[state.history.length - 1];
+          if (last.includes(predictedSuit) && last.includes(triggerSuit)) {
+            console.log(`[Exception] double_suit_last: dernier jeu avait ${predictedSuit} + ${triggerSuit} → bloqué`);
+            return true;
+          }
+          break;
+        }
+
+        // ── 19. Pause après série de défaites ────────────────────────
+        // Bloque pendant `pause` jeux après K défaites consécutives
+        case 'loss_streak_pause': {
+          const k     = Math.max(1, parseInt(ex.value)  || 3);
+          const pause = Math.max(1, parseInt(ex.window) || 2);
+          if (state.lastOutcomes.length < k) break;
+          const tail  = state.lastOutcomes.slice(-k);
+          if (tail.every(o => !o.won)) {
+            const totalGames = state.history.length;
+            const lastLossIdx = state.lastOutcomes.length - 1;
+            const gamesSinceLoss = totalGames - (lastLossIdx + 1);
+            if (gamesSinceLoss < pause) {
+              console.log(`[Exception] loss_streak_pause(${k} défaites, pause ${pause}): ${gamesSinceLoss} jeu(x) depuis dernière perte → bloqué`);
+              return true;
+            }
+          }
+          break;
+        }
+
         default: break;
       }
     }
@@ -920,9 +1074,11 @@ class Engine {
         state.mirrorLastHour = currentHour;
       }
 
-      // 1. Mise à jour des compteurs cumulatifs (+1 par jeu si le costume apparaît, pas par carte)
+      // 1. Mise à jour des compteurs cumulatifs (+N par jeu selon le nb de cartes du costume)
+      // Ex: main ♠♠♥ → ♠ reçoit +2, ♥ reçoit +1
+      const rawCards = cfg.hand === 'banquier' ? (bCards || []) : (pCards || []);
       for (const suit of ALL_SUITS) {
-        const n = handSuits.includes(suit) ? 1 : 0;
+        const n = rawCards.filter(c => normalizeSuit(c.S || '') === suit).length;
         state.mirrorCounts[suit] = (state.mirrorCounts[suit] || 0) + n;
       }
 
@@ -974,12 +1130,11 @@ class Engine {
 
       // 4. Déclenchement si une paire dépasse le seuil
       // Prédit directement le costume retardataire (le plus faible) — aucun mapping
+      // Le compteur continue de s'accumuler après la prédiction — reset UNIQUEMENT à l'heure pile
       if (laggingSuit) {
         const ps = laggingSuit;
         console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ seuil → prédit le retardataire ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
-        // 5. Remise à zéro des compteurs miroir → nouveau cycle
-        for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;
       }
     }
   }
@@ -1136,12 +1291,35 @@ class Engine {
     }
   }
 
+  // ── Reset horaire des compteurs taux_miroir ──────────────────────────────
+  // Appelé à chaque tick (indépendant des jeux terminés) pour garantir
+  // la remise à zéro dès le passage à la nouvelle heure, même entre deux jeux.
+  _checkHourlyMirrorReset() {
+    const currentHour = new Date().getHours();
+    for (const [id, entry] of Object.entries(this.custom)) {
+      if (entry.config?.mode !== 'taux_miroir') continue;
+      if (!entry.mirrorCounts) entry.mirrorCounts = {};
+      if (entry.mirrorLastHour === null || entry.mirrorLastHour === undefined) {
+        entry.mirrorLastHour = currentHour;
+        continue;
+      }
+      if (entry.mirrorLastHour !== currentHour) {
+        console.log(`[S${id}] MiroirTaux ⏰ Heure ${entry.mirrorLastHour}h→${currentHour}h — compteurs remis à zéro (tick)`);
+        for (const suit of ALL_SUITS) entry.mirrorCounts[suit] = 0;
+        entry.mirrorLastHour = currentHour;
+      }
+    }
+  }
+
   async tick() {
     try {
       const games    = await fetchGames();
       const finished = games.filter(g => g.is_finished);
       // Initialiser les nouvelles stratégies AVANT tout traitement
       this._initializeNewStrategies(games);
+
+      // Reset horaire des compteurs taux_miroir (indépendant des jeux terminés)
+      this._checkHourlyMirrorReset();
 
       // Recharger la config Telegram des stratégies par défaut (reflet des changements admin)
       try {

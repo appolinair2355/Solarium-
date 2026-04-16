@@ -159,6 +159,10 @@ const VALID_EXCEPTION_TYPES = [
   'consec_appearances', 'recent_frequency', 'already_pending',
   'max_consec_losses', 'trigger_overload', 'last_game_appeared',
   'time_window_block',
+  'minute_interval_block', 'min_history', 'consec_wins',
+  'suit_absent_long', 'high_win_rate', 'pending_overload',
+  'game_parity', 'dominant_streak', 'cold_start',
+  'bad_hour', 'double_suit_last', 'loss_streak_pause',
 ];
 
 function parseExceptions(raw) {
@@ -171,6 +175,27 @@ function parseExceptions(raw) {
       if (e.window !== undefined) out.window = Math.max(2, parseInt(e.window) || 2);
       if (e.type === 'time_window_block') {
         out.half = ['first', 'second'].includes(e.half) ? e.half : 'second';
+        delete out.value;
+        delete out.window;
+      }
+      if (e.type === 'minute_interval_block') {
+        out.from = Math.max(0,  Math.min(58, parseInt(e.from) || 0));
+        out.to   = Math.max(1,  Math.min(59, parseInt(e.to)   || 10));
+        delete out.value;
+        delete out.window;
+      }
+      if (e.type === 'game_parity') {
+        out.parity = ['even', 'odd'].includes(e.parity) ? e.parity : 'even';
+        delete out.value;
+        delete out.window;
+      }
+      if (e.type === 'bad_hour') {
+        out.from_hour = Math.max(0,  Math.min(23, parseInt(e.from_hour) || 0));
+        out.to_hour   = Math.max(0,  Math.min(23, parseInt(e.to_hour)   || 6));
+        delete out.value;
+        delete out.window;
+      }
+      if (['already_pending', 'last_game_appeared', 'double_suit_last'].includes(e.type)) {
         delete out.value;
         delete out.window;
       }
