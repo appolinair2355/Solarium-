@@ -1073,37 +1073,9 @@ class Engine {
       // Ce jeu live a déjà déclenché pour cette stratégie → skip
       if (entry.liveTriggeredGame === gn) continue;
 
-      // ── Trigger live spécial pour le mode Distribution ──────────────────
-      if (mode === 'distribution') {
-        const lc = this.liveGameCards;
-        const isLiveNatural = lc.playerDone && lc.bankerDone
-          && Array.isArray(lc.playerCards) && Array.isArray(lc.bankerCards)
-          && lc.playerCards.length === 2 && lc.bankerCards.length === 2;
-        if (!isLiveNatural) continue;
-        if ((entry.counts['distrib'] || 0) < B) continue;
-
-        const channelId = `S${idStr}`;
-        const offset    = Math.max(1, parseInt(prediction_offset) || 1);
-        const next      = gn + offset;
-        entry.liveTriggeredGame = gn;
-        console.log(`[${channelId}] ⚡ Live: Distribution après ${entry.counts['distrib']} absences (seuil≥${B}) → prédiction #${next}`);
-        try {
-          await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: 'distrib', triggered_by: 'distrib' });
-          const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
-            ? parseInt(config.max_rattrapage) : getCurrentMaxRattrapage();
-          entry.pending[next] = { suit: 'distrib', rattrapage: 0, maxR: liveMaxR };
-          entry.counts['distrib'] = 0; // reset après déclenchement live
-          const liveTgOpts = { formatId: config.tg_format || null, hand: config.hand || 'joueur', maxR: liveMaxR };
-          if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-            await sendCustomAndStore(tg_targets, channelId, next, 'distrib', liveTgOpts).catch(() => {});
-          } else {
-            await sendToStrategyChannels(channelId, next, 'distrib', liveTgOpts).catch(() => {});
-          }
-        } catch (e) {
-          console.error(`[${channelId}] Distribution live trigger error:`, e.message);
-        }
-        continue;
-      }
+      // Distribution : pas de déclenchement live — on attend la fin officielle du jeu
+      // (seul le traitement batch sur jeux terminés est fiable : 2P + 2B confirmés)
+      if (mode === 'distribution') continue;
 
       const handDone  = hand === 'banquier' ? this.liveGameCards.bankerDone  : this.liveGameCards.playerDone;
       const handSuits = hand === 'banquier' ? this.liveGameCards.bankerSuits : this.liveGameCards.playerSuits;
