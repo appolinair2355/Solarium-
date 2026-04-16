@@ -502,6 +502,11 @@ function AdminPanel() {
   const [relanceStatus, setRelanceStatus]   = useState({});
   const [maxRSaving, setMaxRSaving] = useState(false);
 
+  // Bot admin Telegram ID (commandes bot distantes)
+  const [botAdminTgId, setBotAdminTgId]     = useState('');
+  const [botAdminTgSaving, setBotAdminTgSaving] = useState(false);
+  const [botAdminTgMsg, setBotAdminTgMsg]   = useState('');
+
   // Telegram channels
   const [tgChannels, setTgChannels] = useState([]);
   const [tgInput, setTgInput] = useState('');
@@ -635,6 +640,11 @@ function AdminPanel() {
   const [updatePreview, setUpdatePreview]     = useState(null);
   const [updateApplying, setUpdateApplying]   = useState(false);
   const [updateResult, setUpdateResult]       = useState(null);
+  // Fichiers de mise à jour stockés sur le serveur
+  const [serverUpdateFiles, setServerUpdateFiles]   = useState([]);
+  const [serverFilesLoading, setServerFilesLoading] = useState(false);
+  const [serverApplyingFile, setServerApplyingFile] = useState(null);
+  const [serverUpdateResult, setServerUpdateResult] = useState(null);
   const [uiStyles, setUiStyles]               = useState({});
   const [buildStatus, setBuildStatus]         = useState(null);   // { status, log, error, finishedAt }
   const [modifiedFiles, setModifiedFiles]     = useState([]);
@@ -1029,6 +1039,52 @@ function AdminPanel() {
     setUpdateApplying(false);
   };
 
+  const loadServerUpdateFiles = async () => {
+    setServerFilesLoading(true);
+    try {
+      const r = await fetch('/api/admin/server-update-files', { credentials: 'include' });
+      if (r.ok) setServerUpdateFiles((await r.json()).files || []);
+    } catch {}
+    setServerFilesLoading(false);
+  };
+
+  const applyServerFile = async (filename) => {
+    if (!window.confirm(`Appliquer "${filename}" au système ?`)) return;
+    setServerApplyingFile(filename);
+    setServerUpdateResult(null);
+    try {
+      const r = await fetch('/api/admin/apply-server-update', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      });
+      const d = await r.json();
+      setServerUpdateResult(d);
+      if (d.ok) {
+        await Promise.all([loadStrategies(), loadUiStyles(), loadCustomCss(), loadModifiedFiles()]);
+        if (d.results?.some(r2 => r2.type === 'styles' && r2.applied > 0)) {
+          const sr = await fetch('/api/settings/ui-styles');
+          if (sr.ok) {
+            const styles = await sr.json();
+            for (const [k, v] of Object.entries(styles)) {
+              if (k.startsWith('--')) document.documentElement.style.setProperty(k, v);
+            }
+          }
+        }
+        if (d.results?.some(r2 => r2.type === 'css' && r2.applied > 0)) {
+          const cr = await fetch('/api/settings/custom-css');
+          if (cr.ok) { const css = await cr.text(); injectCustomCss(css); }
+        }
+        if (d.results?.some(r2 => r2.rebuilding)) {
+          const bs = await fetch('/api/admin/build-status', { credentials: 'include' });
+          if (bs.ok) setBuildStatus(await bs.json());
+          pollBuildStatus();
+        }
+      }
+    } catch { setServerUpdateResult({ ok: false, errors: ['Erreur réseau'] }); }
+    setServerApplyingFile(null);
+  };
+
   const loadAnnouncements = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/announcements', { credentials: 'include' });
@@ -1095,6 +1151,32 @@ function AdminPanel() {
       if (r.ok) { const d = await r.json(); setMsgFormat(d.format_id || 1); }
     } catch {}
   }, []);
+
+  const loadBotAdminTgId = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/bot-admin-tg-id', { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setBotAdminTgId(d.bot_admin_tg_id || ''); }
+    } catch {}
+  }, []);
+
+  const saveBotAdminTgId = async () => {
+    setBotAdminTgSaving(true);
+    try {
+      const r = await fetch('/api/admin/bot-admin-tg-id', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_admin_tg_id: botAdminTgId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setBotAdminTgMsg('✅ ID admin bot enregistré');
+      setTimeout(() => setBotAdminTgMsg(''), 3000);
+    } catch (e) {
+      setBotAdminTgMsg('❌ ' + e.message);
+      setTimeout(() => setBotAdminTgMsg(''), 3000);
+    }
+    setBotAdminTgSaving(false);
+  };
 
   const loadMaxR = useCallback(async () => {
     try {
@@ -1379,7 +1461,7 @@ function AdminPanel() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
 
   // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
   useEffect(() => {
@@ -2300,6 +2382,109 @@ function AdminPanel() {
 
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
         {adminTab === 'canaux' && <>
+
+        {/* ── ADMIN BOT TELEGRAM ID ── */}
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.45)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🤖</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Admin Telegram — Commandes à distance</h2>
+              <p className="tg-admin-sub">
+                Renseignez votre <strong style={{ color: '#a78bfa' }}>ID Telegram</strong> pour autoriser les commandes bot distantes&nbsp;:
+                {' '}<code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>/setformat N</code>,{' '}
+                <code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>/setformat S&lt;id&gt; N</code>,{' '}
+                <code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>/setmaxr N</code>,{' '}
+                <code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>/botcmd &#123;JSON&#125;</code>.
+                Trouvez votre ID via <strong>@userinfobot</strong> sur Telegram.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              value={botAdminTgId}
+              onChange={e => setBotAdminTgId(e.target.value.replace(/\D/g, ''))}
+              placeholder="Ex: 123456789"
+              style={{
+                flex: 1, minWidth: 180, padding: '9px 12px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(99,102,241,0.4)',
+                borderRadius: 8, color: '#e2e8f0', fontSize: 14,
+                fontFamily: 'monospace',
+              }}
+            />
+            <button
+              onClick={saveBotAdminTgId}
+              disabled={botAdminTgSaving}
+              style={{
+                padding: '9px 20px', borderRadius: 8, cursor: 'pointer',
+                fontWeight: 700, fontSize: 13,
+                background: 'rgba(99,102,241,0.25)',
+                border: '1px solid rgba(99,102,241,0.5)',
+                color: '#a5b4fc',
+                opacity: botAdminTgSaving ? 0.6 : 1,
+              }}
+            >
+              {botAdminTgSaving ? '⏳ Enregistrement…' : '💾 Enregistrer'}
+            </button>
+            {botAdminTgId && (
+              <button
+                onClick={async () => {
+                  setBotAdminTgId('');
+                  setBotAdminTgSaving(true);
+                  try {
+                    await fetch('/api/admin/bot-admin-tg-id', {
+                      method: 'POST', credentials: 'include',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ bot_admin_tg_id: '' }),
+                    });
+                    setBotAdminTgMsg('✅ ID admin bot effacé');
+                    setTimeout(() => setBotAdminTgMsg(''), 3000);
+                  } catch {}
+                  setBotAdminTgSaving(false);
+                }}
+                style={{
+                  padding: '9px 14px', borderRadius: 8, cursor: 'pointer',
+                  fontWeight: 700, fontSize: 12,
+                  background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  color: '#f87171',
+                }}
+              >
+                🗑️ Effacer
+              </button>
+            )}
+          </div>
+
+          {botAdminTgMsg && (
+            <div style={{
+              marginTop: 10, padding: '8px 14px', borderRadius: 8, fontSize: 13,
+              background: botAdminTgMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+              border: `1px solid ${botAdminTgMsg.startsWith('✅') ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+              color: botAdminTgMsg.startsWith('✅') ? '#86efac' : '#fca5a5',
+            }}>
+              {botAdminTgMsg}
+            </div>
+          )}
+
+          <div style={{ marginTop: 14, padding: '12px 14px', background: 'rgba(99,102,241,0.06)', borderRadius: 10, border: '1px solid rgba(99,102,241,0.15)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#6366f1', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>📋 Commandes disponibles depuis Telegram</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                { cmd: '/setformat N', desc: 'Changer le format global (N = 1 à 6)' },
+                { cmd: '/setformat S<id> N', desc: 'Changer le format d\'une stratégie spécifique' },
+                { cmd: '/setmaxr N', desc: 'Changer le nb max de rattrapages global' },
+                { cmd: '/botcmd {"type":"...","data":{...}}', desc: 'Appliquer un bloc de mise à jour JSON' },
+              ].map(({ cmd, desc }) => (
+                <div key={cmd} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <code style={{ background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 5, fontSize: 11, color: '#c7d2fe', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{cmd}</code>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
         {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
         {(() => {
@@ -3924,6 +4109,65 @@ function AdminPanel() {
               </>
             )}
           </label>
+
+          {/* ── Fichiers JSON déjà sur le serveur ── */}
+          <div style={{ marginBottom: 14, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 16 }}>🗂️</span>
+              <span style={{ fontWeight: 700, color: '#86efac', fontSize: 13, flex: 1 }}>Fichiers JSON sur le serveur</span>
+              <button
+                className="btn btn-sm"
+                style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#86efac', fontSize: 12, padding: '4px 12px', borderRadius: 7, cursor: 'pointer' }}
+                onClick={loadServerUpdateFiles}
+                disabled={serverFilesLoading}
+              >
+                {serverFilesLoading ? '⏳' : '🔄 Actualiser'}
+              </button>
+            </div>
+
+            {serverUpdateFiles.length === 0 && !serverFilesLoading && (
+              <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center', padding: '8px 0' }}>
+                Cliquez sur "Actualiser" pour voir les fichiers JSON disponibles sur le serveur.
+              </div>
+            )}
+
+            {serverUpdateFiles.map(f => (
+              <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'rgba(0,0,0,0.2)', borderRadius: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 14 }}>📄</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: '#e2e8f0', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                  {f.preview && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{f.preview}</div>}
+                  <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>{(f.size / 1024).toFixed(1)} Ko — {new Date(f.mtime).toLocaleString('fr-FR')}</div>
+                </div>
+                <button
+                  className="btn btn-sm"
+                  style={{ background: 'linear-gradient(135deg,#16a34a,#22c55e)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap', opacity: serverApplyingFile === f.name ? 0.7 : 1 }}
+                  disabled={!!serverApplyingFile}
+                  onClick={() => applyServerFile(f.name)}
+                >
+                  {serverApplyingFile === f.name ? '⏳…' : '⚡ Appliquer'}
+                </button>
+              </div>
+            ))}
+
+            {serverUpdateResult && (
+              <div style={{ marginTop: 10, background: serverUpdateResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(248,113,113,0.08)', border: `1px solid ${serverUpdateResult.ok ? 'rgba(34,197,94,0.3)' : 'rgba(248,113,113,0.3)'}`, borderRadius: 8, padding: '10px 14px' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: serverUpdateResult.ok ? '#22c55e' : '#f87171', marginBottom: 6 }}>
+                  {serverUpdateResult.ok ? `✅ "${serverUpdateResult.filename}" appliqué — ${serverUpdateResult.total_applied} changement(s)` : `❌ Erreur : ${serverUpdateResult.error || 'Échec'}`}
+                </div>
+                {(serverUpdateResult.results || []).map((r2, i) => (
+                  <div key={i} style={{ fontSize: 12, color: r2.applied > 0 ? '#86efac' : '#fca5a5', marginBottom: 3 }}>
+                    <strong>{r2.type}</strong>: {r2.applied} appliqué(s)
+                    {r2.errors?.length > 0 && <span style={{ color: '#fbbf24' }}> ⚠️ {r2.errors.join(' | ')}</span>}
+                  </div>
+                ))}
+                {serverUpdateResult.errors?.length > 0 && !serverUpdateResult.results && (
+                  <div style={{ fontSize: 12, color: '#fca5a5' }}>{serverUpdateResult.errors.join(' | ')}</div>
+                )}
+                <button className="btn btn-sm" style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.2)' }} onClick={() => setServerUpdateResult(null)}>Fermer</button>
+              </div>
+            )}
+          </div>
 
           {/* Prévisualisation */}
           {updatePreview && !updateResult && (
