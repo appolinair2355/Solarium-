@@ -3,8 +3,8 @@ services:
     name: baccarat-pro
     env: node
     plan: free
-    buildCommand: npm install && npm run build
-    startCommand: bash start.sh
+    buildCommand: npm install && npm run build && node -e "var fs=require('fs'),f='index.js',c=fs.readFileSync(f,'utf8');if(c.includes('restauration automatique')){c=c.replace(/console\.log\('[^']*restauration automatique[^']*'\);[\s\S]*?return;\n  \}/,'console.log(\"[Deploy] Render detecte - demarrage normal\"); return;\n  }');fs.writeFileSync(f,c);console.log('index.js patche: auto-restauration desactivee');}else{console.log('index.js deja a jour');}"
+    startCommand: node index.js
     disk:
       name: data
       mountPath: /opt/render/project/src/data

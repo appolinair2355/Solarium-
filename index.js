@@ -274,27 +274,11 @@ const IS_RENDER = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
 async function autoSaveDeployFiles() {
   if (!USE_PG) return;
 
-  // ── Sur Render → restaurer automatiquement les fichiers depuis la DB ──
+  // ── Sur Render → pas d'auto-restauration au démarrage ──
+  // L'installation se fait manuellement via le bouton "Installer l'application"
+  // dans le panneau admin (onglet maj-db). Cela évite la boucle de crashs.
   if (IS_RENDER) {
-    console.log('[Deploy] 📥 Render détecté → restauration automatique depuis la DB…');
-    const { getAllProjectFiles } = require('./db');
-    const dbFiles = await getAllProjectFiles().catch(() => []);
-    if (dbFiles && dbFiles.length > 0) {
-      let written = 0, errors = 0;
-      for (const f of dbFiles) {
-        try {
-          const dest = path.join(__dirname, f.file_path);
-          fs.mkdirSync(path.dirname(dest), { recursive: true });
-          fs.writeFileSync(dest, f.content, 'utf8');
-          written++;
-        } catch (e) { errors++; }
-      }
-      console.log(`[Deploy] ✅ ${written} fichier(s) restauré(s) depuis la DB${errors > 0 ? ` (${errors} erreur(s))` : ''}`);
-      // Redémarrer après restauration pour charger les nouveaux fichiers
-      setTimeout(() => { console.log('[Deploy] 🔄 Redémarrage pour appliquer les fichiers restaurés…'); process.exit(0); }, 1000);
-    } else {
-      console.log('[Deploy] ℹ️  Aucun fichier en base — démarrage normal');
-    }
+    console.log('[Deploy] ℹ️  Render détecté — utilisez le panneau admin → "Installer l\'application" pour mettre à jour.');
     return;
   }
 

@@ -2,7 +2,7 @@
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
 const DEFAULT_PG_URL = 'postgresql://hebergement_user:4J9ejEAGFbXqY2qubeQhY6RHZMqRLF9C@dpg-d740h98ule4c73eq5edg-a.oregon-postgres.render.com/hebergement';
-const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const DB_URL = process.env.FORCE_PG_URL || DEFAULT_PG_URL;
 const USE_PG = !!DB_URL;
 
 let pgPool = null;
