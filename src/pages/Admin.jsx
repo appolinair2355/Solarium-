@@ -3828,19 +3828,36 @@ function AdminPanel() {
                   }));
 
                   const EX_OPTS = [
-                    { val: 'consec_appearances', label: '🔁 Apparitions consécutives', desc: 'Bloquer si la carte prédite est apparue N fois de suite' },
-                    { val: 'recent_frequency',   label: '📊 Fréquence récente',        desc: 'Bloquer si la carte prédite est apparue N fois sur W parties' },
-                    { val: 'already_pending',    label: '⏳ Déjà en attente',           desc: 'Bloquer si une prédiction pour cette carte est déjà active' },
-                    { val: 'max_consec_losses',  label: '📉 Série de défaites',         desc: 'Bloquer si les N dernières prédictions ont été perdues' },
-                    { val: 'trigger_overload',   label: '⚡ Déclencheur surchargé',     desc: 'Bloquer si la carte déclencheur est trop fréquente (N fois/W parties)' },
-                    { val: 'last_game_appeared', label: '🎯 Présente au dernier jeu',   desc: 'Bloquer si la carte prédite était présente dans la dernière partie' },
-                    { val: 'time_window_block',  label: '🕐 Fenêtre horaire',           desc: 'Bloquer les prédictions pendant la 1ʳᵉ ou 2ᵉ moitié de chaque heure' },
+                    { val: 'consec_appearances',   label: '🔁 Apparitions consécutives',    desc: 'Bloquer si la carte prédite est apparue N fois de suite' },
+                    { val: 'recent_frequency',     label: '📊 Fréquence récente',            desc: 'Bloquer si la carte prédite est apparue N fois sur W parties' },
+                    { val: 'already_pending',      label: '⏳ Déjà en attente',               desc: 'Bloquer si une prédiction pour cette carte est déjà active' },
+                    { val: 'max_consec_losses',    label: '📉 Série de défaites',             desc: 'Bloquer si les N dernières prédictions ont été perdues' },
+                    { val: 'trigger_overload',     label: '⚡ Déclencheur surchargé',         desc: 'Bloquer si la carte déclencheur est trop fréquente (N fois/W parties)' },
+                    { val: 'last_game_appeared',   label: '🎯 Présente au dernier jeu',       desc: 'Bloquer si la carte prédite était présente dans la dernière partie' },
+                    { val: 'time_window_block',    label: '🕐 Fenêtre horaire (½ heure)',     desc: 'Bloquer les prédictions pendant la 1ʳᵉ ou 2ᵉ moitié de chaque heure' },
+                    { val: 'minute_interval_block',label: '🕑 Intervalle de minutes',         desc: 'Bloquer entre H:MM et H:MM dans chaque heure (ex: :00–:10, :10–:20…)' },
+                    { val: 'min_history',          label: '📋 Historique minimum',            desc: 'Bloquer si moins de N parties ont été enregistrées (données insuffisantes)' },
+                    { val: 'consec_wins',          label: '🏆 Série de victoires',            desc: 'Bloquer après N victoires consécutives (prise de recul)' },
+                    { val: 'suit_absent_long',     label: '💤 Costume absent trop longtemps', desc: 'Bloquer si la carte prédite n\'est pas apparue dans les N dernières parties' },
+                    { val: 'high_win_rate',        label: '📈 Taux de victoire élevé',        desc: 'Bloquer si déjà ≥ N victoires sur W parties récentes' },
+                    { val: 'pending_overload',     label: '🔢 Trop de prédictions actives',   desc: 'Bloquer si plus de N prédictions sont en attente simultanément' },
+                    { val: 'game_parity',          label: '🔀 Parité du jeu',                 desc: 'Bloquer si le numéro de jeu est pair ou impair' },
+                    { val: 'dominant_streak',      label: '🔥 Costume dominant répété',       desc: 'Bloquer si la carte prédite a été présente dans les N dernières parties' },
+                    { val: 'cold_start',           label: '🧊 Démarrage à froid',             desc: 'Bloquer les N premières parties après démarrage (pas assez de données)' },
+                    { val: 'bad_hour',             label: '🌙 Tranche horaire bloquée',       desc: 'Bloquer pendant une plage horaire définie dans la journée (ex: 0h–6h)' },
+                    { val: 'double_suit_last',     label: '🃏 Double costume dernier jeu',    desc: 'Bloquer si le dernier jeu avait à la fois la carte prédite et le déclencheur' },
+                    { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                   ];
 
-                  const needsValue  = ['consec_appearances', 'recent_frequency', 'max_consec_losses', 'trigger_overload'].includes(ex.type);
-                  const needsWindow = ['recent_frequency', 'trigger_overload'].includes(ex.type);
+                  const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause'].includes(ex.type);
+                  const needsWindow = ['recent_frequency','trigger_overload','high_win_rate','loss_streak_pause'].includes(ex.type);
                   const needsHalf   = ex.type === 'time_window_block';
+                  const needsMinInterval = ex.type === 'minute_interval_block';
+                  const needsParity = ex.type === 'game_parity';
+                  const needsBadHour = ex.type === 'bad_hour';
                   const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
+
+                  const INP = { padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 };
 
                   return (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', marginBottom: 8,
@@ -3865,28 +3882,36 @@ function AdminPanel() {
                           {needsValue && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>
-                                {ex.type === 'max_consec_losses' ? 'Défaites consécutives :' : 'N ='}
+                                {ex.type === 'max_consec_losses' ? 'Défaites :' : ex.type === 'loss_streak_pause' ? 'Défaites K =' : 'N ='}
                               </label>
                               <input type="number" min="1" max="20" value={ex.value ?? 2}
                                 onChange={e => setEx({ value: parseInt(e.target.value) || 2 })}
-                                style={{ width: 60, padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
-                                  borderRadius: 6, color: '#fff', fontSize: 12 }} />
+                                style={{ width: 60, ...INP }} />
                             </div>
                           )}
                           {needsWindow && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>fenêtre W =</label>
+                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>
+                                {ex.type === 'loss_streak_pause' ? 'Pause (jeux) =' : 'Fenêtre W ='}
+                              </label>
                               <input type="number" min="2" max="20" value={ex.window ?? 5}
                                 onChange={e => setEx({ window: parseInt(e.target.value) || 5 })}
-                                style={{ width: 60, padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
-                                  borderRadius: 6, color: '#fff', fontSize: 12 }} />
+                                style={{ width: 60, ...INP }} />
                             </div>
                           )}
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
-                            {ex.type === 'consec_appearances' && `→ bloque si la carte prédite a été vue ${ex.value ?? 2}x de suite`}
-                            {ex.type === 'recent_frequency'   && `→ bloque si ≥ ${ex.value ?? 3} fois dans les ${ex.window ?? 5} dernières parties`}
-                            {ex.type === 'max_consec_losses'  && `→ bloque après ${ex.value ?? 3} défaites d'affilée`}
-                            {ex.type === 'trigger_overload'   && `→ bloque si déclencheur ≥ ${ex.value ?? 3}x dans les ${ex.window ?? 5} parties`}
+                            {ex.type === 'consec_appearances'  && `→ bloque si vu ${ex.value ?? 2}x de suite`}
+                            {ex.type === 'recent_frequency'    && `→ bloque si ≥ ${ex.value ?? 3}x dans les ${ex.window ?? 5} dernières`}
+                            {ex.type === 'max_consec_losses'   && `→ bloque après ${ex.value ?? 3} défaites d'affilée`}
+                            {ex.type === 'trigger_overload'    && `→ bloque si déclencheur ≥ ${ex.value ?? 3}x dans les ${ex.window ?? 5} parties`}
+                            {ex.type === 'min_history'         && `→ bloque si < ${ex.value ?? 5} parties en mémoire`}
+                            {ex.type === 'consec_wins'         && `→ bloque après ${ex.value ?? 3} victoires consécutives`}
+                            {ex.type === 'suit_absent_long'    && `→ bloque si absent des ${ex.value ?? 5} dernières parties`}
+                            {ex.type === 'high_win_rate'       && `→ bloque si ≥ ${ex.value ?? 4} victoires dans les ${ex.window ?? 5} dernières`}
+                            {ex.type === 'pending_overload'    && `→ bloque si ≥ ${ex.value ?? 2} prédictions simultanées`}
+                            {ex.type === 'dominant_streak'     && `→ bloque si présent dans les ${ex.value ?? 3} dernières parties`}
+                            {ex.type === 'cold_start'          && `→ bloque les ${ex.value ?? 10} premières parties`}
+                            {ex.type === 'loss_streak_pause'   && `→ pause ${ex.window ?? 2} jeux après ${ex.value ?? 3} défaites de suite`}
                           </div>
                         </div>
                       )}
@@ -3898,22 +3923,82 @@ function AdminPanel() {
                             { val: 'first',  label: '🕐 H:00–H:29 (1ʳᵉ moitié)', hint: 'Bloque de H:00 à H:29 chaque heure' },
                             { val: 'second', label: '🕧 H:30–H:59 (2ᵉ moitié)',  hint: 'Bloque de H:30 à H:59 chaque heure' },
                           ].map(opt => (
-                            <button
-                              key={opt.val}
-                              type="button"
-                              onClick={() => setEx({ half: opt.val })}
-                              title={opt.hint}
-                              style={{
-                                padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                            <button key={opt.val} type="button" onClick={() => setEx({ half: opt.val })} title={opt.hint}
+                              style={{ padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
                                 background: (ex.half ?? 'second') === opt.val ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.07)',
                                 border: `1px solid ${(ex.half ?? 'second') === opt.val ? 'rgba(239,68,68,0.6)' : 'rgba(239,68,68,0.2)'}`,
                                 color: (ex.half ?? 'second') === opt.val ? '#fca5a5' : '#6b7280',
                                 fontWeight: (ex.half ?? 'second') === opt.val ? 700 : 400,
-                              }}
-                            >{opt.label}</button>
+                              }}>{opt.label}</button>
                           ))}
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
                             → bloque pendant la {(ex.half ?? 'second') === 'first' ? '1ʳᵉ (00–29 min)' : '2ᵉ (30–59 min)'} moitié de chaque heure
+                          </div>
+                        </div>
+                      )}
+
+                      {needsMinInterval && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Intervalle bloqué :</label>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <span style={{ color: '#94a3b8', fontSize: 11 }}>H:</span>
+                            <input type="number" min="0" max="58" value={ex.from ?? 0}
+                              onChange={e => setEx({ from: parseInt(e.target.value) || 0 })}
+                              style={{ width: 55, ...INP }} />
+                            <span style={{ color: '#94a3b8', fontSize: 11 }}>→ H:</span>
+                            <input type="number" min="1" max="59" value={ex.to ?? 10}
+                              onChange={e => setEx({ to: parseInt(e.target.value) || 10 })}
+                              style={{ width: 55, ...INP }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {[[0,10],[10,20],[20,30],[30,40],[40,50],[50,59]].map(([f,t]) => (
+                              <button key={f} type="button" onClick={() => setEx({ from: f, to: t })}
+                                style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, cursor: 'pointer',
+                                  background: (ex.from??0) === f && (ex.to??10) === t ? 'rgba(239,68,68,0.3)' : 'rgba(239,68,68,0.07)',
+                                  border: `1px solid ${(ex.from??0) === f && (ex.to??10) === t ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.2)'}`,
+                                  color: (ex.from??0) === f && (ex.to??10) === t ? '#fca5a5' : '#6b7280' }}>
+                                :{String(f).padStart(2,'0')}–:{String(t).padStart(2,'0')}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic', width: '100%' }}>
+                            → bloque de H:{String(ex.from??0).padStart(2,'0')} à H:{String(ex.to??10).padStart(2,'0')} chaque heure
+                          </div>
+                        </div>
+                      )}
+
+                      {needsParity && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Bloquer si jeu :</label>
+                          {[{ val: 'even', label: '2️⃣ Pair' }, { val: 'odd', label: '1️⃣ Impair' }].map(opt => (
+                            <button key={opt.val} type="button" onClick={() => setEx({ parity: opt.val })}
+                              style={{ padding: '4px 14px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                                background: (ex.parity ?? 'even') === opt.val ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.07)',
+                                border: `1px solid ${(ex.parity ?? 'even') === opt.val ? 'rgba(239,68,68,0.6)' : 'rgba(239,68,68,0.2)'}`,
+                                color: (ex.parity ?? 'even') === opt.val ? '#fca5a5' : '#6b7280',
+                                fontWeight: (ex.parity ?? 'even') === opt.val ? 700 : 400 }}>{opt.label}</button>
+                          ))}
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → bloque quand le numéro de jeu est {(ex.parity ?? 'even') === 'even' ? 'pair' : 'impair'}
+                          </div>
+                        </div>
+                      )}
+
+                      {needsBadHour && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Tranche bloquée :</label>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <input type="number" min="0" max="23" value={ex.from_hour ?? 0}
+                              onChange={e => setEx({ from_hour: parseInt(e.target.value) || 0 })}
+                              style={{ width: 55, ...INP }} />
+                            <span style={{ color: '#94a3b8', fontSize: 11 }}>h → </span>
+                            <input type="number" min="0" max="23" value={ex.to_hour ?? 6}
+                              onChange={e => setEx({ to_hour: parseInt(e.target.value) || 6 })}
+                              style={{ width: 55, ...INP }} />
+                            <span style={{ color: '#94a3b8', fontSize: 11 }}>h</span>
+                          </div>
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → bloque de {ex.from_hour ?? 0}h à {ex.to_hour ?? 6}h chaque jour
                           </div>
                         </div>
                       )}
@@ -5290,7 +5375,14 @@ function AdminPanel() {
                       onClick={() => {
                         if (isOpen) { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); return; }
                         setStratChOpen(s.id);
-                        setStratChForm({ bot_token: '', channel_id: '', tg_format: s.tg_format ?? null });
+                        // Si un seul canal configuré → pré-remplir pour modification directe
+                        const existingTargets = (s.tg_targets || []).filter(t => t.bot_token && t.channel_id);
+                        if (existingTargets.length === 1) {
+                          const t = existingTargets[0];
+                          setStratChForm({ bot_token: t.bot_token, channel_id: t.channel_id, tg_format: t.tg_format ?? s.tg_format ?? null });
+                        } else {
+                          setStratChForm({ bot_token: '', channel_id: '', tg_format: s.tg_format ?? null });
+                        }
                       }}
                       style={{
                         fontSize: 11, padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontWeight: 700,
@@ -5338,9 +5430,9 @@ function AdminPanel() {
                         </div>
                       )}
 
-                      {/* ── Formulaire ajout d'un nouveau canal ── */}
+                      {/* ── Formulaire ajout / modification canal ── */}
                       <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
-                        ➕ Ajouter un canal
+                        {(s.tg_targets || []).filter(t => t.bot_token && t.channel_id).length === 1 ? '✏️ Modifier le canal' : '➕ Ajouter un canal'}
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
                         <div>
