@@ -499,51 +499,6 @@ router.get('/msg-format', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-// ── BOT ADMIN TG ID (commandes bot distantes) ──────────────────────
-router.get('/bot-admin-tg-id', requireAdmin, async (req, res) => {
-  try {
-    const v = await db.getSetting('bot_admin_tg_id');
-    res.json({ bot_admin_tg_id: v || '' });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.post('/bot-admin-tg-id', requireAdmin, async (req, res) => {
-  const { bot_admin_tg_id } = req.body;
-  if (!bot_admin_tg_id && bot_admin_tg_id !== '')
-    return res.status(400).json({ error: 'bot_admin_tg_id requis' });
-  try {
-    await db.setSetting('bot_admin_tg_id', String(bot_admin_tg_id).trim());
-    res.json({ ok: true, bot_admin_tg_id: String(bot_admin_tg_id).trim() });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── APPLY UPDATE INLINE (sans fichier sur serveur) ──────────────────
-// Permet d'appliquer une mise à jour directement via JSON en body.
-// Usage: POST /api/admin/apply-update-inline
-// Body: { "type": "format", "data": { "format_id": 3 } }
-// Ou:   { "type": "strategies", "data": [...] }
-// Ou:   { "blocks": [{ "type": "...", "data": {...} }, ...] }
-router.post('/apply-update-inline', requireAdmin, async (req, res) => {
-  try {
-    const body = req.body;
-    if (!body || typeof body !== 'object')
-      return res.status(400).json({ error: 'Body JSON invalide' });
-    const results = [];
-    if (Array.isArray(body.blocks)) {
-      for (const b of body.blocks) results.push(await applyUpdateBlock(b.type, b.data));
-    } else if (body.type) {
-      results.push(await applyUpdateBlock(body.type, body.data));
-    } else {
-      return res.status(400).json({ error: 'Champ "type" ou "blocks" requis' });
-    }
-    const allOk = results.every(r => r.errors.length === 0);
-    res.json({ ok: allOk, results });
-  } catch (e) {
-    console.error('[apply-update-inline] Error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // ── STRATEGY → CHANNEL ROUTING ─────────────────────────────────────
 
 router.get('/strategy-routes', requireAdmin, async (req, res) => {
