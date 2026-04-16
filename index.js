@@ -6,7 +6,7 @@ const path     = require('path');
 const fs       = require('fs');
 const compression = require('compression');
 
-const { initDB, USE_PG, pool, upsertProjectFile } = require('./db');
+const { initDB, USE_PG, pool, upsertProjectFile, createDeployLog, updateDeployLog } = require('./db');
 const authRoutes        = require('./auth');
 const adminRoutes       = require('./admin');
 const predictionsRoutes = require('./predictions');
@@ -274,11 +274,28 @@ const IS_RENDER = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
 async function autoSaveDeployFiles() {
   if (!USE_PG) return;
 
-  // ── Sur Render → pas d'auto-restauration au démarrage ──
-  // L'installation se fait manuellement via le bouton "Installer l'application"
-  // dans le panneau admin (onglet maj-db). Cela évite la boucle de crashs.
+  // ── Sur Render → log du démarrage en base, pas d'auto-restauration ──
   if (IS_RENDER) {
-    console.log('[Deploy] ℹ️  Render détecté — utilisez le panneau admin → "Installer l\'application" pour mettre à jour.');
+    console.log('[Deploy] ℹ️  Render détecté — démarrage tracé en base.');
+    try {
+      const os = require('os');
+      const logId = await createDeployLog({
+        source:   'render_startup',
+        hostname: os.hostname(),
+        env:      process.env.NODE_ENV || 'production',
+      });
+      await updateDeployLog(logId, {
+        status:       'startup',
+        npm_install:  'n/a',
+        build_status: 'n/a',
+        log_text:     'Démarrage automatique Render — pas d\'installation (utilisez le panneau admin)',
+        finished_at:  new Date(),
+        duration_ms:  0,
+      });
+      console.log(`[Deploy] ✅ Démarrage Render tracé → deploy_log id=${logId}`);
+    } catch (e) {
+      console.error('[Deploy] Erreur log démarrage Render:', e.message);
+    }
     return;
   }
 

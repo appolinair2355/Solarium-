@@ -321,7 +321,7 @@ class Engine {
       state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR };
       const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
       if (tgs.length > 0) {
-        sendPredictionToTargets(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
+        sendCustomAndStore(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
       } else {
         sendToStrategyChannels(stratId, nextGn, suit, stratTgOpts).catch(() => {});
       }
@@ -469,7 +469,7 @@ class Engine {
 
     const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
     if (tgs.length > 0) {
-      sendPredictionToTargets(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
+      sendCustomAndStore(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
     } else {
       sendToStrategyChannels(channelId, targetGame, ps, stratTgOpts).catch(() => {});
     }
@@ -507,6 +507,25 @@ class Engine {
         await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
+        continue;
+      }
+
+      // ── Résolution spéciale mode Distribution ──────────────────────────
+      if (ps === 'distrib') {
+        const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
+          && pCards.length === 2 && bCards.length === 2;
+        if (isNatural) {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          console.log(`[${strategy}] [Distribution] Jeu #${gn} = non-naturel après ${effectiveMaxR} tentatives → perdu`);
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
         continue;
       }
 
@@ -842,6 +861,22 @@ class Engine {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
         }
       }
+    } else if (mode === 'distribution') {
+      // Compte les jeux consécutifs NON-naturels (absence de distribution).
+      // Logique identique à absence_apparition : quand une distribution survient
+      // après >= B absences consécutives → prédit que le prochain jeu sera aussi une distribution.
+      const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
+        && pCards.length === 2 && bCards.length === 2;
+      if (isNatural) {
+        if ((state.counts['distrib'] || 0) >= B) {
+          console.log(`[${channelId}] [Distribution] Distribution après ${state.counts['distrib']} absences (seuil≥${B}) → prédiction jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'distrib', 'distrib');
+        }
+        state.counts['distrib'] = 0; // reset après distribution
+      } else {
+        state.counts['distrib'] = (state.counts['distrib'] || 0) + 1;
+        // pas d'émission ici — on attend la prochaine distribution
+      }
     } else if (mode === 'apparition_absence') {
       // Compte les apparitions consécutives (sans seuil max).
       // Dès que le costume disparaît après >= B apparitions → prédit la carte configurée (mapping).
@@ -878,9 +913,9 @@ class Engine {
         state.mirrorLastHour = currentHour;
       }
 
-      // 1. Mise à jour des compteurs cumulatifs
+      // 1. Mise à jour des compteurs cumulatifs (+1 par jeu si le costume apparaît, pas par carte)
       for (const suit of ALL_SUITS) {
-        const n = handSuits.filter(c => c === suit).length;
+        const n = handSuits.includes(suit) ? 1 : 0;
         state.mirrorCounts[suit] = (state.mirrorCounts[suit] || 0) + n;
       }
 
@@ -993,6 +1028,24 @@ class Engine {
       const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
       const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
+
+      // ── Résolution live spéciale pour le mode Distribution ──────────
+      if (cfg.mode === 'distribution') {
+        // Quand les deux mains sont terminées avec exactement 2 cartes → naturel → gagne
+        if (playerDone && bankerDone && playerCards.length === 2 && bankerCards.length === 2) {
+          for (const [pg, info] of Object.entries(entry.pending)) {
+            if (info.suit !== 'distrib') continue;
+            const pgNum = parseInt(pg);
+            if (pgNum > gn) continue;
+            const rattrapage = gn - pgNum;
+            console.log(`[S${idStr}] ⚡ Live: naturel (2P+2B) jeu #${gn} → distribution gagne immédiat (R${rattrapage})`);
+            await resolvePrediction(`S${idStr}`, pgNum, 'distrib', 'gagne', rattrapage, playerCards, bankerCards, stratTgOpts);
+            delete entry.pending[pg];
+          }
+        }
+        continue; // ne pas appeler tryResolve pour distribution
+      }
+
       await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone, stratTgOpts);
     }
   }
@@ -1005,13 +1058,45 @@ class Engine {
       const { config } = entry;
       if (!config?.enabled) continue;
       const { mode, threshold: B, hand, tg_targets, prediction_offset, mappings } = config;
-      if (mode !== 'absence_apparition' && mode !== 'apparition_absence') continue;
+      if (mode !== 'absence_apparition' && mode !== 'apparition_absence' && mode !== 'distribution') continue;
 
       // Une prédiction est déjà en attente → skip
       if (Object.keys(entry.pending).length > 0) continue;
 
       // Ce jeu live a déjà déclenché pour cette stratégie → skip
       if (entry.liveTriggeredGame === gn) continue;
+
+      // ── Trigger live spécial pour le mode Distribution ──────────────────
+      if (mode === 'distribution') {
+        const lc = this.liveGameCards;
+        const isLiveNatural = lc.playerDone && lc.bankerDone
+          && Array.isArray(lc.playerCards) && Array.isArray(lc.bankerCards)
+          && lc.playerCards.length === 2 && lc.bankerCards.length === 2;
+        if (!isLiveNatural) continue;
+        if ((entry.counts['distrib'] || 0) < B) continue;
+
+        const channelId = `S${idStr}`;
+        const offset    = Math.max(1, parseInt(prediction_offset) || 1);
+        const next      = gn + offset;
+        entry.liveTriggeredGame = gn;
+        console.log(`[${channelId}] ⚡ Live: Distribution après ${entry.counts['distrib']} absences (seuil≥${B}) → prédiction #${next}`);
+        try {
+          await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: 'distrib', triggered_by: 'distrib' });
+          const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
+            ? parseInt(config.max_rattrapage) : getCurrentMaxRattrapage();
+          entry.pending[next] = { suit: 'distrib', rattrapage: 0, maxR: liveMaxR };
+          entry.counts['distrib'] = 0; // reset après déclenchement live
+          const liveTgOpts = { formatId: config.tg_format || null, hand: config.hand || 'joueur', maxR: liveMaxR };
+          if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+            await sendCustomAndStore(tg_targets, channelId, next, 'distrib', liveTgOpts).catch(() => {});
+          } else {
+            await sendToStrategyChannels(channelId, next, 'distrib', liveTgOpts).catch(() => {});
+          }
+        } catch (e) {
+          console.error(`[${channelId}] Distribution live trigger error:`, e.message);
+        }
+        continue;
+      }
 
       const handDone  = hand === 'banquier' ? this.liveGameCards.bankerDone  : this.liveGameCards.playerDone;
       const handSuits = hand === 'banquier' ? this.liveGameCards.bankerSuits : this.liveGameCards.playerSuits;
@@ -1355,6 +1440,19 @@ class Engine {
         if (projected.length > 0) liveSuits = projected;
       }
 
+      // Mode Distribution → afficher le compteur de jeux non-naturels
+      if (mode === 'distribution') {
+        const count = entry.counts['distrib'] || 0;
+        return [{
+          suit: 'distrib', display: '📊',
+          count, threshold,
+          mode, label: 'Distribution',
+          isLive: false,
+          singleCounter: true,
+          description: `${count} jeu${count > 1 ? 'x' : ''} non-naturel${count > 1 ? 's' : ''} consécutif${count > 1 ? 's' : ''}`,
+        }];
+      }
+
       // Mode Miroir Taux → afficher les compteurs d'apparitions cumulatifs
       if (mode === 'taux_miroir') {
         const mirrorCounts = entry.mirrorCounts || {};
@@ -1393,6 +1491,7 @@ class Engine {
         const modeLabel = mode === 'apparents' ? 'Apparitions'
           : mode === 'absence_apparition' ? 'Abs→App'
           : mode === 'apparition_absence' ? 'App→Abs'
+          : mode === 'distribution' ? 'Distribution'
           : 'Absences';
 
         return {

@@ -120,6 +120,22 @@ async function initDB() {
         size_bytes INTEGER DEFAULT 0,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS deploy_logs (
+        id              SERIAL PRIMARY KEY,
+        source          TEXT NOT NULL,
+        hostname        TEXT,
+        env             TEXT,
+        files_written   INTEGER DEFAULT 0,
+        files_errors    INTEGER DEFAULT 0,
+        npm_install     TEXT,
+        build_status    TEXT,
+        status          TEXT DEFAULT 'started',
+        log_text        TEXT,
+        duration_ms     INTEGER,
+        installed_at    TIMESTAMPTZ DEFAULT NOW(),
+        finished_at     TIMESTAMPTZ
+      );
     `);
     // Compte admin
     const check = await pgPool.query(`SELECT id FROM users WHERE username = 'buzzinfluence' LIMIT 1`);
@@ -693,6 +709,17 @@ async function getAllProjectFiles() {
   return [];
 }
 
+async function getProjectFileMeta() {
+  // Retourne seulement file_path + size_bytes + updated_at (sans content) pour comparaison rapide
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, size_bytes, updated_at FROM project_files');
+    const map = {};
+    for (const row of r.rows) map[row.file_path] = { size_bytes: row.size_bytes, updated_at: row.updated_at };
+    return map;
+  }
+  return {};
+}
+
 async function deleteProjectFile(filePath) {
   if (USE_PG) {
     await pgPool.query('DELETE FROM project_files WHERE file_path = $1', [filePath]);
@@ -706,6 +733,60 @@ async function clearProjectFiles() {
     return r.rowCount;
   }
   return 0;
+}
+
+// ── DEPLOY LOGS ─────────────────────────────────────────────────────
+
+async function createDeployLog(data) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO deploy_logs (source, hostname, env, status, installed_at)
+     VALUES ($1, $2, $3, 'started', NOW()) RETURNING id`,
+    [data.source || 'unknown', data.hostname || null, data.env || null]
+  );
+  return r.rows[0]?.id || null;
+}
+
+async function updateDeployLog(id, data) {
+  if (!USE_PG || !id) return;
+  await pgPool.query(
+    `UPDATE deploy_logs SET
+       files_written = COALESCE($1, files_written),
+       files_errors  = COALESCE($2, files_errors),
+       npm_install   = COALESCE($3, npm_install),
+       build_status  = COALESCE($4, build_status),
+       status        = COALESCE($5, status),
+       log_text      = COALESCE($6, log_text),
+       duration_ms   = COALESCE($7, duration_ms),
+       finished_at   = COALESCE($8, finished_at)
+     WHERE id = $9`,
+    [
+      data.files_written  ?? null,
+      data.files_errors   ?? null,
+      data.npm_install    ?? null,
+      data.build_status   ?? null,
+      data.status         ?? null,
+      data.log_text       ?? null,
+      data.duration_ms    ?? null,
+      data.finished_at    ?? null,
+      id,
+    ]
+  );
+}
+
+async function getDeployLogs(limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT id, source, hostname, env, files_written, files_errors,
+            npm_install, build_status, status, duration_ms,
+            installed_at, finished_at,
+            LEFT(log_text, 2000) AS log_preview
+     FROM deploy_logs
+     ORDER BY installed_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return r.rows;
 }
 
 module.exports = {
@@ -725,5 +806,6 @@ module.exports = {
   deleteStrategyPredictions, deleteAllPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
-  upsertProjectFile, getAllProjectFiles, deleteProjectFile, clearProjectFiles,
+  upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
+  createDeployLog, updateDeployLog, getDeployLogs,
 };

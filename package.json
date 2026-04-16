@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@vitejs/plugin-react": "^4.7.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "connect-pg-simple": "^10.0.0",

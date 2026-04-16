@@ -220,12 +220,14 @@ function validateStrategyBody(body) {
 
   const B = parseInt(threshold);
   if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
-  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir'].includes(mode)) return 'Mode invalide';
-  const norm = normalizeMappings(mappings);
-  if (!norm) return 'Mappings invalides';
-  for (const s of SUITS) {
-    if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
-    if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution'].includes(mode)) return 'Mode invalide';
+  if (mode !== 'distribution') {
+    const norm = normalizeMappings(mappings);
+    if (!norm) return 'Mappings invalides';
+    for (const s of SUITS) {
+      if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
+      if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
+    }
   }
   return null;
 }
@@ -497,6 +499,51 @@ router.get('/msg-format', requireAdmin, async (req, res) => {
     const v = await db.getSetting('tg_msg_format');
     res.json({ format_id: parseInt(v) || 1 });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── BOT ADMIN TG ID (commandes bot distantes) ──────────────────────
+router.get('/bot-admin-tg-id', requireAdmin, async (req, res) => {
+  try {
+    const v = await db.getSetting('bot_admin_tg_id');
+    res.json({ bot_admin_tg_id: v || '' });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/bot-admin-tg-id', requireAdmin, async (req, res) => {
+  const { bot_admin_tg_id } = req.body;
+  if (!bot_admin_tg_id && bot_admin_tg_id !== '')
+    return res.status(400).json({ error: 'bot_admin_tg_id requis' });
+  try {
+    await db.setSetting('bot_admin_tg_id', String(bot_admin_tg_id).trim());
+    res.json({ ok: true, bot_admin_tg_id: String(bot_admin_tg_id).trim() });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── APPLY UPDATE INLINE (sans fichier sur serveur) ──────────────────
+// Permet d'appliquer une mise à jour directement via JSON en body.
+// Usage: POST /api/admin/apply-update-inline
+// Body: { "type": "format", "data": { "format_id": 3 } }
+// Ou:   { "type": "strategies", "data": [...] }
+// Ou:   { "blocks": [{ "type": "...", "data": {...} }, ...] }
+router.post('/apply-update-inline', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object')
+      return res.status(400).json({ error: 'Body JSON invalide' });
+    const results = [];
+    if (Array.isArray(body.blocks)) {
+      for (const b of body.blocks) results.push(await applyUpdateBlock(b.type, b.data));
+    } else if (body.type) {
+      results.push(await applyUpdateBlock(body.type, body.data));
+    } else {
+      return res.status(400).json({ error: 'Champ "type" ou "blocks" requis' });
+    }
+    const allOk = results.every(r => r.errors.length === 0);
+    res.json({ ok: allOk, results });
+  } catch (e) {
+    console.error('[apply-update-inline] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── STRATEGY → CHANNEL ROUTING ─────────────────────────────────────
@@ -1932,6 +1979,34 @@ function scanProjectFiles(dir, base) {
   return results;
 }
 
+// Téléchargement du ZIP de déploiement (fichiers actuels sur disque)
+router.get('/project-backup/zip', requireAdmin, (req, res) => {
+  try {
+    const archiver = require('archiver');
+    const root     = path.join(__dirname);
+    const files    = scanProjectFiles(root, '');
+    const date     = new Date().toISOString().slice(0, 10);
+    const filename = `baccarat-pro-${date}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (err) => { console.error('[ZIP]', err.message); res.end(); });
+    archive.pipe(res);
+
+    for (const f of files) {
+      archive.file(f.fullPath, { name: f.relPath });
+    }
+
+    archive.finalize();
+    console.log(`[ZIP] Archive générée : ${files.length} fichiers → ${filename}`);
+  } catch (e) {
+    console.error('[ZIP] Erreur:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/project-backup', requireAdmin, async (req, res) => {
   try {
     const root  = path.join(__dirname);
@@ -1948,6 +2023,42 @@ router.post('/project-backup', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Sauvegarde uniquement les fichiers modifiés (comparaison taille + mtime vs DB)
+router.post('/project-backup/diff', requireAdmin, async (req, res) => {
+  try {
+    const root    = path.join(__dirname);
+    const files   = scanProjectFiles(root, '');
+    const dbMeta  = await db.getProjectFileMeta(); // { relPath → { size_bytes, updated_at } }
+
+    let saved = 0, skipped = 0, added = 0, errors = 0;
+    const changed = [];
+
+    for (const f of files) {
+      try {
+        const stat    = fs.statSync(f.fullPath);
+        const diskSize = stat.size;
+        const diskMtime = stat.mtimeMs;
+        const meta    = dbMeta[f.relPath];
+
+        const isNew      = !meta;
+        const sizeChanged = meta && meta.size_bytes !== diskSize;
+        const newer       = meta && meta.updated_at && diskMtime > new Date(meta.updated_at).getTime();
+
+        if (isNew || sizeChanged || newer) {
+          const content = fs.readFileSync(f.fullPath, 'utf8');
+          await db.upsertProjectFile(f.relPath, content, false);
+          changed.push(f.relPath);
+          if (isNew) added++; else saved++;
+        } else {
+          skipped++;
+        }
+      } catch { errors++; }
+    }
+
+    res.json({ ok: true, saved: saved + added, added, updated: saved, skipped, errors, total: files.length, changed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/project-backup/list', requireAdmin, async (req, res) => {
   try {
     const files = await db.getAllProjectFiles();
@@ -1956,7 +2067,12 @@ router.get('/project-backup/list', requireAdmin, async (req, res) => {
       size_bytes: f.size_bytes,
       updated_at: f.updated_at,
     }));
-    res.json({ files: summary, total: summary.length });
+    // Date de la dernière sauvegarde = max updated_at parmi tous les fichiers
+    const lastSaved = summary.reduce((max, f) => {
+      if (!f.updated_at) return max;
+      return (!max || new Date(f.updated_at) > new Date(max)) ? f.updated_at : max;
+    }, null);
+    res.json({ files: summary, total: summary.length, last_saved: lastSaved });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1967,15 +2083,42 @@ router.delete('/project-backup', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Récupérer le journal des déploiements
+router.get('/deploy-logs', requireAdmin, async (req, res) => {
+  try {
+    const logs = await db.getDeployLogs(30);
+    res.json({ ok: true, logs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/project-install', requireAdmin, async (req, res) => {
+  const startedAt = Date.now();
+  const os = require('os');
+  const IS_RENDER_ENV = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+
+  // Créer le log de déploiement immédiatement en base
+  let deployLogId = null;
+  try {
+    deployLogId = await db.createDeployLog({
+      source:   IS_RENDER_ENV ? 'render' : 'manual',
+      hostname: os.hostname(),
+      env:      process.env.NODE_ENV || 'development',
+    });
+    console.log(`[Install] 📋 Log de déploiement créé → id=${deployLogId}`);
+  } catch (e) {
+    console.error('[Install] Impossible de créer le log de déploiement:', e.message);
+  }
+
   try {
     const files = await db.getAllProjectFiles();
     if (!files || files.length === 0) {
+      await db.updateDeployLog(deployLogId, { status: 'error', log_text: 'Aucun fichier en base', finished_at: new Date(), duration_ms: Date.now() - startedAt });
       return res.status(400).json({ error: 'Aucun fichier sauvegardé dans la base de données.' });
     }
     const root = path.join(__dirname);
     let written = 0, errors = 0;
     const log = [];
+
     for (const f of files) {
       try {
         const dest = path.join(root, f.file_path);
@@ -1989,23 +2132,96 @@ router.post('/project-install', requireAdmin, async (req, res) => {
       }
     }
 
-    res.json({ ok: true, written, errors, log });
+    // Mise à jour intermédiaire en base — fichiers écrits
+    await db.updateDeployLog(deployLogId, {
+      files_written: written,
+      files_errors:  errors,
+      status:        'installing',
+      log_text:      log.join('\n'),
+    }).catch(() => {});
 
-    // Relancer npm install si package.json a été restauré, puis redémarrer
+    res.json({ ok: true, written, errors, log, deploy_log_id: deployLogId });
+
+    // Post-install : npm install si besoin + rebuild frontend + redémarrage
     setTimeout(async () => {
+      let npmStatus   = 'skipped';
+      let buildStatus = 'skipped';
+      const postLog   = [...log];
+
       try {
-        const pkgChanged = files.some(f => f.file_path === 'package.json');
-        if (pkgChanged) {
-          await new Promise((resolve) => {
-            const proc = spawn('npm', ['install', '--prefer-offline'], { cwd: root, stdio: 'ignore' });
+        const pkgChanged    = files.some(f => f.file_path === 'package.json');
+        const noNodeModules = !fs.existsSync(path.join(root, 'node_modules', '.package-lock.json')) &&
+                              !fs.existsSync(path.join(root, 'node_modules', 'express'));
+        if (pkgChanged || noNodeModules) {
+          console.log(`[Install] npm install (pkgChanged=${pkgChanged}, noNodeModules=${noNodeModules})...`);
+          postLog.push('--- npm install ---');
+          const npmCode = await new Promise((resolve) => {
+            const proc = spawn('npm', ['install', '--prefer-offline'], { cwd: root, stdio: 'inherit' });
             proc.on('close', resolve);
           });
+          npmStatus = npmCode === 0 ? 'success' : `failed(code=${npmCode})`;
+          postLog.push(`npm install: ${npmStatus}`);
+          console.log(`[Install] npm install → ${npmStatus}`);
+        } else {
+          npmStatus = 'skipped (node_modules déjà présent)';
+          postLog.push('npm install: skipped — node_modules déjà présent');
+          console.log('[Install] node_modules déjà présent — npm install ignoré');
         }
-      } catch {}
-      // Redémarrer le processus (le gestionnaire de processus Replit/Render le relance automatiquement)
-      process.exit(0);
+
+        // Compiler uniquement si dist/index.html n'a PAS été restauré depuis la DB
+        const distRestored = files.some(f => f.file_path === 'dist/index.html');
+        const hasSrc       = files.some(f => f.file_path.startsWith('src/'));
+        if (!distRestored && (hasSrc || pkgChanged)) {
+          console.log('[Install] dist/ absent de la DB — compilation frontend...');
+          postLog.push('--- npm run build ---');
+          const viteBin    = path.join(root, 'node_modules', '.bin', 'vite');
+          const buildSpawn = fs.existsSync(viteBin)
+            ? spawn(viteBin, ['build'], { cwd: root, stdio: 'inherit' })
+            : spawn('npm', ['run', 'build'], { cwd: root, stdio: 'inherit' });
+          const buildCode  = await new Promise((resolve) => buildSpawn.on('close', resolve));
+          buildStatus      = buildCode === 0 ? 'success' : `failed(code=${buildCode})`;
+          postLog.push(`npm run build: ${buildStatus}`);
+          console.log(`[Install] build → ${buildStatus}`);
+        } else if (distRestored) {
+          buildStatus = 'skipped (dist/ restauré depuis DB)';
+          postLog.push(`npm run build: skipped — dist/index.html déjà restauré`);
+          console.log('[Install] ✅ dist/ déjà restauré depuis la base — build ignoré');
+        }
+      } catch (e) {
+        console.error('[Install] Erreur post-install:', e.message);
+        postLog.push(`❌ Erreur post-install: ${e.message}`);
+        npmStatus = npmStatus === 'started' ? `error: ${e.message}` : npmStatus;
+      }
+
+      const finalStatus = errors === 0 ? 'success' : 'partial';
+      const durationMs  = Date.now() - startedAt;
+
+      // Sauvegarder le résultat final en base AVANT de redémarrer
+      try {
+        await db.updateDeployLog(deployLogId, {
+          files_written: written,
+          files_errors:  errors,
+          npm_install:   npmStatus,
+          build_status:  buildStatus,
+          status:        finalStatus,
+          log_text:      postLog.join('\n'),
+          duration_ms:   durationMs,
+          finished_at:   new Date(),
+        });
+        console.log(`[Install] ✅ Log de déploiement mis à jour → id=${deployLogId} status=${finalStatus}`);
+      } catch (e) {
+        console.error('[Install] Impossible de sauvegarder le log final:', e.message);
+      }
+
+      // Petit délai pour s'assurer que la transaction DB est commitée
+      await new Promise(r => setTimeout(r, 800));
+      console.log('[Install] Redémarrage du serveur (exit 1 → Render redémarre automatiquement)...');
+      process.exit(1); // code 1 = Render redémarre le service à coup sûr
     }, 800);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    await db.updateDeployLog(deployLogId, { status: 'error', log_text: e.message, finished_at: new Date(), duration_ms: Date.now() - startedAt }).catch(() => {});
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;

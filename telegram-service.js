@@ -585,6 +585,21 @@ function buildTgMessage(formatId, {
       };
     }
 
+    case 11:
+      return {
+        text:
+          `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
+          `📌 Jeu #${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━\n` +
+          `✅ Distribution : OUI\n` +
+          (status === null
+            ? `⌛ En cours de vérification...`
+            : status === 'gagne'
+              ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ 🎯`
+              : `❌ Non distribué`),
+        parse_mode: null,
+      };
+
     default:
       return {
         text:
