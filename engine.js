@@ -299,26 +299,31 @@ class Engine {
   // Injecte une prédiction forcée (relance) sur le prochain jeu
   _forceNextPrediction(stratId, nextGn, suit) {
     if (!suit) return;
-    const tgOpts = {};
+    const globalMaxR = getCurrentMaxRattrapage();
     if (stratId === 'C1' || stratId === 'C2' || stratId === 'C3' || stratId === 'DC') {
       const customTg = this.defaultStratTg[stratId] || {};
       savePrediction(stratId, nextGn, suit, suit, customTg.bot_token ? customTg : null);
-      if (stratId === 'C1') this.c1.pending[nextGn] = { suit, rattrapage: 0 };
-      else if (stratId === 'C2') this.c2.pending[nextGn] = { suit, rattrapage: 0 };
-      else if (stratId === 'C3') this.c3.pending[nextGn] = { suit, rattrapage: 0 };
-      else if (stratId === 'DC') this.dc.pending[nextGn] = { suit, rattrapage: 0 };
+      if (stratId === 'C1') this.c1.pending[nextGn] = { suit, rattrapage: 0, maxR: globalMaxR };
+      else if (stratId === 'C2') this.c2.pending[nextGn] = { suit, rattrapage: 0, maxR: globalMaxR };
+      else if (stratId === 'C3') this.c3.pending[nextGn] = { suit, rattrapage: 0, maxR: globalMaxR };
+      else if (stratId === 'DC') this.dc.pending[nextGn] = { suit, rattrapage: 0, maxR: globalMaxR };
     } else if (stratId.startsWith('S')) {
       const id = parseInt(stratId.slice(1));
       const state = this.custom[id];
       if (!state || !state.config?.enabled) return;
       if (Object.keys(state.pending).length > 0) return; // déjà en attente
+      // Calcul du maxR effectif : priorité à la config de la stratégie, sinon global
+      const stratMaxR = (state.config.max_rattrapage !== undefined && state.config.max_rattrapage !== null)
+        ? parseInt(state.config.max_rattrapage) : globalMaxR;
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
       db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).catch(() => {});
-      state.pending[nextGn] = { suit, rattrapage: 0 };
+      // Stocker maxR dans le pending pour que la résolution utilise la même valeur
+      state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR };
+      const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
       if (tgs.length > 0) {
-        sendPredictionToTargets(tgs, stratId, nextGn, suit, { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: state.config.max_rattrapage || 20 }).catch(() => {});
+        sendPredictionToTargets(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
       } else {
-        sendToStrategyChannels(stratId, nextGn, suit).catch(() => {});
+        sendToStrategyChannels(stratId, nextGn, suit, stratTgOpts).catch(() => {});
       }
     }
   }
@@ -460,13 +465,13 @@ class Engine {
       await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: ps, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
       console.log(`[${channelId}] Multi-strat prédiction #${targetGame} ${SUIT_DISPLAY[ps]||ps} (${matchMode}, sources: ${signals.map(s=>s.srcId).join(',')})`);
     } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
-    state.pending[targetGame] = { suit: ps, rattrapage: 0 };
+    state.pending[targetGame] = { suit: ps, rattrapage: 0, maxR: stratMaxR };
 
     const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
     if (tgs.length > 0) {
       sendPredictionToTargets(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
     } else {
-      sendToStrategyChannels(channelId, targetGame, ps).catch(() => {});
+      sendToStrategyChannels(channelId, targetGame, ps, stratTgOpts).catch(() => {});
     }
   }
 
@@ -493,8 +498,13 @@ class Engine {
       const ps    = info.suit;
       if (pgNum > gn) continue;
 
-      if (gn > pgNum + maxR) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards, tgOpts);
+      // Utilise le maxR stocké dans la prédiction au moment de son émission.
+      // Cela garantit qu'un changement de config après l'émission n'affecte
+      // pas les prédictions déjà en cours.
+      const effectiveMaxR = (info.maxR !== undefined && info.maxR !== null) ? info.maxR : maxR;
+
+      if (gn > pgNum + effectiveMaxR) {
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(false, ps, pgNum);
         continue;
@@ -505,10 +515,10 @@ class Engine {
         await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
         delete pending[pg];
         if (onLoss) onLoss(true, ps, pgNum, rattrapage);
-      } else if (gn === pgNum + maxR) {
-        await resolvePrediction(strategy, pgNum, ps, 'perdu', maxR, pCards, bCards, tgOpts);
+      } else if (gn === pgNum + effectiveMaxR) {
+        await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
         delete pending[pg];
-        if (onLoss) onLoss(false, ps, pgNum, maxR);
+        if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
       }
     }
   }
@@ -524,7 +534,7 @@ class Engine {
         this.c1.consecLosses = 0;
         const next = gn + 1;
         savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-        this.dc.pending[next] = { suit, rattrapage: 0 };
+        this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
       }
     });
     for (const suit of ALL_SUITS) {
@@ -533,7 +543,7 @@ class Engine {
       if (this.c1.absences[suit] === C1_B) {
         const ps = C1_MAP[suit]; const next = gn + 1;
         await savePrediction('C1', next, ps, suit, this.defaultStratTg['C1']);
-        this.c1.pending[next] = { suit: ps, rattrapage: 0 };
+        this.c1.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c1.absences[suit] = 0;
       }
     }
@@ -549,7 +559,7 @@ class Engine {
       this._onStratLoss('C2', gn, suit);
       const next = gn + 1;
       savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-      this.dc.pending[next] = { suit, rattrapage: 0 };
+      this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
     });
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c2.absences[suit] = 0; continue; }
@@ -557,7 +567,7 @@ class Engine {
       if (this.c2.absences[suit] === C2_B) {
         const ps = C2_MAP[suit]; const next = gn + 1;
         await savePrediction('C2', next, ps, suit, this.defaultStratTg['C2']);
-        this.c2.pending[next] = { suit: ps, rattrapage: 0 };
+        this.c2.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c2.absences[suit] = 0;
       }
     }
@@ -574,7 +584,7 @@ class Engine {
         this.c3.consecLosses = 0;
         const next = gn + 1;
         savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-        this.dc.pending[next] = { suit, rattrapage: 0 };
+        this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
       }
     });
     for (const suit of ALL_SUITS) {
@@ -583,7 +593,7 @@ class Engine {
       if (this.c3.absences[suit] === C3_B) {
         const ps = C3_MAP[suit]; const next = gn + 1;
         await savePrediction('C3', next, ps, suit, this.defaultStratTg['C3']);
-        this.c3.pending[next] = { suit: ps, rattrapage: 0 };
+        this.c3.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c3.absences[suit] = 0;
       }
     }
@@ -774,12 +784,12 @@ class Engine {
         await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
         console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
-      state.pending[next] = { suit: ps, rattrapage: 0 };
+      state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve };
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
         await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
       } else {
-        await sendToStrategyChannels(channelId, next, ps).catch(() => {});
+        await sendToStrategyChannels(channelId, next, ps, stratTgOpts).catch(() => {});
       }
     };
 
@@ -1040,16 +1050,19 @@ class Engine {
         try {
           await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit });
           console.log(`[${channelId}] Prédiction live #${next} ${SUIT_DISPLAY[ps] || ps}`);
-          entry.pending[next] = { suit: ps, rattrapage: 0 };
+          const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
+            ? parseInt(config.max_rattrapage) : getCurrentMaxRattrapage();
+          entry.pending[next] = { suit: ps, rattrapage: 0, maxR: liveMaxR };
 
           const liveTgOpts = {
             formatId: config.tg_format || null,
             hand:     config.hand      || 'joueur',
+            maxR:     liveMaxR,
           };
           if (Array.isArray(tg_targets) && tg_targets.length > 0) {
             await sendCustomAndStore(tg_targets, channelId, next, ps, liveTgOpts).catch(() => {});
           } else {
-            await sendToStrategyChannels(channelId, next, ps).catch(() => {});
+            await sendToStrategyChannels(channelId, next, ps, liveTgOpts).catch(() => {});
           }
         } catch (e) {
           console.error(`[${channelId}] Live trigger error:`, e.message);
@@ -1212,17 +1225,20 @@ class Engine {
   async loadExistingPending() {
     try {
       const rows = await db.getPredictions({ status: 'en_cours', limit: 500 });
+      const globalMaxR = getCurrentMaxRattrapage();
       for (const row of rows) {
         const { strategy, game_number: gn, predicted_suit: ps, rattrapage: r } = row;
-        const entry = { suit: ps, rattrapage: parseInt(r) || 0 };
-        if      (strategy === 'C1') this.c1.pending[gn] = entry;
-        else if (strategy === 'C2') this.c2.pending[gn] = entry;
-        else if (strategy === 'C3') this.c3.pending[gn] = entry;
-        else if (strategy === 'DC') this.dc.pending[gn] = entry;
+        if      (strategy === 'C1') this.c1.pending[gn] = { suit: ps, rattrapage: parseInt(r) || 0, maxR: globalMaxR };
+        else if (strategy === 'C2') this.c2.pending[gn] = { suit: ps, rattrapage: parseInt(r) || 0, maxR: globalMaxR };
+        else if (strategy === 'C3') this.c3.pending[gn] = { suit: ps, rattrapage: parseInt(r) || 0, maxR: globalMaxR };
+        else if (strategy === 'DC') this.dc.pending[gn] = { suit: ps, rattrapage: parseInt(r) || 0, maxR: globalMaxR };
         else if (strategy.startsWith('S') && !isNaN(parseInt(strategy.slice(1)))) {
           const id = parseInt(strategy.slice(1));
           if (!this.custom[id]) this.custom[id] = this._makeCustomState();
-          this.custom[id].pending[gn] = entry;
+          const cfg = this.custom[id].config;
+          const stratMaxR = (cfg?.max_rattrapage !== undefined && cfg?.max_rattrapage !== null)
+            ? parseInt(cfg.max_rattrapage) : globalMaxR;
+          this.custom[id].pending[gn] = { suit: ps, rattrapage: parseInt(r) || 0, maxR: stratMaxR };
         }
       }
       if (rows.length > 0) console.log(`[Engine] ${rows.length} prédiction(s) en_cours rechargée(s) en mémoire`);

@@ -499,6 +499,51 @@ router.get('/msg-format', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
+// ── BOT ADMIN TG ID (commandes bot distantes) ──────────────────────
+router.get('/bot-admin-tg-id', requireAdmin, async (req, res) => {
+  try {
+    const v = await db.getSetting('bot_admin_tg_id');
+    res.json({ bot_admin_tg_id: v || '' });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/bot-admin-tg-id', requireAdmin, async (req, res) => {
+  const { bot_admin_tg_id } = req.body;
+  if (!bot_admin_tg_id && bot_admin_tg_id !== '')
+    return res.status(400).json({ error: 'bot_admin_tg_id requis' });
+  try {
+    await db.setSetting('bot_admin_tg_id', String(bot_admin_tg_id).trim());
+    res.json({ ok: true, bot_admin_tg_id: String(bot_admin_tg_id).trim() });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── APPLY UPDATE INLINE (sans fichier sur serveur) ──────────────────
+// Permet d'appliquer une mise à jour directement via JSON en body.
+// Usage: POST /api/admin/apply-update-inline
+// Body: { "type": "format", "data": { "format_id": 3 } }
+// Ou:   { "type": "strategies", "data": [...] }
+// Ou:   { "blocks": [{ "type": "...", "data": {...} }, ...] }
+router.post('/apply-update-inline', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object')
+      return res.status(400).json({ error: 'Body JSON invalide' });
+    const results = [];
+    if (Array.isArray(body.blocks)) {
+      for (const b of body.blocks) results.push(await applyUpdateBlock(b.type, b.data));
+    } else if (body.type) {
+      results.push(await applyUpdateBlock(body.type, body.data));
+    } else {
+      return res.status(400).json({ error: 'Champ "type" ou "blocks" requis' });
+    }
+    const allOk = results.every(r => r.errors.length === 0);
+    res.json({ ok: allOk, results });
+  } catch (e) {
+    console.error('[apply-update-inline] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── STRATEGY → CHANNEL ROUTING ─────────────────────────────────────
 
 router.get('/strategy-routes', requireAdmin, async (req, res) => {
@@ -1256,6 +1301,72 @@ router.post('/apply-update', requireAdmin, async (req, res) => {
     const totalApplied = results.reduce((s, r) => s + r.applied, 0);
     const allErrors    = results.flatMap(r => r.errors);
     res.json({ ok: allErrors.length === 0 || totalApplied > 0, results, total_applied: totalApplied, errors: allErrors });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Liste des fichiers JSON de mise à jour stockés sur le serveur ────
+const EXCLUDE_JSON_FILES = new Set(['package.json', 'package-lock.json', 'railway.json', 'tsconfig.json', 'jsconfig.json']);
+router.get('/server-update-files', requireAdmin, (req, res) => {
+  try {
+    const rootDir = path.join(__dirname);
+    const entries = fs.readdirSync(rootDir);
+    const files = entries
+      .filter(f => f.endsWith('.json') && !EXCLUDE_JSON_FILES.has(f))
+      .map(f => {
+        try {
+          const stat = fs.statSync(path.join(rootDir, f));
+          let preview = null;
+          try {
+            const raw = fs.readFileSync(path.join(rootDir, f), 'utf8');
+            const parsed = JSON.parse(raw);
+            preview = parsed?._meta?.description || parsed?._meta?.version
+              ? `v${parsed._meta.version || '?'} — ${parsed._meta.description || ''}`
+              : (parsed?.type ? `Type: ${parsed.type}` : null);
+          } catch { preview = null; }
+          return { name: f, size: stat.size, mtime: stat.mtime.toISOString(), preview };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+    res.json({ files });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Appliquer un fichier JSON de mise à jour depuis le serveur ────────
+router.post('/apply-server-update', requireAdmin, async (req, res) => {
+  try {
+    const { filename } = req.body;
+    if (!filename || typeof filename !== 'string') return res.status(400).json({ error: 'Nom de fichier requis' });
+    // Sécurité : interdire les traversées de répertoire
+    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      return res.status(400).json({ error: 'Nom de fichier invalide' });
+    }
+    if (EXCLUDE_JSON_FILES.has(filename)) return res.status(400).json({ error: 'Ce fichier ne peut pas être appliqué' });
+    const filePath = path.join(__dirname, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: `Fichier "${filename}" introuvable` });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch { return res.status(400).json({ error: 'Fichier JSON invalide — vérifiez la syntaxe' }); }
+
+    const { type, data } = parsed;
+    if (!type) return res.status(400).json({ error: 'Champ "type" manquant dans le fichier' });
+
+    const results = [];
+    if (type === 'multi') {
+      if (!Array.isArray(data)) return res.status(400).json({ error: 'Pour type "multi", data doit être un tableau' });
+      for (const block of data) {
+        if (!block.type || !block.data) { results.push({ type: block.type || '?', applied: 0, errors: ['Bloc invalide'] }); continue; }
+        results.push(await applyUpdateBlock(block.type, block.data));
+      }
+    } else {
+      results.push(await applyUpdateBlock(type, data));
+    }
+
+    const totalApplied = results.reduce((s, r) => s + r.applied, 0);
+    const allErrors    = results.flatMap(r => r.errors);
+    res.json({ ok: allErrors.length === 0 || totalApplied > 0, results, total_applied: totalApplied, errors: allErrors, filename });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

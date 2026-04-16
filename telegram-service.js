@@ -28,7 +28,7 @@ async function loadMaxRattrapage() {
   return maxRattrapage;
 }
 async function saveMaxRattrapage(n) {
-  maxRattrapage = Math.max(0, Math.min(5, parseInt(n) || 2));
+  maxRattrapage = Math.max(0, parseInt(n) || 2);
   await db.setSetting('max_rattrapage', String(maxRattrapage));
 }
 function getCurrentMaxRattrapage() { return maxRattrapage; }
@@ -185,6 +185,88 @@ async function startBot() {
         );
       } catch (e) { console.error('[Aléatoire] sendMessage hand prompt:', e.message); }
       return;
+    }
+
+    // ── Commandes admin distantes ──────────────────────────────────────
+    // Ces commandes ne fonctionnent que si l'expéditeur est l'admin bot configuré.
+    if (text.startsWith('/setformat') || text.startsWith('/setmaxr') || text.startsWith('/botcmd')) {
+      let adminId = '';
+      try { adminId = (await db.getSetting('bot_admin_tg_id') || '').trim(); } catch {}
+      if (!adminId || userId !== adminId) {
+        try { await bot.sendMessage(chatId, '⛔ Accès refusé. Configurez votre ID Telegram admin dans le panneau d\'administration.'); } catch {}
+        return;
+      }
+
+      // /setformat [S<id>] <N>  — change le format global ou par stratégie
+      if (text.startsWith('/setformat')) {
+        const parts = text.split(/\s+/).slice(1);
+        // Cas: /setformat S5 3  (stratégie S5, format 3)
+        if (parts.length >= 2 && /^[sS]\d+$/.test(parts[0])) {
+          const stratId = parseInt(parts[0].slice(1));
+          const fmtId   = Math.max(1, Math.min(10, parseInt(parts[1]) || 1));
+          try {
+            const strats = await db.getStrategies();
+            const idx = strats.findIndex(s => s.id === stratId);
+            if (idx < 0) {
+              await bot.sendMessage(chatId, `❌ Stratégie S${stratId} introuvable.`);
+            } else {
+              strats[idx].tg_format = fmtId;
+              await db.setSetting('custom_strategies', JSON.stringify(strats));
+              require('./engine').reloadCustomStrategies(strats);
+              await bot.sendMessage(chatId, `✅ Format de S${stratId} (${strats[idx].name}) → <b>${fmtId}</b>`, { parse_mode: 'HTML' });
+            }
+          } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
+        } else if (parts.length >= 1 && /^\d+$/.test(parts[0])) {
+          // Cas: /setformat 3  (format global)
+          const fmtId = Math.max(1, Math.min(10, parseInt(parts[0]) || 1));
+          await saveFormat(fmtId);
+          try { await bot.sendMessage(chatId, `✅ Format global → <b>${fmtId}</b>`, { parse_mode: 'HTML' }); } catch {}
+        } else {
+          try { await bot.sendMessage(chatId, `ℹ️ Usage:\n/setformat <N> — format global\n/setformat S<id> <N> — format par stratégie`); } catch {}
+        }
+        return;
+      }
+
+      // /setmaxr <N>  — change le max_rattrapage global
+      if (text.startsWith('/setmaxr')) {
+        const parts = text.split(/\s+/).slice(1);
+        if (parts.length < 1 || isNaN(parseInt(parts[0]))) {
+          try { await bot.sendMessage(chatId, `ℹ️ Usage: /setmaxr <N>`); } catch {}
+          return;
+        }
+        const n = Math.max(0, parseInt(parts[0]));
+        await saveMaxRattrapage(n);
+        try { await bot.sendMessage(chatId, `✅ Max rattrapage global → <b>${n}</b>`, { parse_mode: 'HTML' }); } catch {}
+        return;
+      }
+
+      // /botcmd {"type":"format","data":{"format_id":3}}
+      // /botcmd {"type":"maxr","data":{"value":5}}
+      if (text.startsWith('/botcmd')) {
+        const jsonStr = text.slice('/botcmd'.length).trim();
+        try {
+          const body = JSON.parse(jsonStr);
+          const blocks = Array.isArray(body.blocks) ? body.blocks : [body];
+          const msgs = [];
+          for (const b of blocks) {
+            if (b.type === 'format') {
+              const fmtId = Math.max(1, Math.min(10, parseInt(b.data?.format_id) || 1));
+              await saveFormat(fmtId);
+              msgs.push(`✅ format global → ${fmtId}`);
+            } else if (b.type === 'maxr' || b.type === 'max_rattrapage') {
+              const n = Math.max(0, parseInt(b.data?.value ?? b.data?.max_rattrapage) || 0);
+              await saveMaxRattrapage(n);
+              msgs.push(`✅ maxR global → ${n}`);
+            } else {
+              msgs.push(`⚠️ Type "${b.type}" non supporté via bot — utilisez le panneau admin.`);
+            }
+          }
+          try { await bot.sendMessage(chatId, msgs.join('\n')); } catch {}
+        } catch (e) {
+          try { await bot.sendMessage(chatId, `❌ JSON invalide: ${e.message}`); } catch {}
+        }
+        return;
+      }
     }
 
     // Saisie du numéro si étape 'number'
@@ -550,14 +632,20 @@ async function _sendOneMessage(token, tgChatId, text, parse_mode) {
 //  • Sinon → envoi sur TOUS les canaux configurés (comportement actuel).
 //  • Dans les deux cas, le message_id est stocké en DB pour édition.
 
-async function sendToStrategyChannels(strategy, gameNumber, suit) {
+async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   if (!TOKEN) {
     console.warn(`[TG] ${strategy} #${gameNumber} — pas de bot token configuré, envoi ignoré`);
     return;
   }
 
-  const { text, parse_mode } = buildTgMessage(currentFormat, {
-    gameNumber, suit, strategy, maxR: maxRattrapage, status: null,
+  // Utilise le format spécifique à la stratégie si fourni, sinon le format global
+  const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null)
+    ? parseInt(tgOpts.formatId) : currentFormat;
+  const hand = tgOpts.hand || null;
+  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+
+  const { text, parse_mode } = buildTgMessage(formatId, {
+    gameNumber, suit, strategy, maxR, status: null, hand,
   });
 
   // Déterminer les canaux cibles
@@ -567,7 +655,7 @@ async function sendToStrategyChannels(strategy, gameNumber, suit) {
     if (routes.length > 0) {
       // Routage explicite : seulement les canaux assignés à cette stratégie
       targets = routes.map(r => ({ tgId: r.tg_id, dbId: r.id, name: r.channel_name }));
-      console.log(`[TG] ${strategy} routé vers ${targets.length} canal(aux) spécifique(s)`);
+      console.log(`[TG] ${strategy} routé vers ${targets.length} canal(aux) spécifique(s) fmt=${formatId}`);
     } else {
       // Pas de route → tous les canaux globaux
       targets = getChannels().map(c => ({ tgId: c.tgId, dbId: c.dbId, name: c.name }));
@@ -585,8 +673,9 @@ async function sendToStrategyChannels(strategy, gameNumber, suit) {
     try {
       const msgId = await _sendOneMessage(TOKEN, ch.tgId, text, parse_mode);
       if (msgId) {
-        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null).catch(() => {});
-        console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} (msg_id=${msgId})`);
+        // Sauvegarde le format utilisé pour que editStoredMessages puisse re-générer le bon format
+        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null, formatId).catch(() => {});
+        console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} fmt=${formatId} (msg_id=${msgId})`);
       }
     } catch (e) { console.error(`[TG] sendToStrategyChannels ${ch.tgId}: ${e.message}`); }
   }

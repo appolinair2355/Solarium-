@@ -5,3 +5,11 @@ aiohttp
 aiofiles
 cryptg
 pdfplumber
+aiofiles
+aiohttp
+cryptg
+pdfplumber
+python-telegram-bot
+reportlab
+telegram
+telethon
