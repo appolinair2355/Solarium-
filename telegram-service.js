@@ -203,7 +203,7 @@ async function startBot() {
         // Cas: /setformat S5 3  (stratégie S5, format 3)
         if (parts.length >= 2 && /^[sS]\d+$/.test(parts[0])) {
           const stratId = parseInt(parts[0].slice(1));
-          const fmtId   = Math.max(1, Math.min(10, parseInt(parts[1]) || 1));
+          const fmtId   = Math.max(1, Math.min(11, parseInt(parts[1]) || 1));
           try {
             const strats = await db.getStrategies();
             const idx = strats.findIndex(s => s.id === stratId);
@@ -218,7 +218,7 @@ async function startBot() {
           } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
         } else if (parts.length >= 1 && /^\d+$/.test(parts[0])) {
           // Cas: /setformat 3  (format global)
-          const fmtId = Math.max(1, Math.min(10, parseInt(parts[0]) || 1));
+          const fmtId = Math.max(1, Math.min(11, parseInt(parts[0]) || 1));
           await saveFormat(fmtId);
           try { await bot.sendMessage(chatId, `✅ Format global → <b>${fmtId}</b>`, { parse_mode: 'HTML' }); } catch {}
         } else {
@@ -250,7 +250,7 @@ async function startBot() {
           const msgs = [];
           for (const b of blocks) {
             if (b.type === 'format') {
-              const fmtId = Math.max(1, Math.min(10, parseInt(b.data?.format_id) || 1));
+              const fmtId = Math.max(1, Math.min(11, parseInt(b.data?.format_id) || 1));
               await saveFormat(fmtId);
               msgs.push(`✅ format global → ${fmtId}`);
             } else if (b.type === 'maxr' || b.type === 'max_rattrapage') {
@@ -420,8 +420,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
-const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
@@ -445,6 +445,9 @@ function buildTgMessage(formatId, {
   rattrapage = 0,
   hand = null,
 }) {
+  // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
+  if (suit === 'distrib') formatId = 11;
+
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
   const sup     = SUPERSCRIPT[maxR] ?? String(maxR);

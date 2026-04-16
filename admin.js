@@ -304,7 +304,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(11, parseInt(tg_format) || 1)) : null,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -364,7 +364,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(11, parseInt(tg_format) || 1)) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -875,7 +875,7 @@ async function applyUpdateBlock(type, data) {
           threshold: parseInt(item.threshold), prediction_offset: Math.max(1, parseInt(item.prediction_offset) || 1),
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(11, parseInt(item.tg_format) || 1)) : null,
         };
         result.detail = (result.detail || '') + `\n• Mise à jour: "${item.name.trim()}"`;
       } else {
@@ -901,7 +901,7 @@ async function applyUpdateBlock(type, data) {
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           loss_type: ['sec', 'rattrapage', 'martingale'].includes(item.loss_type) ? item.loss_type : 'rattrapage',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(11, parseInt(item.tg_format) || 1)) : null,
         });
         result.detail = (result.detail || '') + `\n• Créée: "${item.name.trim()}"`;
       }

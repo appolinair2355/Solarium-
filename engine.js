@@ -38,13 +38,15 @@ async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy, 
   try {
     await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
+    // Extraire le format configuré sur ce canal (C1/C2/C3/DC)
+    const tgOpts = { formatId: customTg?.tg_format ?? null };
     // Pour les stratégies globales (C1/C2/C3/DC), on route via sendToStrategyChannels.
     // Si la stratégie a un token+canal propre → on utilise sendCustomAndStore.
     if (!strategy.startsWith('S') || strategy === 'S') {
       if (customTg?.bot_token && customTg?.channel_id) {
-        await sendCustomAndStore([customTg], strategy, gameNumber, predictedSuit).catch(() => {});
+        await sendCustomAndStore([customTg], strategy, gameNumber, predictedSuit, tgOpts).catch(() => {});
       } else {
-        await sendToStrategyChannels(strategy, gameNumber, predictedSuit);
+        await sendToStrategyChannels(strategy, gameNumber, predictedSuit, tgOpts);
       }
     }
   } catch (e) { console.error('savePrediction error:', e.message); }
@@ -794,6 +796,11 @@ class Engine {
       // ── Bloque l'émission si une prédiction est encore en attente ─
       if (Object.keys(state.pending).length > 0) {
         console.log(`[${channelId}] Bloqué — prédiction en attente de vérification`);
+        return;
+      }
+      // ── Bloque si le live trigger a déjà émis pour ce jeu (évite le doublon) ─
+      if (state.liveTriggeredGame === gn) {
+        console.log(`[${channelId}] Bloqué — déjà déclenché en live pour jeu #${gn}`);
         return;
       }
       // ── Vérification des exceptions avant d'émettre ───────────────
