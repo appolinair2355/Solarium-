@@ -260,20 +260,139 @@ function TgDirectChat() {
   );
 }
 
+function DeployLogsPanel() {
+  const [logs, setLogs]       = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/admin/deploy-logs', { credentials: 'include' });
+      const d = await r.json();
+      if (d.ok) setLogs(d.logs || []);
+    } catch {}
+    finally { setLoading(false); }
+  };
+
+  React.useEffect(() => { load(); }, []);
+
+  const statusColor = (s) => {
+    if (!s) return '#94a3b8';
+    if (s === 'success')  return '#4ade80';
+    if (s === 'startup')  return '#60a5fa';
+    if (s === 'installing' || s === 'started') return '#fbbf24';
+    if (s === 'partial')  return '#f97316';
+    if (s === 'error')    return '#f87171';
+    return '#94a3b8';
+  };
+  const statusLabel = (s) => {
+    if (!s) return '—';
+    if (s === 'success')    return '✅ Succès';
+    if (s === 'startup')    return '🔵 Démarrage';
+    if (s === 'installing') return '⏳ En cours';
+    if (s === 'started')    return '⏳ Démarré';
+    if (s === 'partial')    return '⚠️ Partiel';
+    if (s === 'error')      return '❌ Erreur';
+    return s;
+  };
+  const sourceLabel = (s) => {
+    if (s === 'render')         return '🖥️ Render (install)';
+    if (s === 'render_startup') return '🚀 Render (démarrage)';
+    if (s === 'manual')         return '🖱️ Manuel (Replit)';
+    return s || '—';
+  };
+  const fmt = (iso) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'medium' });
+  };
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(59,130,246,0.3)', marginTop: 20 }}>
+      <div className="tg-admin-header" style={{ marginBottom: 14 }}>
+        <span className="tg-admin-icon">📋</span>
+        <div style={{ flex: 1 }}>
+          <div className="tg-admin-title">Journal des déploiements</div>
+          <div className="tg-admin-subtitle">Trace de chaque installation et démarrage — Render.com + manuel</div>
+        </div>
+        <button onClick={load} disabled={loading} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(59,130,246,0.3)', background: 'rgba(59,130,246,0.1)', color: '#60a5fa', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+          {loading ? '⏳' : '🔄 Actualiser'}
+        </button>
+      </div>
+
+      {logs.length === 0 && !loading && (
+        <div style={{ padding: '12px 16px', borderRadius: 9, background: 'rgba(100,116,139,0.08)', color: '#64748b', fontSize: 12, textAlign: 'center' }}>
+          Aucun déploiement enregistré pour le moment.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {logs.map((log) => (
+          <div key={log.id} style={{ borderRadius: 12, border: `1px solid ${statusColor(log.status)}30`, background: 'rgba(15,23,42,0.6)', overflow: 'hidden' }}>
+            {/* En-tête de la ligne */}
+            <div
+              onClick={() => setExpanded(expanded === log.id ? null : log.id)}
+              style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 10, alignItems: 'center', padding: '10px 14px', cursor: 'pointer' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>{sourceLabel(log.source)}</div>
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                  {fmt(log.installed_at)}
+                  {log.hostname && <span style={{ marginLeft: 8, opacity: 0.7 }}>@ {log.hostname}</span>}
+                  {log.env && <span style={{ marginLeft: 6, opacity: 0.6 }}>({log.env})</span>}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right' }}>
+                {log.files_written > 0 && <div>📄 {log.files_written} fichier(s)</div>}
+                {log.files_errors  > 0 && <div style={{ color: '#f87171' }}>⚠️ {log.files_errors} erreur(s)</div>}
+                {log.duration_ms > 0 && <div style={{ opacity: 0.6 }}>{(log.duration_ms / 1000).toFixed(1)}s</div>}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(log.status), whiteSpace: 'nowrap' }}>{statusLabel(log.status)}</span>
+                {log.npm_install  && log.npm_install !== 'n/a' && log.npm_install !== 'skipped' && <span style={{ fontSize: 10, color: log.npm_install === 'success' ? '#4ade80' : '#f87171' }}>npm: {log.npm_install}</span>}
+                {log.build_status && log.build_status !== 'n/a' && log.build_status !== 'skipped' && <span style={{ fontSize: 10, color: log.build_status === 'success' ? '#4ade80' : '#f87171' }}>build: {log.build_status}</span>}
+              </div>
+              <span style={{ fontSize: 10, color: '#475569' }}>{expanded === log.id ? '▲' : '▼'}</span>
+            </div>
+
+            {/* Détails dépliables */}
+            {expanded === log.id && log.log_preview && (
+              <div style={{ padding: '0 14px 12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ marginTop: 10, maxHeight: 200, overflowY: 'auto', background: '#0a0f1e', borderRadius: 8, padding: '10px 12px', fontSize: 10, fontFamily: 'monospace', color: '#4ade80', lineHeight: 1.8 }}>
+                  {log.log_preview.split('\n').map((line, i) => (
+                    <div key={i} style={{ color: line.startsWith('❌') ? '#f87171' : line.startsWith('---') ? '#fbbf24' : '#4ade80' }}>{line}</div>
+                  ))}
+                </div>
+                {log.finished_at && (
+                  <div style={{ marginTop: 6, fontSize: 10, color: '#475569' }}>
+                    Terminé le : {fmt(log.finished_at)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProjectBackupPanel() {
   const [status, setStatus]       = React.useState(null);
   const [loading, setLoading]     = React.useState(false);
+  const [diffing, setDiffing]     = React.useState(false);
   const [installing, setInstalling] = React.useState(false);
   const [fileList, setFileList]   = React.useState(null);
   const [log, setLog]             = React.useState([]);
+  const [changedFiles, setChangedFiles] = React.useState(null);
   const [loadingList, setLoadingList] = React.useState(false);
+  const [checkedAt, setCheckedAt] = React.useState(null);
 
   const loadList = async () => {
     setLoadingList(true);
     try {
       const r = await fetch('/api/admin/project-backup/list', { credentials: 'include' });
       const d = await r.json();
-      if (r.ok) setFileList(d);
+      if (r.ok) { setFileList(d); setCheckedAt(new Date()); }
       else setStatus({ error: d.error });
     } catch (e) { setStatus({ error: e.message }); }
     finally { setLoadingList(false); }
@@ -283,7 +402,7 @@ function ProjectBackupPanel() {
 
   const handleBackup = async () => {
     if (!confirm('Enregistrer tous les fichiers du projet dans la base de données ? Les fichiers existants seront remplacés.')) return;
-    setLoading(true); setStatus(null); setLog([]);
+    setLoading(true); setStatus(null); setLog([]); setChangedFiles(null);
     try {
       const r = await fetch('/api/admin/project-backup', { method: 'POST', credentials: 'include' });
       const d = await r.json();
@@ -292,6 +411,23 @@ function ProjectBackupPanel() {
       await loadList();
     } catch (e) { setStatus({ error: e.message }); }
     finally { setLoading(false); }
+  };
+
+  const handleDiff = async () => {
+    setDiffing(true); setStatus(null); setLog([]); setChangedFiles(null);
+    try {
+      const r = await fetch('/api/admin/project-backup/diff', { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) { setStatus({ error: d.error }); return; }
+      if (d.saved === 0) {
+        setStatus({ success: `✅ Aucun fichier modifié — base de données déjà à jour (${d.skipped} fichier(s) inchangé(s)).` });
+      } else {
+        setStatus({ success: `✅ ${d.saved} fichier(s) modifié(s) mis à jour${d.added > 0 ? ` dont ${d.added} nouveau(x)` : ''}${d.skipped > 0 ? ` · ${d.skipped} inchangé(s) ignoré(s)` : ''}${d.errors > 0 ? ` · ${d.errors} erreur(s)` : ''}.` });
+        setChangedFiles(d.changed || []);
+      }
+      await loadList();
+    } catch (e) { setStatus({ error: e.message }); }
+    finally { setDiffing(false); }
   };
 
   const handleClear = async () => {
@@ -364,33 +500,56 @@ function ProjectBackupPanel() {
               ) : (
                 <div style={{ fontSize: 14, color: '#64748b' }}>Aucun fichier sauvegardé</div>
               )}
-              {fileList?.files?.[0]?.updated_at && (
-                <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                  Dernière mise à jour : {new Date(fileList.files[0].updated_at).toLocaleString('fr-FR')}
+              {fileList?.last_saved && (
+                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.18)' }}>
+                  <div style={{ fontSize: 10, color: '#4ade80', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
+                    Dernière sauvegarde en base
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#22c55e' }}>
+                    {new Date(fileList.last_saved).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </div>
+                </div>
+              )}
+              {checkedAt && (
+                <div style={{ fontSize: 10, color: '#334155', marginTop: 6 }}>
+                  Vérifié à {checkedAt.toLocaleTimeString('fr-FR')}
                 </div>
               )}
             </div>
             <button onClick={loadList} disabled={loadingList}
-              style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
-              🔄 Actualiser
+              style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#94a3b8', fontSize: 12, cursor: 'pointer', minWidth: 110 }}>
+              {loadingList ? '⏳ …' : '🔄 Actualiser'}
             </button>
           </div>
         </div>
 
         {/* Boutons principaux */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-          <button
-            onClick={handleBackup}
-            disabled={loading || installing}
-            style={{ padding: '18px 20px', borderRadius: 14, border: 'none', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14,
-              background: loading ? 'rgba(34,197,94,0.15)' : 'linear-gradient(135deg,#16a34a,#22c55e)',
-              color: loading ? '#4ade80' : '#fff', opacity: loading ? 0.7 : 1, transition: 'all 0.2s',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexDirection: 'column',
-            }}>
-            <span style={{ fontSize: 28 }}>{loading ? '⏳' : '📤'}</span>
-            <span>{loading ? 'Enregistrement…' : 'Enregistrer les fichiers'}</span>
-            <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>Replit → Base de données</span>
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={handleBackup}
+              disabled={loading || installing || diffing}
+              style={{ padding: '14px 20px', borderRadius: 14, border: 'none', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 13,
+                background: loading ? 'rgba(34,197,94,0.15)' : 'linear-gradient(135deg,#16a34a,#22c55e)',
+                color: loading ? '#4ade80' : '#fff', opacity: loading ? 0.7 : 1, transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexDirection: 'column',
+              }}>
+              <span style={{ fontSize: 22 }}>{loading ? '⏳' : '📤'}</span>
+              <span>{loading ? 'Enregistrement…' : 'Enregistrer les fichiers'}</span>
+              <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.85 }}>Tous les fichiers → Base</span>
+            </button>
+            <button
+              onClick={handleDiff}
+              disabled={loading || installing || diffing}
+              style={{ padding: '10px 20px', borderRadius: 12, border: '2px solid rgba(34,197,94,0.4)', cursor: diffing ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 12,
+                background: diffing ? 'rgba(34,197,94,0.08)' : 'rgba(34,197,94,0.1)',
+                color: diffing ? '#4ade80' : '#22c55e', opacity: diffing ? 0.7 : 1, transition: 'all 0.2s',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+              <span>{diffing ? '⏳' : '🔄'}</span>
+              <span>{diffing ? 'Analyse en cours…' : 'Modifiés uniquement'}</span>
+            </button>
+          </div>
 
           <button
             onClick={handleInstall}
@@ -406,9 +565,39 @@ function ProjectBackupPanel() {
           </button>
         </div>
 
+        {/* Bouton téléchargement ZIP */}
+        <a
+          href="/api/admin/project-backup/zip"
+          download
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '10px 20px', borderRadius: 12, textDecoration: 'none', fontWeight: 700, fontSize: 12,
+            background: 'rgba(168,85,247,0.1)', border: '2px solid rgba(168,85,247,0.35)', color: '#c084fc',
+            transition: 'all 0.2s', marginBottom: 4,
+          }}>
+          <span>📦</span>
+          <span>Télécharger le ZIP de déploiement</span>
+          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>fichiers actuels</span>
+        </a>
+
         {!fileList?.total && (
           <div style={{ padding: '10px 14px', borderRadius: 9, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)', color: '#fbbf24', fontSize: 12, textAlign: 'center' }}>
             ℹ️ Aucun fichier en DB — cliquez sur "Enregistrer les fichiers" d'abord
+          </div>
+        )}
+
+        {/* Liste des fichiers modifiés lors du dernier diff */}
+        {changedFiles && changedFiles.length > 0 && (
+          <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 12, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)' }}>
+            <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+              🔄 Fichiers mis à jour ({changedFiles.length})
+            </div>
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {changedFiles.map((f, i) => (
+                <div key={i} style={{ fontSize: 11, color: '#86efac', fontFamily: 'monospace', lineHeight: 1.6 }}>
+                  ✅ {f}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -581,6 +770,7 @@ function AdminPanel() {
     { value: '5',  label: 'Barre de progression' },
     { value: '6',  label: 'Classique' },
     { value: '7',  label: 'Joueur Carte' },
+    { value: '11', label: '📊 Distribution' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -702,7 +892,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -715,6 +905,7 @@ function AdminPanel() {
         channel_id: stratChForm.channel_id.trim(),
         bot_token_preview: stratChForm.bot_token.trim().slice(0,12) + '…',
         format_label: fmtObj ? fmtObj.label : '— Global —',
+        format_id: stratChForm.tg_format ? parseInt(stratChForm.tg_format) : null,
         wins:    parseInt(st.wins)    || 0,
         losses:  parseInt(st.losses)  || 0,
         pending: parseInt(st.pending) || 0,
@@ -1132,6 +1323,7 @@ function AdminPanel() {
           channel_id: cfg.channel_id?.trim() || '',
           bot_token_preview: cfg.bot_token ? cfg.bot_token.trim().slice(0,12) + '…' : '',
           format_label: fmtObj ? fmtObj.label : '— Global —',
+          format_id: cfg.tg_format ? parseInt(cfg.tg_format) : null,
           max_rattrapage: maxRattrapage,
           wins:    parseInt(st.wins)    || 0,
           losses:  parseInt(st.losses)  || 0,
@@ -1623,7 +1815,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution' };
 
   return (
     <>
@@ -1714,10 +1906,12 @@ function AdminPanel() {
                     background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)',
                     letterSpacing: 0.5,
                   }}>{modeLabels[successModal.mode] || successModal.mode}</span>
+                  {successModal.mode !== 'distribution' && (
                   <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
                     background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.35)',
                     letterSpacing: 0.5,
                   }}>{successModal.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</span>
+                  )}
                   <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, fontWeight: 800,
                     background: successModal.visibility === 'all' ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)',
                     color: successModal.visibility === 'all' ? '#4ade80' : '#94a3b8',
@@ -2547,16 +2741,22 @@ function AdminPanel() {
               perdu:   `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ❌`,
             },
             {
-              id: 9, label: '🤖 Joueur dédié', icon: '🤖',
+              id: 9, label: 'Joueur dédié', icon: '🤖',
               preview: `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ⌛`,
               result:  `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ✅${RE[0]}GAGNÉ`,
               perdu:   `🤖 joueur :${G}\n🔰Couleur de la carte :♠️\n🔰 Rattrapages : ${maxRattrapage}(🔰+${maxRattrapage})\n🧨 Résultats : ❌`,
             },
             {
-              id: 10, label: '🎮 Banquier dédié', icon: '🎮',
+              id: 10, label: 'Banquier dédié', icon: '🎮',
               preview: `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ⌛`,
               result:  `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ✅${RE[0]}GAGNÉ`,
               perdu:   `🎮 banquier №${G}\n⚜️ Couleur de la carte:♠️\n🎰 Poursuite  🔰+${maxRattrapage} jeux\n🗯️ Résultats : ❌`,
+            },
+            {
+              id: 11, label: 'Distribution', icon: '🃏',
+              preview: `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n⌛ En cours de vérification...`,
+              result:  `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n✅ 0️⃣GAGNÉ 🎯`,
+              perdu:   `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n❌ Non distribué`,
             },
           ];
 
@@ -2698,8 +2898,9 @@ function AdminPanel() {
                           : s.mode === 'absence_apparition' ? 'Abs→App'
                           : s.mode === 'apparition_absence' ? 'App→Abs'
                           : s.mode === 'taux_miroir' ? '⚖️ Miroir'
+                          : s.mode === 'distribution' ? '📊 Distribution'
                           : s.mode;
-                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence';
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution';
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
@@ -3088,7 +3289,7 @@ function AdminPanel() {
                 )}
 
                 {/* Main à surveiller : Joueur / Banquier */}
-                {stratForm.mode !== 'relance' && (
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'distribution' && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>Main à surveiller</label>
                   <div style={{ display: 'flex', gap: 10 }}>
@@ -3122,7 +3323,7 @@ function AdminPanel() {
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
                   <select value={stratForm.mode} onChange={e => {
                     const m = e.target.value;
-                    const isNew = m === 'absence_apparition' || m === 'apparition_absence';
+                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution';
                     setStratForm(p => ({
                       ...p,
                       mode: m,
@@ -3135,6 +3336,7 @@ function AdminPanel() {
                     <option value="apparents">Apparents — prédit le fréquent</option>
                     <option value="absence_apparition">Absence → Apparition</option>
                     <option value="apparition_absence">Apparition → Absence</option>
+                    <option value="distribution">📊 Distribution</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
@@ -3142,6 +3344,11 @@ function AdminPanel() {
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
                       ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
+                    </div>
+                  )}
+                  {stratForm.mode === 'distribution' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(99,211,255,0.08)', border: '1px solid rgba(99,211,255,0.25)', fontSize: 12, color: '#7dd3fc', lineHeight: 1.6 }}>
+                      📊 Compte les <strong>absences de distribution</strong> de chaque costume. Dès qu'un costume manque depuis ≥ B jeux consécutifs et est <strong>enfin distribué</strong> (réapparaît dans la main), il est prédit automatiquement pour le jeu suivant. Déclenchement en temps réel — toujours le costume distribué.
                     </div>
                   )}
                   {stratForm.mode === 'apparition_absence' && (
@@ -3217,15 +3424,15 @@ function AdminPanel() {
                   ) : (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
-                        {(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence')
+                        {(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence' || stratForm.mode === 'distribution')
                           ? 'Minimum B (≥4 requis)'
                           : 'Seuil B (1–50)'}
                       </label>
                       <input type="number"
-                        min={(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence') ? 4 : 1}
+                        min={(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence' || stratForm.mode === 'distribution') ? 4 : 1}
                         max={50} value={stratForm.threshold}
                         onChange={e => {
-                          const min = (stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence') ? 4 : 1;
+                          const min = (stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence' || stratForm.mode === 'distribution') ? 4 : 1;
                           setStratForm(p => ({ ...p, threshold: Math.max(min, parseInt(e.target.value) || min) }));
                         }}
                         style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 14 }}
@@ -3576,15 +3783,15 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
               </div>
               )}
 
-              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
+              {/* Presets de combinaison — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -3604,8 +3811,8 @@ function AdminPanel() {
                 </div>
               </div>}
 
-              {/* Mappings manuels — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
+              {/* Mappings manuels — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -5186,7 +5393,7 @@ function AdminPanel() {
                       onClick={() => {
                         if (isOpen) { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); return; }
                         setStratChOpen(s.id);
-                        setStratChForm({ bot_token: '', channel_id: '', tg_format: null });
+                        setStratChForm({ bot_token: '', channel_id: '', tg_format: s.tg_format ?? null });
                       }}
                       style={{
                         fontSize: 11, padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontWeight: 700,
@@ -5215,7 +5422,12 @@ function AdminPanel() {
                                 </div>
                                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
                                   Format : <span style={{ color: '#a78bfa', fontWeight: 700 }}>
-                                    {tgt.tg_format ? (TG_FORMATS.find(f => String(f.value) === String(tgt.tg_format))?.label || `Format ${tgt.tg_format}`) : (TG_FORMATS[0]?.label || 'Par défaut')}
+                                    {(() => {
+                                      const effectiveFmt = tgt.tg_format ?? s.tg_format;
+                                      if (!effectiveFmt) return TG_FORMATS[0]?.label || 'Par défaut';
+                                      const fObj = TG_FORMATS.find(f => String(f.value) === String(effectiveFmt));
+                                      return fObj ? `#${effectiveFmt} — ${fObj.label}` : `Format ${effectiveFmt}`;
+                                    })()}
                                   </span>
                                 </div>
                               </div>
@@ -5736,7 +5948,12 @@ function AdminPanel() {
       )}
 
       {/* ── TAB : MISE À JOUR PAR BASE DE DONNÉES ── */}
-      {adminTab === 'maj-db' && <ProjectBackupPanel />}
+      {adminTab === 'maj-db' && (
+        <>
+          <ProjectBackupPanel />
+          <DeployLogsPanel />
+        </>
+      )}
 
     </div>
 
@@ -5796,7 +6013,7 @@ function AdminPanel() {
           {/* Infos configuration */}
           <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '18px 20px', marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>📡 Configuration Telegram</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Canal ID</div>
                 <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 700, fontFamily: 'monospace', wordBreak: 'break-all' }}>{tgSaveModal.channel_id}</div>
@@ -5805,14 +6022,79 @@ function AdminPanel() {
                 <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Bot Token</div>
                 <div style={{ fontSize: 13, color: '#94a3b8', fontFamily: 'monospace' }}>{tgSaveModal.bot_token_preview}</div>
               </div>
-              <div>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Format de prédiction</div>
-                <div style={{ fontSize: 13, color: '#a78bfa', fontWeight: 700 }}>📋 {tgSaveModal.format_label}</div>
-              </div>
-              <div>
+              <div style={{ gridColumn: '1 / -1' }}>
                 <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3 }}>Max rattrapages</div>
                 <div style={{ fontSize: 13, color: '#fbbf24', fontWeight: 700 }}>🔄 {tgSaveModal.max_rattrapage} tentative{tgSaveModal.max_rattrapage > 1 ? 's' : ''}</div>
               </div>
+            </div>
+
+            {/* Format de prédiction — section détaillée */}
+            <div style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)', borderRadius: 10, padding: '14px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>📋 Format de prédiction</span>
+                {tgSaveModal.format_id ? (
+                  <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 20, fontWeight: 800, background: 'rgba(167,139,250,0.25)', color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.5)' }}>
+                    #{tgSaveModal.format_id}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 20, fontWeight: 700, background: 'rgba(100,116,139,0.2)', color: '#64748b', border: '1px solid rgba(100,116,139,0.3)' }}>
+                    Global
+                  </span>
+                )}
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#a78bfa', marginBottom: 10 }}>
+                {tgSaveModal.format_label}
+              </div>
+              {tgSaveModal.format_id ? (() => {
+                const maxR = tgSaveModal.max_rattrapage ?? 20;
+                const G = 1234;
+                const PREVIEWS = {
+                  1:  `⚜ #N${G} Игрок    +${maxR} ⚜\n◽Масть ♥️\n◼️ Результат ⌛`,
+                  2:  `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\nGame ${G} :♥️\nEn cours :⌛`,
+                  3:  `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♥️:⌛\nMode: Dogon ${maxR}`,
+                  4:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♥️ Cœur\n📊 Statut: En cours ⏳\n🔍 Vérification en cours`,
+                  5:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♥️ Cœur\n\n🔍 Vérification jeu #${G}\n🟦⬜⬜⬜⬜\n⏳ Analyse...`,
+                  6:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♥️ Cœur\n⏳ Statut: En cours`,
+                  7:  `Le joueur recevra une carte ♥️ Cœur\n\n⏳ En attente du résultat...`,
+                  8:  `🤖 joueur :${G}\n🔰Couleur de la carte :♥️\n🔰 Rattrapages : ${maxR}(🔰+${maxR})\n🧨 Résultats : ⌛`,
+                  9:  `🤖 joueur :${G}\n🔰Couleur de la carte :♥️\n🔰 Rattrapages : ${maxR}(🔰+${maxR})\n🧨 Résultats : ⌛`,
+                  10: `🎮 banquier №${G}\n⚜️ Couleur de la carte:♥️\n🎰 Poursuite  🔰+${maxR} jeux\n🗯️ Résultats : ⌛`,
+                  11: `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n⌛ En cours de vérification...`,
+                };
+                const WIN_PREVIEWS = {
+                  1:  `⚜ #N${G} Игрок    +${maxR} ⚜\n◽Масть ♥️\n◼️ Результат ✅ 🎯`,
+                  2:  `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\nGame ${G} :♥️\nStatut :✅ 🎯`,
+                  3:  `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♥️:✅ 🎯\nMode: Dogon ${maxR}`,
+                  4:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♥️ Cœur\n📊 Statut: ✅ 🎯\n🔍 Vérifié ✓`,
+                  5:  `🎰 PRÉDICTION #${G}\n🎯 Couleur: ♥️ Cœur\n\n🔍 Vérification jeu #${G}\n🟩⬜⬜⬜⬜\n✅ 🎯`,
+                  6:  `🏆 PRÉDICTION #${G}\n\n🎯 Couleur: ♥️ Cœur\n✅ Statut: ✅ 🎯`,
+                  7:  `Le joueur recevra une carte ♥️ Cœur\n\n✅ GAGNÉ 🎯`,
+                  8:  `🤖 joueur :${G}\n🔰Couleur de la carte :♥️\n🔰 Rattrapages : ${maxR}(🔰+${maxR})\n🧨 Résultats : ✅🎯GAGNÉ`,
+                  9:  `🤖 joueur :${G}\n🔰Couleur de la carte :♥️\n🔰 Rattrapages : ${maxR}(🔰+${maxR})\n🧨 Résultats : ✅🎯GAGNÉ`,
+                  10: `🎮 banquier №${G}\n⚜️ Couleur de la carte:♥️\n🎰 Poursuite  🔰+${maxR} jeux\n🗯️ Résultats : ✅🎯GAGNÉ`,
+                  11: `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n✅ 0️⃣GAGNÉ 🎯`,
+                };
+                const fid = parseInt(tgSaveModal.format_id);
+                const prev = PREVIEWS[fid];
+                const winPrev = WIN_PREVIEWS[fid];
+                if (!prev) return null;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ background: '#1e2433', borderRadius: 8, padding: '10px 12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 9, color: '#93c5fd', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>⌛ Envoi initial — en attente</div>
+                      <pre style={{ margin: 0, fontSize: '0.72rem', color: '#cbd5e1', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{prev}</pre>
+                    </div>
+                    <div style={{ background: '#1a2a1a', borderRadius: 8, padding: '10px 12px', border: '1px solid rgba(34,197,94,0.15)' }}>
+                      <div style={{ fontSize: 9, color: '#86efac', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Après résultat — Gagné</div>
+                      <pre style={{ margin: 0, fontSize: '0.72rem', color: '#86efac', fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{winPrev}</pre>
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', padding: '8px 0' }}>
+                  ℹ️ Le format global sera appliqué (défini dans Paramètres → Format des messages)
+                </div>
+              )}
             </div>
           </div>
 
