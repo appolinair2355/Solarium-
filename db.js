@@ -260,13 +260,13 @@ async function getPredictions(opts = {}) {
 async function createPrediction(data) {
   if (USE_PG) {
     try {
-      await pgPool.query(
+      const r = await pgPool.query(
         `INSERT INTO predictions (strategy, game_number, predicted_suit, triggered_by)
          VALUES ($1,$2,$3,$4) ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
         [data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null]
       );
-    } catch (e) { console.error('createPrediction error:', e.message); }
-    return;
+      return r.rowCount > 0; // true = nouveau, false = doublon (ON CONFLICT DO NOTHING)
+    } catch (e) { console.error('createPrediction error:', e.message); return false; }
   }
   return jsondb.createPrediction(data);
 }

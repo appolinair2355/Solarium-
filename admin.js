@@ -302,8 +302,12 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     if (err) { console.log('[Strategy POST] Validation échouée:', err); return res.status(400).json({ error: err }); }
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
-    const tg_targets = parseTgTargets(req.body.tg_targets);
-    const exceptions = parseExceptions(req.body.exceptions);
+    const tg_targets  = parseTgTargets(req.body.tg_targets);
+    const exceptions  = parseExceptions(req.body.exceptions);
+    const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
+      ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
+          .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
+      : [];
     const isComb     = strategy_type === 'combinaison';
     const isRelance  = mode === 'relance';
     const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
@@ -333,6 +337,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
               interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
+      mirror_pairs,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -364,8 +369,12 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     if (idx === -1) { console.log('[Strategy PUT] Stratégie introuvable id=' + id); return res.status(404).json({ error: 'Stratégie introuvable' }); }
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
-    const tg_targets = parseTgTargets(req.body.tg_targets);
-    const exceptions = parseExceptions(req.body.exceptions);
+    const tg_targets  = parseTgTargets(req.body.tg_targets);
+    const exceptions  = parseExceptions(req.body.exceptions);
+    const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
+      ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
+          .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
+      : [];
     const isComb    = strategy_type === 'combinaison';
     const isRelance = mode === 'relance';
     const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
@@ -393,6 +402,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
               interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
+      mirror_pairs,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -2270,6 +2280,119 @@ router.post('/project-install', requireAdmin, async (req, res) => {
     await db.updateDeployLog(deployLogId, { status: 'error', log_text: e.message, finished_at: new Date(), duration_ms: Date.now() - startedAt }).catch(() => {});
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Settings génériques (clé/valeur) ──────────────────────────────────────
+const ALLOWED_SETTINGS = ['render_service_id', 'render_api_key', 'render_base_url'];
+router.post('/settings', requireAdmin, async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    if (!key || !ALLOWED_SETTINGS.includes(key)) return res.status(400).json({ error: 'Clé non autorisée : ' + key });
+    if (value === undefined || value === null || value === '') return res.status(400).json({ error: 'Valeur vide' });
+    await db.setSetting(key, String(value).trim());
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/settings/:key', requireAdmin, async (req, res) => {
+  try {
+    if (!ALLOWED_SETTINGS.includes(req.params.key)) return res.status(400).json({ error: 'Clé non autorisée' });
+    const val = await db.getSetting(req.params.key);
+    res.json({ value: val || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Arrêt serveur Replit ───────────────────────────────────────────────────
+router.post('/stop-server', requireAdmin, (req, res) => {
+  res.json({ ok: true, message: 'Serveur Replit en cours d\'arrêt...' });
+  setTimeout(() => { console.log('[Admin] Arrêt serveur demandé par admin'); process.exit(0); }, 600);
+});
+
+// ── Suspension service Render ──────────────────────────────────────────────
+router.post('/stop-render', requireAdmin, async (req, res) => {
+  try {
+    const serviceId = await db.getSetting('render_service_id');
+    const apiKey    = await db.getSetting('render_api_key');
+    if (!serviceId || !apiKey)
+      return res.status(400).json({ error: 'Configurez d\'abord le Render Service ID et la Render API Key dans Système.' });
+    const fetch = require('node-fetch');
+    const r = await fetch(`https://api.render.com/v1/services/${serviceId}/suspend`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) { const t = await r.text(); return res.status(500).json({ error: `Render API ${r.status}: ${t}` }); }
+    res.json({ ok: true, message: 'Service Render suspendu.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── HÉBERGEMENT BOTS TELEGRAM ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+const botHost = require('./bot-host');
+
+// Lister tous les bots hébergés
+router.get('/bots', requireAdmin, async (req, res) => {
+  try { res.json(await botHost.getAll()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Créer un nouveau bot (avec ZIP en base64 — fichier principal détecté automatiquement)
+router.post('/bots', requireAdmin, async (req, res) => {
+  try {
+    const { name, language, token, channel_id, zip_base64 } = req.body;
+    if (!name || !token) return res.status(400).json({ error: 'name et token requis' });
+    if (!zip_base64) return res.status(400).json({ error: 'zip_base64 requis' });
+    const bot = await botHost.createBot({ name, language, token, channel_id, zip_base64 });
+    res.json({ ok: true, bot });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Mettre à jour le code d'un bot (nouveau ZIP)
+router.post('/bots/:id/upload', requireAdmin, async (req, res) => {
+  try {
+    const { zip_base64 } = req.body;
+    if (!zip_base64) return res.status(400).json({ error: 'zip_base64 requis' });
+    await botHost.updateCode(parseInt(req.params.id), zip_base64);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Démarrer un bot
+router.post('/bots/:id/start', requireAdmin, async (req, res) => {
+  try {
+    const result = await botHost.startBot(parseInt(req.params.id));
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Arrêter un bot
+router.post('/bots/:id/stop', requireAdmin, async (req, res) => {
+  try {
+    const result = botHost.stopBot(parseInt(req.params.id));
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Supprimer un bot
+router.delete('/bots/:id', requireAdmin, async (req, res) => {
+  try {
+    await botHost.deleteBot(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Logs d'un bot
+router.get('/bots/:id/logs', requireAdmin, (req, res) => {
+  try { res.json(botHost.getLogs(parseInt(req.params.id))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Valider un token Telegram
+router.post('/bots/validate-token', requireAdmin, async (req, res) => {
+  try {
+    const result = await botHost.validateToken(req.body.token);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;

@@ -37,7 +37,11 @@ function extractSuits(cards) {
 
 async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy, customTg) {
   try {
-    await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
+    const inserted = await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
+    if (!inserted) {
+      console.warn(`[${strategy}] Prédiction #${gameNumber} déjà existante — Telegram ignoré (doublon évité)`);
+      return;
+    }
     console.log(`[${strategy}] Prédiction #${gameNumber} ${SUIT_DISPLAY[predictedSuit] || predictedSuit}`);
     // Extraire le format configuré sur ce canal (C1/C2/C3/DC)
     const tgOpts = { formatId: customTg?.tg_format ?? null };
@@ -319,15 +323,20 @@ class Engine {
       const stratMaxR = (state.config.max_rattrapage !== undefined && state.config.max_rattrapage !== null)
         ? parseInt(state.config.max_rattrapage) : globalMaxR;
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
-      db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).catch(() => {});
+      const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
+      db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(inserted => {
+        if (!inserted) {
+          console.warn(`[${stratId}] _forceNextPrediction #${nextGn} déjà existante — Telegram ignoré`);
+          return;
+        }
+        if (tgs.length > 0) {
+          sendCustomAndStore(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
+        } else {
+          sendToStrategyChannels(stratId, nextGn, suit, stratTgOpts).catch(() => {});
+        }
+      }).catch(() => {});
       // Stocker maxR dans le pending pour que la résolution utilise la même valeur
       state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR };
-      const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
-      if (tgs.length > 0) {
-        sendCustomAndStore(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
-      } else {
-        sendToStrategyChannels(stratId, nextGn, suit, stratTgOpts).catch(() => {});
-      }
     }
   }
 
@@ -464,11 +473,17 @@ class Engine {
     for (const s of signals) { suitVotes[s.suit] = (suitVotes[s.suit] || 0) + 1; }
     const ps = Object.entries(suitVotes).sort((a,b) => b[1]-a[1])[0][0];
 
+    let inserted = false;
     try {
-      await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: ps, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
-      console.log(`[${channelId}] Multi-strat prédiction #${targetGame} ${SUIT_DISPLAY[ps]||ps} (${matchMode}, sources: ${signals.map(s=>s.srcId).join(',')})`);
+      inserted = await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: ps, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
+      if (inserted) {
+        console.log(`[${channelId}] Multi-strat prédiction #${targetGame} ${SUIT_DISPLAY[ps]||ps} (${matchMode}, sources: ${signals.map(s=>s.srcId).join(',')})`);
+      } else {
+        console.warn(`[${channelId}] Multi-strat prédiction #${targetGame} déjà existante — Telegram ignoré (doublon évité)`);
+      }
     } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
     state.pending[targetGame] = { suit: ps, rattrapage: 0, maxR: stratMaxR };
+    if (!inserted) return;
 
     const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
     if (tgs.length > 0) {
@@ -494,7 +509,7 @@ class Engine {
     }
   }
 
-  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}) {
+  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}, handCards = null) {
     if (maxR === null) maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(pending)) {
       const pgNum = parseInt(pg);
@@ -525,6 +540,24 @@ class Engine {
           if (onLoss) onLoss(true, ps, pgNum, rattrapage);
         } else if (gn === pgNum + effectiveMaxR) {
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = non-naturel après ${effectiveMaxR} tentatives → perdu`);
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue; // skip la résolution par costume normale
+
+      // ── Résolution spéciale mode Carte 2/3 ─────────────────────────────
+      } else if (ps === 'deux' || ps === 'trois') {
+        const hc = Array.isArray(handCards) ? handCards : Array.isArray(pCards) ? pCards : [];
+        const targetCount = ps === 'deux' ? 2 : 3;
+        if (hc.length === targetCount) {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [Carte${targetCount}] Jeu #${gn} = ${targetCount} cartes → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          console.log(`[${strategy}] [Carte${targetCount}] Jeu #${gn} = pas ${targetCount} cartes après ${effectiveMaxR} tentatives → perdu`);
           await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
           delete pending[pg];
           if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
@@ -955,12 +988,13 @@ class Engine {
     };
 
     if (Object.keys(state.pending).length > 0) {
+      const handCards = cfg.hand === 'banquier' ? bCards : pCards;
       await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
         if (won) this._onStratWin(channelId);
         else this._onStratLoss(channelId, gn, ps);
-      }, stratMaxRForResolve, stratTgOpts);
+      }, stratMaxRForResolve, stratTgOpts, handCards);
     }
 
     // ── Logique de déclenchement : ne traiter ce jeu qu'une seule fois ──
@@ -989,11 +1023,17 @@ class Engine {
       // ── Vérification des exceptions avant d'émettre ───────────────
       if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
 
+      let inserted = false;
       try {
-        await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
-        console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
+        inserted = await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
+        if (inserted) {
+          console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
+        } else {
+          console.warn(`[${channelId}] Prédiction #${next} déjà existante — Telegram ignoré (doublon évité)`);
+        }
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
       state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve };
+      if (!inserted) return; // Prédiction déjà en DB → ne pas renvoyer le message Telegram
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
         await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
@@ -1067,6 +1107,39 @@ class Engine {
         state.counts['distrib'] = (state.counts['distrib'] || 0) + 1;
         // pas d'émission ici — on attend la prochaine distribution
       }
+
+    } else if (mode === 'carte_3_vers_2') {
+      // ── Mode : 3 cartes → prédit 2 cartes ────────────────────────────────
+      // Compte les jeux où la main choisie a tiré 3 cartes.
+      // Dès que le compteur atteint B → prédit que le prochain jeu aura 2 cartes (naturel).
+      const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
+      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
+      if (hasThreeCards) {
+        state.counts['c3v2'] = (state.counts['c3v2'] || 0) + 1;
+        if (state.counts['c3v2'] >= B) {
+          console.log(`[${channelId}] [Carte3→2] ${state.counts['c3v2']}× 3 cartes (seuil≥${B}) → prédit 2 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'deux', 'trois');
+          state.counts['c3v2'] = 0;
+        }
+      }
+      // Les jeux à 2 cartes ne modifient pas le compteur
+
+    } else if (mode === 'carte_2_vers_3') {
+      // ── Mode : 2 cartes → prédit 3 cartes ────────────────────────────────
+      // Compte les jeux où la main choisie a reçu exactement 2 cartes (naturel).
+      // Dès que le compteur atteint B → prédit que le prochain jeu tirera 3 cartes.
+      const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
+      const hasTwoCards = Array.isArray(handCardsNow) && handCardsNow.length === 2;
+      if (hasTwoCards) {
+        state.counts['c2v3'] = (state.counts['c2v3'] || 0) + 1;
+        if (state.counts['c2v3'] >= B) {
+          console.log(`[${channelId}] [Carte2→3] ${state.counts['c2v3']}× 2 cartes (seuil≥${B}) → prédit 3 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'trois', 'deux');
+          state.counts['c2v3'] = 0;
+        }
+      }
+      // Les jeux à 3 cartes ne modifient pas le compteur
+
     } else if (mode === 'apparition_absence') {
       // Compte les apparitions consécutives (sans seuil max).
       // Dès que le costume disparaît après >= B apparitions → prédit la carte configurée (mapping).
@@ -1120,11 +1193,12 @@ class Engine {
 
       // 3. Trouver la paire (dominant, retardataire) avec le plus grand écart ≥ seuil
       let bestDiff = 0;
+      let bestPairThreshold = B;
       let laggingSuit = null;
       let dominantSuit = null;
 
-      // Utilise les paires configurées avec leurs seuils individuels.
-      // Si aucune paire configurée → seuil global B sur toutes les combinaisons.
+      // Chaque paire cochée a son propre seuil défini par l'admin.
+      // Si aucune paire cochée → seuil global B sur toutes les combinaisons.
       const configuredPairs = Array.isArray(cfg.mirror_pairs) && cfg.mirror_pairs.length > 0
         ? cfg.mirror_pairs
         : null;
@@ -1133,13 +1207,15 @@ class Engine {
         for (const pairCfg of configuredPairs) {
           const sA = pairCfg.a;
           const sB = pairCfg.b;
+          // Seuil individuel défini par l'admin pour cette paire ; B en fallback si non défini
           const pairThreshold = (pairCfg.threshold && pairCfg.threshold > 0) ? pairCfg.threshold : B;
           const diff = (state.mirrorCounts[sA] || 0) - (state.mirrorCounts[sB] || 0);
           const absDiff = Math.abs(diff);
           if (absDiff >= pairThreshold && absDiff > bestDiff) {
-            bestDiff     = absDiff;
-            dominantSuit = diff > 0 ? sA : sB;
-            laggingSuit  = diff > 0 ? sB : sA;
+            bestDiff          = absDiff;
+            bestPairThreshold = pairThreshold;
+            dominantSuit      = diff > 0 ? sA : sB;
+            laggingSuit       = diff > 0 ? sB : sA;
           }
         }
       } else {
@@ -1162,7 +1238,7 @@ class Engine {
       // Le compteur continue de s'accumuler après la prédiction — reset UNIQUEMENT à l'heure pile
       if (laggingSuit) {
         const ps = laggingSuit;
-        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ seuil → prédit le retardataire ${ps}`);
+        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ écart(${bestPairThreshold}) → prédit ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
       }
     }
@@ -1237,6 +1313,26 @@ class Engine {
         continue; // ne pas appeler tryResolve pour distribution
       }
 
+      // ── Résolution live spéciale pour les modes Carte 2/3 ───────────
+      if (cfg.mode === 'carte_3_vers_2' || cfg.mode === 'carte_2_vers_3') {
+        const hCards = hand === 'banquier' ? bankerCards : playerCards;
+        if (handDone && Array.isArray(hCards)) {
+          for (const [pg, info] of Object.entries(entry.pending)) {
+            if (info.suit !== 'deux' && info.suit !== 'trois') continue;
+            const pgNum = parseInt(pg);
+            if (pgNum > gn) continue;
+            const targetCount = info.suit === 'deux' ? 2 : 3;
+            if (hCards.length === targetCount) {
+              const rattrapage = gn - pgNum;
+              console.log(`[S${idStr}] ⚡ Live: ${targetCount} cartes (${hand}) jeu #${gn} → gagne immédiat (R${rattrapage})`);
+              await resolvePrediction(`S${idStr}`, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, stratTgOpts);
+              delete entry.pending[pg];
+            }
+          }
+        }
+        continue; // ne pas appeler tryResolve pour ces modes
+      }
+
       await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone, stratTgOpts);
     }
   }
@@ -1249,7 +1345,8 @@ class Engine {
       const { config } = entry;
       if (!config?.enabled) continue;
       const { mode, threshold: B, hand, tg_targets, prediction_offset, mappings } = config;
-      if (mode !== 'absence_apparition' && mode !== 'apparition_absence' && mode !== 'distribution') continue;
+      if (mode !== 'absence_apparition' && mode !== 'apparition_absence' && mode !== 'distribution'
+          && mode !== 'carte_3_vers_2' && mode !== 'carte_2_vers_3') continue;
 
       // Une prédiction est déjà en attente → skip
       if (Object.keys(entry.pending).length > 0) continue;
@@ -1257,9 +1354,9 @@ class Engine {
       // Ce jeu live a déjà déclenché pour cette stratégie → skip
       if (entry.liveTriggeredGame === gn) continue;
 
-      // Distribution : pas de déclenchement live — on attend la fin officielle du jeu
-      // (seul le traitement batch sur jeux terminés est fiable : 2P + 2B confirmés)
-      if (mode === 'distribution') continue;
+      // Distribution / Carte2/3 : pas de déclenchement live — on attend la fin officielle du jeu
+      // (comptage fiable seulement quand la main est complètement terminée)
+      if (mode === 'distribution' || mode === 'carte_3_vers_2' || mode === 'carte_2_vers_3') continue;
 
       const handDone  = hand === 'banquier' ? this.liveGameCards.bankerDone  : this.liveGameCards.playerDone;
       const handSuits = hand === 'banquier' ? this.liveGameCards.bankerSuits : this.liveGameCards.playerSuits;
@@ -1296,21 +1393,24 @@ class Engine {
         console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, count=${entry.counts[suit]}, seuil≥${B}) → prédiction immédiate ${ps} #${next}`);
 
         try {
-          await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit });
-          console.log(`[${channelId}] Prédiction live #${next} ${SUIT_DISPLAY[ps] || ps}`);
           const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
             ? parseInt(config.max_rattrapage) : getCurrentMaxRattrapage();
           entry.pending[next] = { suit: ps, rattrapage: 0, maxR: liveMaxR };
-
-          const liveTgOpts = {
-            formatId: config.tg_format || null,
-            hand:     config.hand      || 'joueur',
-            maxR:     liveMaxR,
-          };
-          if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-            await sendCustomAndStore(tg_targets, channelId, next, ps, liveTgOpts).catch(() => {});
+          const inserted = await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit });
+          if (!inserted) {
+            console.warn(`[${channelId}] Prédiction live #${next} déjà existante — Telegram ignoré (doublon évité)`);
           } else {
-            await sendToStrategyChannels(channelId, next, ps, liveTgOpts).catch(() => {});
+            console.log(`[${channelId}] Prédiction live #${next} ${SUIT_DISPLAY[ps] || ps}`);
+            const liveTgOpts = {
+              formatId: config.tg_format || null,
+              hand:     config.hand      || 'joueur',
+              maxR:     liveMaxR,
+            };
+            if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+              await sendCustomAndStore(tg_targets, channelId, next, ps, liveTgOpts).catch(() => {});
+            } else {
+              await sendToStrategyChannels(channelId, next, ps, liveTgOpts).catch(() => {});
+            }
           }
         } catch (e) {
           console.error(`[${channelId}] Live trigger error:`, e.message);

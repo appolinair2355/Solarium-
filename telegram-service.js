@@ -420,8 +420,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀' };
-const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution' };
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
@@ -447,6 +447,8 @@ function buildTgMessage(formatId, {
 }) {
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
+  // Les modes Carte 2/3 utilisent le format 12
+  if (suit === 'deux' || suit === 'trois') formatId = 12;
 
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -602,6 +604,29 @@ function buildTgMessage(formatId, {
               : `❌ Non distribué`),
         parse_mode: null,
       };
+
+    case 12: {
+      const handLabel12 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const targetCards = suit === 'deux' ? 2 : 3;
+      const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
+      const winMsg   = suit === 'deux'
+        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Naturel confirmé 🎯`
+        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmé 🎯`;
+      const lossMsg  = suit === 'deux'
+        ? `❌ Pas de naturel sur ${maxR} jeux`
+        : `❌ Pas de 3 cartes sur ${maxR} jeux`;
+      return {
+        text:
+          `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
+          `📌 Jeu #${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━\n` +
+          `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
+          (status === null
+            ? `⌛ En cours de vérification...`
+            : status === 'gagne' ? winMsg : lossMsg),
+        parse_mode: null,
+      };
+    }
 
     default:
       return {

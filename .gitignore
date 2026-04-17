@@ -1,0 +1,5 @@
+node_modules/
+bot_instances/
+deploiement-fichiers-modifies.zip
+.env
+.local/state/
