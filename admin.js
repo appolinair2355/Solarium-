@@ -252,10 +252,15 @@ function validateStrategyBody(body) {
     return null;
   }
 
-  const B = parseInt(threshold);
-  if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
-  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution'].includes(mode)) return 'Mode invalide';
-  if (mode !== 'distribution') {
+  const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
+  const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
+
+  if (!isCarteAuto) {
+    const B = parseInt(threshold);
+    if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
+  }
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3'].includes(mode)) return 'Mode invalide';
+  if (mode !== 'distribution' && !isCarteAuto) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
     for (const s of SUITS) {
@@ -308,9 +313,10 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
-    const isComb     = strategy_type === 'combinaison';
-    const isRelance  = mode === 'relance';
-    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
+    const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
+    const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto) ? null : normalizeMappings(mappings);
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
@@ -336,6 +342,8 @@ router.post('/strategies', requireAdmin, async (req, res) => {
               interval_max:     r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
               interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
+        : isCarteAuto
+        ? { threshold: 0, mode, mappings: null }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -375,9 +383,10 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
-    const isComb    = strategy_type === 'combinaison';
-    const isRelance = mode === 'relance';
-    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
+    const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
+    const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto) ? null : normalizeMappings(mappings);
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
@@ -401,6 +410,8 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
               interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
               interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
+        : isCarteAuto
+        ? { threshold: 0, mode, mappings: null }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
