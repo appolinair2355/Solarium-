@@ -3847,7 +3847,7 @@ function AdminPanel() {
                     { val: 'bad_hour',             label: '🌙 Tranche horaire bloquée',       desc: 'Bloquer pendant une plage horaire définie dans la journée (ex: 0h–6h)' },
                     { val: 'double_suit_last',     label: '🃏 Double costume dernier jeu',    desc: 'Bloquer si le dernier jeu avait à la fois la carte prédite et le déclencheur' },
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
-                    { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 du jeu déclencheur (ordre : J1-Joueur, J1-Banquier, J2-Joueur, J2-Banquier…)' },
+                    { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause'].includes(ex.type);
@@ -4007,15 +4007,12 @@ function AdminPanel() {
 
                       {needsTriggerPos && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <label style={{ color: '#94a3b8', fontSize: 11 }}>Bloquer si la carte prédite est à la position :</label>
+                          <label style={{ color: '#94a3b8', fontSize: 11 }}>Bloquer si la carte prédite est à la position dans la main choisie :</label>
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             {[
-                              { pos: 1, label: '1ʳᵉ carte', hint: 'J1-Joueur' },
-                              { pos: 2, label: '2ᵉ carte',  hint: 'J1-Banquier' },
-                              { pos: 3, label: '3ᵉ carte',  hint: 'J2-Joueur' },
-                              { pos: 4, label: '4ᵉ carte',  hint: 'J2-Banquier' },
-                              { pos: 5, label: '5ᵉ carte',  hint: 'J3-Joueur (si droit)' },
-                              { pos: 6, label: '6ᵉ carte',  hint: 'J3-Banquier (si droit)' },
+                              { pos: 1, label: '1ʳᵉ carte', hint: '1ère carte de la main choisie' },
+                              { pos: 2, label: '2ᵉ carte',  hint: '2ème carte de la main choisie' },
+                              { pos: 3, label: '3ᵉ carte',  hint: '3ème carte de la main (si droit)' },
                             ].map(({ pos, label, hint }) => {
                               const cur = Array.isArray(ex.positions) ? ex.positions.map(Number) : [1];
                               const active = cur.includes(pos);
@@ -4035,7 +4032,7 @@ function AdminPanel() {
                             })}
                           </div>
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
-                            → bloque si la carte prédite apparaît en position {(Array.isArray(ex.positions) ? ex.positions : [1]).sort((a,b)=>a-b).join(', ')} du jeu déclencheur
+                            → bloque si la carte prédite est en position {(Array.isArray(ex.positions) ? ex.positions : [1]).sort((a,b)=>a-b).join(', ')} dans la main choisie du jeu déclencheur
                           </div>
                         </div>
                       )}
