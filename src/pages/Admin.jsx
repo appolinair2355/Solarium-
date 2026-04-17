@@ -3847,6 +3847,7 @@ function AdminPanel() {
                     { val: 'bad_hour',             label: '🌙 Tranche horaire bloquée',       desc: 'Bloquer pendant une plage horaire définie dans la journée (ex: 0h–6h)' },
                     { val: 'double_suit_last',     label: '🃏 Double costume dernier jeu',    desc: 'Bloquer si le dernier jeu avait à la fois la carte prédite et le déclencheur' },
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
+                    { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 du jeu déclencheur (ordre : J1-Joueur, J1-Banquier, J2-Joueur, J2-Banquier…)' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause'].includes(ex.type);
@@ -3855,6 +3856,7 @@ function AdminPanel() {
                   const needsMinInterval = ex.type === 'minute_interval_block';
                   const needsParity = ex.type === 'game_parity';
                   const needsBadHour = ex.type === 'bad_hour';
+                  const needsTriggerPos = ex.type === 'trigger_card_position';
                   const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
 
                   const INP = { padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 };
@@ -3999,6 +4001,41 @@ function AdminPanel() {
                           </div>
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
                             → bloque de {ex.from_hour ?? 0}h à {ex.to_hour ?? 6}h chaque jour
+                          </div>
+                        </div>
+                      )}
+
+                      {needsTriggerPos && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11 }}>Bloquer si la carte prédite est à la position :</label>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {[
+                              { pos: 1, label: '1ʳᵉ carte', hint: 'J1-Joueur' },
+                              { pos: 2, label: '2ᵉ carte',  hint: 'J1-Banquier' },
+                              { pos: 3, label: '3ᵉ carte',  hint: 'J2-Joueur' },
+                              { pos: 4, label: '4ᵉ carte',  hint: 'J2-Banquier' },
+                              { pos: 5, label: '5ᵉ carte',  hint: 'J3-Joueur (si droit)' },
+                              { pos: 6, label: '6ᵉ carte',  hint: 'J3-Banquier (si droit)' },
+                            ].map(({ pos, label, hint }) => {
+                              const cur = Array.isArray(ex.positions) ? ex.positions.map(Number) : [1];
+                              const active = cur.includes(pos);
+                              return (
+                                <button key={pos} type="button" title={hint}
+                                  onClick={() => {
+                                    const next = active ? cur.filter(p => p !== pos) : [...cur, pos];
+                                    setEx({ positions: next.length ? next : [pos] });
+                                  }}
+                                  style={{ padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                                    background: active ? 'rgba(239,68,68,0.3)' : 'rgba(239,68,68,0.07)',
+                                    border: `1px solid ${active ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.2)'}`,
+                                    color: active ? '#fca5a5' : '#6b7280', fontWeight: active ? 700 : 400 }}>
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → bloque si la carte prédite apparaît en position {(Array.isArray(ex.positions) ? ex.positions : [1]).sort((a,b)=>a-b).join(', ')} du jeu déclencheur
                           </div>
                         </div>
                       )}
@@ -4205,6 +4242,45 @@ function AdminPanel() {
         })()}
 
         </>}
+
+        {/* ── EFFACEMENT MANUEL DES PRÉDICTIONS ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(251,146,60,0.5)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🧹</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Effacer toutes les prédictions</h2>
+              <p className="tg-admin-sub">
+                Supprime <strong style={{ color: '#fb923c' }}>toutes les prédictions stockées et vérifiées</strong> en base de données ainsi que les messages Telegram associés.<br/>
+                Libère immédiatement toutes les stratégies bloquées en attente.<br/>
+                <span style={{ color: '#6b7280', fontSize: 11 }}>Conserve : stratégies, canaux, utilisateurs, bilan, compteurs d'absences.</span>
+              </p>
+            </div>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{
+              background: 'linear-gradient(135deg,#ea580c,#c2410c)',
+              border: 'none', color: '#fff', fontWeight: 700, fontSize: 13,
+              padding: '10px 28px', borderRadius: 10, cursor: 'pointer', marginTop: 8,
+            }}
+            onClick={async () => {
+              if (!confirm('🧹 Effacer TOUTES les prédictions stockées en base de données ?\n\n✓ Prédictions (gagnées, perdues, en attente)\n✓ Messages Telegram liés\n✓ Déblocage de toutes les stratégies\n\nLes stratégies, canaux et configs sont conservés.\n\nConfirmer ?')) return;
+              try {
+                const r = await fetch('/api/admin/clear-predictions', { method: 'POST', credentials: 'include' });
+                const d = await r.json();
+                if (d.ok) {
+                  const ext = d.extDeleted > 0 ? `\n📡 Base Render externe : ${d.extDeleted} supprimée(s)` : '';
+                  alert(`✅ Prédictions effacées !\n\n🗄️ Base locale : ${d.deleted} prédiction(s)\n${ext}\n\nToutes les stratégies sont libérées et prêtes pour de nouvelles prédictions.`);
+                } else {
+                  alert('❌ Erreur : ' + (d.error || 'Échec'));
+                }
+              } catch (e) { alert('❌ Erreur réseau : ' + e.message); }
+            }}
+          >
+            🧹 Effacer toutes les prédictions
+          </button>
+        </div>)}
 
         {/* ── RESET USINE ── */}
         {adminTab === 'systeme' && (
