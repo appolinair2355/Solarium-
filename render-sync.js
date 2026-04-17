@@ -445,6 +445,20 @@ async function getRenderStats() {
 
 function isConnected() { return !!renderPool; }
 
+// ── Effacement manuel de la table predictions_export sur la base Render ──
+// Appelé quand l'admin clique "Effacer toutes les prédictions" dans l'onglet Système.
+async function clearExternalPredictions() {
+  if (!renderPool) return 0;
+  try {
+    const r = await renderPool.query('DELETE FROM predictions_export');
+    console.log(`[RenderSync] 🧹 ${r.rowCount} prédiction(s) effacée(s) de la base Render externe`);
+    return r.rowCount;
+  } catch (e) {
+    console.error('[RenderSync] Erreur clearExternalPredictions:', e.message);
+    return 0;
+  }
+}
+
 module.exports = {
   loadRenderUrl,
   syncVerifiedPrediction,
@@ -457,6 +471,7 @@ module.exports = {
   syncTelegramChannel,
   syncDeleteTelegramChannel,
   handleGameOne,
+  clearExternalPredictions,
   testConnection,
   getRenderStats,
   isConnected,

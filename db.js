@@ -2,7 +2,8 @@
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
 const DEFAULT_PG_URL = 'postgresql://hebergement_user:4J9ejEAGFbXqY2qubeQhY6RHZMqRLF9C@dpg-d740h98ule4c73eq5edg-a.oregon-postgres.render.com/hebergement';
-const DB_URL = process.env.FORCE_PG_URL || DEFAULT_PG_URL;
+// Priorité : FORCE_PG_URL > DATABASE_URL (Replit local) > DEFAULT_PG_URL (Render externe)
+const DB_URL = process.env.FORCE_PG_URL || process.env.DATABASE_URL || DEFAULT_PG_URL;
 const USE_PG = !!DB_URL;
 
 let pgPool = null;
@@ -13,6 +14,12 @@ if (USE_PG) {
     ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
       ? { rejectUnauthorized: false }
       : false,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPool.on('error', (err) => {
+    console.error('[DB] Erreur pool inattendue:', err.message);
   });
 }
 

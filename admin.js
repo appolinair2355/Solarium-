@@ -163,6 +163,7 @@ const VALID_EXCEPTION_TYPES = [
   'suit_absent_long', 'high_win_rate', 'pending_overload',
   'game_parity', 'dominant_streak', 'cold_start',
   'bad_hour', 'double_suit_last', 'loss_streak_pause',
+  'trigger_card_position',
 ];
 
 function parseExceptions(raw) {
@@ -196,6 +197,14 @@ function parseExceptions(raw) {
         delete out.window;
       }
       if (['already_pending', 'last_game_appeared', 'double_suit_last'].includes(e.type)) {
+        delete out.value;
+        delete out.window;
+      }
+      if (e.type === 'trigger_card_position') {
+        // positions: tableau de numéros de position à bloquer (1, 2, 3)
+        const rawPos = Array.isArray(e.positions) ? e.positions : [];
+        out.positions = rawPos.map(Number).filter(p => p >= 1 && p <= 6);
+        if (!out.positions.length) out.positions = [1];
         delete out.value;
         delete out.window;
       }
@@ -458,6 +467,21 @@ router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Effacement ciblé des prédictions UNIQUEMENT (bouton manuel) ──
+// Supprime : predictions + tg_pred_messages
+// Libère   : pending en mémoire moteur (déblocage immédiat)
+// NE touche PAS aux configs : custom_strategies, telegram_config, users,
+// strategy_channel_routes, settings, canaux, tokens, durées.
+// Identique au reset automatique jeu #1.
+router.post('/clear-predictions', requireAdmin, async (req, res) => {
+  try {
+    const eng = require('./engine');
+    const { deleted, extDeleted } = await eng.fullReset();
+    console.log(`[Admin] Reset complet — local: ${deleted}, render: ${extDeleted}`);
+    res.json({ ok: true, deleted, extDeleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Nettoyage complet des prédictions (sans toucher aux configs) ──
 // Supprime : predictions, tg_pred_messages
 // Remet à 0 : engine_absences, bilan_last, pending en mémoire, compteurs absences moteur
@@ -466,28 +490,22 @@ router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
 router.post('/reset-all-stats', requireAdmin, async (req, res) => {
   try {
     const pool = db.pool;
-    // 1. Supprimer toutes les prédictions
-    const r = await pool.query(`DELETE FROM predictions`);
-    const deleted = r.rowCount;
-    // 2. Supprimer les message_id Telegram stockés
-    await pool.query(`DELETE FROM tg_pred_messages`).catch(() => {});
-    // 3. Remettre les compteurs d'absences à zéro (engine_absences)
+    const eng  = require('./engine');
+    // fullReset = même chose que jeu #1 : predictions + tg_pred_messages + Render + mémoire moteur
+    const { deleted, extDeleted } = await eng.fullReset();
+    // Remettre les compteurs d'absences à zéro (engine_absences)
     const SUITS = ['♠','♥','♦','♣'];
     const zero  = Object.fromEntries(SUITS.map(s => [s, 0]));
     const absReset = JSON.stringify({ c1: {...zero}, c2: {...zero}, c3: {...zero} });
     await pool.query(`INSERT INTO settings(key,value) VALUES('engine_absences',$1)
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [absReset]).catch(() => {});
-    // 4. Supprimer le bilan quotidien (obsolète sans prédictions)
+    // Supprimer le bilan quotidien (obsolète sans prédictions)
     await pool.query(`DELETE FROM settings WHERE key='bilan_last'`).catch(() => {});
-    // 5. Réinitialiser le moteur en mémoire
-    const eng = require('./engine');
-    if (eng) {
-      if (eng.clearAllPending) eng.clearAllPending();
-      if (eng.resetAbsences)   eng.resetAbsences();
-    }
-    console.log(`[Admin] Clean predictions — ${deleted} supprimée(s), absences remises à 0`);
-    res.json({ ok: true, deleted, details: {
+    if (eng.resetAbsences) eng.resetAbsences();
+    console.log(`[Admin] Reset-all-stats — ${deleted} supprimée(s), absences remises à 0`);
+    res.json({ ok: true, deleted, extDeleted, details: {
       predictions_deleted: deleted,
+      render_deleted: extDeleted,
       tg_messages_cleared: true,
       absences_reset: true,
       bilan_cleared: true,

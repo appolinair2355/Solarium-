@@ -651,7 +651,7 @@ class Engine {
    * @param {object} state        - État de la stratégie custom (history, lastOutcomes, pending)
    * @returns {boolean} true = prédiction bloquée
    */
-  _checkExceptions(exceptions, predictedSuit, triggerSuit, state) {
+  _checkExceptions(exceptions, predictedSuit, triggerSuit, state, triggerCards = {}) {
     if (!Array.isArray(exceptions) || exceptions.length === 0) return false;
 
     for (const ex of exceptions) {
@@ -896,6 +896,31 @@ class Engine {
           break;
         }
 
+        // ── 20. Position de la carte prédite dans le jeu déclencheur ─
+        // Bloque si la carte prédite apparaît à l'une des positions configurées
+        // (position 1 = 1ère carte jouée, ordre : J1-P, J1-B, J2-P, J2-B, J3-P, J3-B)
+        case 'trigger_card_position': {
+          const blockedPos = Array.isArray(ex.positions) ? ex.positions.map(Number).filter(p => p >= 1 && p <= 6) : [];
+          if (!blockedPos.length) break;
+          const pC = Array.isArray(triggerCards.pCards) ? triggerCards.pCards : [];
+          const bC = Array.isArray(triggerCards.bCards) ? triggerCards.bCards : [];
+          // Construire la séquence ordonnée des couleurs : J1-P, J1-B, J2-P, J2-B, J3-P, J3-B
+          const orderedSuits = [];
+          const maxLen = Math.max(pC.length, bC.length);
+          for (let i = 0; i < maxLen; i++) {
+            if (i < pC.length && pC[i]) { const s = normalizeSuit(pC[i].S || ''); if (ALL_SUITS.includes(s)) orderedSuits.push(s); }
+            if (i < bC.length && bC[i]) { const s = normalizeSuit(bC[i].S || ''); if (ALL_SUITS.includes(s)) orderedSuits.push(s); }
+          }
+          const posIdx = orderedSuits.indexOf(predictedSuit);
+          if (posIdx === -1) break; // carte prédite absente du jeu déclencheur → pas de blocage
+          const pos = posIdx + 1; // 1-indexé
+          if (blockedPos.includes(pos)) {
+            console.log(`[Exception] trigger_card_position(${blockedPos.join(',')}): ${predictedSuit} en position ${pos} → bloqué`);
+            return true;
+          }
+          break;
+        }
+
         default: break;
       }
     }
@@ -959,7 +984,7 @@ class Engine {
         return;
       }
       // ── Vérification des exceptions avant d'émettre ───────────────
-      if (this._checkExceptions(exceptions, ps, suit, state)) return;
+      if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards })) return;
 
       try {
         await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
@@ -1526,29 +1551,64 @@ class Engine {
     } catch (e) { console.error('loadAbsences error:', e.message); }
   }
 
-  // ── Reset complet au passage minuit (jeu #1 détecté) ─────────────────────
-  // Expire toutes les prédictions en_cours de la veille en DB et vide les
-  // pending / processed en mémoire pour repartir proprement.
-  async _resetOnGameOne() {
-    console.log('[Engine] 🕛 Jeu #1 détecté → reset complet (nouvelles 24h)');
-    // 1. Expire toutes les en_cours en DB
-    const expired = await db.expireAllEnCours().catch(() => 0);
-    if (expired > 0) console.log(`[Engine] 🕛 ${expired} prédiction(s) de la veille expirée(s)`);
-    // 2. Vide les messages Telegram stockés (pour éviter les éditions orphelines)
+  // ─── Reset complet partagé ────────────────────────────────────────────────
+  // Appelé à la fois par le bouton Admin et par le déclencheur jeu #1.
+  // NE touche JAMAIS aux configs : custom_strategies, telegram_config, users,
+  // strategy_channel_routes, settings, canaux, tokens, durées.
+  async fullReset() {
+    // 1. DB locale — toutes les prédictions (en cours ET vérifiées)
+    const deleted = await db.deleteAllPredictions().catch(() => 0);
+
+    // 2. DB Render externe — predictions_export
+    const extDeleted = await renderSync.clearExternalPredictions().catch(() => 0);
+
+    // 3. Messages Telegram stockés (évite éditions orphelines)
     await db.clearAllTgPredMessages().catch(() => {});
-    // 3. Vide les pending et processed en mémoire pour toutes les stratégies
+
+    // 4. Reset mémoire — stratégies standards C1/C2/C3
     for (const strat of ['c1', 'c2', 'c3']) {
-      if (this[strat]) { this[strat].pending = {}; this[strat].processed = new Set(); }
+      if (!this[strat]) continue;
+      this[strat].pending      = {};
+      this[strat].processed    = new Set();
+      this[strat].counts       = {};
+      this[strat].history      = [];
+      this[strat].lastOutcomes = [];
+      if (this[strat].mirrorCounts) for (const s of ALL_SUITS) this[strat].mirrorCounts[s] = 0;
     }
-    if (this.dc) this.dc.pending = {};
+
+    // 5. Reset mémoire — DC
+    if (this.dc) {
+      this.dc.pending      = {};
+      this.dc.processed    = new Set();
+      this.dc.counts       = {};
+      this.dc.history      = [];
+      this.dc.lastOutcomes = [];
+    }
+
+    // 6. Reset mémoire — toutes les stratégies custom (S7, S8, S9, S10…)
     for (const [, state] of Object.entries(this.custom)) {
-      state.pending = {};
-      state.processed = new Set();
-      if (state.mirrorCounts) for (const s of ALL_SUITS) state.mirrorCounts[s] = 0;
+      state.pending           = {};
+      state.processed         = new Set();
+      state.counts            = {};
+      state.history           = [];
+      state.lastOutcomes      = [];
+      state.liveTriggeredGame = null;
+      if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
+      if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
     }
+
+    // 7. Compteurs moteur globaux
     this.maxProcessedGame = 0;
     this.currentMaxGame   = 0;
-    console.log('[Engine] 🕛 Reset terminé — moteur prêt pour le nouveau jour');
+
+    return { deleted, extDeleted };
+  }
+
+  async _resetOnGameOne() {
+    console.log('[Engine] 🕛 Jeu #1 détecté → reset complet (nouvelles 24h)');
+    const { deleted, extDeleted } = await this.fullReset();
+    console.log(`[Engine] 🕛 ${deleted} préd. supprimée(s) en local, ${extDeleted} sur Render externe`);
+    console.log('[Engine] 🕛 Reset complet terminé — moteur prêt pour le nouveau jour');
   }
 
   async start(intervalMs = 5000) {
