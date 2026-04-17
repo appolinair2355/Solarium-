@@ -9,6 +9,7 @@ const {
   sendCustomAndStore,
   editStoredMessages,
   getCurrentMaxRattrapage,
+  loadMaxRattrapage,
 } = require('./telegram-service');
 const renderSync = require('./render-sync');
 
@@ -1406,8 +1407,11 @@ class Engine {
         if (!this.c1.processed.has(game.game_number)) {
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
-          // Détection jeu #1 → reset de la base externe Render
-          if (game.game_number === 1) renderSync.handleGameOne(1).catch(() => {});
+          // Détection jeu #1 → reset complet (nouveau jour / passage à minuit)
+          if (game.game_number === 1 && (this.maxProcessedGame || 0) > 5) {
+            await this._resetOnGameOne();
+            renderSync.handleGameOne(1).catch(() => {});
+          }
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards);
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
@@ -1522,9 +1526,38 @@ class Engine {
     } catch (e) { console.error('loadAbsences error:', e.message); }
   }
 
+  // ── Reset complet au passage minuit (jeu #1 détecté) ─────────────────────
+  // Expire toutes les prédictions en_cours de la veille en DB et vide les
+  // pending / processed en mémoire pour repartir proprement.
+  async _resetOnGameOne() {
+    console.log('[Engine] 🕛 Jeu #1 détecté → reset complet (nouvelles 24h)');
+    // 1. Expire toutes les en_cours en DB
+    const expired = await db.expireAllEnCours().catch(() => 0);
+    if (expired > 0) console.log(`[Engine] 🕛 ${expired} prédiction(s) de la veille expirée(s)`);
+    // 2. Vide les messages Telegram stockés (pour éviter les éditions orphelines)
+    await db.clearAllTgPredMessages().catch(() => {});
+    // 3. Vide les pending et processed en mémoire pour toutes les stratégies
+    for (const strat of ['c1', 'c2', 'c3']) {
+      if (this[strat]) { this[strat].pending = {}; this[strat].processed = new Set(); }
+    }
+    if (this.dc) this.dc.pending = {};
+    for (const [, state] of Object.entries(this.custom)) {
+      state.pending = {};
+      state.processed = new Set();
+      if (state.mirrorCounts) for (const s of ALL_SUITS) state.mirrorCounts[s] = 0;
+    }
+    this.maxProcessedGame = 0;
+    this.currentMaxGame   = 0;
+    console.log('[Engine] 🕛 Reset terminé — moteur prêt pour le nouveau jour');
+  }
+
   async start(intervalMs = 5000) {
     if (this.running) return;
     this.running = true;
+    // ── Charge le maxRattrapage depuis la DB EN PREMIER ──────────────────
+    // CRITIQUE : doit être avant cleanupStale() et loadExistingPending()
+    // sinon maxRattrapage = 2 (valeur par défaut) → perdu prématuré au démarrage.
+    await loadMaxRattrapage().catch(() => {});
     console.log('🚀 Moteur de prédiction démarré');
     await this.loadCustomStrategies();
     await this.loadLossSequences();

@@ -325,8 +325,10 @@ async function main() {
   await initDB();
   await autoSaveDeployFiles();
 
-  engine.start(2000);
+  // ⚠️ IMPORTANT : loadConfig AVANT engine.start pour que maxRattrapage soit
+  // chargé depuis la DB avant cleanupStale() et loadExistingPending().
   await telegramService.loadConfig();
+  await engine.start(2000);
   bilan.scheduleMidnight();
   // Lancer le scheduler d'annonces toutes les minutes
   setInterval(runAnnouncementsScheduler, 60_000);

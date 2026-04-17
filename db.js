@@ -304,6 +304,28 @@ async function getMaxResolvedGame() {
   return jsondb.getMaxResolvedGame();
 }
 
+// ── Reset total au passage à minuit (jeu #1 détecté) ───────────────────────
+// Expire TOUTES les prédictions en_cours de la journée précédente.
+// Appelé quand l'API retourne le jeu numéro 1 (nouveau jour).
+async function expireAllEnCours() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='expire', resolved_at=NOW() WHERE status='en_cours'`
+    );
+    return r.rowCount;
+  }
+  let count = 0;
+  const preds = jsondb.getPredictions({ status: 'en_cours', limit: 1000 });
+  for (const p of preds) {
+    jsondb.updatePrediction(
+      { strategy: p.strategy, game_number: p.game_number, predicted_suit: p.predicted_suit, status_filter: 'en_cours' },
+      { status: 'expire', resolved_at: new Date().toISOString() }
+    );
+    count++;
+  }
+  return count;
+}
+
 async function expireStaleByGame(threshold, maxR) {
   if (USE_PG) {
     const r = await pgPool.query(
@@ -511,6 +533,14 @@ async function setStrategyRoutes(strategy, channelDbIds) {
 // ── TG PRED MESSAGE IDS ────────────────────────────────────────────
 
 const _tgMsgStore = new Map(); // fallback JSON
+
+async function clearAllTgPredMessages() {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM tg_pred_messages');
+  } else {
+    _tgMsgStore.clear();
+  }
+}
 
 async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat) {
   if (USE_PG) {
@@ -794,7 +824,8 @@ module.exports = {
   getUser, getUserByLogin, getUserByUsername, getAllUsers,
   createUser, updateUser, deleteUser,
   getPredictions, createPrediction, updatePrediction,
-  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime,
+  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime, expireAllEnCours,
+  clearAllTgPredMessages,
   getSetting, setSetting, deleteSetting,
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,
