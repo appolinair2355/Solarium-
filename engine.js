@@ -1110,35 +1110,77 @@ class Engine {
 
     } else if (mode === 'carte_3_vers_2') {
       // ── Mode : 3 cartes → prédit 2 cartes ────────────────────────────────
-      // Compte les jeux où la main choisie a tiré 3 cartes.
-      // Dès que le compteur atteint B → prédit que le prochain jeu aura 2 cartes (naturel).
-      const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
+      // Phase 1 (comptage) : on compte les jeux à 3 cartes consécutifs pour la main choisie.
+      //   - Si 2 cartes apparaissent avant le seuil → reset compteur.
+      //   - Quand compteur >= B → on entre en phase attente.
+      // Phase 2 (attente) : on attend que 2 cartes apparaissent pour la main choisie.
+      //   - Dès que 2 cartes arrivent → prédiction envoyée + reset.
+      const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
+      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
       const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
-      if (hasThreeCards) {
-        state.counts['c3v2'] = (state.counts['c3v2'] || 0) + 1;
-        if (state.counts['c3v2'] >= B) {
-          console.log(`[${channelId}] [Carte3→2] ${state.counts['c3v2']}× 3 cartes (seuil≥${B}) → prédit 2 cartes jeu #${gn + offset}`);
+
+      if (state.waiting_c3v2) {
+        // Phase attente : seuil déjà atteint, on attend les 2 cartes
+        if (hasTwoCards) {
+          console.log(`[${channelId}] [Carte3→2] ✅ 2 cartes apparues après seuil (${B}) → prédiction envoyée jeu #${gn + offset}`);
           await emitPrediction(gn + offset, 'deux', 'trois');
+          state.counts['c3v2'] = 0;
+          state.waiting_c3v2 = false;
+        }
+        // 3 cartes en attente → on reste en attente, on ne compte plus
+      } else {
+        // Phase comptage
+        if (hasThreeCards) {
+          state.counts['c3v2'] = (state.counts['c3v2'] || 0) + 1;
+          console.log(`[${channelId}] [Carte3→2] compteur=${state.counts['c3v2']} / seuil=${B}`);
+          if (state.counts['c3v2'] >= B) {
+            console.log(`[${channelId}] [Carte3→2] Seuil ${B} atteint → attente des 2 cartes...`);
+            state.waiting_c3v2 = true;
+          }
+        } else if (hasTwoCards) {
+          // 2 cartes avant le seuil → reset
+          if ((state.counts['c3v2'] || 0) > 0)
+            console.log(`[${channelId}] [Carte3→2] 2 cartes avant seuil → reset (was ${state.counts['c3v2']})`);
           state.counts['c3v2'] = 0;
         }
       }
-      // Les jeux à 2 cartes ne modifient pas le compteur
 
     } else if (mode === 'carte_2_vers_3') {
       // ── Mode : 2 cartes → prédit 3 cartes ────────────────────────────────
-      // Compte les jeux où la main choisie a reçu exactement 2 cartes (naturel).
-      // Dès que le compteur atteint B → prédit que le prochain jeu tirera 3 cartes.
-      const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
-      const hasTwoCards = Array.isArray(handCardsNow) && handCardsNow.length === 2;
-      if (hasTwoCards) {
-        state.counts['c2v3'] = (state.counts['c2v3'] || 0) + 1;
-        if (state.counts['c2v3'] >= B) {
-          console.log(`[${channelId}] [Carte2→3] ${state.counts['c2v3']}× 2 cartes (seuil≥${B}) → prédit 3 cartes jeu #${gn + offset}`);
+      // Phase 1 (comptage) : on compte les jeux à 2 cartes consécutifs pour la main choisie.
+      //   - Si 3 cartes apparaissent avant le seuil → reset compteur.
+      //   - Quand compteur >= B → on entre en phase attente.
+      // Phase 2 (attente) : on attend que 3 cartes apparaissent pour la main choisie.
+      //   - Dès que 3 cartes arrivent → prédiction envoyée + reset.
+      const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
+      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
+      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
+
+      if (state.waiting_c2v3) {
+        // Phase attente : seuil déjà atteint, on attend les 3 cartes
+        if (hasThreeCards) {
+          console.log(`[${channelId}] [Carte2→3] ✅ 3 cartes apparues après seuil (${B}) → prédiction envoyée jeu #${gn + offset}`);
           await emitPrediction(gn + offset, 'trois', 'deux');
+          state.counts['c2v3'] = 0;
+          state.waiting_c2v3 = false;
+        }
+        // 2 cartes en attente → on reste en attente, on ne compte plus
+      } else {
+        // Phase comptage
+        if (hasTwoCards) {
+          state.counts['c2v3'] = (state.counts['c2v3'] || 0) + 1;
+          console.log(`[${channelId}] [Carte2→3] compteur=${state.counts['c2v3']} / seuil=${B}`);
+          if (state.counts['c2v3'] >= B) {
+            console.log(`[${channelId}] [Carte2→3] Seuil ${B} atteint → attente des 3 cartes...`);
+            state.waiting_c2v3 = true;
+          }
+        } else if (hasThreeCards) {
+          // 3 cartes avant le seuil → reset
+          if ((state.counts['c2v3'] || 0) > 0)
+            console.log(`[${channelId}] [Carte2→3] 3 cartes avant seuil → reset (was ${state.counts['c2v3']})`);
           state.counts['c2v3'] = 0;
         }
       }
-      // Les jeux à 3 cartes ne modifient pas le compteur
 
     } else if (mode === 'apparition_absence') {
       // Compte les apparitions consécutives (sans seuil max).
