@@ -896,26 +896,29 @@ class Engine {
           break;
         }
 
-        // ── 20. Position de la carte prédite dans le jeu déclencheur ─
+        // ── 20. Position de la carte prédite dans la main du jeu déclencheur ─
         // Bloque si la carte prédite apparaît à l'une des positions configurées
-        // (position 1 = 1ère carte jouée, ordre : J1-P, J1-B, J2-P, J2-B, J3-P, J3-B)
+        // dans la MAIN DE LA STRATÉGIE (joueur ou banquier) uniquement.
+        // Position 1 = 1ère carte de la main, position 2 = 2ème carte, position 3 = 3ème carte.
         case 'trigger_card_position': {
           const blockedPos = Array.isArray(ex.positions) ? ex.positions.map(Number).filter(p => p >= 1 && p <= 6) : [];
           if (!blockedPos.length) break;
           const pC = Array.isArray(triggerCards.pCards) ? triggerCards.pCards : [];
           const bC = Array.isArray(triggerCards.bCards) ? triggerCards.bCards : [];
-          // Construire la séquence ordonnée des couleurs : J1-P, J1-B, J2-P, J2-B, J3-P, J3-B
-          const orderedSuits = [];
-          const maxLen = Math.max(pC.length, bC.length);
-          for (let i = 0; i < maxLen; i++) {
-            if (i < pC.length && pC[i]) { const s = normalizeSuit(pC[i].S || ''); if (ALL_SUITS.includes(s)) orderedSuits.push(s); }
-            if (i < bC.length && bC[i]) { const s = normalizeSuit(bC[i].S || ''); if (ALL_SUITS.includes(s)) orderedSuits.push(s); }
+          // Utilise uniquement les cartes de la main configurée pour la stratégie
+          const hand      = triggerCards.hand || 'joueur';
+          const handCards = hand === 'banquier' ? bC : pC;
+          if (!handCards.length) break;
+          // Chercher TOUTES les positions où la carte prédite apparaît dans cette main
+          const matchedPos = [];
+          for (let i = 0; i < handCards.length; i++) {
+            const s = normalizeSuit((handCards[i] && handCards[i].S) || '');
+            if (s === predictedSuit) matchedPos.push(i + 1); // 1-indexé
           }
-          const posIdx = orderedSuits.indexOf(predictedSuit);
-          if (posIdx === -1) break; // carte prédite absente du jeu déclencheur → pas de blocage
-          const pos = posIdx + 1; // 1-indexé
-          if (blockedPos.includes(pos)) {
-            console.log(`[Exception] trigger_card_position(${blockedPos.join(',')}): ${predictedSuit} en position ${pos} → bloqué`);
+          if (!matchedPos.length) break; // carte absente de la main → pas de blocage
+          const hit = matchedPos.find(p => blockedPos.includes(p));
+          if (hit !== undefined) {
+            console.log(`[Exception] trigger_card_position(${blockedPos.join(',')}): ${predictedSuit} en position ${hit} dans main ${hand} → bloqué`);
             return true;
           }
           break;
@@ -984,7 +987,7 @@ class Engine {
         return;
       }
       // ── Vérification des exceptions avant d'émettre ───────────────
-      if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards })) return;
+      if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
 
       try {
         await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
