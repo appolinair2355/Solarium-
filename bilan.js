@@ -56,7 +56,6 @@ function formatBilanText(entry, dateStr) {
   const lines = [];
 
   lines.push(`📊 <b>BILAN DU ${dateStr}</b>`);
-  lines.push(`📌 Stratégie : <b>${entry.name}</b> (${entry.stratId})`);
   lines.push(BAR);
 
   if (entry.total === 0) {

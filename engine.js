@@ -76,7 +76,12 @@ async function resolvePrediction(strategy, gameNumber, predictedSuit, status, ra
       resolved_at: now,
     }).catch(() => {});
     // editStoredMessages gère les deux cas : token global ou token custom (bot_token stocké en DB)
-    editStoredMessages(strategy, gameNumber, predictedSuit, status, rattrapage, tgOpts).catch(() => {});
+    // On transmet les cartes pour que le format 11 (Distribution) puisse les afficher
+    editStoredMessages(strategy, gameNumber, predictedSuit, status, rattrapage, {
+      ...tgOpts,
+      playerCards: playerCards || null,
+      bankerCards: bankerCards || null,
+    }).catch(() => {});
   } catch (e) { console.error('resolvePrediction error:', e.message); }
 }
 

@@ -438,12 +438,22 @@ function getSuitName(suit)  { return SUIT_NAME_FR[suit]  || suit; }
  * status = 'gagne'  → gagné (✅ + emoji rattrapage)
  * status = 'perdu'  → perdu (❌)
  */
+function formatCardsToEmojis(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return '—';
+  return cards.map(c => {
+    const raw = (c && c.S) ? String(c.S).replace(/\uFE0F/g, '').trim() : '';
+    return SUIT_EMOJI_MAP[raw] || raw || '?';
+  }).join(' ');
+}
+
 function buildTgMessage(formatId, {
   gameNumber, suit, strategy,
   maxR = 2,
   status = null,
   rattrapage = 0,
   hand = null,
+  playerCards = null,
+  bankerCards = null,
 }) {
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
@@ -590,20 +600,43 @@ function buildTgMessage(formatId, {
       };
     }
 
-    case 11:
-      return {
-        text:
-          `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-          `📌 Jeu #${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━\n` +
-          `✅ Distribution : OUI\n` +
-          (status === null
-            ? `⌛ En cours de vérification...`
-            : status === 'gagne'
-              ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ 🎯`
-              : `❌ Non distribué`),
-        parse_mode: null,
-      };
+    case 11: {
+      const foundGame = gameNumber + rattrapage;
+      const pEmojis   = formatCardsToEmojis(playerCards);
+      const bEmojis   = formatCardsToEmojis(bankerCards);
+      if (status === null) {
+        return {
+          text:
+            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
+            `📌 Jeu #${gameNumber}\n` +
+            `━━━━━━━━━━━━━━━━━━\n` +
+            `⌛ Vérification en cours...`,
+          parse_mode: null,
+        };
+      } else if (status === 'gagne') {
+        // Phase 1 : affiche le jeu trouvé + cartes (remplacé après 10s par buildDistribFinalMsg)
+        return {
+          text:
+            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
+            `📌 Jeu #${gameNumber}\n` +
+            `━━━━━━━━━━━━━━━━━━\n` +
+            `✅ Jeu #N${foundGame} trouvé\n` +
+            `🃏 Joueur  : ${pEmojis}\n` +
+            `🎴 Banquier : ${bEmojis}`,
+          parse_mode: null,
+        };
+      } else {
+        return {
+          text:
+            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
+            `📌 Jeu #${gameNumber}\n` +
+            `━━━━━━━━━━━━━━━━━━\n` +
+            `✅ Distribution : OUI\n` +
+            `❌ Non distribué`,
+          parse_mode: null,
+        };
+      }
+    }
 
     case 12: {
       const handLabel12 = hand === 'banquier' ? 'Banquier' : 'Joueur';
@@ -762,6 +795,17 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
 //  Utilise le bot_token stocké dans tg_pred_messages s'il est présent
 //  (stratégie custom), sinon le TOKEN global.
 
+// Phase 2 du format 11 (Distribution) — remplace les cartes après 10 secondes
+function buildDistribFinalMsg(gameNumber, rattrapage) {
+  return (
+    `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
+    `📌 Jeu #${gameNumber}\n` +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `✅ Distribution : OUI\n` +
+    `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ 🎯`
+  );
+}
+
 async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage, tgOpts = {}) {
   let stored;
   try {
@@ -777,20 +821,44 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
   }
 
   const defaultFormatId = tgOpts.formatId || currentFormat;
-  const hand     = tgOpts.hand     || null;
-  const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
+  const hand        = tgOpts.hand        || null;
+  const maxR        = tgOpts.maxR        !== undefined ? tgOpts.maxR : maxRattrapage;
+  const playerCards = tgOpts.playerCards || null;
+  const bankerCards = tgOpts.bankerCards || null;
 
   for (const row of stored) {
     const token  = row.bot_token || TOKEN;
     if (!token) { console.warn(`[TG Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
     const formatId = (row.tg_format !== undefined && row.tg_format !== null)
       ? parseInt(row.tg_format) : defaultFormatId;
-    const { text, parse_mode } = buildTgMessage(formatId, {
-      gameNumber, suit, strategy, maxR, status, rattrapage, hand,
+    const { text: resultText, parse_mode } = buildTgMessage(formatId, {
+      gameNumber, suit, strategy, maxR, status, rattrapage, hand, playerCards, bankerCards,
     });
 
+    // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
+    // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
+    // puis on remplace par le résultat standard après 10 secondes (phase 2).
+    const fmt = parseInt(formatId);
+    const hasCards = (Array.isArray(playerCards) && playerCards.length > 0)
+                  || (Array.isArray(bankerCards)  && bankerCards.length  > 0);
+
+    let phase1Text;
+    if (status === 'gagne' && hasCards && fmt !== 11) {
+      // Formats standard : résultat + section cartes
+      const pEmojis = formatCardsToEmojis(playerCards);
+      const bEmojis = formatCardsToEmojis(bankerCards);
+      phase1Text =
+        resultText +
+        `\n━━━━━━━━━━━━━━━━━━\n` +
+        `🃏 Joueur  : ${pEmojis}\n` +
+        `🎴 Banquier : ${bEmojis}`;
+    } else {
+      // Format 11 (déjà construit avec les cartes) ou pas de cartes : texte normal
+      phase1Text = resultText;
+    }
+
     try {
-      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text };
+      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text: phase1Text };
       if (parse_mode) body.parse_mode = parse_mode;
       const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
         method: 'POST',
@@ -799,6 +867,39 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
       });
       if (resp.ok) {
         console.log(`[TG Edit] ${strategy} #${gameNumber} → ${row.channel_tg_id} (${status} R${rattrapage})`);
+
+        if (status === 'gagne') {
+          const capturedToken  = token;
+          const capturedChatId = row.channel_tg_id;
+          const capturedMsgId  = parseInt(row.message_id);
+
+          if (fmt === 11) {
+            // Format Distribution : phase 2 = résumé sans cartes
+            const finalText = buildDistribFinalMsg(gameNumber, rattrapage);
+            setTimeout(async () => {
+              try {
+                await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: finalText }),
+                });
+                console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2 distrib)`);
+              } catch {}
+            }, 10_000);
+          } else if (hasCards) {
+            // Autres formats : phase 2 = résultat standard sans cartes
+            setTimeout(async () => {
+              try {
+                await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: resultText }),
+                });
+                console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2 standard)`);
+              } catch {}
+            }, 10_000);
+          }
+        }
       } else {
         const err = await resp.text();
         // 400 "message is not modified" est bénin — on l'ignore
