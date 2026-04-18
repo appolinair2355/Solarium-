@@ -352,8 +352,26 @@ class Engine {
         const s = this._makeCustomState();
         s.needsInit = true;
         this.custom[cfg.id] = s;
+      } else {
+        // Stratégie existante : si la MAIN a changé, reset les compteurs liés à la main
+        // car les données accumulées correspondent à l'ancienne main (mauvaise main)
+        const oldHand = this.custom[cfg.id].config?.hand || 'joueur';
+        const newHand = cfg.hand || 'joueur';
+        if (oldHand !== newHand) {
+          console.log(`[S${cfg.id}] Main changée (${oldHand} → ${newHand}) — reset compteurs`);
+          // Reset counts (absences/apparitions pour manquants, apparents, absence_apparition, apparition_absence)
+          const counts = this.custom[cfg.id].counts;
+          if (counts) for (const s of ALL_SUITS) counts[s] = 0;
+          // Reset mirrorCounts (taux_miroir)
+          const mc = this.custom[cfg.id].mirrorCounts;
+          if (mc) for (const s of ALL_SUITS) mc[s] = 0;
+          // Reset histoire (basée sur la main surveillée)
+          this.custom[cfg.id].history = [];
+          // Reset lastHour pour forcer la réinitialisation de mirrorLastHour
+          this.custom[cfg.id].mirrorLastHour = null;
+        }
       }
-      // Ne PAS remettre les compteurs à 0 pour les stratégies existantes
+      // Ne PAS remettre les compteurs à 0 pour les stratégies existantes dont la main n'a pas changé
       // (sinon on perd la progression des absences/apparitions)
       this.custom[cfg.id].config = cfg;
       console.log(`[S${cfg.id}] "${cfg.name}" rechargée: mode=${cfg.mode}, B=${cfg.threshold}, hand=${cfg.hand || 'joueur'}, enabled=${cfg.enabled}`);
