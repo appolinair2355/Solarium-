@@ -635,6 +635,11 @@ function AdminPanel() {
   const [updatePreview, setUpdatePreview]     = useState(null);
   const [updateApplying, setUpdateApplying]   = useState(false);
   const [updateResult, setUpdateResult]       = useState(null);
+  // Fichiers de mise à jour stockés sur le serveur
+  const [serverUpdateFiles, setServerUpdateFiles]   = useState([]);
+  const [serverFilesLoading, setServerFilesLoading] = useState(false);
+  const [serverApplyingFile, setServerApplyingFile] = useState(null);
+  const [serverUpdateResult, setServerUpdateResult] = useState(null);
   const [uiStyles, setUiStyles]               = useState({});
   const [buildStatus, setBuildStatus]         = useState(null);   // { status, log, error, finishedAt }
   const [modifiedFiles, setModifiedFiles]     = useState([]);
@@ -1029,6 +1034,52 @@ function AdminPanel() {
     setUpdateApplying(false);
   };
 
+  const loadServerUpdateFiles = async () => {
+    setServerFilesLoading(true);
+    try {
+      const r = await fetch('/api/admin/server-update-files', { credentials: 'include' });
+      if (r.ok) setServerUpdateFiles((await r.json()).files || []);
+    } catch {}
+    setServerFilesLoading(false);
+  };
+
+  const applyServerFile = async (filename) => {
+    if (!window.confirm(`Appliquer "${filename}" au système ?`)) return;
+    setServerApplyingFile(filename);
+    setServerUpdateResult(null);
+    try {
+      const r = await fetch('/api/admin/apply-server-update', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      });
+      const d = await r.json();
+      setServerUpdateResult(d);
+      if (d.ok) {
+        await Promise.all([loadStrategies(), loadUiStyles(), loadCustomCss(), loadModifiedFiles()]);
+        if (d.results?.some(r2 => r2.type === 'styles' && r2.applied > 0)) {
+          const sr = await fetch('/api/settings/ui-styles');
+          if (sr.ok) {
+            const styles = await sr.json();
+            for (const [k, v] of Object.entries(styles)) {
+              if (k.startsWith('--')) document.documentElement.style.setProperty(k, v);
+            }
+          }
+        }
+        if (d.results?.some(r2 => r2.type === 'css' && r2.applied > 0)) {
+          const cr = await fetch('/api/settings/custom-css');
+          if (cr.ok) { const css = await cr.text(); injectCustomCss(css); }
+        }
+        if (d.results?.some(r2 => r2.rebuilding)) {
+          const bs = await fetch('/api/admin/build-status', { credentials: 'include' });
+          if (bs.ok) setBuildStatus(await bs.json());
+          pollBuildStatus();
+        }
+      }
+    } catch { setServerUpdateResult({ ok: false, errors: ['Erreur réseau'] }); }
+    setServerApplyingFile(null);
+  };
+
   const loadAnnouncements = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/announcements', { credentials: 'include' });
@@ -1381,10 +1432,10 @@ function AdminPanel() {
 
   useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
 
-  // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
+  // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir, carte_3_vers_2, carte_2_vers_3
   useEffect(() => {
     const fetchMirrorCounts = async () => {
-      const mirrorStrats = strategies.filter(s => s.mode === 'taux_miroir');
+      const mirrorStrats = strategies.filter(s => s.mode === 'taux_miroir' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3');
       if (!mirrorStrats.length) return;
       const updates = {};
       await Promise.all(mirrorStrats.map(async s => {
@@ -2513,9 +2564,13 @@ function AdminPanel() {
                           : s.mode === 'absence_apparition' ? 'Abs→App'
                           : s.mode === 'apparition_absence' ? 'App→Abs'
                           : s.mode === 'taux_miroir' ? '⚖️ Miroir'
+                          : s.mode === 'carte_3_vers_2' ? '🃏 3→2 cartes'
+                          : s.mode === 'carte_2_vers_3' ? '🃏 2→3 cartes'
                           : s.mode;
                         const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence';
+                        const isCarteMode = s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3';
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
+                          : isCarteMode ? (s.mode === 'carte_3_vers_2' ? 'attend 2 cartes' : 'attend 3 cartes')
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
                       })()}
@@ -2538,6 +2593,46 @@ function AdminPanel() {
                             </span>
                           );
                         })}
+                      </div>
+                    )}
+                    {/* ── Compteur carte_3_vers_2 temps réel ── */}
+                    {s.mode === 'carte_3_vers_2' && mirrorCountsData[s.id] && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+                        {(() => {
+                          const cnt = mirrorCountsData[s.id]?.counts?.c3v2 || 0;
+                          const thr = mirrorCountsData[s.id]?.threshold || s.threshold;
+                          const waiting = mirrorCountsData[s.id]?.waiting;
+                          const pct = Math.min(cnt / Math.max(thr, 1), 1);
+                          return (<>
+                            <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 8, fontWeight: 800,
+                              background: waiting ? 'rgba(245,158,11,0.2)' : pct >= 0.8 ? 'rgba(239,68,68,0.2)' : 'rgba(99,102,241,0.12)',
+                              color: waiting ? '#fbbf24' : pct >= 0.8 ? '#f87171' : '#818cf8',
+                              border: `1px solid ${waiting ? 'rgba(245,158,11,0.4)' : pct >= 0.8 ? 'rgba(239,68,68,0.35)' : 'rgba(99,102,241,0.25)'}`,
+                            }}>
+                              🃏 {waiting ? `⏳ Attend 2 cartes…` : `${cnt} / ${thr} jeux à 3 cartes`}
+                            </span>
+                          </>);
+                        })()}
+                      </div>
+                    )}
+                    {/* ── Compteur carte_2_vers_3 temps réel ── */}
+                    {s.mode === 'carte_2_vers_3' && mirrorCountsData[s.id] && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+                        {(() => {
+                          const cnt = mirrorCountsData[s.id]?.counts?.c2v3 || 0;
+                          const thr = mirrorCountsData[s.id]?.threshold || s.threshold;
+                          const waiting = mirrorCountsData[s.id]?.waiting;
+                          const pct = Math.min(cnt / Math.max(thr, 1), 1);
+                          return (<>
+                            <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 8, fontWeight: 800,
+                              background: waiting ? 'rgba(245,158,11,0.2)' : pct >= 0.8 ? 'rgba(239,68,68,0.2)' : 'rgba(99,102,241,0.12)',
+                              color: waiting ? '#fbbf24' : pct >= 0.8 ? '#f87171' : '#818cf8',
+                              border: `1px solid ${waiting ? 'rgba(245,158,11,0.4)' : pct >= 0.8 ? 'rgba(239,68,68,0.35)' : 'rgba(99,102,241,0.25)'}`,
+                            }}>
+                              🃏 {waiting ? `⏳ Attend 3 cartes…` : `${cnt} / ${thr} jeux à 2 cartes`}
+                            </span>
+                          </>);
+                        })()}
                       </div>
                     )}
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
@@ -2951,6 +3046,8 @@ function AdminPanel() {
                     <option value="absence_apparition">Absence → Apparition</option>
                     <option value="apparition_absence">Apparition → Absence</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
+                    <option value="carte_3_vers_2">🃏 3 cartes → prédit 2 cartes</option>
+                    <option value="carte_2_vers_3">🃏 2 cartes → prédit 3 cartes</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
@@ -2971,6 +3068,26 @@ function AdminPanel() {
                       <div style={{ marginTop: 6 }}>Dès qu'un costume <strong>dépasse un autre de B apparitions</strong>, le costume "en retard" est prédit selon le mapping configuré. Les compteurs remettent à zéro après chaque déclenchement.</div>
                       <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(99,102,241,0.12)', borderRadius: 6, fontFamily: 'monospace', fontSize: 11 }}>
                         Ex. B=5 · ♠:8 ♥:3 → écart ♠-♥=5 ≥ 5 → prédit ♥ (ou son mapping) → remise à zéro
+                      </div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'carte_3_vers_2' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode 3 cartes → 2 cartes — Comment ça fonctionne ?</div>
+                      <div><strong>Phase 1 (comptage) :</strong> Le moteur compte les jeux consécutifs où la main choisie a <strong>3 cartes</strong>. Si 2 cartes apparaissent avant le seuil B, le compteur est remis à zéro.</div>
+                      <div style={{ marginTop: 6 }}><strong>Phase 2 (attente) :</strong> Dès que le compteur atteint B, le moteur attend le prochain jeu à <strong>2 cartes</strong> — c'est à ce moment que la prédiction est envoyée.</div>
+                      <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(251,191,36,0.12)', borderRadius: 6, fontFamily: 'monospace', fontSize: 11 }}>
+                        Ex. B=3 · 3 jeux à 3 cartes → seuil atteint → dès que 2 cartes apparaissent → prédiction
+                      </div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'carte_2_vers_3' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode 2 cartes → 3 cartes — Comment ça fonctionne ?</div>
+                      <div><strong>Phase 1 (comptage) :</strong> Le moteur compte les jeux consécutifs où la main choisie a <strong>2 cartes</strong>. Si 3 cartes apparaissent avant le seuil B, le compteur est remis à zéro.</div>
+                      <div style={{ marginTop: 6 }}><strong>Phase 2 (attente) :</strong> Dès que le compteur atteint B, le moteur attend le prochain jeu à <strong>3 cartes</strong> — c'est à ce moment que la prédiction est envoyée.</div>
+                      <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(251,191,36,0.12)', borderRadius: 6, fontFamily: 'monospace', fontSize: 11 }}>
+                        Ex. B=3 · 3 jeux à 2 cartes → seuil atteint → dès que 3 cartes apparaissent → prédiction
                       </div>
                     </div>
                   )}
@@ -3034,6 +3151,10 @@ function AdminPanel() {
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
                         {(stratForm.mode === 'absence_apparition' || stratForm.mode === 'apparition_absence')
                           ? 'Minimum B (≥4 requis)'
+                          : stratForm.mode === 'carte_3_vers_2'
+                          ? 'Seuil B — nb de jeux à 3 cartes consécutifs avant attente (1–50)'
+                          : stratForm.mode === 'carte_2_vers_3'
+                          ? 'Seuil B — nb de jeux à 2 cartes consécutifs avant attente (1–50)'
                           : 'Seuil B (1–50)'}
                       </label>
                       <input type="number"
@@ -3391,15 +3512,15 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'distribution' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
               </div>
               )}
 
-              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
+              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance, aleatoire, carte_3_vers_2, carte_2_vers_3, distribution */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'distribution' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -3419,8 +3540,8 @@ function AdminPanel() {
                 </div>
               </div>}
 
-              {/* Mappings manuels — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
+              {/* Mappings manuels — masqué pour absence_apparition, taux_miroir, relance, aleatoire, carte_3_vers_2, carte_2_vers_3, distribution */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'distribution' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -3924,6 +4045,65 @@ function AdminPanel() {
               </>
             )}
           </label>
+
+          {/* ── Fichiers JSON déjà sur le serveur ── */}
+          <div style={{ marginBottom: 14, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 16 }}>🗂️</span>
+              <span style={{ fontWeight: 700, color: '#86efac', fontSize: 13, flex: 1 }}>Fichiers JSON sur le serveur</span>
+              <button
+                className="btn btn-sm"
+                style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#86efac', fontSize: 12, padding: '4px 12px', borderRadius: 7, cursor: 'pointer' }}
+                onClick={loadServerUpdateFiles}
+                disabled={serverFilesLoading}
+              >
+                {serverFilesLoading ? '⏳' : '🔄 Actualiser'}
+              </button>
+            </div>
+
+            {serverUpdateFiles.length === 0 && !serverFilesLoading && (
+              <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center', padding: '8px 0' }}>
+                Cliquez sur "Actualiser" pour voir les fichiers JSON disponibles sur le serveur.
+              </div>
+            )}
+
+            {serverUpdateFiles.map(f => (
+              <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'rgba(0,0,0,0.2)', borderRadius: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 14 }}>📄</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: '#e2e8f0', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                  {f.preview && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{f.preview}</div>}
+                  <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>{(f.size / 1024).toFixed(1)} Ko — {new Date(f.mtime).toLocaleString('fr-FR')}</div>
+                </div>
+                <button
+                  className="btn btn-sm"
+                  style={{ background: 'linear-gradient(135deg,#16a34a,#22c55e)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap', opacity: serverApplyingFile === f.name ? 0.7 : 1 }}
+                  disabled={!!serverApplyingFile}
+                  onClick={() => applyServerFile(f.name)}
+                >
+                  {serverApplyingFile === f.name ? '⏳…' : '⚡ Appliquer'}
+                </button>
+              </div>
+            ))}
+
+            {serverUpdateResult && (
+              <div style={{ marginTop: 10, background: serverUpdateResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(248,113,113,0.08)', border: `1px solid ${serverUpdateResult.ok ? 'rgba(34,197,94,0.3)' : 'rgba(248,113,113,0.3)'}`, borderRadius: 8, padding: '10px 14px' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: serverUpdateResult.ok ? '#22c55e' : '#f87171', marginBottom: 6 }}>
+                  {serverUpdateResult.ok ? `✅ "${serverUpdateResult.filename}" appliqué — ${serverUpdateResult.total_applied} changement(s)` : `❌ Erreur : ${serverUpdateResult.error || 'Échec'}`}
+                </div>
+                {(serverUpdateResult.results || []).map((r2, i) => (
+                  <div key={i} style={{ fontSize: 12, color: r2.applied > 0 ? '#86efac' : '#fca5a5', marginBottom: 3 }}>
+                    <strong>{r2.type}</strong>: {r2.applied} appliqué(s)
+                    {r2.errors?.length > 0 && <span style={{ color: '#fbbf24' }}> ⚠️ {r2.errors.join(' | ')}</span>}
+                  </div>
+                ))}
+                {serverUpdateResult.errors?.length > 0 && !serverUpdateResult.results && (
+                  <div style={{ fontSize: 12, color: '#fca5a5' }}>{serverUpdateResult.errors.join(' | ')}</div>
+                )}
+                <button className="btn btn-sm" style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.2)' }} onClick={() => setServerUpdateResult(null)}>Fermer</button>
+              </div>
+            )}
+          </div>
 
           {/* Prévisualisation */}
           {updatePreview && !updateResult && (

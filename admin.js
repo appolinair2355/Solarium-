@@ -255,7 +255,7 @@ function validateStrategyBody(body) {
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
 
-  if (!isCarteAuto) {
+  {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
@@ -458,15 +458,32 @@ router.delete('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Compteurs miroir (taux_miroir) en temps réel ──────────────────
+// ── Compteurs miroir (taux_miroir) et carte (carte_3_vers_2 / carte_2_vers_3) ──
 router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const entry = engine.custom?.[id];
     if (!entry) return res.json({ counts: {}, threshold: 0 });
-    const counts = entry.mirrorCounts || {};
+    const mode = entry.config?.mode || '';
     const threshold = entry.config?.threshold || 0;
-    res.json({ counts, threshold });
+    if (mode === 'carte_3_vers_2') {
+      return res.json({
+        counts: { c3v2: entry.counts?.['c3v2'] || 0 },
+        threshold,
+        waiting: !!entry.waiting_c3v2,
+        mode,
+      });
+    }
+    if (mode === 'carte_2_vers_3') {
+      return res.json({
+        counts: { c2v3: entry.counts?.['c2v3'] || 0 },
+        threshold,
+        waiting: !!entry.waiting_c2v3,
+        mode,
+      });
+    }
+    const counts = entry.mirrorCounts || {};
+    res.json({ counts, threshold, mode });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
