@@ -348,14 +348,14 @@ export default function Dashboard() {
   }, [hasAccess]);
 
   useEffect(() => {
-    if (!user?.is_admin) return;
+    if (!user?.is_admin && !user?.is_premium) return;
     const load = () =>
       fetch(`/api/games/absences?channel=${channelId}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : []).then(setAbsences);
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [user?.is_admin, channelId]);
+  }, [user?.is_admin, user?.is_premium, channelId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -655,7 +655,7 @@ export default function Dashboard() {
               ) : (
                 <div className="live-games-layout">
                   {/* Big live game + absence counter side by side */}
-                  <div className={`live-grid ${(user?.is_admin || user?.subscription_expires_at) ? 'live-grid-admin' : 'live-grid-single'}`}>
+                  <div className={`live-grid ${(user?.is_admin || user?.is_premium) ? 'live-grid-admin' : 'live-grid-single'}`}>
                     {liveGame ? (
                       <GameRow g={liveGame} mode="live" />
                     ) : (
@@ -663,7 +663,7 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>En attente de la prochaine partie...</span>
                       </div>
                     )}
-                    {(user?.is_admin || user?.subscription_expires_at) && (
+                    {(user?.is_admin || user?.is_premium) && (
                       <div className="absence-counter-chip">
                         <div className="absence-chip-title">
                           <span style={{ color: channel.color }}>📊</span>

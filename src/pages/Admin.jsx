@@ -813,6 +813,17 @@ function AdminPanel() {
   const [renderDbSaving, setRenderDbSaving]   = useState(false);
   const [renderDbMsg, setRenderDbMsg]         = useState('');
 
+  // Hébergement Bots
+  const [hostedBots, setHostedBots]           = useState([]);
+  const [botMsg, setBotMsg]                   = useState('');
+  const [botLoading, setBotLoading]           = useState(false);
+  const [botLogId, setBotLogId]               = useState(null);
+  const [botLogs, setBotLogs]                 = useState([]);
+  const [newBot, setNewBot]                   = useState({ name: '', language: 'python', token: '', channel_id: '' });
+  const [newBotFile, setNewBotFile]           = useState(null); // { name, base64 }
+  const [newBotZipB64, setNewBotZipB64]       = useState('');
+  const [botSaving, setBotSaving]             = useState(false);
+
   // Messages reçus des utilisateurs
   const [userMessages, setUserMessages]         = useState([]);
 
@@ -892,7 +903,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -1030,6 +1041,13 @@ function AdminPanel() {
     try {
       const r = await fetch('/api/admin/render-db', { credentials: 'include' });
       if (r.ok) setRenderDbStatus(await r.json());
+    } catch {}
+  }, []);
+
+  const loadHostedBots = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/bots', { credentials: 'include' });
+      if (r.ok) setHostedBots(await r.json());
     } catch {}
   }, []);
 
@@ -1653,7 +1671,7 @@ function AdminPanel() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots]);
 
   // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
   useEffect(() => {
@@ -1815,7 +1833,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C' };
 
   return (
     <>
@@ -2057,6 +2075,7 @@ function AdminPanel() {
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'systeme',        icon: '🛠️', label: 'Système' },
+            { id: 'bots',           icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
             { id: 'maj-db',         icon: '💾', label: 'Mise à jour DB' },
           ].map(tab => {
@@ -2796,8 +2815,10 @@ function AdminPanel() {
                           : s.mode === 'apparition_absence' ? 'App→Abs'
                           : s.mode === 'taux_miroir' ? '⚖️ Miroir'
                           : s.mode === 'distribution' ? '📊 Distribution'
+                          : s.mode === 'carte_3_vers_2' ? '3️⃣→2️⃣'
+                          : s.mode === 'carte_2_vers_3' ? '2️⃣→3️⃣'
                           : s.mode;
-                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution';
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3';
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
@@ -3220,11 +3241,11 @@ function AdminPanel() {
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
                   <select value={stratForm.mode} onChange={e => {
                     const m = e.target.value;
-                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution';
+                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3';
                     setStratForm(p => ({
                       ...p,
                       mode: m,
-                      ...(isNew ? { threshold: Math.max(p.threshold, 4), max_rattrapage: 20 } : {}),
+                      ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
                       ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
                     }));
                   }}
@@ -3234,6 +3255,8 @@ function AdminPanel() {
                     <option value="absence_apparition">Absence → Apparition</option>
                     <option value="apparition_absence">Apparition → Absence</option>
                     <option value="distribution">📊 Distribution</option>
+                    <option value="carte_3_vers_2">3️⃣ 3 cartes → prédit 2 cartes</option>
+                    <option value="carte_2_vers_3">2️⃣ 2 cartes → prédit 3 cartes</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
@@ -3246,6 +3269,16 @@ function AdminPanel() {
                   {stratForm.mode === 'distribution' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(99,211,255,0.08)', border: '1px solid rgba(99,211,255,0.25)', fontSize: 12, color: '#7dd3fc', lineHeight: 1.6 }}>
                       📊 Compte les <strong>absences de distribution</strong> de chaque costume. Dès qu'un costume manque depuis ≥ B jeux consécutifs et est <strong>enfin distribué</strong> (réapparaît dans la main), il est prédit automatiquement pour le jeu suivant. Déclenchement en temps réel — toujours le costume distribué.
+                    </div>
+                  )}
+                  {stratForm.mode === 'carte_3_vers_2' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', fontSize: 12, color: '#fde68a', lineHeight: 1.6 }}>
+                      3️⃣ Compte le nombre de fois où la main choisie a tiré <strong>3 cartes</strong>. Dès que le compteur atteint le seuil B, prédit que le prochain jeu (ou après offset) aura <strong>2 cartes</strong> (naturel) pour la même main.
+                    </div>
+                  )}
+                  {stratForm.mode === 'carte_2_vers_3' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(167,243,208,0.08)', border: '1px solid rgba(167,243,208,0.25)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.6 }}>
+                      2️⃣ Compte le nombre de fois où la main choisie a reçu <strong>2 cartes</strong> (naturel). Dès que le compteur atteint le seuil B, prédit que le prochain jeu tirera <strong>3 cartes</strong> pour la même main.
                     </div>
                   )}
                   {stratForm.mode === 'apparition_absence' && (
@@ -3680,7 +3713,7 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -3688,7 +3721,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -3709,7 +3742,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -3848,9 +3881,10 @@ function AdminPanel() {
                     { val: 'double_suit_last',     label: '🃏 Double costume dernier jeu',    desc: 'Bloquer si le dernier jeu avait à la fois la carte prédite et le déclencheur' },
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                     { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
+                    { val: 'consec_same_suit_pred', label: '🚫 Prédictions consécutives même costume', desc: 'Bloquer si le même costume a été prédit N fois de suite. Libération automatique si un autre costume est prédit ou après 20 min.' },
                   ];
 
-                  const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause'].includes(ex.type);
+                  const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause','consec_same_suit_pred'].includes(ex.type);
                   const needsWindow = ['recent_frequency','trigger_overload','high_win_rate','loss_streak_pause'].includes(ex.type);
                   const needsHalf   = ex.type === 'time_window_block';
                   const needsMinInterval = ex.type === 'minute_interval_block';
@@ -3914,6 +3948,7 @@ function AdminPanel() {
                             {ex.type === 'dominant_streak'     && `→ bloque si présent dans les ${ex.value ?? 3} dernières parties`}
                             {ex.type === 'cold_start'          && `→ bloque les ${ex.value ?? 10} premières parties`}
                             {ex.type === 'loss_streak_pause'   && `→ pause ${ex.window ?? 2} jeux après ${ex.value ?? 3} défaites de suite`}
+                            {ex.type === 'consec_same_suit_pred' && `→ bloque si le même costume est prédit ${ex.value ?? 3}x de suite (libéré après autre costume ou 20 min)`}
                           </div>
                         </div>
                       )}
@@ -4875,6 +4910,276 @@ function AdminPanel() {
               </button>
             </div>
           )}
+        </div>)}
+
+        {/* ── CONTRÔLE SERVEURS (STOP) ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(239,68,68,0.5)', marginTop: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">⚡</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Contrôle des serveurs</h2>
+              <p className="tg-admin-sub">
+                Arrêtez le serveur Replit (redémarrage automatique via workflow) ou suspendez le service Render.com via l'API REST.<br/>
+                <span style={{ color: '#6b7280', fontSize: 11 }}>Pour Render : configurez d'abord le Service ID et la clé API ci-dessous.</span>
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+            <button
+              className="btn btn-sm"
+              style={{ background: 'linear-gradient(135deg,#b45309,#d97706)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 13, padding: '10px 22px', borderRadius: 10, cursor: 'pointer' }}
+              onClick={async () => {
+                if (!confirm('⚡ Arrêter le serveur Replit maintenant ?\nIl redémarrera automatiquement via le workflow.')) return;
+                try {
+                  const r = await fetch('/api/admin/stop-server', { method: 'POST', credentials: 'include' });
+                  const d = await r.json();
+                  alert(d.message || '✅ Commande envoyée');
+                } catch (e) { alert('❌ Erreur : ' + e.message); }
+              }}
+            >⏹ Arrêter Replit</button>
+            <button
+              className="btn btn-sm"
+              style={{ background: 'linear-gradient(135deg,#7c3aed,#a855f7)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 13, padding: '10px 22px', borderRadius: 10, cursor: 'pointer' }}
+              onClick={async () => {
+                if (!confirm('🟣 Suspendre le service Render.com ?\nIl s\'arrêtera et consommera 0 heures jusqu\'à la prochaine requête entrante.')) return;
+                try {
+                  const r = await fetch('/api/admin/stop-render', { method: 'POST', credentials: 'include' });
+                  const d = await r.json();
+                  if (r.ok) alert('✅ ' + d.message);
+                  else alert('❌ ' + d.error);
+                } catch (e) { alert('❌ Erreur réseau : ' + e.message); }
+              }}
+            >🟣 Suspendre Render</button>
+          </div>
+
+          {/* Config Render API */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 10 }}>Configuration API Render.com</div>
+            {[
+              { key: 'render_service_id', label: 'Render Service ID (srv-xxxxx)', placeholder: 'srv-xxxxxxxxxxxxxxxxxxxxx' },
+              { key: 'render_api_key',    label: 'Render API Key', placeholder: 'rnd_xxxxxxxxxxxx', type: 'password' },
+            ].map(({ key, label, placeholder, type }) => (
+              <div key={key} style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>{label}</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type={type || 'text'}
+                    className="tg-input"
+                    placeholder={placeholder}
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+                    onBlur={async (e) => {
+                      const val = e.target.value.trim();
+                      if (!val) return;
+                      await fetch('/api/admin/settings', {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key, value: val }),
+                      });
+                      e.target.value = '';
+                      e.target.placeholder = '✅ Sauvegardé';
+                      setTimeout(() => { e.target.placeholder = placeholder; }, 2000);
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>)}
+
+        {/* ══════════════ ONGLET HÉBERGEMENT BOTS ══════════════ */}
+        {adminTab === 'bots' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.5)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🤖</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Hébergement Bots Telegram</h2>
+              <p className="tg-admin-sub">Déployez vos bots Python ou Node.js en uploadant un fichier ZIP. Chaque bot tourne dans son propre processus avec redémarrage automatique.</p>
+            </div>
+            {hostedBots.filter(b => b.running).length > 0 && (
+              <span className="tg-badge-connected">🟢 {hostedBots.filter(b => b.running).length} actif{hostedBots.filter(b => b.running).length > 1 ? 's' : ''}</span>
+            )}
+          </div>
+
+          {/* Liste des bots existants */}
+          {hostedBots.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              {hostedBots.map(bot => (
+                <div key={bot.id} style={{
+                  borderRadius: 12, padding: '12px 16px',
+                  background: bot.running ? 'rgba(34,197,94,0.06)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${bot.running ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 16 }}>{bot.language === 'node' ? '🟨' : '🐍'}</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0', flex: 1 }}>{bot.name}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                      background: bot.running ? 'rgba(34,197,94,0.15)' : 'rgba(107,114,128,0.2)',
+                      color: bot.running ? '#22c55e' : '#9ca3af' }}>
+                      {bot.running ? '🟢 Actif' : '⚫ Arrêté'}
+                    </span>
+                    {bot.restarts > 0 && <span style={{ fontSize: 10, color: '#fbbf24' }}>🔄 {bot.restarts} redémarrage{bot.restarts > 1 ? 's' : ''}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                    {bot.language} · 
+                    <span style={{ color: '#7dd3fc', marginLeft: 4 }}>
+                      📄 {bot.work_dir ? bot.work_dir.split('/').slice(-1)[0] + '/' : ''}{bot.main_file}
+                    </span>
+                    {' · '}canal: {bot.channel_id || '—'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                    {!bot.running ? (
+                      <button className="btn btn-sm" style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer' }}
+                        onClick={async () => {
+                          const r = await fetch(`/api/admin/bots/${bot.id}/start`, { method: 'POST', credentials: 'include' });
+                          const d = await r.json();
+                          if (d.ok) { setBotMsg('✅ Bot démarré'); await loadHostedBots(); }
+                          else setBotMsg('❌ ' + d.error);
+                        }}>▶ Démarrer</button>
+                    ) : (
+                      <button className="btn btn-sm" style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer' }}
+                        onClick={async () => {
+                          await fetch(`/api/admin/bots/${bot.id}/stop`, { method: 'POST', credentials: 'include' });
+                          setBotMsg('⏹ Bot arrêté'); await loadHostedBots();
+                        }}>⏹ Arrêter</button>
+                    )}
+                    <button className="btn btn-sm" style={{ background: 'rgba(34,158,217,0.12)', border: '1px solid rgba(34,158,217,0.3)', color: '#7dd3fc', fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer' }}
+                      onClick={async () => {
+                        if (botLogId === bot.id) { setBotLogId(null); setBotLogs([]); return; }
+                        const r = await fetch(`/api/admin/bots/${bot.id}/logs`, { credentials: 'include' });
+                        const d = await r.json();
+                        setBotLogs(Array.isArray(d) ? d : []);
+                        setBotLogId(bot.id);
+                      }}>📋 Logs</button>
+                    <label className="btn btn-sm" style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', color: '#fbbf24', fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer' }}>
+                      📁 Mettre à jour ZIP
+                      <input type="file" accept=".zip" style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const file = e.target.files[0]; if (!file) return;
+                          const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = ev => res(ev.target.result.split(',')[1]); fr.readAsDataURL(file); });
+                          const r = await fetch(`/api/admin/bots/${bot.id}/upload`, {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ zip_base64: b64 }),
+                          });
+                          const d = await r.json();
+                          setBotMsg(d.ok ? '✅ Code mis à jour' : '❌ ' + d.error);
+                          await loadHostedBots();
+                        }} />
+                    </label>
+                    <button className="btn btn-sm" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer' }}
+                      onClick={async () => {
+                        if (!confirm(`Supprimer définitivement le bot "${bot.name}" ?`)) return;
+                        await fetch(`/api/admin/bots/${bot.id}`, { method: 'DELETE', credentials: 'include' });
+                        setBotMsg('🗑️ Bot supprimé'); await loadHostedBots();
+                        if (botLogId === bot.id) { setBotLogId(null); setBotLogs([]); }
+                      }}>🗑 Supprimer</button>
+                  </div>
+
+                  {/* Zone logs */}
+                  {botLogId === bot.id && (
+                    <div style={{ marginTop: 12, background: '#0f172a', borderRadius: 8, padding: '10px 12px', maxHeight: 220, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
+                      {botLogs.length === 0 ? (
+                        <span style={{ color: '#64748b' }}>Aucun log disponible.</span>
+                      ) : botLogs.map((l, i) => (
+                        <div key={i} style={{ color: l.s === 'err' ? '#f87171' : '#86efac', marginBottom: 2 }}>
+                          <span style={{ color: '#64748b', marginRight: 6 }}>[{new Date(l.t).toLocaleTimeString()}]</span>{l.m}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {botMsg && (
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: botMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>
+              {botMsg}
+            </div>
+          )}
+
+          {/* Formulaire ajout nouveau bot */}
+          <div style={{ borderTop: hostedBots.length > 0 ? '1px solid rgba(255,255,255,0.08)' : 'none', paddingTop: hostedBots.length > 0 ? 16 : 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', marginBottom: 12 }}>➕ Ajouter un nouveau bot</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 2, minWidth: 180 }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>Nom du bot *</label>
+                  <input className="tg-input" value={newBot.name} onChange={e => setNewBot(p => ({ ...p, name: e.target.value }))} placeholder="MonBot" style={{ width: '100%' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>Langage</label>
+                  <select className="tg-input" value={newBot.language} onChange={e => setNewBot(p => ({ ...p, language: e.target.value, main_file: '' }))}>
+                    <option value="python">🐍 Python</option>
+                    <option value="node">🟨 Node.js</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>Token Bot Telegram *</label>
+                <input className="tg-input" value={newBot.token} onChange={e => setNewBot(p => ({ ...p, token: e.target.value }))} placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ" style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>Channel ID <span style={{ color: '#f87171' }}>*</span> <span style={{ color: '#64748b' }}>(requis pour message bienvenue)</span></label>
+                <input className="tg-input" value={newBot.channel_id} onChange={e => setNewBot(p => ({ ...p, channel_id: e.target.value }))} placeholder="-100123456789" style={{ width: '100%' }} />
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>
+                  Le fichier principal est détecté automatiquement depuis le ZIP (main.py, bot.py, index.js…). Le bot doit être <strong style={{ color: '#94a3b8' }}>admin du canal</strong> pour envoyer des messages.
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 3 }}>
+                  Fichier ZIP du bot {newBotZipB64 ? <span style={{ color: '#22c55e' }}>✅ Chargé ({(newBotZipB64.length * 0.75 / 1024).toFixed(0)} Ko)</span> : <span style={{ color: '#f87171' }}>* (requis)</span>}
+                </label>
+                <input type="file" accept=".zip"
+                  style={{ fontSize: 12, color: '#e2e8f0' }}
+                  onChange={async (e) => {
+                    const file = e.target.files[0]; if (!file) return;
+                    const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = ev => res(ev.target.result.split(',')[1]); fr.readAsDataURL(file); });
+                    setNewBotZipB64(b64);
+                  }}
+                />
+              </div>
+            </div>
+            <button
+              className="btn btn-gold btn-sm"
+              disabled={botSaving || !newBot.name || !newBot.token || !newBotZipB64}
+              style={{ marginTop: 14, background: 'linear-gradient(135deg,#1e40af,#3b82f6)', border: 'none', color: '#fff', fontWeight: 700, fontSize: 13, padding: '10px 28px', borderRadius: 10, cursor: 'pointer', opacity: (!newBot.name || !newBot.token || !newBotZipB64) ? 0.4 : 1 }}
+              onClick={async () => {
+                setBotSaving(true); setBotMsg('');
+                try {
+                  const body = {
+                    name: newBot.name.trim(),
+                    language: newBot.language,
+                    token: newBot.token.trim(),
+                    channel_id: newBot.channel_id.trim(),
+                    zip_base64: newBotZipB64,
+                  };
+                  const r = await fetch('/api/admin/bots', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  const d = await r.json();
+                  if (r.ok) {
+                    const w = d.bot?._welcome;
+                    const wMsg = !newBot.channel_id.trim()
+                      ? ' — ⚠️ Channel ID manquant, message bienvenue non envoyé'
+                      : w?.ok
+                        ? ' — ✅ Message bienvenue envoyé sur Telegram'
+                        : ` — ⚠️ Message bienvenue échoué : ${w?.error || 'inconnu'} (vérifiez que le bot est admin du canal)`;
+                    setBotMsg('✅ Bot créé ! Démarrez-le avec le bouton ▶' + wMsg);
+                    setNewBot({ name: '', language: 'python', token: '', channel_id: '' });
+                    setNewBotZipB64('');
+                    await loadHostedBots();
+                  } else {
+                    setBotMsg('❌ ' + d.error);
+                  }
+                } catch (e) { setBotMsg('❌ Erreur réseau : ' + e.message); }
+                setBotSaving(false);
+              }}
+            >{botSaving ? '⏳ Création…' : '🤖 Créer le bot'}</button>
+          </div>
         </div>)}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
