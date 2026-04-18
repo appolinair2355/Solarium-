@@ -712,7 +712,7 @@ function AdminPanel() {
   const [premiumDurH, setPremiumDurH] = useState(750);
 
   const generatePremium = async () => {
-    if (!confirm(`Générer ${premiumCount} compte(s) premium ? Les comptes existants (premium1…) seront remplacés.`)) return;
+    if (!confirm(`Générer ${premiumCount} compte(s) premium ? Les ${premiumCount} derniers comptes générés seront automatiquement supprimés.`)) return;
     setPremiumLoading(true);
     try {
       const r = await fetch('/api/admin/generate-premium', {
@@ -2117,7 +2117,7 @@ function AdminPanel() {
             <div style={{ flex: 1 }}>
               <h2 className="tg-admin-title">Comptes Premium</h2>
               <p className="tg-admin-sub">
-                Génère des comptes prêts à l'emploi (premium1, premium2…) avec email et mot de passe. Les comptes existants seront remplacés.
+                Génère des comptes prêts à l'emploi avec identifiants uniques, email et mot de passe. Les derniers comptes générés sont automatiquement supprimés.
               </p>
             </div>
           </div>
@@ -2142,7 +2142,7 @@ function AdminPanel() {
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.3)',
                   background: 'rgba(250,204,21,0.05)', color: '#e2e8f0', fontSize: 13 }}
               />
-              <span style={{ fontSize: 10, color: '#64748b' }}>Ex : premium1@{premiumDomain || 'premium.pro'}</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>Ex : pm_A3F2_1@{premiumDomain || 'premium.pro'}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Durée (heures)</label>
