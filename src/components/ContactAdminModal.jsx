@@ -1,4 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+const SEEN_KEY = 'seen_admin_replies';
+
+function getSeenIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function markSeen(ids) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...ids])); } catch {}
+}
 
 export default function ContactAdminModal({ trigger }) {
   const [open, setOpen]       = useState(false);
@@ -8,17 +18,48 @@ export default function ContactAdminModal({ trigger }) {
   const [result, setResult]   = useState('');
   const [history, setHistory] = useState([]);
   const [histLoading, setHistLoading] = useState(false);
+  const [seenIds, setSeenIds] = useState(getSeenIds);
+  const pollRef = useRef(null);
 
-  const openModal = () => { setOpen(true); setResult(''); loadHistory(); };
-  const close     = () => { setOpen(false); setResult(''); };
-
-  const loadHistory = async () => {
-    setHistLoading(true);
+  const loadHistory = async (silent = false) => {
+    if (!silent) setHistLoading(true);
     try {
       const r = await fetch('/api/user/my-messages', { credentials: 'include' });
       if (r.ok) setHistory(await r.json());
     } catch {}
-    setHistLoading(false);
+    if (!silent) setHistLoading(false);
+  };
+
+  const openModal = () => {
+    setOpen(true);
+    setResult('');
+    loadHistory();
+  };
+
+  const close = () => {
+    setOpen(false);
+    setResult('');
+    if (pollRef.current) clearInterval(pollRef.current);
+  };
+
+  useEffect(() => {
+    if (open) {
+      pollRef.current = setInterval(() => loadHistory(true), 10000);
+    } else {
+      if (pollRef.current) clearInterval(pollRef.current);
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [open]);
+
+  const repliedMessages = history.filter(m => m.admin_reply);
+  const repliedIds = new Set(repliedMessages.map(m => String(m.id)));
+  const unreadCount = repliedMessages.filter(m => !seenIds.has(String(m.id))).length;
+
+  const handleOpenHistorique = () => {
+    setTab('historique');
+    const newSeen = new Set([...seenIds, ...repliedIds]);
+    setSeenIds(newSeen);
+    markSeen(newSeen);
   };
 
   const send = async () => {
@@ -43,12 +84,19 @@ export default function ContactAdminModal({ trigger }) {
     setSending(false);
   };
 
-  const unreadReplies = history.filter(m => m.admin_reply && !m._replyRead).length;
-
   if (!open) {
-    return trigger ? trigger(openModal) : (
-      <button onClick={openModal} className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+    return trigger ? trigger(openModal, unreadCount) : (
+      <button onClick={openModal} className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5, position: 'relative' }}>
         ✉️ <span>Écrire à l'admin</span>
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -5, right: -5,
+            background: '#ef4444', color: '#fff',
+            borderRadius: '50%', fontSize: 10, fontWeight: 800,
+            width: 17, height: 17, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 0 6px rgba(239,68,68,0.7)',
+          }}>{unreadCount}</span>
+        )}
       </button>
     );
   }
@@ -84,16 +132,30 @@ export default function ContactAdminModal({ trigger }) {
         {/* Tabs */}
         <div style={{ display: 'flex', margin: '14px 20px 0', gap: 6 }}>
           {[
-            { id: 'compose',    label: '✏️ Nouveau message' },
-            { id: 'historique', label: `📬 Historique${history.length > 0 ? ` (${history.length})` : ''}` },
+            { id: 'compose',    label: '✏️ Nouveau message', onClick: () => setTab('compose') },
+            { id: 'historique', label: `📬 Historique${history.length > 0 ? ` (${history.length})` : ''}`, onClick: handleOpenHistorique },
           ].map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
+            <button key={t.id} onClick={t.onClick} style={{
               flex: 1, padding: '7px 10px', borderRadius: 9, fontSize: 12, fontWeight: tab === t.id ? 700 : 500, cursor: 'pointer',
               background: tab === t.id ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
               border: tab === t.id ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.07)',
               color: tab === t.id ? '#a5b4fc' : '#64748b',
               transition: 'all 0.15s',
-            }}>{t.label}</button>
+              position: 'relative',
+            }}>
+              {t.label}
+              {t.id === 'historique' && unreadCount > 0 && (
+                <span style={{
+                  marginLeft: 5,
+                  background: '#ef4444', color: '#fff',
+                  borderRadius: 999, fontSize: 10, fontWeight: 800,
+                  padding: '1px 6px',
+                  display: 'inline-block',
+                  verticalAlign: 'middle',
+                  boxShadow: '0 0 5px rgba(239,68,68,0.6)',
+                }}>{unreadCount} nouveau{unreadCount > 1 ? 'x' : ''}</span>
+              )}
+            </button>
           ))}
         </div>
 
@@ -155,7 +217,7 @@ export default function ContactAdminModal({ trigger }) {
                 {history.map(msg => (
                   <div key={msg.id} style={{
                     borderRadius: 10, overflow: 'hidden',
-                    border: '1px solid rgba(99,102,241,0.2)',
+                    border: `1px solid ${msg.admin_reply ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.2)'}`,
                     background: 'rgba(255,255,255,0.02)',
                   }}>
                     {/* User message */}
@@ -172,7 +234,7 @@ export default function ContactAdminModal({ trigger }) {
 
                     {/* Admin reply */}
                     {msg.admin_reply ? (
-                      <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderTop: '1px solid rgba(99,102,241,0.18)' }}>
+                      <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.1)', borderTop: '1px solid rgba(99,102,241,0.25)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: '#818cf8' }}>↩️ Réponse admin</span>
                           <span style={{ fontSize: 10, color: '#475569' }}>
@@ -191,7 +253,7 @@ export default function ContactAdminModal({ trigger }) {
                 ))}
               </div>
             )}
-            <button onClick={loadHistory} style={{
+            <button onClick={() => loadHistory()} style={{
               marginTop: 12, width: '100%', padding: '8px', borderRadius: 8, fontSize: 12,
               background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
               color: '#64748b', cursor: 'pointer',
