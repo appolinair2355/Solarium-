@@ -36,6 +36,13 @@ function fmtDuration(mins) {
 router.get('/my-strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   if (req.session.isAdmin) return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] });
+  if (req.session.isPremium) {
+    try {
+      const strats = await getStrategies();
+      const customIds = strats.map(s => `S${s.id}`);
+      return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL', ...customIds] });
+    } catch (e) { return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] }); }
+  }
   try {
     const visible = await db.getVisibleStrategies(req.session.userId);
     res.json({ visible });
@@ -121,9 +128,26 @@ router.post('/generate-premium', requireAdmin, async (req, res) => {
     const count = Math.min(Math.max(parseInt(req.body.count) || 5, 1), 50);
     const domain = (req.body.domain || 'premium.pro').trim().replace(/^@/, '');
     const durationH = Math.max(parseInt(req.body.durationH) || 750, 1);
+
+    // Supprimer les 5 derniers comptes générés
+    const lastRaw = await db.getSetting('premium_last_generated');
+    if (lastRaw) {
+      try {
+        const lastUsernames = JSON.parse(lastRaw);
+        for (const uname of lastUsernames) {
+          const u = await db.getUserByLogin(uname);
+          if (u) await db.deleteUser(u.id);
+        }
+      } catch (_) {}
+    }
+
+    // Suffix unique basé sur timestamp (ex: pm_A3F2_1)
+    const suffix = Date.now().toString(36).slice(-4).toUpperCase();
     const accounts = [];
+    const generatedUsernames = [];
+
     for (let i = 1; i <= count; i++) {
-      const username  = `premium${i}`;
+      const username  = `pm_${suffix}_${i}`;
       const email     = `${username}@${domain}`;
       const password  = genPassword(10);
       const hash      = await bcrypt.hash(password, 10);
@@ -135,7 +159,12 @@ router.post('/generate-premium', requireAdmin, async (req, res) => {
         subscription_duration_minutes: durationH * 60,
       });
       accounts.push({ username, email, password, expires_at: expiresAt });
+      generatedUsernames.push(username);
     }
+
+    // Sauvegarder les noms générés pour la prochaine suppression
+    await db.setSetting('premium_last_generated', JSON.stringify(generatedUsernames));
+
     res.json({ ok: true, accounts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
