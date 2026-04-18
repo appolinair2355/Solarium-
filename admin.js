@@ -343,7 +343,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
               interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
         : isCarteAuto
-        ? { threshold: 0, mode, mappings: null }
+        ? { threshold: parseInt(threshold), mode, mappings: null }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -411,7 +411,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
               interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
             })) : [] }
         : isCarteAuto
-        ? { threshold: 0, mode, mappings: null }
+        ? { threshold: parseInt(threshold), mode, mappings: null }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',

@@ -1835,6 +1835,40 @@ class Engine {
         if (projected.length > 0) liveSuits = projected;
       }
 
+      // Mode 3 cartes → 2 cartes : afficher le compteur de jeux à 3 cartes consécutifs
+      if (mode === 'carte_3_vers_2') {
+        const count = entry.counts['c3v2'] || 0;
+        const waiting = !!entry.waiting_c3v2;
+        return [{
+          suit: 'c3v2', display: '🃏',
+          count, threshold,
+          mode, label: '3→2 cartes',
+          isLive: false,
+          singleCounter: true,
+          waiting,
+          description: waiting
+            ? `⏳ Seuil atteint — attend un jeu à 2 cartes`
+            : `${count}/${threshold} jeu${count > 1 ? 'x' : ''} à 3 cartes`,
+        }];
+      }
+
+      // Mode 2 cartes → 3 cartes : afficher le compteur de jeux à 2 cartes consécutifs
+      if (mode === 'carte_2_vers_3') {
+        const count = entry.counts['c2v3'] || 0;
+        const waiting = !!entry.waiting_c2v3;
+        return [{
+          suit: 'c2v3', display: '🃏',
+          count, threshold,
+          mode, label: '2→3 cartes',
+          isLive: false,
+          singleCounter: true,
+          waiting,
+          description: waiting
+            ? `⏳ Seuil atteint — attend un jeu à 3 cartes`
+            : `${count}/${threshold} jeu${count > 1 ? 'x' : ''} à 2 cartes`,
+        }];
+      }
+
       // Mode Distribution → afficher le compteur de jeux non-naturels
       if (mode === 'distribution') {
         const count = entry.counts['distrib'] || 0;
