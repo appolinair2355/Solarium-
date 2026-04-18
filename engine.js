@@ -1201,10 +1201,10 @@ class Engine {
     } else if (mode === 'taux_miroir') {
       // ── MODE MIROIR TAUX ─────────────────────────────────────────────
       // Compte le nombre TOTAL d'apparitions de chaque costume (cumulatif).
-      // Chaque carte de la main est comptée (ex: main ♠♠ = pique +2).
+      // Chaque carte de la main sélectionnée est comptée (ex: banquier ♠♠ = pique +2).
       // Quand un costume A a B apparitions DE PLUS qu'un costume B → prédit le costume B.
-      // Après le déclenchement, remet les compteurs mirrorCounts à 0 (cycle repart).
-      // Les compteurs se remettent aussi à zéro toutes les heures pile.
+      // Les compteurs NE se remettent PAS à zéro après la prédiction.
+      // Remise à zéro UNIQUEMENT à l'heure pile.
       // ─────────────────────────────────────────────────────────────────
 
       // 0. Remise à zéro automatique toutes les heures pile
@@ -1218,17 +1218,25 @@ class Engine {
         state.mirrorLastHour = currentHour;
       }
 
-      // 1. Mise à jour des compteurs cumulatifs (+N par jeu selon le nb de cartes du costume)
-      // Ex: main ♠♠♥ → ♠ reçoit +2, ♥ reçoit +1
+      // 1. Mise à jour des compteurs cumulatifs
+      // On compte les cartes de la main configurée : 'banquier' → bCards, 'joueur' → pCards
+      // Ex: banquier ♠♠♥ → ♠ reçoit +2, ♥ reçoit +1
       const rawCards = cfg.hand === 'banquier' ? (bCards || []) : (pCards || []);
+      const addedCounts = {};
+      for (const c of rawCards) {
+        const s = normalizeSuit(c.S || '');
+        if (ALL_SUITS.includes(s)) {
+          addedCounts[s] = (addedCounts[s] || 0) + 1;
+        }
+      }
       for (const suit of ALL_SUITS) {
-        const n = rawCards.filter(c => normalizeSuit(c.S || '') === suit).length;
-        state.mirrorCounts[suit] = (state.mirrorCounts[suit] || 0) + n;
+        state.mirrorCounts[suit] = (state.mirrorCounts[suit] || 0) + (addedCounts[suit] || 0);
       }
 
-      // Log des compteurs courants
+      // Log des compteurs courants (avec la main utilisée)
+      const addedStr  = ALL_SUITS.map(s => `${s}:+${addedCounts[s] || 0}`).join(' ');
       const countsStr = ALL_SUITS.map(s => `${s}:${state.mirrorCounts[s] || 0}`).join(' ');
-      console.log(`[${channelId}] MiroirTaux compteurs → ${countsStr}`);
+      console.log(`[${channelId}] MiroirTaux (main=${cfg.hand || 'joueur'}, jeu#${gn}) cartes ajoutées: ${addedStr} | totaux: ${countsStr}`);
 
       // 2. Si prédiction en attente → ne pas déclencher
       if (Object.keys(state.pending).length > 0) return;
@@ -1277,15 +1285,12 @@ class Engine {
 
       // 4. Déclenchement si une paire dépasse le seuil
       // Prédit le costume retardataire (le plus faible) — aucun mapping.
-      // Après déclenchement, les compteurs des deux costumes impliqués sont remis à zéro
-      // pour éviter un re-déclenchement immédiat sur le jeu suivant.
+      // Les compteurs NE se remettent PAS à zéro après déclenchement :
+      // ils continuent de s'accumuler et se remettent à zéro uniquement à l'heure pile.
       if (laggingSuit) {
         const ps = laggingSuit;
-        console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ écart(${bestPairThreshold}) → prédit ${ps}`);
+        console.log(`[${channelId}] MiroirTaux (main=${handLabel}): ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ écart(${bestPairThreshold}) → prédit ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
-        // Reset des compteurs des deux costumes impliqués après déclenchement
-        state.mirrorCounts[dominantSuit] = 0;
-        state.mirrorCounts[laggingSuit]  = 0;
       }
     }
   }
