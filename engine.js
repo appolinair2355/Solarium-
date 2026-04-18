@@ -1276,12 +1276,16 @@ class Engine {
       }
 
       // 4. Déclenchement si une paire dépasse le seuil
-      // Prédit directement le costume retardataire (le plus faible) — aucun mapping
-      // Le compteur continue de s'accumuler après la prédiction — reset UNIQUEMENT à l'heure pile
+      // Prédit le costume retardataire (le plus faible) — aucun mapping.
+      // Après déclenchement, les compteurs des deux costumes impliqués sont remis à zéro
+      // pour éviter un re-déclenchement immédiat sur le jeu suivant.
       if (laggingSuit) {
         const ps = laggingSuit;
         console.log(`[${channelId}] MiroirTaux: ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ écart(${bestPairThreshold}) → prédit ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
+        // Reset des compteurs des deux costumes impliqués après déclenchement
+        state.mirrorCounts[dominantSuit] = 0;
+        state.mirrorCounts[laggingSuit]  = 0;
       }
     }
   }
@@ -1338,21 +1342,12 @@ class Engine {
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
       const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
 
-      // ── Résolution live spéciale pour le mode Distribution ──────────
+      // ── Mode Distribution : résolution en fin de jeu uniquement ─────
+      // Ne pas résoudre live — on attend que le jeu soit terminé
+      // pour vérifier que les DEUX mains ont exactement 2 cartes.
+      // La résolution correcte est dans _resolvePending (appelé par processGame).
       if (cfg.mode === 'distribution') {
-        // Quand les deux mains sont terminées avec exactement 2 cartes → naturel → gagne
-        if (playerDone && bankerDone && playerCards.length === 2 && bankerCards.length === 2) {
-          for (const [pg, info] of Object.entries(entry.pending)) {
-            if (info.suit !== 'distrib') continue;
-            const pgNum = parseInt(pg);
-            if (pgNum > gn) continue;
-            const rattrapage = gn - pgNum;
-            console.log(`[S${idStr}] ⚡ Live: naturel (2P+2B) jeu #${gn} → distribution gagne immédiat (R${rattrapage})`);
-            await resolvePrediction(`S${idStr}`, pgNum, 'distrib', 'gagne', rattrapage, playerCards, bankerCards, stratTgOpts);
-            delete entry.pending[pg];
-          }
-        }
-        continue; // ne pas appeler tryResolve pour distribution
+        continue; // skip tryResolve, résolution via _resolvePending en fin de jeu
       }
 
       // ── Résolution live spéciale pour les modes Carte 2/3 ───────────

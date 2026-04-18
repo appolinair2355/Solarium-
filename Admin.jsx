@@ -3037,6 +3037,7 @@ function AdminPanel() {
                       ...p,
                       mode: m,
                       ...(isNew ? { threshold: Math.max(p.threshold, 4), max_rattrapage: 20 } : {}),
+                      ...(m === 'taux_miroir' ? { threshold: Math.max(p.threshold, 7) } : {}),
                       ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
                     }));
                   }}
