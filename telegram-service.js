@@ -795,6 +795,10 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
 //  Utilise le bot_token stocké dans tg_pred_messages s'il est présent
 //  (stratégie custom), sinon le TOKEN global.
 
+// Verrou anti-doublon : empêche deux phase 2 pour la même prédiction + canal
+// (editStoredMessages peut être appelée deux fois : résolution live + résolution finale)
+const _phase2Active = new Set();
+
 // Phase 2 du format 11 (Distribution) — remplace les cartes après 10 secondes
 function buildDistribFinalMsg(gameNumber, rattrapage) {
   return (
@@ -838,13 +842,13 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
     // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
     // puis on remplace par le résultat standard après 10 secondes (phase 2).
-    const fmt = parseInt(formatId);
-    const hasCards = (Array.isArray(playerCards) && playerCards.length > 0)
-                  || (Array.isArray(bankerCards)  && bankerCards.length  > 0);
+    const isDistrib = (suit === 'distrib');
+    const hasCards  = (Array.isArray(playerCards) && playerCards.length > 0)
+                   || (Array.isArray(bankerCards)  && bankerCards.length  > 0);
 
     let phase1Text;
-    if (status === 'gagne' && hasCards && fmt !== 11) {
-      // Formats standard : résultat + section cartes
+    if (status === 'gagne' && hasCards && !isDistrib) {
+      // Formats standard : résultat + section cartes (supprimée après 10s)
       const pEmojis = formatCardsToEmojis(playerCards);
       const bEmojis = formatCardsToEmojis(bankerCards);
       phase1Text =
@@ -853,7 +857,7 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
         `🃏 Joueur  : ${pEmojis}\n` +
         `🎴 Banquier : ${bEmojis}`;
     } else {
-      // Format 11 (déjà construit avec les cartes) ou pas de cartes : texte normal
+      // Distribution (cartes déjà incluses dans resultText) ou pas de cartes : texte normal
       phase1Text = resultText;
     }
 
@@ -873,31 +877,29 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
           const capturedChatId = row.channel_tg_id;
           const capturedMsgId  = parseInt(row.message_id);
 
-          if (fmt === 11) {
-            // Format Distribution : phase 2 = résumé sans cartes
-            const finalText = buildDistribFinalMsg(gameNumber, rattrapage);
-            setTimeout(async () => {
-              try {
-                await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: finalText }),
-                });
-                console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2 distrib)`);
-              } catch {}
-            }, 10_000);
-          } else if (hasCards) {
-            // Autres formats : phase 2 = résultat standard sans cartes
-            setTimeout(async () => {
-              try {
-                await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: resultText }),
-                });
-                console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2 standard)`);
-              } catch {}
-            }, 10_000);
+          // Clé unique par prédiction + canal pour éviter deux phase 2 identiques
+          const p2Key = `${strategy}#${gameNumber}#${suit}#${capturedChatId}`;
+
+          if (!_phase2Active.has(p2Key)) {
+            _phase2Active.add(p2Key);
+
+            const phase2Text = isDistrib
+              ? buildDistribFinalMsg(gameNumber, rattrapage)
+              : (hasCards ? resultText : null);
+
+            if (phase2Text) {
+              setTimeout(async () => {
+                _phase2Active.delete(p2Key);
+                try {
+                  await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: phase2Text }),
+                  });
+                  console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2)`);
+                } catch { _phase2Active.delete(p2Key); }
+              }, 20_000);
+            }
           }
         }
       } else {

@@ -117,6 +117,23 @@ async function initRenderDb() {
         synced_at    TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+    // ── Migration : s'assure que les colonnes critiques sont bien TEXT ──
+    // Nécessaire si la table a été créée avec un type plus restreint (ex: VARCHAR(5))
+    const alterCols = [
+      ['predictions_export', 'predicted_suit'],
+      ['predictions_export', 'player_cards'],
+      ['predictions_export', 'banker_cards'],
+      ['predictions_export', 'status'],
+      ['predictions_export', 'strategy'],
+    ];
+    for (const [table, col] of alterCols) {
+      try {
+        await renderPool.query(
+          `ALTER TABLE ${table} ALTER COLUMN ${col} TYPE TEXT`
+        );
+      } catch {}
+    }
+
     console.log('[RenderSync] Tables initialisées');
   } catch (e) {
     console.error('[RenderSync] Erreur init tables:', e.message);
