@@ -116,7 +116,7 @@ class Engine {
     const mappingIndex = {};
     const mirrorCounts = {};
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], mappingIndex, mirrorCounts, mirrorLastHour: null };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null };
   }
 
   async loadLossSequences() {
@@ -980,6 +980,28 @@ class Engine {
           break;
         }
 
+        // ── 21. Prédictions consécutives du même costume ───────────────
+        // Bloque si le même costume a été prédit N fois de suite.
+        // Libération automatique : dès qu'un autre costume est prédit,
+        // ou après 20 minutes d'attente.
+        case 'consec_same_suit_pred': {
+          const n = Math.max(1, parseInt(ex.value) || 3);
+          const releaseMs = 20 * 60 * 1000;
+          if (!state.predHistory || state.predHistory.length < n) break;
+          const recentN = state.predHistory.slice(-n);
+          const allSame = recentN.every(p => p.suit === predictedSuit);
+          if (allSame) {
+            const oldestTs = recentN[0].timestamp;
+            if (Date.now() - oldestTs >= releaseMs) {
+              console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} − libéré après 20 min`);
+              break;
+            }
+            console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} prédit ${n}x de suite → bloqué`);
+            return true;
+          }
+          break;
+        }
+
         default: break;
       }
     }
@@ -1056,6 +1078,10 @@ class Engine {
         }
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
       state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve };
+      // Historique des prédictions émises (pour l'exception consec_same_suit_pred)
+      if (!state.predHistory) state.predHistory = [];
+      state.predHistory.push({ suit: ps, timestamp: Date.now() });
+      if (state.predHistory.length > 30) state.predHistory.shift();
       if (!inserted) return; // Prédiction déjà en DB → ne pas renvoyer le message Telegram
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {

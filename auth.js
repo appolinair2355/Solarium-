@@ -13,7 +13,7 @@ function getUserStatus(user) {
 function publicUser(u) {
   return {
     id: u.id, username: u.username, email: u.email,
-    is_admin: u.is_admin, is_approved: u.is_approved,
+    is_admin: u.is_admin, is_approved: u.is_approved, is_premium: u.is_premium || false,
     subscription_expires_at: u.subscription_expires_at,
     status: getUserStatus(u),
   };
@@ -55,8 +55,9 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Identifiants incorrects' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
-    req.session.userId  = user.id;
-    req.session.isAdmin = user.is_admin;
+    req.session.userId    = user.id;
+    req.session.isAdmin   = user.is_admin;
+    req.session.isPremium = user.is_premium || false;
     res.json({ user: publicUser(user) });
   } catch (err) {
     console.error('login error:', err);

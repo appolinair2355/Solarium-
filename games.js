@@ -169,7 +169,7 @@ router.post('/client-push', async (req, res) => {
 });
 
 router.get('/absences', (req, res) => {
-  if (!req.session.userId || !req.session.isAdmin) return res.status(403).json({ error: 'Admin requis' });
+  if (!req.session.userId || (!req.session.isAdmin && !req.session.isPremium)) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || 'C1';
   const engine = require('./engine');
   const data = engine.getAbsences(channel);

@@ -16,6 +16,7 @@ const telegramService   = require('./telegram-service');
 const progRoutes        = require('./prog');
 const engine            = require('./engine');
 const bilan             = require('./bilan');
+const botHost           = require('./bot-host');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -32,7 +33,8 @@ app.use(compression({
 }));
 
 app.use(cors({ origin: false, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ── Session store ──────────────────────────────────────────────────
 let sessionStore;
@@ -148,7 +150,7 @@ app.get('/api/user/my-messages', async (req, res) => {
     const raw = await db.getSetting('user_messages');
     const all = raw ? JSON.parse(raw) : [];
     const mine = all
-      .filter(m => m.userId === req.session.userId)
+      .filter(m => Number(m.userId) === Number(req.session.userId))
       .map(m => ({ id: m.id, text: m.text, date: m.date, admin_reply: m.admin_reply || null }));
     res.json(mine);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -330,6 +332,9 @@ async function main() {
   await telegramService.loadConfig();
   await engine.start(2000);
   bilan.scheduleMidnight();
+  // Initialiser la table hébergement bots + restaurer bots actifs
+  await botHost.initDB();
+  botHost.restoreRunningBots().catch(e => console.error('[BotHost] Restauration échouée:', e.message));
   // Lancer le scheduler d'annonces toutes les minutes
   setInterval(runAnnouncementsScheduler, 60_000);
   app.listen(PORT, '0.0.0.0', () => {

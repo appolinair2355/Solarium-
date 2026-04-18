@@ -131,7 +131,7 @@ router.post('/generate-premium', requireAdmin, async (req, res) => {
       await db.createUser({
         username, email, password_hash: hash,
         first_name: 'Premium', last_name: String(i),
-        is_approved: true, subscription_expires_at: expiresAt.toISOString(),
+        is_approved: true, is_premium: true, subscription_expires_at: expiresAt.toISOString(),
         subscription_duration_minutes: durationH * 60,
       });
       accounts.push({ username, email, password, expires_at: expiresAt });
@@ -164,6 +164,7 @@ const VALID_EXCEPTION_TYPES = [
   'game_parity', 'dominant_streak', 'cold_start',
   'bad_hour', 'double_suit_last', 'loss_streak_pause',
   'trigger_card_position',
+  'consec_same_suit_pred',
 ];
 
 function parseExceptions(raw) {

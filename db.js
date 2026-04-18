@@ -39,6 +39,7 @@ async function initDB() {
         last_name TEXT,
         is_admin BOOLEAN DEFAULT FALSE,
         is_approved BOOLEAN DEFAULT FALSE,
+        is_premium BOOLEAN DEFAULT FALSE,
         subscription_expires_at TIMESTAMPTZ,
         subscription_duration_minutes INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
@@ -46,6 +47,7 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_duration_minutes INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 
       CREATE TABLE IF NOT EXISTS predictions (
@@ -198,7 +200,7 @@ async function getUserByUsername(username) {
 async function getAllUsers() {
   if (USE_PG) {
     const r = await pgPool.query(
-      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
     );
     return r.rows;
   }
@@ -208,15 +210,16 @@ async function getAllUsers() {
 async function createUser(data) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, subscription_expires_at, subscription_duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
          last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
+         is_premium = EXCLUDED.is_premium,
          subscription_expires_at = EXCLUDED.subscription_expires_at, subscription_duration_minutes = EXCLUDED.subscription_duration_minutes
        RETURNING *`,
       [data.username, data.email || null, data.password_hash, data.first_name || null, data.last_name || null,
-       data.is_admin || false, data.is_approved || false, data.subscription_expires_at || null,
+       data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
        data.subscription_duration_minutes || null]
     );
     return r.rows[0];
