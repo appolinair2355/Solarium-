@@ -655,7 +655,7 @@ export default function Dashboard() {
               ) : (
                 <div className="live-games-layout">
                   {/* Big live game + absence counter side by side */}
-                  <div className={`live-grid ${user?.is_admin ? 'live-grid-admin' : 'live-grid-single'}`}>
+                  <div className={`live-grid ${(user?.is_admin || user?.subscription_expires_at) ? 'live-grid-admin' : 'live-grid-single'}`}>
                     {liveGame ? (
                       <GameRow g={liveGame} mode="live" />
                     ) : (
@@ -663,7 +663,7 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>En attente de la prochaine partie...</span>
                       </div>
                     )}
-                    {user?.is_admin && (
+                    {(user?.is_admin || user?.subscription_expires_at) && (
                       <div className="absence-counter-chip">
                         <div className="absence-chip-title">
                           <span style={{ color: channel.color }}>📊</span>
