@@ -737,7 +737,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* ── Séquences de Relance — barres de progression pertes ── */}
-                  {(() => {
+                  {(user?.is_admin || user?.is_premium) && (() => {
                     const activeSeqs = (lossSeqData.sequences || []).filter(seq =>
                       seq.enabled && (seq.rules || []).some(r => r.strategy_id === channelId)
                     );

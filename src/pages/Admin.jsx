@@ -6131,8 +6131,12 @@ function AdminPanel() {
               <button className="vis-modal-close" onClick={() => setVisModal(null)}>✕</button>
             </div>
             <div className="vis-modal-sub">
-              <strong style={{ color: '#fbbf24' }}>⚠️ Pour que l'utilisateur voie les prédictions</strong>, cochez les stratégies ci-dessous.<br/>
-              Les canaux Telegram concernent uniquement les notifications bot — c'est différent.
+              {(() => {
+                const mu = users.find(u => u.id === visModal.userId);
+                return mu?.is_premium
+                  ? <><strong style={{ color: '#fbbf24' }}>⭐ Compte Premium</strong> — accès aux canaux assignés + compteurs d'absences visibles.</>
+                  : <><strong style={{ color: '#94a3b8' }}>👤 Utilisateur standard</strong> — accès aux canaux assignés, sans compteurs.</>;
+              })()}
             </div>
             {visLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><div className="spinner" /></div>
