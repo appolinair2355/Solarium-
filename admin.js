@@ -36,15 +36,9 @@ function fmtDuration(mins) {
 router.get('/my-strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   if (req.session.isAdmin) return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] });
-  if (req.session.isPremium) {
-    try {
-      const strats = await getStrategies();
-      const customIds = strats.map(s => `S${s.id}`);
-      return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL', ...customIds] });
-    } catch (e) { return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] }); }
-  }
   try {
     const visible = await db.getVisibleStrategies(req.session.userId);
+    // Tous les utilisateurs (normal ou premium) : exactement ce que l'admin a assigné
     res.json({ visible });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -321,8 +315,11 @@ router.get('/strategies', async (req, res) => {
   try {
     const list = await getStrategies();
     if (!req.session.isAdmin) {
+      // Récupérer les stratégies explicitement assignées à cet utilisateur
+      const assignedIds = await db.getVisibleStrategies(req.session.userId);
+      const assignedSet = new Set(assignedIds.map(id => String(id)));
       return res.json(
-        list.filter(s => s.enabled && s.visibility === 'all')
+        list.filter(s => s.enabled && (s.visibility === 'all' || assignedSet.has(`S${s.id}`)))
             .map(s => ({ id: s.id, name: s.name, enabled: s.enabled, visibility: s.visibility, threshold: s.threshold, mode: s.mode }))
       );
     }
