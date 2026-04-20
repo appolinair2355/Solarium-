@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import TelegramFeed from './pages/TelegramFeed';
 import Programmation from './pages/Programmation';
+import SystemLogs from './pages/SystemLogs';
 
 function useUiStyles() {
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
           <Route path="/canal-telegram" element={<ProtectedRoute><TelegramFeed /></ProtectedRoute>} />
           <Route path="/programmation" element={<Programmation />} />
+          <Route path="/system-logs" element={<ProtectedRoute adminOnly><SystemLogs /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
