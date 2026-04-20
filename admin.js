@@ -305,7 +305,7 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse'].includes(mode)) return 'Mode invalide';
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3'].includes(mode)) return 'Mode invalide';
   if (mode !== 'distribution' && !isCarteAuto) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -2114,12 +2114,71 @@ function scanProjectFiles(dir, base) {
   return results;
 }
 
+// Scan dist/ (inclut .js .css .html .map + pas de limite d'ext)
+function scanDistFiles(dir, base) {
+  const results = [];
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return results; }
+  const DIST_EXTS = ['.js', '.css', '.html', '.map', '.ico', '.svg', '.png', '.woff', '.woff2', '.ttf'];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    const relPath  = base ? `${base}/${entry}` : entry;
+    let stat;
+    try { stat = fs.statSync(fullPath); } catch { continue; }
+    if (stat.isDirectory()) {
+      results.push(...scanDistFiles(fullPath, relPath));
+    } else if (stat.isFile()) {
+      const ext = path.extname(entry).toLowerCase();
+      if (!DIST_EXTS.includes(ext)) continue;
+      if (stat.size > 5 * 1024 * 1024) continue; // 5 Mo max
+      results.push({ fullPath, relPath, size: stat.size });
+    }
+  }
+  return results;
+}
+
+const DEPLOY_README = `# Baccarat Pro — Guide de déploiement
+
+## Prérequis
+- Node.js 18+
+- PostgreSQL 14+
+
+## Variables d'environnement requises (.env)
+Créez un fichier \`.env\` à la racine avec les variables suivantes :
+\`\`\`
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DBNAME
+SESSION_SECRET=votre_secret_session_ici
+PORT=5000
+NODE_ENV=production
+\`\`\`
+
+## Installation
+\`\`\`bash
+npm install
+node index.js
+\`\`\`
+
+Le frontend est déjà compilé dans dist/.
+Le serveur Express sert automatiquement les fichiers statiques depuis dist/.
+
+## Telegram Bot
+Chaque canal Telegram (token + chat_id) est configuré dans l'interface Admin.
+Le bot fonctionne en mode polling — aucune configuration webhook nécessaire.
+
+## Notes importantes
+- Ne pas inclure .env dans git/zip
+- La base de données doit être accessible depuis le serveur
+- Port par défaut : 5000 (configurable via PORT)
+`;
+
 // Téléchargement du ZIP de déploiement (fichiers actuels sur disque)
 router.get('/project-backup/zip', requireAdmin, (req, res) => {
   try {
     const archiver = require('archiver');
     const root     = path.join(__dirname);
     const files    = scanProjectFiles(root, '');
+    const distDir  = path.join(root, 'dist');
+    const distFiles = fs.existsSync(distDir) ? scanDistFiles(distDir, 'dist') : [];
     const date     = new Date().toISOString().slice(0, 10);
     const filename = `baccarat-pro-${date}.zip`;
 
@@ -2133,11 +2192,79 @@ router.get('/project-backup/zip', requireAdmin, (req, res) => {
     for (const f of files) {
       archive.file(f.fullPath, { name: f.relPath });
     }
+    // Inclure les fichiers compilés du frontend
+    for (const f of distFiles) {
+      archive.file(f.fullPath, { name: f.relPath });
+    }
+    // Ajouter le guide de déploiement
+    archive.append(DEPLOY_README, { name: 'DEPLOY.md' });
 
     archive.finalize();
-    console.log(`[ZIP] Archive générée : ${files.length} fichiers → ${filename}`);
+    console.log(`[ZIP] Archive générée : ${files.length} src + ${distFiles.length} dist → ${filename}`);
   } catch (e) {
     console.error('[ZIP] Erreur:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── ZIP différentiel — uniquement les fichiers modifiés depuis un commit ──────
+router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
+  try {
+    const archiver   = require('archiver');
+    const { execSync } = require('child_process');
+    const root = path.join(__dirname);
+
+    // Commit de référence : "Add support for three new operational modes" (132d09e)
+    // On prend les fichiers modifiés entre ce commit et HEAD (git tracked)
+    const REF_COMMIT = req.query.since || '132d09e';
+    let changedFiles = [];
+    try {
+      const out = execSync(`git diff --name-only ${REF_COMMIT} HEAD`, { cwd: root, timeout: 10000 }).toString().trim();
+      changedFiles = out.split('\n').filter(Boolean);
+    } catch {
+      return res.status(500).json({ error: 'git diff échoué — vérifiez que le dépôt git est initialisé' });
+    }
+
+    if (!changedFiles.length) {
+      return res.status(400).json({ error: 'Aucun fichier modifié depuis ce commit' });
+    }
+
+    const date     = new Date().toISOString().slice(0, 10);
+    const filename = `baccarat-pro-diff-${date}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', err => { console.error('[ZIP-DIFF]', err.message); res.end(); });
+    archive.pipe(res);
+
+    let included = 0;
+    for (const relFile of changedFiles) {
+      const fullPath = path.join(root, relFile);
+      if (!fs.existsSync(fullPath)) continue;
+      try {
+        const stat = fs.statSync(fullPath);
+        if (!stat.isFile() || stat.size > 5 * 1024 * 1024) continue;
+        archive.file(fullPath, { name: relFile });
+        included++;
+      } catch {}
+    }
+
+    // Inclure un manifeste
+    const manifest = `# Baccarat Pro — Mise à jour différentielle ${date}
+# Fichiers modifiés depuis : ${REF_COMMIT}
+# ${included} fichier(s) inclus
+
+${changedFiles.filter(f => {
+  const fp = path.join(root, f);
+  return fs.existsSync(fp);
+}).join('\n')}
+`;
+    archive.append(manifest, { name: 'UPDATE_MANIFEST.txt' });
+    archive.finalize();
+    console.log(`[ZIP-DIFF] Archive diff générée : ${included} fichiers depuis ${REF_COMMIT} → ${filename}`);
+  } catch (e) {
+    console.error('[ZIP-DIFF] Erreur:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

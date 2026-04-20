@@ -420,8 +420,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣' };
-const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes' };
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes', 'WIN_B': 'Victoire Banquier', 'WIN_P': 'Victoire Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
@@ -457,8 +457,8 @@ function buildTgMessage(formatId, {
 }) {
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
-  // Les modes Carte 2/3 utilisent le format 12
-  if (suit === 'deux' || suit === 'trois') formatId = 12;
+  // Les modes Carte 2/3 utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
+  if ((suit === 'deux' || suit === 'trois') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
 
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -661,16 +661,119 @@ function buildTgMessage(formatId, {
       };
     }
 
+    // ── Format 13 : Victoire Pro (Banquier / Joueur) ─────────────────────
+    case 13: {
+      const sl13 = status === null    ? '⌛ En cours de vérification...'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ`
+                 :                      `❌ Perdu après ${maxR} tentatives`;
+      const winLabel13 = suit === 'WIN_B' ? '🏦 BANQUIER'
+                       : suit === 'WIN_P' ? '👤 JOUEUR'
+                       : `${emoji} ${name.toUpperCase()}`;
+      return {
+        text:
+          `🏆 PRÉDICTION VICTOIRE\n` +
+          `📌 Jeu #N${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `🎯 ${winLabel13} va gagner\n` +
+          `🔰 Rattrapage : +${maxR}\n` +
+          `${sl13}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 14 : Victoire Compact ──────────────────────────────────────
+    case 14: {
+      const sl14 = status === null    ? '⌛'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+                 :                      '❌';
+      const winLabel14 = suit === 'WIN_B' ? '🏦 Banquier'
+                       : suit === 'WIN_P' ? '👤 Joueur'
+                       : `${emoji} ${name}`;
+      return {
+        text: `${winLabel14} gagne — Jeu #N${gameNumber}   +${maxR}\n${sl14}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 15 : Match Nul Pro ─────────────────────────────────────────
+    case 15: {
+      const sl15 = status === null    ? '⌛ En cours de vérification...'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ÉGALITÉ CONFIRMÉE`
+                 :                      `❌ Pas d'égalité sur ${maxR} jeux`;
+      const tieLabel15 = suit === 'TIE' ? '⚖️ Égalité — aucun gagnant' : `🎯 ${emoji} ${name}`;
+      return {
+        text:
+          `🤝 PRÉDICTION MATCH NUL\n` +
+          `📌 Jeu #N${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `${tieLabel15}\n` +
+          `🔰 Rattrapage : +${maxR}\n` +
+          `${sl15}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 16 : Match Nul Compact ─────────────────────────────────────
+    case 16: {
+      const sl16 = status === null    ? '⌛'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+                 :                      '❌';
+      const tieLabel16 = suit === 'TIE' ? '🤝 Match Nul' : `${emoji} ${name}`;
+      return {
+        text: `${tieLabel16} · #N${gameNumber} · +${maxR}\n${sl16}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 17 : 2+3 Cartes Pro ────────────────────────────────────────
+    case 17: {
+      const sl17 = status === null    ? '⌛ En cours de vérification...'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} JEU MIXTE CONFIRMÉ`
+                 :                      `❌ Pas de jeu mixte sur ${maxR} jeux`;
+      const mixLabel17 = suit === 'TWO_THREE'
+        ? '🃏 Un camp : 2 cartes — Autre : 3 cartes'
+        : `🎯 ${emoji} ${name}`;
+      return {
+        text:
+          `⚡ PRÉDICTION 2+3 CARTES\n` +
+          `📌 Jeu #N${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `${mixLabel17}\n` +
+          `🔰 Rattrapage : +${maxR}\n` +
+          `${sl17}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 18 : Cartes 2/3 Style B ────────────────────────────────────
+    case 18: {
+      const sl18 = status === null    ? '⌛ Vérification...'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé`
+                 :                      '❌ Non confirmé';
+      let cardLabel18;
+      if (suit === 'deux')       cardLabel18 = '2️⃣ 2 CARTES (Naturel)';
+      else if (suit === 'trois') cardLabel18 = '3️⃣ 3 CARTES';
+      else if (suit === 'TWO_THREE') cardLabel18 = '⚡ 2+3 CARTES MIXTE';
+      else                       cardLabel18 = `${emoji} ${name.toUpperCase()}`;
+      const handLabel18 = hand === 'banquier' ? '🏦 BANQUIER' : hand === 'joueur' ? '👤 JOUEUR' : '';
+      return {
+        text:
+          `${cardLabel18}${handLabel18 ? ` — ${handLabel18}` : ''}\n` +
+          `〖 Jeu #N${gameNumber} 〗〖 +${maxR} 〗\n` +
+          `${sl18}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {
         text:
-          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
-          (status === null
-            ? `⏳ <i>En attente du résultat...</i>`
-            : status === 'gagne'
-              ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
-              : `❌`),
-        parse_mode: 'HTML',
+          `🎯 PRÉDICTION #N${gameNumber}\n` +
+          `${emoji} ${name}\n` +
+          `🔰 +${maxR}\n` +
+          `${statusLine}`,
+        parse_mode: null,
       };
   }
 }
@@ -885,18 +988,21 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
           if (!_phase2Active.has(p2Key)) {
             _phase2Active.add(p2Key);
 
-            const phase2Text = isDistrib
+            const phase2Text      = isDistrib
               ? buildDistribFinalMsg(gameNumber, rattrapage)
               : (hasCards ? resultText : null);
+            const capturedParseMd = parse_mode;   // capture pour le closure phase2
 
             if (phase2Text) {
               setTimeout(async () => {
                 _phase2Active.delete(p2Key);
                 try {
+                  const body2 = { chat_id: capturedChatId, message_id: capturedMsgId, text: phase2Text };
+                  if (capturedParseMd) body2.parse_mode = capturedParseMd;
                   await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: capturedChatId, message_id: capturedMsgId, text: phase2Text }),
+                    body: JSON.stringify(body2),
                   });
                   console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2)`);
                 } catch { _phase2Active.delete(p2Key); }

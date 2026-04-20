@@ -674,44 +674,127 @@ async function startBot(botId) {
   return { ok: true };
 }
 
+// ── Installer les dépendances avant de lancer le bot ─────────────────────────
+function _installDeps(bot, workDir, state) {
+  return new Promise((resolve) => {
+    const lang = bot.language || 'python';
+    const addLog = (s, msg) => {
+      state.logs.push({ t: Date.now(), s, m: msg });
+      if (state.logs.length > 500) state.logs.shift();
+    };
+
+    let cmd, args, label;
+    if (lang === 'node') {
+      const pkgJson = path.join(workDir, 'package.json');
+      if (!fs.existsSync(pkgJson)) {
+        addLog('out', '[Install] Pas de package.json — installation ignorée');
+        return resolve(true);
+      }
+      cmd = 'npm'; args = ['install', '--prefer-offline', '--no-audit', '--no-fund']; label = 'npm install';
+    } else {
+      const reqTxt = path.join(workDir, 'requirements.txt');
+      if (!fs.existsSync(reqTxt)) {
+        addLog('out', '[Install] Pas de requirements.txt — installation ignorée');
+        return resolve(true);
+      }
+      cmd = 'pip3'; args = ['install', '-r', 'requirements.txt', '--quiet', '--disable-pip-version-check']; label = 'pip3 install -r requirements.txt';
+    }
+
+    addLog('out', `[Install] ⏳ ${label}...`);
+    console.log(`[BotHost] 📦 Bot #${bot.id} — ${label} dans ${workDir}`);
+
+    const proc = spawn(cmd, args, { cwd: workDir, env: process.env });
+    proc.stdout.on('data', d => {
+      const m = d.toString().trim(); if (m) addLog('out', `[Install] ${m}`);
+    });
+    proc.stderr.on('data', d => {
+      const m = d.toString().trim(); if (m) addLog('err', `[Install] ${m}`);
+    });
+    proc.on('close', code => {
+      if (code === 0) {
+        addLog('out', `[Install] ✅ ${label} terminé avec succès`);
+        console.log(`[BotHost] ✅ Bot #${bot.id} — dépendances installées`);
+        resolve(true);
+      } else {
+        addLog('err', `[Install] ❌ ${label} échoué (code=${code}) — le bot ne pourra pas démarrer correctement`);
+        console.error(`[BotHost] ❌ Bot #${bot.id} — installation échouée (code=${code})`);
+        resolve(false); // On continue quand même mais on loggue l'erreur
+      }
+    });
+    proc.on('error', e => {
+      addLog('err', `[Install] ❌ Impossible de lancer ${cmd} : ${e.message}`);
+      console.error(`[BotHost] ❌ Bot #${bot.id} — erreur spawn install : ${e.message}`);
+      resolve(false);
+    });
+  });
+}
+
 // ── Lancer le processus ───────────────────────────────────────────────────────
-function _spawnBot(bot, workDir, mainFilePath) {
+async function _spawnBot(bot, workDir, mainFilePath) {
   const botId = bot.id;
   const lang  = bot.language || 'python';
   const cmd   = lang === 'node' ? 'node' : 'python3';
 
-  console.log(`[BotHost] ▶ Bot #${botId} "${bot.name}" → ${cmd} ${mainFilePath} (CWD: ${workDir})`);
-
-  const webPort = 10000 + botId;
-  const proc  = spawn(cmd, [mainFilePath], {
-    cwd: workDir,
-    env: { ...process.env, BOT_TOKEN: bot.token, CHANNEL_ID: bot.channel_id, PORT: String(webPort) },
-  });
-
+  // Initialiser l'état (avec préservation des logs existants)
   const state = {
-    proc,
+    proc:        null,
     logs:        running[botId]?.logs || [],
     restarts:    running[botId]?.restarts || 0,
     autoRestart: true,
+    installing:  true,
   };
   running[botId] = state;
+  db.pool.query('UPDATE hosted_bots SET status=$1,updated_at=NOW() WHERE id=$2', ['installing', botId]).catch(() => {});
+
+  // 1. Installer les dépendances
+  await _installDeps(bot, workDir, state);
+  state.installing = false;
+
+  // Vérifier si le bot a été arrêté pendant l'installation
+  if (!running[botId]?.autoRestart) {
+    console.log(`[BotHost] Bot #${botId} annulé pendant l'installation`);
+    return;
+  }
+
+  if (!fs.existsSync(mainFilePath)) {
+    state.logs.push({ t: Date.now(), s: 'err', m: `❌ Fichier introuvable : ${mainFilePath}` });
+    db.pool.query('UPDATE hosted_bots SET status=$1,updated_at=NOW() WHERE id=$2', ['stopped', botId]).catch(() => {});
+    console.error(`[BotHost] ❌ Bot #${botId} — fichier principal introuvable : ${mainFilePath}`);
+    return;
+  }
+
+  // 2. Lancer le bot
+  console.log(`[BotHost] ▶ Bot #${botId} "${bot.name}" → ${cmd} ${mainFilePath} (CWD: ${workDir})`);
+  state.logs.push({ t: Date.now(), s: 'out', m: `▶ Démarrage : ${cmd} ${path.basename(mainFilePath)}` });
+
+  const webPort = 10000 + botId;
+  const proc = spawn(cmd, [mainFilePath], {
+    cwd: workDir,
+    env: {
+      ...process.env,
+      BOT_TOKEN:  bot.token,
+      CHANNEL_ID: bot.channel_id || '',
+      PORT:       String(webPort),
+      PYTHONUNBUFFERED: '1',
+    },
+  });
+  state.proc = proc;
 
   const addLog = (s, data) => {
     const m = data.toString().trim();
     if (!m) return;
     state.logs.push({ t: Date.now(), s, m });
-    if (state.logs.length > 300) state.logs.shift();
+    if (state.logs.length > 500) state.logs.shift();
   };
   proc.stdout.on('data', d => addLog('out', d));
-  proc.stderr.on('data', d => {
-    addLog('err', d);
-  });
+  proc.stderr.on('data', d => addLog('err', d));
 
   proc.on('close', code => {
     console.log(`[BotHost] ⏹ Bot #${botId} terminé (code=${code})`);
     if (running[botId]?.autoRestart && code !== null) {
       running[botId].restarts++;
-      console.log(`[BotHost] 🔄 Redémarrage auto bot #${botId} dans 5s`);
+      const delay = Math.min(5000 * running[botId].restarts, 30000); // Backoff progressif
+      console.log(`[BotHost] 🔄 Redémarrage auto bot #${botId} dans ${delay / 1000}s`);
       setTimeout(async () => {
         if (!running[botId]?.autoRestart) return;
         const r2 = await db.pool.query('SELECT * FROM hosted_bots WHERE id=$1', [botId]).catch(() => ({ rows: [] }));
@@ -723,11 +806,16 @@ function _spawnBot(bot, workDir, mainFilePath) {
         delete running[botId];
         if (prev) running[botId] = { proc: null, logs: prev.logs, restarts: prev.restarts, autoRestart: true };
         _spawnBot(bot2, workDir2, mf2);
-      }, 5000);
+      }, delay);
     } else {
       delete running[botId];
       db.pool.query('UPDATE hosted_bots SET status=$1,updated_at=NOW() WHERE id=$2', ['stopped', botId]).catch(() => {});
     }
+  });
+
+  proc.on('error', e => {
+    addLog('err', `❌ Impossible de lancer ${cmd} : ${e.message}`);
+    console.error(`[BotHost] ❌ Bot #${botId} — erreur spawn : ${e.message}`);
   });
 
   db.pool.query('UPDATE hosted_bots SET status=$1,updated_at=NOW() WHERE id=$2', ['running', botId]).catch(() => {});
@@ -778,9 +866,26 @@ async function restoreRunningBots() {
   }
 }
 
+// ── Nettoyage périodique des logs en mémoire ─────────────────────────────────
+// Appelé toutes les 20 minutes depuis index.js
+// Conserve seulement les N dernières lignes par bot
+function purgeMemoryLogs(keepLast = 30) {
+  let total = 0;
+  for (const [id, state] of Object.entries(running)) {
+    if (!state || !Array.isArray(state.logs)) continue;
+    const before = state.logs.length;
+    if (before > keepLast) {
+      state.logs.splice(0, before - keepLast);
+      total += before - keepLast;
+    }
+  }
+  if (total > 0) console.log(`[BotHost] 🧹 Nettoyage mémoire : ${total} ligne(s) de logs supprimée(s) (bots actifs: ${Object.keys(running).length})`);
+}
+
 module.exports = {
   initDB, getAll, createBot, updateCode,
   startBot, stopBot, deleteBot, getLogs,
   restoreRunningBots, validateToken, analyzeAndFixZip,
   detectPredictionCode, setupPredictionChannel,
+  purgeMemoryLogs,
 };

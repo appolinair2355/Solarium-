@@ -347,6 +347,40 @@ async function main() {
   botHost.restoreRunningBots().catch(e => console.error('[BotHost] Restauration échouée:', e.message));
   // Lancer le scheduler d'annonces toutes les minutes
   setInterval(runAnnouncementsScheduler, 60_000);
+
+  // ── Nettoyage automatique des logs en mémoire (toutes les 20 min) ──────────
+  const CLEANUP_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+  async function runMemoryCleanup() {
+    try {
+      // 1. Purger les logs de bots en mémoire (garder 30 lignes/bot)
+      botHost.purgeMemoryLogs(30);
+      // 2. Purger les anciennes prédictions en_cours bloquées depuis > 30 min
+      const r = await db.pool.query(
+        `UPDATE predictions SET status='expire', resolved_at=NOW()
+         WHERE status='en_cours' AND created_at < NOW() - INTERVAL '30 minutes'
+         RETURNING id`
+      ).catch(() => ({ rows: [] }));
+      if (r.rows.length > 0) {
+        console.log(`[Cleanup] 🧹 ${r.rows.length} prédiction(s) en_cours expirée(s) (bloquées > 30 min)`);
+      }
+      // 3. Supprimer les prédictions résolues très anciennes (> 45 jours)
+      const del = await db.pool.query(
+        `DELETE FROM predictions
+         WHERE status IN ('gagne','perdu','expire')
+         AND created_at < NOW() - INTERVAL '45 days'
+         RETURNING id`
+      ).catch(() => ({ rows: [] }));
+      if (del.rows.length > 0) {
+        console.log(`[Cleanup] 🧹 ${del.rows.length} ancienne(s) prédiction(s) (> 45j) supprimée(s)`);
+      }
+    } catch (e) {
+      console.error('[Cleanup] Erreur nettoyage mémoire :', e.message);
+    }
+  }
+  // Première exécution après 20 min puis toutes les 20 min
+  setInterval(runMemoryCleanup, CLEANUP_INTERVAL_MS);
+  console.log(`[Cleanup] ⏱ Nettoyage automatique actif — toutes les 20 min`);
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
   });

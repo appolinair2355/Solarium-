@@ -304,6 +304,25 @@ router.get('/table/:name', requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /api/system-logs/timeline — Courbe de variation des prédictions ──────
+router.get('/timeline', requireAdmin, async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours) || 24;
+    const result = await db.pool.query(`
+      SELECT
+        id, strategy, game_number, predicted_suit, status,
+        created_at, resolved_at,
+        EXTRACT(EPOCH FROM created_at)::bigint AS ts_epoch
+      FROM predictions
+      WHERE created_at >= NOW() - INTERVAL '${Math.min(hours, 168)} hours'
+      ORDER BY created_at ASC
+    `);
+    res.json({ rows: result.rows, hours });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/system-logs/engine — État mémoire du moteur ────────────────────
 router.get('/engine', requireAdmin, (req, res) => {
   try {

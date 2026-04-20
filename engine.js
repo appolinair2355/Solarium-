@@ -14,7 +14,8 @@ const {
 const renderSync = require('./render-sync');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
-const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
+const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
+const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
 
 const C1_B = 5;  const C1_MAP = { '♣':'♦','♦':'♣','♠':'♥','♥':'♠' };
 const C2_B = 8;  const C2_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
@@ -469,7 +470,7 @@ class Engine {
     } catch (e) { console.error('loadCustomStrategies error:', e.message); }
   }
 
-  async processGame(gn, suits, bSuits, pCards, bCards) {
+  async processGame(gn, suits, bSuits, pCards, bCards, winner = null) {
     this.gameCardsCache[gn] = { player: suits || [], banker: bSuits || [] };
     const cacheKeys = Object.keys(this.gameCardsCache).map(Number).sort((a, b) => a - b);
     while (cacheKeys.length > 100) { delete this.gameCardsCache[cacheKeys.shift()]; }
@@ -481,7 +482,7 @@ class Engine {
     // Passe 1 : stratégies simples (hors multi_strategy et relance)
     for (const [id, state] of Object.entries(this.custom)) {
       if (state.config?.enabled && state.config?.mode !== 'multi_strategy' && state.config?.mode !== 'relance') {
-        await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
+        await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
     // Passe 2 : stratégies combinaison (peuvent lire les pending des simples)
@@ -602,7 +603,7 @@ class Engine {
     }
   }
 
-  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}, handCards = null) {
+  async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}, handCards = null, winner = null) {
     if (maxR === null) maxR = getCurrentMaxRattrapage();
     for (const [pg, info] of Object.entries(pending)) {
       const pgNum = parseInt(pg);
@@ -651,6 +652,76 @@ class Engine {
           if (onLoss) onLoss(true, ps, pgNum, rattrapage);
         } else if (gn === pgNum + effectiveMaxR) {
           console.log(`[${strategy}] [Carte${targetCount}] Jeu #${gn} = pas ${targetCount} cartes après ${effectiveMaxR} tentatives → perdu`);
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
+      // ── Résolution spéciale mode Victoire Adverse ───────────────────────
+      } else if (ps === 'WIN_B' || ps === 'WIN_P') {
+        const expectedWinner = ps === 'WIN_B' ? 'Banker' : 'Player';
+        if (winner === expectedWinner) {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [Victoire Adverse] ✅ ${expectedWinner} gagne → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          console.log(`[${strategy}] [Victoire Adverse] ${expectedWinner} ne gagne pas après ${effectiveMaxR} tentatives → perdu`);
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
+      // ── Résolution spéciale mode Écart 2/3 ─────────────────────────────
+      } else if (ps === 'TWO_THREE') {
+        const isMixed = Array.isArray(pCards) && Array.isArray(bCards) &&
+          ((pCards.length === 2 && bCards.length === 3) || (pCards.length === 3 && bCards.length === 2));
+        if (isMixed) {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [Écart 2/3] ✅ Jeu mixte → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
+      // ── Résolution spéciale mode Match Nul ─────────────────────────────
+      } else if (ps === 'TIE') {
+        if (winner === 'Tie') {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [Match Nul] ✅ Tie → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
+      // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
+      } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
+        const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
+        const isMatch = ps === 'DEUX_TROIS'
+          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 2 && bCards.length === 3)
+          : ps === 'TROIS_DEUX'
+          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 2)
+          : (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 3);
+        if (isMatch) {
+          const rattrapage = gn - pgNum;
+          console.log(`[${strategy}] [${combLabel}] ✅ Combinaison confirmée → gagne (R${rattrapage})`);
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
           await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
           delete pending[pg];
           if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
@@ -1078,7 +1149,7 @@ class Engine {
     return false;
   }
 
-  async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
+  async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards, winner = null) {
     // Stratégie supprimée entre le début du tick et maintenant → on ignore
     if (!this.custom[id]) return;
 
@@ -1111,7 +1182,7 @@ class Engine {
         else this._onStratLoss(channelId, gn, ps);
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
-      }, stratMaxRForResolve, stratTgOpts, handCards);
+      }, stratMaxRForResolve, stratTgOpts, handCards, winner);
     }
 
     // ── Logique de déclenchement : ne traiter ce jeu qu'une seule fois ──
@@ -1461,6 +1532,71 @@ class Engine {
           }
         }
       }
+
+    } else if (mode === 'absence_victoire') {
+      // ── MODE ABSENCE → VICTOIRE ───────────────────────────────────────────
+      // Logique identique à absence_apparition mais sur les résultats (Joueur/Banquier).
+      // Deux compteurs indépendants :
+      //   abs_joueur  = jeux consécutifs sans victoire Joueur
+      //   abs_banquier = jeux consécutifs sans victoire Banquier
+      //
+      // Règles :
+      //  - Victoire Joueur  → si abs_joueur  >= B → prédit WIN_P puis reset des 2 compteurs
+      //  - Victoire Banquier → si abs_banquier >= B → prédit WIN_B puis reset des 2 compteurs
+      //  - Égalité (Tie)    → reset des 2 compteurs, puis reprise
+      // ─────────────────────────────────────────────────────────────────────
+      const absP = state.counts['abs_joueur']   || 0;
+      const absB = state.counts['abs_banquier']  || 0;
+
+      if (winner === 'Player') {
+        if (absP >= B) {
+          console.log(`[${channelId}] [Abs Victoire] 👤 Joueur réapparaît après ${absP} absences (seuil≥${B}) → WIN_P jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P');
+          state.counts['abs_joueur'] = 0;
+          state.counts['abs_banquier'] = 0;
+        } else {
+          state.counts['abs_joueur'] = 0;
+          state.counts['abs_banquier'] = absB + 1;
+        }
+      } else if (winner === 'Banker') {
+        if (absB >= B) {
+          console.log(`[${channelId}] [Abs Victoire] 🏦 Banquier réapparaît après ${absB} absences (seuil≥${B}) → WIN_B jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B');
+          state.counts['abs_joueur'] = 0;
+          state.counts['abs_banquier'] = 0;
+        } else {
+          state.counts['abs_banquier'] = 0;
+          state.counts['abs_joueur'] = absP + 1;
+        }
+      } else {
+        state.counts['abs_joueur'] = 0;
+        state.counts['abs_banquier'] = 0;
+        console.log(`[${channelId}] [Abs Victoire] Égalité — reset des 2 compteurs`);
+      }
+
+    } else if (mode === 'abs_3_vers_2' || mode === 'abs_3_vers_3') {
+      // ── MODE ABSENCE DE 3 CARTES → PRÉDIT 2 OU 3 CARTES ─────────────────
+      // Compte les jeux consécutifs à 2 cartes (absences de 3 cartes).
+      // Dès que 3 cartes apparaissent ET que le compteur >= B → prédit 2 (abs_3_vers_2)
+      // ou 3 cartes (abs_3_vers_3) au jeu suivant.
+      // Similaire à absence_apparition mais pour le nombre de cartes.
+      // ─────────────────────────────────────────────────────────────────────
+      const predictCard   = mode === 'abs_3_vers_2' ? 'deux' : 'trois';
+      const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
+      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
+      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
+
+      if (hasThreeCards) {
+        if ((state.counts['abs3'] || 0) >= B) {
+          console.log(`[${channelId}] [Abs3→${predictCard}] 3 cartes après ${state.counts['abs3']} jeux à 2 cartes (seuil≥${B}) → prédiction jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, predictCard, 'trois');
+        }
+        state.counts['abs3'] = 0;
+      } else if (hasTwoCards) {
+        state.counts['abs3'] = (state.counts['abs3'] || 0) + 1;
+        console.log(`[${channelId}] [Abs3→${predictCard}] 2 cartes (absence) compteur=${state.counts['abs3']}/${B}`);
+      }
+
     }
   }
 
@@ -1756,7 +1892,7 @@ class Engine {
             renderSync.handleGameOne(1).catch(() => {});
           }
         }
-        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards);
+        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
         if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
       }
@@ -2011,9 +2147,17 @@ class Engine {
       // on projette les compteurs en temps réel (sans attendre la fin du jeu)
       let liveSuits = null;
       if (this.liveGameCards) {
-        const projected = hand === 'banquier'
-          ? this.liveGameCards.bankerSuits
-          : this.liveGameCards.playerSuits;
+        // Pour compteur_adverse : on surveille la main OPPOSÉE (adverse)
+        let projected;
+        if (mode === 'compteur_adverse') {
+          projected = hand === 'banquier'
+            ? this.liveGameCards.playerSuits   // adverse du banquier = joueur
+            : this.liveGameCards.bankerSuits;  // adverse du joueur = banquier
+        } else {
+          projected = hand === 'banquier'
+            ? this.liveGameCards.bankerSuits
+            : this.liveGameCards.playerSuits;
+        }
         if (projected.length > 0) liveSuits = projected;
       }
 
@@ -2062,6 +2206,92 @@ class Engine {
           singleCounter: true,
           description: `${count} jeu${count > 1 ? 'x' : ''} non-naturel${count > 1 ? 's' : ''} consécutif${count > 1 ? 's' : ''}`,
         }];
+      }
+
+      // Mode Absence 3→2 / 3→3 → afficher le compteur de jeux à 2 cartes consécutifs
+      if (mode === 'abs_3_vers_2' || mode === 'abs_3_vers_3') {
+        const count   = entry.counts?.['abs3'] || 0;
+        const predict = mode === 'abs_3_vers_2' ? '2️⃣' : '3️⃣';
+        return [{
+          suit: 'abs3', display: predict,
+          count, threshold,
+          mode, label: mode === 'abs_3_vers_2' ? 'Abs 3→2' : 'Abs 3→3',
+          isLive: false,
+          singleCounter: true,
+          description: `${count}/${threshold} jeux à 2 cartes (absence de 3)`,
+        }];
+      }
+
+      // Mode Absence Victoire → afficher les deux compteurs d'absences (joueur + banquier)
+      if (mode === 'absence_victoire') {
+        const absP = entry.counts?.['abs_joueur']   || 0;
+        const absB = entry.counts?.['abs_banquier']  || 0;
+        return [
+          {
+            suit: 'WIN_P',
+            display: '👤',
+            count: absP, threshold,
+            mode, label: 'Abs Victoire Joueur',
+            isLive: false,
+            singleCounter: false,
+            description: absP >= threshold
+              ? `✅ Seuil atteint ! (${absP} abs.) — attend victoire Joueur`
+              : `${absP}/${threshold} jeux sans victoire Joueur`,
+          },
+          {
+            suit: 'WIN_B',
+            display: '🏦',
+            count: absB, threshold,
+            mode, label: 'Abs Victoire Banquier',
+            isLive: false,
+            singleCounter: false,
+            description: absB >= threshold
+              ? `✅ Seuil atteint ! (${absB} abs.) — attend victoire Banquier`
+              : `${absB}/${threshold} jeux sans victoire Banquier`,
+          },
+        ];
+      }
+
+      // Mode Victoire Adverse → afficher le compteur de victoires consécutives
+      if (mode === 'victoire_adverse') {
+        const configHand  = hand === 'banquier' ? 'banquier' : 'joueur';
+        const adverseHand = configHand === 'banquier' ? 'joueur' : 'banquier';
+        const count   = entry.counts?.['adv_wins'] || 0;
+        const waiting = !!entry.waiting_adverse_win;
+        return [{
+          suit: 'adv_wins',
+          display: configHand === 'banquier' ? '🏦' : '👤',
+          count, threshold,
+          mode, label: `Victoire Adverse`,
+          isLive: false,
+          singleCounter: true,
+          waiting,
+          description: waiting
+            ? `⏳ Seuil atteint — en attente d'une victoire ${adverseHand}`
+            : `${count}/${threshold} victoires ${configHand} consécutives`,
+        }];
+      }
+
+      // Mode Compteur Adverse → afficher les compteurs d'absences de la main OPPOSÉE
+      if (mode === 'compteur_adverse') {
+        const adverseCounts = entry.adverseCounts || {};
+        const adverseLabel  = hand === 'banquier' ? 'joueur' : 'banquier';
+        return ALL_SUITS.map(suit => {
+          const base    = adverseCounts[suit] || 0;
+          let count     = base;
+          let isLive    = false;
+          // liveSuits ici = suits de la main adverse (déjà corrigé plus haut)
+          if (liveSuits !== null) {
+            isLive = true;
+            count  = liveSuits.includes(suit) ? 0 : base + 1;
+          }
+          return {
+            suit, display: SUIT_DISPLAY[suit] || suit,
+            count, threshold,
+            mode, label: `Adverse (${adverseLabel})`,
+            isLive,
+          };
+        });
       }
 
       // Mode Miroir Taux → afficher les compteurs d'apparitions cumulatifs
