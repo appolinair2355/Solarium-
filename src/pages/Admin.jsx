@@ -649,6 +649,7 @@ export default function Admin() {
 function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isSuperAdmin = user?.admin_level === 1;
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -903,7 +904,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -1833,7 +1834,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse' };
 
   return (
     <>
@@ -2050,6 +2051,7 @@ function AdminPanel() {
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro ✨</Link>
         <div className="navbar-actions">
           <Link to="/choisir" className="btn btn-ghost btn-sm">⇄ Canaux</Link>
+          {isSuperAdmin && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
           <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
@@ -2069,15 +2071,17 @@ function AdminPanel() {
         {/* ── ONGLETS DE NAVIGATION ── */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '2px solid rgba(255,255,255,0.06)', paddingBottom: 0, flexWrap: 'wrap' }}>
           {[
-            { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: (nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null },
+            { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
-            { id: 'systeme',        icon: '🛠️', label: 'Système' },
-            { id: 'bots',           icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
-            { id: 'maj-db',         icon: '💾', label: 'Mise à jour DB' },
+            ...(isSuperAdmin ? [
+              { id: 'systeme',      icon: '🛠️', label: 'Système' },
+              { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
+              { id: 'maj-db',       icon: '💾', label: 'Mise à jour DB' },
+            ] : []),
           ].map(tab => {
             const active = adminTab === tab.id;
             return (
@@ -2110,8 +2114,8 @@ function AdminPanel() {
         {/* ── TAB : UTILISATEURS ── */}
         {adminTab === 'utilisateurs' && <>
 
-        {/* ── COMPTES PREMIUM ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(250,204,21,0.4)' }}>
+        {/* ── COMPTES PREMIUM (super admin uniquement) ── */}
+        {isSuperAdmin && <div className="tg-admin-card" style={{ borderColor: 'rgba(250,204,21,0.4)' }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">⭐</span>
             <div style={{ flex: 1 }}>
@@ -2163,7 +2167,7 @@ function AdminPanel() {
               {premiumLoading ? '⏳ Génération...' : `⭐ Générer ${premiumCount} compte${premiumCount > 1 ? 's' : ''}`}
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* ── USER TABLE ── */}
         <div className="admin-card">
@@ -2186,10 +2190,10 @@ function AdminPanel() {
                   <tr>
                     <th>Utilisateur</th>
                     <th>Prénom / Nom</th>
-                    <th>Durée donnée</th>
-                    <th>Durée restante</th>
+                    {isSuperAdmin && <th>Durée donnée</th>}
+                    {isSuperAdmin && <th>Durée restante</th>}
                     <th>Statut</th>
-                    <th>Définir durée</th>
+                    {isSuperAdmin && <th>Définir durée</th>}
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -2241,20 +2245,20 @@ function AdminPanel() {
                         </td>
 
                         {/* Duration given */}
-                        <td style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {isSuperAdmin && <td style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                           {fmtDuration(u.subscription_duration_minutes)}
-                        </td>
+                        </td>}
 
                         {/* Remaining */}
-                        <td style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                        {isSuperAdmin && <td style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
                           {fmtRemaining(u.subscription_expires_at)}
-                        </td>
+                        </td>}
 
                         {/* Status */}
                         <td>{statusLabel(u.status)}</td>
 
                         {/* Duration input */}
-                        <td style={{ minWidth: 160 }}>
+                        {isSuperAdmin && <td style={{ minWidth: 160 }}>
                           <div className="dur-input-row">
                             <input
                               className="dur-val-input"
@@ -2275,22 +2279,22 @@ function AdminPanel() {
                               <option value="h">h</option>
                             </select>
                           </div>
-                        </td>
+                        </td>}
 
                         {/* Actions */}
                         <td>
                           <div className="approve-form" style={{ flexWrap: 'wrap', gap: 4 }}>
-                            {(u.status === 'pending' || u.status === 'expired') && (
+                            {isSuperAdmin && (u.status === 'pending' || u.status === 'expired') && (
                               <button className="btn btn-success btn-sm" onClick={() => approveUser(u.id)}>✅ Approuver</button>
                             )}
-                            {u.status === 'active' && (
+                            {isSuperAdmin && u.status === 'active' && (
                               <button className="btn btn-ghost btn-sm" onClick={() => extendUser(u.id)}>➕ Prolonger</button>
                             )}
                             <button className="btn btn-tg btn-sm" onClick={() => openVisModal(u)}>📡 Canaux</button>
-                            {u.status !== 'pending' && (
+                            {isSuperAdmin && u.status !== 'pending' && (
                               <button className="btn btn-danger btn-sm" onClick={() => revokeUser(u.id)}>🔒 Révoquer</button>
                             )}
-                            <button className="btn btn-danger btn-sm" onClick={() => deleteUser(u.id)} style={{ opacity: 0.7 }}>🗑️</button>
+                            {isSuperAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteUser(u.id)} style={{ opacity: 0.7 }}>🗑️</button>}
                           </div>
                         </td>
                       </tr>
@@ -2302,8 +2306,8 @@ function AdminPanel() {
           )}
         </div>
 
-        {/* ── MESSAGES DES UTILISATEURS ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.35)', marginBottom: 20, marginTop: 20 }}>
+        {/* ── MESSAGES DES UTILISATEURS (super admin uniquement) ── */}
+        {isSuperAdmin && <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.35)', marginBottom: 20, marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📨</span>
             <div style={{ flex: 1 }}>
@@ -2447,10 +2451,10 @@ function AdminPanel() {
               ))}
             </div>
           )}
-        </div>
+        </div>}
 
-        {/* ── MESSAGE BROADCAST ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.45)', marginTop: 20 }}>
+        {/* ── MESSAGE BROADCAST (super admin uniquement) ── */}
+        {isSuperAdmin && <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.45)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📣</span>
             <div style={{ flex: 1 }}>
@@ -2587,7 +2591,7 @@ function AdminPanel() {
               {broadcastMsg}
             </div>
           )}
-        </div>
+        </div>}
 
         </>}
 
@@ -3258,6 +3262,7 @@ function AdminPanel() {
                     <option value="carte_3_vers_2">3️⃣ 3 cartes → prédit 2 cartes</option>
                     <option value="carte_2_vers_3">2️⃣ 2 cartes → prédit 3 cartes</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
+                    <option value="compteur_adverse">🔄 Compteur Adverse</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
@@ -3279,6 +3284,11 @@ function AdminPanel() {
                   {stratForm.mode === 'carte_2_vers_3' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(167,243,208,0.08)', border: '1px solid rgba(167,243,208,0.25)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.6 }}>
                       2️⃣ Compte le nombre de fois où la main choisie a reçu <strong>2 cartes</strong> (naturel). Dès que le compteur atteint le seuil B, prédit que le prochain jeu tirera <strong>3 cartes</strong> pour la même main.
+                    </div>
+                  )}
+                  {stratForm.mode === 'compteur_adverse' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', fontSize: 12, color: '#d8b4fe', lineHeight: 1.6 }}>
+                      🔄 Compte les costumes <strong>manquants de la main ADVERSE</strong> (opposée à la main choisie). Dès qu'un costume est absent depuis ≥ B jeux dans la main adverse → prédit le costume défini dans le mapping pour la main sélectionnée. Ex : main=Joueur, seuil=5 → observe les absences du Banquier.
                     </div>
                   )}
                   {stratForm.mode === 'apparition_absence' && (
