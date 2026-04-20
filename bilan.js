@@ -3,15 +3,26 @@
  *
  * Chaque nuit à 00h00, génère et envoie le bilan de la veille
  * pour chaque stratégie (C1/C2/C3/DC + stratégies custom).
+ *
+ * Corrections :
+ *  - Chaque stratégie affiche TOUS les niveaux de rattrapage de 0 à max_rattrapage
+ *    (même si aucune prédiction n'a eu lieu à ce niveau ce jour-là → 0/0)
+ *  - Les stratégies ne se mélangent pas entre elles — chaque bilan est bien délimité
+ *  - L'en-tête affiche clairement le nom de la stratégie
  */
 
 const db = require('./db');
 const tg = require('./telegram-service');
 
+// Niveaux de rattrapage standards pour les stratégies système
+const SYSTEM_MAX_R = { C1: 3, C2: 3, C3: 3, DC: 2 };
+
 // ── Construction du bilan structuré ─────────────────────────────────
 
 function buildBilanData(rows, strategies) {
   const byStrat = {};
+
+  // Regrouper les prédictions par stratégie / rattrapage / statut
   for (const row of rows) {
     if (!byStrat[row.strategy]) byStrat[row.strategy] = { gagne: {}, perdu: {} };
     const r = parseInt(row.rattrapage) || 0;
@@ -19,16 +30,32 @@ function buildBilanData(rows, strategies) {
   }
 
   const result = [];
-  for (const [stratId, data] of Object.entries(byStrat)) {
-    const rSet = new Set([
-      ...Object.keys(data.gagne || {}).map(Number),
-      ...Object.keys(data.perdu || {}).map(Number),
-    ]);
 
+  for (const [stratId, data] of Object.entries(byStrat)) {
+    // Déterminer max_rattrapage de la stratégie
+    let maxR = 0;
+    const stratCfg = strategies.find(s => `S${s.id}` === stratId);
+
+    if (stratCfg) {
+      // Stratégie custom → utiliser max_rattrapage configuré
+      maxR = parseInt(stratCfg.max_rattrapage) || 0;
+    } else if (SYSTEM_MAX_R[stratId] !== undefined) {
+      // Stratégie système (C1/C2/C3/DC)
+      maxR = SYSTEM_MAX_R[stratId];
+    } else {
+      // Fallback : prendre le niveau max trouvé dans les données
+      const allLevels = [
+        ...Object.keys(data.gagne || {}).map(Number),
+        ...Object.keys(data.perdu || {}).map(Number),
+      ];
+      maxR = allLevels.length > 0 ? Math.max(...allLevels) : 0;
+    }
+
+    // Remplir TOUS les niveaux de 0 à maxR (même si aucune prédiction ce niveau)
     let totalWins = 0, totalLosses = 0;
     const byRattrapage = [];
 
-    for (const r of [...rSet].sort((a, b) => a - b)) {
+    for (let r = 0; r <= maxR; r++) {
       const w = (data.gagne || {})[r] || 0;
       const l = (data.perdu || {})[r] || 0;
       totalWins   += w;
@@ -36,14 +63,29 @@ function buildBilanData(rows, strategies) {
       byRattrapage.push({ rattrapage: r, wins: w, losses: l });
     }
 
+    // Ajouter les niveaux au-delà de maxR qui auraient quand même des données
+    const allDataLevels = new Set([
+      ...Object.keys(data.gagne || {}).map(Number),
+      ...Object.keys(data.perdu || {}).map(Number),
+    ]);
+    for (const r of allDataLevels) {
+      if (r > maxR) {
+        const w = (data.gagne || {})[r] || 0;
+        const l = (data.perdu || {})[r] || 0;
+        totalWins   += w;
+        totalLosses += l;
+        byRattrapage.push({ rattrapage: r, wins: w, losses: l });
+      }
+    }
+    byRattrapage.sort((a, b) => a.rattrapage - b.rattrapage);
+
     const total   = totalWins + totalLosses;
     const winRate = total > 0 ? Math.round(totalWins / total * 100) : 0;
 
-    const stratCfg  = strategies.find(s => `S${s.id}` === stratId);
     const name      = stratCfg ? stratCfg.name : stratId;
     const tgTargets = stratCfg?.tg_targets || [];
 
-    result.push({ stratId, name, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets });
+    result.push({ stratId, name, maxR, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets });
   }
 
   return result.sort((a, b) => a.stratId.localeCompare(b.stratId));
@@ -52,34 +94,49 @@ function buildBilanData(rows, strategies) {
 // ── Formatage du message Telegram ────────────────────────────────────
 
 function formatBilanText(entry, dateStr) {
-  const BAR  = '━━━━━━━━━━━━━━━━━━';
+  const BAR_DOUBLE = '══════════════════════';
+  const BAR_THIN   = '──────────────────────';
   const lines = [];
 
-  lines.push(`📊 <b>BILAN DU ${dateStr}</b>`);
-  lines.push(BAR);
+  // ── En-tête clair avec nom de la stratégie ──
+  lines.push(`${BAR_DOUBLE}`);
+  lines.push(`📊 <b>BILAN — ${entry.name}</b>`);
+  lines.push(`📅 <i>${dateStr}</i>`);
+  lines.push(BAR_THIN);
 
   if (entry.total === 0) {
     lines.push('Aucune prédiction vérifiée ce jour.');
   } else {
     const lossRate = 100 - entry.winRate;
-    lines.push(`📈 Total prédictions : <b>${entry.total}</b>`);
+    const perfIcon = entry.winRate >= 70 ? '🔥' : entry.winRate >= 50 ? '✅' : entry.winRate >= 30 ? '🟡' : '🔴';
+
+    lines.push(`${perfIcon} Taux de réussite : <b>${entry.winRate}%</b>`);
+    lines.push(`📈 Total préd. vérifiées : <b>${entry.total}</b>`);
     lines.push(`✅ Gagnantes : <b>${entry.totalWins}</b>  (${entry.winRate}%)`);
     lines.push(`❌ Perdues   : <b>${entry.totalLosses}</b>  (${lossRate}%)`);
 
+    // ── Détail par niveau de rattrapage ──
     if (entry.byRattrapage.length > 0) {
       lines.push('');
-      lines.push('<b>Par rattrapage :</b>');
+      lines.push(`<b>Détail par rattrapage</b> (max configuré : R${entry.maxR}) :`);
+
       for (const { rattrapage, wins, losses } of entry.byRattrapage) {
-        const tot    = wins + losses;
-        const rate   = tot > 0 ? Math.round(wins / tot * 100) : 0;
-        const label  = rattrapage === 0 ? 'Direct  (R0)' : `Ratt.  (R${rattrapage})`;
-        const icon   = wins > losses ? '🟢' : wins === losses ? '🟡' : '🔴';
-        lines.push(`  ${icon} ${label} : ✅ ${wins} / ${tot}  (${rate}%)`);
+        const tot   = wins + losses;
+        const rate  = tot > 0 ? Math.round(wins / tot * 100) : null;
+        const label = rattrapage === 0 ? 'Direct      (R0)' : `Rattrapage  (R${rattrapage})`;
+
+        if (tot === 0) {
+          // Niveau configuré mais pas de prédiction ce jour → afficher comme inactif
+          lines.push(`  ⚪ ${label} : —  (aucune préd.)`);
+        } else {
+          const icon = wins > losses ? '🟢' : wins === losses ? '🟡' : '🔴';
+          lines.push(`  ${icon} ${label} : ✅ ${wins} / ❌ ${losses}  (${rate}%)`);
+        }
       }
     }
   }
 
-  lines.push(BAR);
+  lines.push(BAR_DOUBLE);
   return lines.join('\n');
 }
 
@@ -96,7 +153,6 @@ async function sendDailyBilan(dateStr) {
 
     if (bilanData.length === 0) {
       console.log('[Bilan] Aucune prédiction résolue ce jour.');
-      // Sauvegarder quand même un snapshot vide
       await db.saveBilanSnapshot(dateStr, []);
       return;
     }
@@ -104,33 +160,36 @@ async function sendDailyBilan(dateStr) {
     await db.saveBilanSnapshot(dateStr, bilanData);
     console.log(`[Bilan] Snapshot sauvegardé (${bilanData.length} stratégies)`);
 
+    // ── Envoi séparé pour chaque stratégie ──────────────────────────
+    // Chaque stratégie est envoyée indépendamment sur ses propres canaux.
+    // Cela garantit qu'aucune stratégie ne se mélange avec une autre.
     for (const entry of bilanData) {
       const text = formatBilanText(entry, dateStr);
 
       if (entry.tgTargets && entry.tgTargets.length > 0) {
-        // Stratégies custom avec token + canal propre configurés
+        // Stratégie custom avec token + canal propres configurés
         for (const { bot_token, channel_id } of entry.tgTargets) {
           if (!bot_token || !channel_id) continue;
           try {
             await tg.sendRawMessage(bot_token, channel_id, text, 'HTML');
-            console.log(`[Bilan] ${entry.stratId} → canal ${channel_id} ✓`);
+            console.log(`[Bilan] ✓ ${entry.stratId} (${entry.name}) → canal ${channel_id}`);
           } catch (e) {
-            console.error(`[Bilan] ${entry.stratId} → ${channel_id}: ${e.message}`);
+            console.error(`[Bilan] ✗ ${entry.stratId} → ${channel_id}: ${e.message}`);
           }
         }
       } else {
-        // Stratégies standard (C1/C2/C3/DC) ET custom sans tg_targets spécifiques
+        // Stratégie standard (C1/C2/C3/DC) ou custom sans tg_targets spécifiques
         // → bot global + routage par stratégie (ou tous les canaux si pas de route)
         try {
           await tg.sendBilanToStrategyChannels(entry.stratId, text);
-          console.log(`[Bilan] ${entry.stratId} → canaux globaux ✓`);
+          console.log(`[Bilan] ✓ ${entry.stratId} (${entry.name}) → canaux globaux`);
         } catch (e) {
-          console.error(`[Bilan] ${entry.stratId} global: ${e.message}`);
+          console.error(`[Bilan] ✗ ${entry.stratId} global: ${e.message}`);
         }
       }
     }
 
-    console.log(`[Bilan] ✅ Terminé pour ${dateStr}`);
+    console.log(`[Bilan] ✅ Terminé pour ${dateStr} (${bilanData.length} stratégie(s) envoyée(s))`);
   } catch (e) {
     console.error('[Bilan] Erreur:', e.message);
   }
@@ -158,7 +217,6 @@ function scheduleMidnight() {
 
   setTimeout(() => {
     fire();
-    // Répéter toutes les 24h
     setInterval(fire, 24 * 60 * 60 * 1000);
   }, ms);
 }

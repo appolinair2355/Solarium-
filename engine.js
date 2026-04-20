@@ -104,6 +104,10 @@ class Engine {
     this.lossSequences  = []; // chargé depuis la DB
     this.gameCardsCache = {}; // { gameNumber: { player: ['♥','♦','♠'], banker: ['♣','♥'] } }
 
+    // ── Bloqueur de mauvaises prédictions ─────────────────────────────────
+    // { stratId: { blockedUntilGame: N, reason: '...', triggeredAt: Date } }
+    this.badPredBlocker = {};
+
     for (const s of ALL_SUITS) {
       this.c1.absences[s] = 0;
       this.c2.absences[s] = 0;
@@ -115,8 +119,51 @@ class Engine {
     const counts = {};
     const mappingIndex = {};
     const mirrorCounts = {};
-    for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null };
+    const adverseCounts = {}; // pour le mode compteur_adverse
+    for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts };
+  }
+
+  // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
+  // Vérifie si une stratégie est actuellement bloquée à cause d'un mauvais taux de victoire.
+  // Retourne true si bloqué (prédiction doit être ignorée).
+  _isBadPredBlocked(stratId, gn, state) {
+    const block = this.badPredBlocker[stratId];
+    if (!block) return false;
+    if (gn <= block.blockedUntilGame) {
+      console.log(`[BadPredBlock] ${stratId} bloqué jusqu'au jeu #${block.blockedUntilGame} (jeu actuel #${gn}) — raison: ${block.reason}`);
+      return true;
+    }
+    // Déblocage automatique
+    delete this.badPredBlocker[stratId];
+    console.log(`[BadPredBlock] ${stratId} débloqué au jeu #${gn}`);
+    return false;
+  }
+
+  // Évalue le taux de victoire récent et bloque si trop faible.
+  // Appelé après chaque résolution de prédiction (gain ou perte).
+  _updateBadPredBlocker(stratId, gn, state) {
+    const BAD_WINDOW   = 5;   // Fenêtre d'analyse : 5 dernières prédictions
+    const BAD_WIN_RATE = 0.20; // Seuil : en dessous de 20% → bloqué
+    const BLOCK_GAMES  = 3;   // Bloquer pendant 3 jeux
+    const MIN_PRED     = 3;   // Minimum de prédictions avant d'activer le bloqueur
+
+    const outcomes = state.lastOutcomes || [];
+    if (outcomes.length < MIN_PRED) return;
+
+    const recent = outcomes.slice(-BAD_WINDOW);
+    const wins   = recent.filter(o => o.won).length;
+    const rate   = wins / recent.length;
+
+    if (rate <= BAD_WIN_RATE && recent.length >= MIN_PRED) {
+      const reason = `taux victoire ${(rate * 100).toFixed(0)}% sur ${recent.length} dernières préd.`;
+      this.badPredBlocker[stratId] = {
+        blockedUntilGame: gn + BLOCK_GAMES,
+        reason,
+        triggeredAt: new Date().toISOString(),
+      };
+      console.log(`[BadPredBlock] ⛔ ${stratId} BLOQUÉ automatiquement — ${reason} — jusqu'au jeu #${gn + BLOCK_GAMES}`);
+    }
   }
 
   async loadLossSequences() {
@@ -1039,6 +1086,8 @@ class Engine {
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
         if (won) this._onStratWin(channelId);
         else this._onStratLoss(channelId, gn, ps);
+        // Évaluer si le bloqueur doit s'activer
+        this._updateBadPredBlocker(channelId, gn, state);
       }, stratMaxRForResolve, stratTgOpts, handCards);
     }
 
@@ -1065,6 +1114,8 @@ class Engine {
         console.log(`[${channelId}] Bloqué — déjà déclenché en live pour jeu #${gn}`);
         return;
       }
+      // ── Bloqueur automatique de mauvaises prédictions ─────────────
+      if (this._isBadPredBlocked(channelId, gn, state)) return;
       // ── Vérification des exceptions avant d'émettre ───────────────
       if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
 
@@ -1340,6 +1391,48 @@ class Engine {
         const ps = laggingSuit;
         console.log(`[${channelId}] MiroirTaux (main=${handLabel}): ${dominantSuit}(${state.mirrorCounts[dominantSuit]}) - ${laggingSuit}(${state.mirrorCounts[laggingSuit]}) = ${bestDiff} ≥ écart(${bestPairThreshold}) → prédit ${ps}`);
         await emitPrediction(gn + offset, ps, laggingSuit);
+      }
+
+    } else if (mode === 'compteur_adverse') {
+      // ── MODE COMPTEUR ADVERSE ─────────────────────────────────────────────
+      // Compte les costumes MANQUANTS de la main OPPOSÉE à celle choisie par l'admin.
+      // Si hand = 'joueur' → observe la main du BANQUIER
+      // Si hand = 'banquier' → observe la main du JOUEUR
+      //
+      // Logique : même principe que 'manquants' mais sur la main adverse.
+      // Quand un costume est absent depuis B jeux dans la main adverse →
+      //   prédit le costume configuré par l'admin dans le mapping pour ce costume.
+      //
+      // Exemple : hand='joueur', B=5, mapping[♠]='♥'
+      //   → Si ♠ est absent 5 fois dans la main du BANQUIER → prédit ♥ pour le joueur
+      // ─────────────────────────────────────────────────────────────────────
+
+      // La main adverse est l'opposée de la main configurée
+      const adverseSuits = cfg.hand === 'banquier' ? suits : (bSuits || []);
+      const adverseLabel = cfg.hand === 'banquier' ? 'joueur' : 'banquier';
+
+      if (!state.adverseCounts) {
+        state.adverseCounts = {};
+        for (const s of ALL_SUITS) state.adverseCounts[s] = 0;
+      }
+
+      for (const suit of ALL_SUITS) {
+        if (adverseSuits.includes(suit)) {
+          // Costume présent dans la main adverse → réinitialiser son compteur
+          state.adverseCounts[suit] = 0;
+        } else {
+          // Costume absent de la main adverse → incrémenter le compteur
+          state.adverseCounts[suit] = (state.adverseCounts[suit] || 0) + 1;
+          if (state.adverseCounts[suit] === B) {
+            const ps = resolvePredictedSuit(suit);
+            if (ps) {
+              console.log(`[${channelId}] [Adverse] ♟ ${suit} absent ${B} fois de la main ${adverseLabel} → prédit ${ps} (main ${handLabel})`);
+              await emitPrediction(gn + offset, ps, suit);
+            }
+            // Réinitialiser le compteur après déclenchement
+            state.adverseCounts[suit] = 0;
+          }
+        }
       }
     }
   }
@@ -1627,7 +1720,9 @@ class Engine {
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
           // Détection jeu #1 → reset complet (nouveau jour / passage à minuit)
-          if (game.game_number === 1 && (this.maxProcessedGame || 0) > 5) {
+          // Seuil abaissé à 2 : on autorise le reset dès qu'au moins 2 jeux ont été traités
+          // (évite un faux reset au tout premier démarrage où maxProcessedGame === 0)
+          if (game.game_number === 1 && (this.maxProcessedGame || 0) > 2) {
             await this._resetOnGameOne();
             renderSync.handleGameOne(1).catch(() => {});
           }
@@ -1795,13 +1890,18 @@ class Engine {
     this.maxProcessedGame = 0;
     this.currentMaxGame   = 0;
 
+    // 8. Vider le bloqueur de mauvaises prédictions
+    this.badPredBlocker = {};
+
     return { deleted, extDeleted };
   }
 
   async _resetOnGameOne() {
     console.log('[Engine] 🕛 Jeu #1 détecté → reset complet (nouvelles 24h)');
     const { deleted, extDeleted } = await this.fullReset();
-    console.log(`[Engine] 🕛 ${deleted} préd. supprimée(s) en local, ${extDeleted} sur Render externe`);
+    // Nettoyer aussi les enregistrements 'expire' résiduels
+    const expireDeleted = await db.deleteExpiredPredictions().catch(() => 0);
+    console.log(`[Engine] 🕛 ${deleted} préd. supprimée(s) en local, ${extDeleted} sur Render externe, ${expireDeleted} expire nettoyé(s)`);
     console.log('[Engine] 🕛 Reset complet terminé — moteur prêt pour le nouveau jour');
   }
 
@@ -1852,6 +1952,10 @@ class Engine {
           }
         }
       }
+      // ── Nettoyage périodique des enregistrements 'expire' accumulés en base ──
+      // Supprime les vieux 'expire' de plus de 2 jours pour éviter leur accumulation
+      const cleaned = await db.cleanupOldPredictions(2).catch(() => 0);
+      if (cleaned > 0) console.log(`[Engine] 🗑️ Nettoyage DB: ${cleaned} ancienne(s) prédiction(s) résolue(s) supprimée(s)`);
     } catch (e) { console.error('[Engine] _clearExpiredByTime error:', e.message); }
   }
 

@@ -49,6 +49,7 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_duration_minutes INTEGER;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 2;
 
       CREATE TABLE IF NOT EXISTS predictions (
         id SERIAL PRIMARY KEY,
@@ -146,19 +147,29 @@ async function initDB() {
         finished_at     TIMESTAMPTZ
       );
     `);
-    // Compte admin
-    const check = await pgPool.query(`SELECT id FROM users WHERE username = 'buzzinfluence' LIMIT 1`);
-    if (check.rows.length === 0) {
+    // Compte admin secondaire : buzzinfluence (admin_level=2)
+    {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
-        `INSERT INTO users (username, email, password_hash, is_admin, is_approved)
-         VALUES ($1, $2, $3, TRUE, TRUE)
-         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE`,
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 2)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
         ['buzzinfluence', 'admin@baccarat.pro', hash]
       );
-      console.log('✅ Compte admin créé: buzzinfluence');
     }
+    // Compte super admin : sossoukouam@gmail.com (admin_level=1)
+    {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('arrow2026', 10);
+      await pgPool.query(
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 1)
+         ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 1`,
+        ['sossoukouam', 'sossoukouam@gmail.com', hash]
+      );
+    }
+    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
     console.log('✅ Base de données PostgreSQL initialisée');
   } else {
     const existing = jsondb.getUserByUsername('buzzinfluence');
@@ -636,13 +647,42 @@ async function deleteStrategyPredictions(strategy) {
 
 async function deleteAllPredictions() {
   if (USE_PG) {
-    const r = await pgPool.query(`DELETE FROM predictions`);
+    // Supprimer les messages TG orphelins en même temps
+    await pgPool.query('DELETE FROM tg_pred_messages').catch(() => {});
+    const r = await pgPool.query('DELETE FROM predictions');
     return r.rowCount;
   }
   const data = require('./jsondb');
   let count = 0;
   if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
   return count;
+}
+
+// ── Nettoyage automatique des anciens enregistrements résolus ──────
+// Supprime les prédictions résolues (gagne/perdu/expire) de plus de N jours.
+// Appelé périodiquement pour éviter l'accumulation en base.
+async function cleanupOldPredictions(daysOld = 3) {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(
+      `DELETE FROM predictions
+       WHERE status IN ('gagne','perdu','expire')
+         AND resolved_at < NOW() - INTERVAL '${parseInt(daysOld)} days'`
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[DB] cleanupOldPredictions error:', e.message);
+    return 0;
+  }
+}
+
+// Supprime les enregistrements 'expire' immédiatement (pour les resets manuels)
+async function deleteExpiredPredictions() {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(`DELETE FROM predictions WHERE status='expire'`);
+    return r.rowCount;
+  } catch (e) { return 0; }
 }
 
 async function expireStrategyPredictions(strategy) {
@@ -844,7 +884,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,

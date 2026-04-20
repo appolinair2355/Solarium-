@@ -1,6 +1,7 @@
 /**
  * bot-host.js — Hébergement de bots Telegram
  * Détection automatique du fichier principal dans le ZIP.
+ * Analyse et correction automatique du paquet ZIP avant déploiement.
  * Supporte Python et Node.js avec redémarrage automatique.
  */
 'use strict';
@@ -22,22 +23,26 @@ const running = {};
 async function initDB() {
   await db.pool.query(`
     CREATE TABLE IF NOT EXISTS hosted_bots (
-      id          SERIAL PRIMARY KEY,
-      name        TEXT NOT NULL,
-      language    TEXT    DEFAULT 'python',
-      token       TEXT    NOT NULL,
-      channel_id  TEXT    DEFAULT '',
-      main_file   TEXT    DEFAULT 'main.py',
-      work_dir    TEXT    DEFAULT '',
-      detected_files TEXT DEFAULT '',
-      status      TEXT    DEFAULT 'stopped',
-      created_at  TIMESTAMPTZ DEFAULT NOW(),
-      updated_at  TIMESTAMPTZ DEFAULT NOW()
+      id                 SERIAL PRIMARY KEY,
+      name               TEXT NOT NULL,
+      language           TEXT    DEFAULT 'python',
+      token              TEXT    NOT NULL,
+      channel_id         TEXT    DEFAULT '',
+      main_file          TEXT    DEFAULT 'main.py',
+      work_dir           TEXT    DEFAULT '',
+      detected_files     TEXT    DEFAULT '',
+      status             TEXT    DEFAULT 'stopped',
+      is_prediction_bot  BOOLEAN DEFAULT false,
+      auto_strategy_id   INTEGER DEFAULT NULL,
+      created_at         TIMESTAMPTZ DEFAULT NOW(),
+      updated_at         TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  // Ajouter work_dir si la table existe déjà sans cette colonne
+  // Migrations — ajouter les colonnes si elles n'existent pas encore
   await db.pool.query(`ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS work_dir TEXT DEFAULT ''`).catch(() => {});
   await db.pool.query(`ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS detected_files TEXT DEFAULT ''`).catch(() => {});
+  await db.pool.query(`ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS is_prediction_bot BOOLEAN DEFAULT false`).catch(() => {});
+  await db.pool.query(`ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS auto_strategy_id INTEGER DEFAULT NULL`).catch(() => {});
 }
 
 // ── Lister tous les bots ─────────────────────────────────────────────────────
@@ -92,6 +97,325 @@ async function sendMessage(token, chatId, text) {
   } catch (e) {
     console.error('[BotHost] sendMessage error:', e.message);
     return { ok: false, error: e.message };
+  }
+}
+
+// ── Analyser et corriger automatiquement le paquet ZIP de déploiement ────────
+// Vérifie l'intégrité du ZIP, s'assure qu'un fichier principal est présent,
+// ajoute un squelette si aucun script n'est trouvé, supprime les fichiers
+// indésirables. Retourne { base64Fixed, report } avec le ZIP corrigé prêt.
+async function analyzeAndFixZip(base64, language) {
+  const lang = language || 'python';
+  const ext  = lang === 'node' ? '.js' : '.py';
+  const PRIORITY = lang === 'node'
+    ? ['index.js', 'app.js', 'bot.js', 'main.js', 'server.js', 'start.js']
+    : ['main.py', 'bot.py', 'app.py', 'run.py', 'start.py', 'bot_telegram.py',
+       'telegram_bot.py', 'index.py', 'handler.py'];
+
+  const report = {
+    valid:        false,
+    filesFound:   [],
+    issues:       [],
+    fixes:        [],
+    mainDetected: null,
+  };
+
+  // 1. Vérifier que le buffer base64 est valide
+  let buffer;
+  try {
+    buffer = Buffer.from(base64, 'base64');
+    if (buffer.length < 4) throw new Error('Tampon trop court');
+  } catch (e) {
+    report.issues.push(`ZIP corrompu ou base64 invalide : ${e.message}`);
+    console.error('[BotHost][ZIP-Analyse] ❌ Base64 invalide :', e.message);
+    return { base64Fixed: base64, report };
+  }
+
+  // 2. Charger le ZIP
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (e) {
+    report.issues.push(`Impossible d'ouvrir le ZIP : ${e.message}`);
+    console.error('[BotHost][ZIP-Analyse] ❌ Lecture ZIP impossible :', e.message);
+    return { base64Fixed: base64, report };
+  }
+
+  // 3. Inventaire complet des fichiers
+  const allFiles = Object.entries(zip.files).filter(([, f]) => !f.dir);
+  report.filesFound = allFiles.map(([n]) => n);
+  console.log(`[BotHost][ZIP-Analyse] 📦 ${report.filesFound.length} fichier(s) trouvé(s) dans le ZIP`);
+
+  // 4. Supprimer les fichiers indésirables (.DS_Store, __MACOSX, Thumbs.db, .exe, .bat)
+  const UNWANTED = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
+  const UNWANTED_EXT = ['.exe', '.bat', '.cmd', '.sh.exe'];
+  const UNWANTED_DIR = ['__MACOSX'];
+  for (const [filename] of allFiles) {
+    const base = path.basename(filename);
+    const parts = filename.split('/');
+    const inBadDir = parts.some(p => UNWANTED_DIR.includes(p));
+    const isBadFile = UNWANTED.includes(base) || UNWANTED_EXT.some(e => base.endsWith(e));
+    if (inBadDir || isBadFile) {
+      delete zip.files[filename];
+      report.fixes.push(`Fichier indésirable supprimé : ${filename}`);
+      console.log(`[BotHost][ZIP-Analyse] 🗑 Supprimé : ${filename}`);
+    }
+  }
+
+  // 5. Vérifier la présence d'un script principal
+  const remainingFiles = Object.entries(zip.files).filter(([, f]) => !f.dir);
+  const scriptFiles = remainingFiles
+    .map(([n]) => n)
+    .filter(n => n.endsWith(ext));
+
+  let hasMain = false;
+  for (const prio of PRIORITY) {
+    if (scriptFiles.some(f => path.basename(f) === prio)) {
+      report.mainDetected = prio;
+      hasMain = true;
+      break;
+    }
+  }
+
+  // Fallback : n'importe quel script du bon type
+  if (!hasMain && scriptFiles.length > 0) {
+    report.mainDetected = path.basename(scriptFiles[0]);
+    hasMain = true;
+  }
+
+  // 6. Aucun script trouvé → injecter un squelette minimal
+  if (!hasMain) {
+    report.issues.push(`Aucun script ${ext} trouvé dans le ZIP — squelette par défaut injecté`);
+    const defaultMain = lang === 'node' ? 'index.js' : 'main.py';
+    const skeleton = lang === 'node'
+      ? `// Bot Telegram Node.js — squelette généré automatiquement\n` +
+        `const TelegramBot = require('node-telegram-bot-api');\n` +
+        `const token = process.env.BOT_TOKEN || '';\n` +
+        `if (!token) { console.error('BOT_TOKEN manquant'); process.exit(1); }\n` +
+        `const bot = new TelegramBot(token, { polling: true });\n` +
+        `bot.on('message', msg => bot.sendMessage(msg.chat.id, 'Bonjour ! Je suis en ligne.'));\n` +
+        `console.log('Bot Node.js démarré');\n`
+      : `# Bot Telegram Python — squelette généré automatiquement\n` +
+        `import os, telebot\n` +
+        `token = os.environ.get('BOT_TOKEN', '')\n` +
+        `if not token:\n    print('BOT_TOKEN manquant'); exit(1)\n` +
+        `bot = telebot.TeleBot(token)\n` +
+        `@bot.message_handler(func=lambda m: True)\n` +
+        `def echo(m): bot.reply_to(m, 'Bonjour ! Je suis en ligne.')\n` +
+        `print('Bot Python démarré')\n` +
+        `bot.infinity_polling()\n`;
+
+    zip.file(defaultMain, skeleton);
+    report.fixes.push(`Squelette ${defaultMain} injecté automatiquement`);
+    report.mainDetected = defaultMain;
+    console.log(`[BotHost][ZIP-Analyse] 🔧 Squelette ${defaultMain} injecté`);
+  }
+
+  // 7. Pour Python : vérifier la présence de requirements.txt
+  if (lang === 'python') {
+    const hasReqs = Object.keys(zip.files).some(f => path.basename(f) === 'requirements.txt');
+    if (!hasReqs) {
+      zip.file('requirements.txt', 'pyTelegramBotAPI\n');
+      report.fixes.push('requirements.txt manquant — créé avec dépendance de base (pyTelegramBotAPI)');
+      console.log('[BotHost][ZIP-Analyse] 🔧 requirements.txt créé');
+    }
+  }
+
+  // 8. Pour Node.js : vérifier la présence de package.json
+  if (lang === 'node') {
+    const hasPkg = Object.keys(zip.files).some(f => path.basename(f) === 'package.json');
+    if (!hasPkg) {
+      zip.file('package.json', JSON.stringify({
+        name: 'telegram-bot', version: '1.0.0', main: report.mainDetected || 'index.js',
+        dependencies: { 'node-telegram-bot-api': '^0.61.0' },
+      }, null, 2));
+      report.fixes.push('package.json manquant — créé avec dépendance de base (node-telegram-bot-api)');
+      console.log('[BotHost][ZIP-Analyse] 🔧 package.json créé');
+    }
+  }
+
+  // 9. Re-générer le ZIP corrigé
+  let base64Fixed = base64;
+  try {
+    const fixedBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    base64Fixed = fixedBuffer.toString('base64');
+    console.log(`[BotHost][ZIP-Analyse] ✅ ZIP corrigé généré (${fixedBuffer.length} octets)`);
+  } catch (e) {
+    report.issues.push(`Erreur régénération ZIP : ${e.message}`);
+    console.error('[BotHost][ZIP-Analyse] ❌ Erreur régénération :', e.message);
+  }
+
+  report.valid = true;
+  if (report.fixes.length === 0) {
+    console.log('[BotHost][ZIP-Analyse] ✅ ZIP valide — aucune correction nécessaire');
+  } else {
+    console.log(`[BotHost][ZIP-Analyse] 🔧 ${report.fixes.length} correction(s) appliquée(s)`);
+  }
+
+  return { base64Fixed, report };
+}
+
+// ── Détection de code de prédiction automatique ───────────────────────────────
+// Analyse le contenu des fichiers extraits et détecte les mots-clés typiques
+// d'un bot de prédiction Baccarat. Retourne un objet de résultat.
+function detectPredictionCode(botDir) {
+  // Mots-clés qui identifient un code de prédiction automatique
+  const PREDICTION_KEYWORDS = [
+    'predict', 'prédiction', 'prediction', 'baccarat', 'baccara',
+    'banker', 'banquier', 'player', 'joueur', 'suit', 'costume',
+    'absence', 'manquant', 'rattrapage', 'strategy', 'stratégie',
+    'send_prediction', 'envoyer_pred', 'auto_predict', 'auto_pred',
+    'hearts', 'spades', 'clubs', 'diamonds',
+    'coeur', 'carreau', 'trefle', 'trèfle', 'pique',
+  ];
+
+  const result = {
+    isPredictionBot: false,
+    keywords:        [],
+    confidence:      0,   // 0-100%
+    filesScanned:    0,
+  };
+
+  if (!fs.existsSync(botDir)) return result;
+
+  // Scanner tous les fichiers texte du bot
+  const scanDir = (dir) => {
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          scanDir(full);
+        } else if (/\.(py|js|txt|json|cfg|ini|env)$/i.test(entry)) {
+          try {
+            const content = fs.readFileSync(full, 'utf8').toLowerCase();
+            result.filesScanned++;
+            for (const kw of PREDICTION_KEYWORDS) {
+              if (content.includes(kw.toLowerCase()) && !result.keywords.includes(kw)) {
+                result.keywords.push(kw);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  };
+  scanDir(botDir);
+
+  // Calculer un score de confiance (plus de mots-clés = plus de certitude)
+  result.confidence = Math.min(100, Math.round(result.keywords.length / PREDICTION_KEYWORDS.length * 100 * 3));
+  result.isPredictionBot = result.keywords.length >= 3; // ≥ 3 mots-clés → considéré comme bot de prédiction
+
+  if (result.isPredictionBot) {
+    console.log(`[BotHost] 🎯 Code de PRÉDICTION détecté — confiance: ${result.confidence}% — mots-clés: ${result.keywords.slice(0,5).join(', ')}`);
+  } else {
+    console.log(`[BotHost] ℹ Code générique — ${result.keywords.length} mot(s)-clé(s) prédiction trouvé(s) (seuil: 3)`);
+  }
+
+  return result;
+}
+
+// ── Configuration automatique du canal de prédiction ─────────────────────────
+// Si le code déployé est un bot de prédiction, crée automatiquement :
+//  1. Un canal Telegram dans le système (upsertTelegramConfig)
+//  2. Une stratégie custom "manquants" liée à ce canal
+//  3. Recharge le moteur de prédictions
+// Retourne { ok, channelDbId, strategyId, message }
+async function setupPredictionChannel(bot) {
+  const { id: botId, name: botName, token, channel_id: channelId } = bot;
+  if (!channelId || !token) {
+    return { ok: false, message: 'channel_id ou token manquant — configuration auto ignorée' };
+  }
+
+  try {
+    console.log(`[BotHost] 🔧 Mise en place automatique du canal de prédiction pour bot #${botId} "${botName}"...`);
+
+    // 1. Créer ou mettre à jour le canal Telegram dans le système
+    const channelName = `Bot-${botName}`.replace(/[^a-zA-Z0-9\-_\s]/g, '').trim();
+    const existing = await db.pool.query(
+      `SELECT id FROM telegram_config WHERE channel_id=$1`, [channelId]
+    ).catch(() => ({ rows: [] }));
+
+    let channelDbId;
+    if (existing.rows.length > 0) {
+      channelDbId = existing.rows[0].id;
+      console.log(`[BotHost] ℹ Canal ${channelId} déjà enregistré en base (id=${channelDbId})`);
+    } else {
+      await db.upsertTelegramConfig(channelId, channelName);
+      const newRow = await db.pool.query(
+        `SELECT id FROM telegram_config WHERE channel_id=$1`, [channelId]
+      );
+      channelDbId = newRow.rows[0]?.id;
+      console.log(`[BotHost] ✅ Canal Telegram "${channelName}" (${channelId}) créé en base (id=${channelDbId})`);
+    }
+
+    // 2. Créer une stratégie custom liée à ce canal
+    //    Mode "manquants" par défaut — prédit le costume le plus absent
+    const v          = await db.getSetting('custom_strategies').catch(() => null);
+    const strategies = v ? JSON.parse(v) : [];
+
+    // Vérifier si une stratégie pour ce bot existe déjà
+    const alreadyExists = strategies.find(s =>
+      s.tg_targets && s.tg_targets.some(t => String(t.channel_id) === String(channelId))
+    );
+
+    let strategyId = null;
+    if (alreadyExists) {
+      strategyId = alreadyExists.id;
+      console.log(`[BotHost] ℹ Stratégie liée à ce canal déjà existante (id=${strategyId})`);
+    } else {
+      const nextId = strategies.length > 0 ? Math.max(...strategies.map(s => s.id || 0)) + 1 : 7;
+      const newStrat = {
+        id:               nextId,
+        name:             `Auto-${botName}`,
+        mode:             'manquants',
+        hand:             'joueur',
+        threshold:        5,
+        max_rattrapage:   2,
+        enabled:          true,
+        visibility:       'admin',
+        mappings:         { '♠': ['♠'], '♥': ['♥'], '♦': ['♦'], '♣': ['♣'] },
+        exceptions:       [],
+        prediction_offset: 1,
+        tg_targets:       [{ bot_token: token, channel_id: channelId }],
+        created_at:       new Date().toISOString(),
+        _auto_created:    true,
+        _from_bot_id:     botId,
+      };
+
+      strategies.push(newStrat);
+      await db.setSetting('custom_strategies', JSON.stringify(strategies));
+      strategyId = nextId;
+      console.log(`[BotHost] ✅ Stratégie auto "${newStrat.name}" créée (id=${strategyId}) → canal ${channelId}`);
+
+      // 3. Recharger le moteur de prédictions
+      try {
+        require('./engine').reloadCustomStrategies(strategies);
+        console.log(`[BotHost] ✅ Moteur rechargé avec la nouvelle stratégie auto`);
+      } catch (e) {
+        console.warn(`[BotHost] ⚠ Rechargement moteur échoué : ${e.message}`);
+      }
+    }
+
+    // 4. Enregistrer l'association dans la table hosted_bots
+    await db.pool.query(
+      `ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS is_prediction_bot BOOLEAN DEFAULT false`
+    ).catch(() => {});
+    await db.pool.query(
+      `ALTER TABLE hosted_bots ADD COLUMN IF NOT EXISTS auto_strategy_id INTEGER DEFAULT NULL`
+    ).catch(() => {});
+    await db.pool.query(
+      `UPDATE hosted_bots SET is_prediction_bot=true, auto_strategy_id=$1 WHERE id=$2`,
+      [strategyId, botId]
+    );
+
+    const msg = `Canal "${channelName}" (${channelId}) + stratégie "Auto-${botName}" (id=${strategyId}) créés automatiquement`;
+    console.log(`[BotHost] ✅ Configuration auto terminée : ${msg}`);
+    return { ok: true, channelDbId, strategyId, message: msg };
+
+  } catch (e) {
+    console.error(`[BotHost] ❌ Erreur configuration auto prédiction : ${e.message}`);
+    return { ok: false, message: e.message };
   }
 }
 
@@ -181,18 +505,33 @@ async function createBot({ name, language, token, channel_id, zip_base64 }) {
   );
   const bot = r.rows[0];
 
-  // 3. Extraire le ZIP
-  let detectedFiles = [];
+  // 3. Analyser et corriger automatiquement le ZIP avant extraction
+  let zipToUse  = zip_base64;
+  let zipReport = null;
   if (zip_base64) {
-    detectedFiles = await extractZip(bot.id, zip_base64);
+    console.log(`[BotHost] 🔍 Analyse du ZIP de déploiement pour le bot #${bot.id} "${name}"...`);
+    const analysis = await analyzeAndFixZip(zip_base64, lang);
+    zipToUse  = analysis.base64Fixed;
+    zipReport = analysis.report;
+    if (zipReport.fixes.length > 0) {
+      console.log(`[BotHost] 🔧 ZIP corrigé (${zipReport.fixes.length} correction(s)) : ${zipReport.fixes.join(' | ')}`);
+    }
+    if (zipReport.issues.length > 0) {
+      console.warn(`[BotHost] ⚠ Problèmes ZIP détectés : ${zipReport.issues.join(' | ')}`);
+    }
   }
 
-  // 4. Détecter le fichier principal automatiquement
+  // 4. Extraire le ZIP (potentiellement corrigé)
+  let detectedFiles = [];
+  if (zipToUse) {
+    detectedFiles = await extractZip(bot.id, zipToUse);
+  }
+
+  // 5. Détecter le fichier principal automatiquement
   const botDir   = path.join(BOTS_DIR, String(bot.id));
   const detected = detectMainFile(botDir, lang);
 
   if (!detected) {
-    // Aucun script trouvé — mettre quand même un défaut
     const defMain = lang === 'node' ? 'index.js' : 'main.py';
     await db.pool.query(
       `UPDATE hosted_bots SET main_file=$1, work_dir=$2, detected_files=$3, updated_at=NOW() WHERE id=$4`,
@@ -207,32 +546,51 @@ async function createBot({ name, language, token, channel_id, zip_base64 }) {
     console.log(`[BotHost] ✅ Fichier principal détecté : ${detected.relPath} (CWD: ${detected.workDir})`);
   }
 
-  // 5. Message de bienvenue
+  // 6. Envoyer "bienvenu bot configurer" via l'API token au canal
   const botUsername = valid.bot?.username || name;
   let welcomeResult = { ok: false, error: 'channel_id non fourni' };
   if (channel_id) {
-    const mainInfo = detected ? `Fichier : ${detected.relPath}` : 'Aucun script détecté';
-    welcomeResult = await sendMessage(token, channel_id,
-      `✅ Bot ${name} déployé !\n` +
-      `🤖 @${botUsername} est prêt.\n` +
-      `${mainInfo}\n` +
-      `📦 ${detectedFiles.length} fichier(s) chargé(s)\n\n` +
-      `Démarrez-le depuis l'interface Admin.`
-    );
+    welcomeResult = await sendMessage(token, channel_id, 'bienvenu bot configurer');
     if (welcomeResult.ok) {
-      console.log(`[BotHost] ✅ Message bienvenue envoyé → ${channel_id}`);
+      console.log(`[BotHost] ✅ Message "bienvenu bot configurer" envoyé via API token → ${channel_id}`);
     } else {
-      console.warn(`[BotHost] ⚠ Message bienvenue échoué : ${welcomeResult.error}`);
+      console.warn(`[BotHost] ⚠ Envoi "bienvenu bot configurer" échoué : ${welcomeResult.error}`);
     }
   } else {
-    console.log(`[BotHost] ℹ Pas de channel_id — message bienvenue ignoré`);
+    console.log(`[BotHost] ℹ Pas de channel_id — message "bienvenu bot configurer" ignoré`);
+  }
+
+  // 7. Vérification post-déploiement : détecter si c'est un code de prédiction automatique
+  const botDirPred  = path.join(BOTS_DIR, String(bot.id));
+  const predDetect  = detectPredictionCode(botDirPred);
+  let   autoSetup   = null;
+
+  if (predDetect.isPredictionBot) {
+    console.log(`[BotHost] 🎯 Bot de prédiction détecté (confiance ${predDetect.confidence}%) — configuration automatique...`);
+    // Récupérer le bot mis à jour avec main_file/work_dir avant de passer à setupPredictionChannel
+    const botUpdated = (await db.pool.query('SELECT * FROM hosted_bots WHERE id=$1', [bot.id])).rows[0];
+    autoSetup = await setupPredictionChannel({ ...botUpdated, token, channel_id });
+
+    // Envoyer un message de confirmation au canal Telegram
+    if (autoSetup.ok && channel_id) {
+      const confirmMsg = `✅ Bot de prédiction configuré automatiquement !\n\nStratégie "${botUpdated.name}" créée et active.\nLes prédictions démarreront au prochain jeu.`;
+      await sendMessage(token, channel_id, confirmMsg).catch(() => {});
+    }
+  } else {
+    console.log(`[BotHost] ℹ Bot générique (${predDetect.keywords.length} mot(s)-clé préd. détecté(s)) — pas de configuration auto`);
   }
 
   console.log(`[BotHost] Bot #${bot.id} "${name}" créé (${lang}) — ${detectedFiles.length} fichiers`);
 
-  // Retourner le bot mis à jour
+  // Retourner le bot mis à jour avec le rapport d'analyse et le résultat de détection
   const updated = await db.pool.query('SELECT * FROM hosted_bots WHERE id=$1', [bot.id]);
-  return { ...updated.rows[0], _welcome: welcomeResult };
+  return {
+    ...updated.rows[0],
+    _welcome:          welcomeResult,
+    _zipReport:        zipReport,
+    _predDetection:    predDetect,
+    _autoSetup:        autoSetup,
+  };
 }
 
 // ── Mettre à jour le code d'un bot (re-déploiement ZIP) ───────────────────────
@@ -244,7 +602,16 @@ async function updateCode(botId, zip_base64) {
   if (!rBot.rows.length) throw new Error('Bot introuvable');
   const bot = rBot.rows[0];
 
-  const detectedFiles = await extractZip(botId, zip_base64);
+  // Analyser et corriger le ZIP avant extraction
+  console.log(`[BotHost] 🔍 Analyse du ZIP de mise à jour pour le bot #${botId}...`);
+  const analysis = await analyzeAndFixZip(zip_base64, bot.language);
+  const zipToUse = analysis.base64Fixed;
+  const zipReport = analysis.report;
+  if (zipReport.fixes.length > 0) {
+    console.log(`[BotHost] 🔧 ZIP corrigé (${zipReport.fixes.length} correction(s)) : ${zipReport.fixes.join(' | ')}`);
+  }
+
+  const detectedFiles = await extractZip(botId, zipToUse);
   const botDir = path.join(BOTS_DIR, String(botId));
   const detected = detectMainFile(botDir, bot.language);
 
@@ -256,8 +623,25 @@ async function updateCode(botId, zip_base64) {
     console.log(`[BotHost] Code mis à jour — fichier principal: ${detected.relPath}`);
   }
 
+  // Vérification post-mise à jour : re-détecter si c'est un code de prédiction
+  const botDirUpdate   = path.join(BOTS_DIR, String(botId));
+  const predDetectUpd  = detectPredictionCode(botDirUpdate);
+  let   autoSetupUpd   = null;
+
+  // Si c'est un bot de prédiction ET qu'il n'a pas encore de stratégie auto → la créer
+  const botRowUpd = (await db.pool.query('SELECT * FROM hosted_bots WHERE id=$1', [botId])).rows[0];
+  if (predDetectUpd.isPredictionBot && !botRowUpd?.auto_strategy_id) {
+    autoSetupUpd = await setupPredictionChannel({ ...botRowUpd, token: bot.token });
+  }
+
   if (wasRunning) await startBot(botId);
-  return { ok: true, detected: detected ? detected.relPath : null };
+  return {
+    ok: true,
+    detected:       detected ? detected.relPath : null,
+    _zipReport:     zipReport,
+    _predDetection: predDetectUpd,
+    _autoSetup:     autoSetupUpd,
+  };
 }
 
 // ── Démarrer un bot ───────────────────────────────────────────────────────────
@@ -397,5 +781,6 @@ async function restoreRunningBots() {
 module.exports = {
   initDB, getAll, createBot, updateCode,
   startBot, stopBot, deleteBot, getLogs,
-  restoreRunningBots, validateToken,
+  restoreRunningBots, validateToken, analyzeAndFixZip,
+  detectPredictionCode, setupPredictionChannel,
 };

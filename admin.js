@@ -18,6 +18,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireSuperAdmin(req, res, next) {
+  if (!req.session.userId || !req.session.isAdmin)
+    return res.status(403).json({ error: 'Accès admin requis' });
+  if ((req.session.adminLevel || 2) !== 1)
+    return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
+  next();
+}
+
 function getUserStatus(user) {
   if (user.is_admin) return 'active';
   if (!user.is_approved) return 'pending';
@@ -50,7 +58,7 @@ router.get('/users', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/approve', requireAdmin, async (req, res) => {
+router.post('/users/:id/approve', requireSuperAdmin, async (req, res) => {
   const id   = parseInt(req.params.id);
   const mins = parseFloat(req.body.minutes);
   if (!req.body.minutes || isNaN(mins) || mins < 10 || mins > 45000)
@@ -60,11 +68,25 @@ router.post('/users/:id/approve', requireAdmin, async (req, res) => {
     const user = await db.updateUser(id, { is_approved: true, subscription_expires_at: expires.toISOString(), subscription_duration_minutes: Math.round(mins) });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
     renderSync.syncUser(user).catch(() => {});
+    // Auto-assignation du mode aléatoire à chaque nouvel utilisateur approuvé
+    try {
+      const stratRaw = await db.getSetting('custom_strategies');
+      const strats = stratRaw ? JSON.parse(stratRaw) : [];
+      for (let i = 0; i < strats.length; i++) {
+        if (strats[i].mode === 'aleatoire') {
+          const sid = `S${i + 1}`;
+          await db.pool.query(
+            'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [id, sid]
+          );
+        }
+      }
+    } catch (_) {}
     res.json({ message: `Accès accordé pour ${fmtDuration(mins)}`, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/extend', requireAdmin, async (req, res) => {
+router.post('/users/:id/extend', requireSuperAdmin, async (req, res) => {
   const id   = parseInt(req.params.id);
   const mins = parseFloat(req.body.minutes);
   if (!req.body.minutes || isNaN(mins) || mins < 10 || mins > 45000)
@@ -83,7 +105,7 @@ router.post('/users/:id/extend', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/reject', requireAdmin, async (req, res) => {
+router.post('/users/:id/reject', requireSuperAdmin, async (req, res) => {
   try {
     const rUser = await db.updateUser(parseInt(req.params.id), { is_approved: false, subscription_expires_at: null });
     if (rUser) renderSync.syncUser(rUser).catch(() => {});
@@ -101,7 +123,7 @@ router.put('/users/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.delete('/users/:id', requireAdmin, async (req, res) => {
+router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
   try {
     const u = await db.getUser(parseInt(req.params.id));
     if (u?.is_admin) return res.status(400).json({ error: 'Impossible de supprimer un admin' });
@@ -117,7 +139,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/generate-premium', requireAdmin, async (req, res) => {
+router.post('/generate-premium', requireSuperAdmin, async (req, res) => {
   try {
     const count = Math.min(Math.max(parseInt(req.body.count) || 5, 1), 50);
     const domain = (req.body.domain || 'premium.pro').trim().replace(/^@/, '');
@@ -283,7 +305,7 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3'].includes(mode)) return 'Mode invalide';
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse'].includes(mode)) return 'Mode invalide';
   if (mode !== 'distribution' && !isCarteAuto) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -1703,14 +1725,14 @@ router.get('/modified-files', requireAdmin, (req, res) => {
 
 // ── MESSAGES REÇUS DES UTILISATEURS ────────────────────────────────
 
-router.get('/user-messages', requireAdmin, async (req, res) => {
+router.get('/user-messages', requireSuperAdmin, async (req, res) => {
   try {
     const raw = await db.getSetting('user_messages');
     res.json(raw ? JSON.parse(raw) : []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/user-messages/:id/read', requireAdmin, async (req, res) => {
+router.post('/user-messages/:id/read', requireSuperAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const raw = await db.getSetting('user_messages');
@@ -1722,7 +1744,7 @@ router.post('/user-messages/:id/read', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/user-messages/:id/reply', requireAdmin, async (req, res) => {
+router.post('/user-messages/:id/reply', requireSuperAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { text } = req.body;
@@ -1738,7 +1760,7 @@ router.post('/user-messages/:id/reply', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/user-messages/:id', requireAdmin, async (req, res) => {
+router.delete('/user-messages/:id', requireSuperAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const raw = await db.getSetting('user_messages');
@@ -1748,7 +1770,7 @@ router.delete('/user-messages/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/user-messages', requireAdmin, async (req, res) => {
+router.delete('/user-messages', requireSuperAdmin, async (req, res) => {
   try {
     await db.deleteSetting('user_messages');
     res.json({ ok: true });
@@ -1757,14 +1779,14 @@ router.delete('/user-messages', requireAdmin, async (req, res) => {
 
 // ── MESSAGE BROADCAST (Accueil utilisateurs) ────────────────────────
 
-router.get('/broadcast-message', requireAdmin, async (req, res) => {
+router.get('/broadcast-message', requireSuperAdmin, async (req, res) => {
   try {
     const raw = await db.getSetting('broadcast_message');
     res.json(raw ? JSON.parse(raw) : { enabled: false, text: '', targets: ['pending', 'active', 'expired'] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/broadcast-message', requireAdmin, async (req, res) => {
+router.post('/broadcast-message', requireSuperAdmin, async (req, res) => {
   try {
     const { text, enabled, targets } = req.body;
     if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message requis' });
@@ -1780,7 +1802,7 @@ router.post('/broadcast-message', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/broadcast-message', requireAdmin, async (req, res) => {
+router.delete('/broadcast-message', requireSuperAdmin, async (req, res) => {
   try {
     await db.deleteSetting('broadcast_message');
     res.json({ ok: true });
@@ -1789,7 +1811,7 @@ router.delete('/broadcast-message', requireAdmin, async (req, res) => {
 
 // ── BASE EXTERNE RENDER ─────────────────────────────────────────────
 
-router.get('/render-db', requireAdmin, async (req, res) => {
+router.get('/render-db', requireSuperAdmin, async (req, res) => {
   try {
     const renderSync = require('./render-sync');
     const url = await db.getSetting('render_db_url');
@@ -1802,7 +1824,7 @@ router.get('/render-db', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db/test', requireAdmin, async (req, res) => {
+router.post('/render-db/test', requireSuperAdmin, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url || !url.trim()) return res.status(400).json({ error: 'URL manquante' });
@@ -1812,7 +1834,7 @@ router.post('/render-db/test', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db', requireAdmin, async (req, res) => {
+router.post('/render-db', requireSuperAdmin, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url || !url.trim()) return res.status(400).json({ error: 'URL manquante' });
@@ -1825,7 +1847,7 @@ router.post('/render-db', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/render-db', requireAdmin, async (req, res) => {
+router.delete('/render-db', requireSuperAdmin, async (req, res) => {
   try {
     await db.deleteSetting('render_db_url');
     const renderSync = require('./render-sync');
@@ -1834,7 +1856,7 @@ router.delete('/render-db', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db/reset', requireAdmin, async (req, res) => {
+router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
   try {
     const renderSync = require('./render-sync');
     if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
@@ -1844,7 +1866,7 @@ router.post('/render-db/reset', requireAdmin, async (req, res) => {
 });
 
 // ── Reset complet (retour usine) ─────────────────────────────────────────────
-router.post('/factory-reset', requireAdmin, async (req, res) => {
+router.post('/factory-reset', requireSuperAdmin, async (req, res) => {
   try {
     const pool = db.getPool ? db.getPool() : db.pool;
     await pool.query(`TRUNCATE predictions, tg_pred_messages, strategy_channel_routes, user_channel_hidden, user_channel_visible, user_strategy_visible RESTART IDENTITY CASCADE`);
@@ -2197,7 +2219,7 @@ router.delete('/project-backup', requireAdmin, async (req, res) => {
 });
 
 // Récupérer le journal des déploiements
-router.get('/deploy-logs', requireAdmin, async (req, res) => {
+router.get('/deploy-logs', requireSuperAdmin, async (req, res) => {
   try {
     const logs = await db.getDeployLogs(30);
     res.json({ ok: true, logs });
@@ -2385,13 +2407,13 @@ router.post('/stop-render', requireAdmin, async (req, res) => {
 const botHost = require('./bot-host');
 
 // Lister tous les bots hébergés
-router.get('/bots', requireAdmin, async (req, res) => {
+router.get('/bots', requireSuperAdmin, async (req, res) => {
   try { res.json(await botHost.getAll()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Créer un nouveau bot (avec ZIP en base64 — fichier principal détecté automatiquement)
-router.post('/bots', requireAdmin, async (req, res) => {
+router.post('/bots', requireSuperAdmin, async (req, res) => {
   try {
     const { name, language, token, channel_id, zip_base64 } = req.body;
     if (!name || !token) return res.status(400).json({ error: 'name et token requis' });
@@ -2402,7 +2424,7 @@ router.post('/bots', requireAdmin, async (req, res) => {
 });
 
 // Mettre à jour le code d'un bot (nouveau ZIP)
-router.post('/bots/:id/upload', requireAdmin, async (req, res) => {
+router.post('/bots/:id/upload', requireSuperAdmin, async (req, res) => {
   try {
     const { zip_base64 } = req.body;
     if (!zip_base64) return res.status(400).json({ error: 'zip_base64 requis' });
@@ -2412,7 +2434,7 @@ router.post('/bots/:id/upload', requireAdmin, async (req, res) => {
 });
 
 // Démarrer un bot
-router.post('/bots/:id/start', requireAdmin, async (req, res) => {
+router.post('/bots/:id/start', requireSuperAdmin, async (req, res) => {
   try {
     const result = await botHost.startBot(parseInt(req.params.id));
     if (!result.ok) return res.status(400).json(result);
@@ -2421,7 +2443,7 @@ router.post('/bots/:id/start', requireAdmin, async (req, res) => {
 });
 
 // Arrêter un bot
-router.post('/bots/:id/stop', requireAdmin, async (req, res) => {
+router.post('/bots/:id/stop', requireSuperAdmin, async (req, res) => {
   try {
     const result = botHost.stopBot(parseInt(req.params.id));
     res.json(result);
@@ -2429,7 +2451,7 @@ router.post('/bots/:id/stop', requireAdmin, async (req, res) => {
 });
 
 // Supprimer un bot
-router.delete('/bots/:id', requireAdmin, async (req, res) => {
+router.delete('/bots/:id', requireSuperAdmin, async (req, res) => {
   try {
     await botHost.deleteBot(parseInt(req.params.id));
     res.json({ ok: true });
@@ -2437,13 +2459,13 @@ router.delete('/bots/:id', requireAdmin, async (req, res) => {
 });
 
 // Logs d'un bot
-router.get('/bots/:id/logs', requireAdmin, (req, res) => {
+router.get('/bots/:id/logs', requireSuperAdmin, (req, res) => {
   try { res.json(botHost.getLogs(parseInt(req.params.id))); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Valider un token Telegram
-router.post('/bots/validate-token', requireAdmin, async (req, res) => {
+router.post('/bots/validate-token', requireSuperAdmin, async (req, res) => {
   try {
     const result = await botHost.validateToken(req.body.token);
     res.json(result);

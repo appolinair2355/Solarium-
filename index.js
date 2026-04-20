@@ -17,6 +17,7 @@ const progRoutes        = require('./prog');
 const engine            = require('./engine');
 const bilan             = require('./bilan');
 const botHost           = require('./bot-host');
+const systemLogsRoutes  = require('./system-logs-route');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -70,6 +71,7 @@ app.use('/api/games',       gamesRouter);
 app.use('/api/telegram',    telegramRoutes);
 app.use('/api/prog',        progRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
+app.use('/api/system-logs', systemLogsRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
