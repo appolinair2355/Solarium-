@@ -250,7 +250,7 @@ async function startBot() {
           const msgs = [];
           for (const b of blocks) {
             if (b.type === 'format') {
-              const fmtId = Math.max(1, Math.min(11, parseInt(b.data?.format_id) || 1));
+              const fmtId = Math.max(1, Math.min(18, parseInt(b.data?.format_id) || 1));
               await saveFormat(fmtId);
               msgs.push(`✅ format global → ${fmtId}`);
             } else if (b.type === 'maxr' || b.type === 'max_rattrapage') {
@@ -818,7 +818,7 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   }
 
   // Utilise le format spécifique à la stratégie si fourni, sinon le format global
-  const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null)
+  const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null && tgOpts.formatId !== '')
     ? parseInt(tgOpts.formatId) : currentFormat;
   const hand = tgOpts.hand || null;
   const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;

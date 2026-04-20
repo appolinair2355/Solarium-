@@ -326,7 +326,7 @@ function parseTgTargets(raw) {
         channel_id: String(t.channel_id || '').trim(),
       };
       if (t.tg_format !== undefined && t.tg_format !== null && t.tg_format !== '')
-        obj.tg_format = Math.max(1, Math.min(11, parseInt(t.tg_format) || 1));
+        obj.tg_format = Math.max(1, Math.min(18, parseInt(t.tg_format) || 1));
       return obj;
     })
     .filter(t => t.bot_token && t.channel_id);
@@ -405,7 +405,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(11, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(18, parseInt(tg_format) || 1)) : null,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -473,7 +473,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(11, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, Math.min(18, parseInt(tg_format) || 1)) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
