@@ -825,6 +825,22 @@ function AdminPanel() {
   const [newBotZipB64, setNewBotZipB64]       = useState('');
   const [botSaving, setBotSaving]             = useState(false);
 
+  // ── Config IA ──────────────────────────────────────────────────────
+  const [aiProviders,    setAiProviders]      = useState([]);
+  const [aiConfigData,   setAiConfigData]     = useState({ provider: null, hasKey: false });
+  const [aiSelectedProv, setAiSelectedProv]   = useState('groq');
+  const [aiApiKey,       setAiApiKey]         = useState('');
+  const [aiSaving,       setAiSaving]         = useState(false);
+  const [aiMsg,          setAiMsg]            = useState('');
+  const [aiTestResult,   setAiTestResult]     = useState(null);
+  const [aiTesting,      setAiTesting]        = useState(false);
+  const [aiRepairResult,  setAiRepairResult]  = useState(null);
+  const [aiRepairing,     setAiRepairing]     = useState(false);
+  const [aiSmartRepairing,setAiSmartRepairing]= useState(false);
+  const [aiApplyLog,      setAiApplyLog]      = useState([]);
+  const [aiBotPrecheck,  setAiBotPrecheck]    = useState(null);
+  const [aiBotChecking,  setAiBotChecking]    = useState(false);
+
   // Messages reçus des utilisateurs
   const [userMessages, setUserMessages]         = useState([]);
 
@@ -1672,7 +1688,18 @@ function AdminPanel() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots]);
+  const loadAiConfig = useCallback(async () => {
+    try {
+      const [provR, cfgR] = await Promise.all([
+        fetch('/api/ai/providers', { credentials: 'include' }),
+        fetch('/api/ai/config',    { credentials: 'include' }),
+      ]);
+      if (provR.ok) { const d = await provR.json(); setAiProviders(d.providers || []); }
+      if (cfgR.ok)  { const d = await cfgR.json();  setAiConfigData(d); setAiSelectedProv(d.provider || 'groq'); }
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
 
   // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
   useEffect(() => {
@@ -2080,6 +2107,7 @@ function AdminPanel() {
             ...(isSuperAdmin ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
+              { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
               { id: 'maj-db',       icon: '💾', label: 'Mise à jour DB' },
             ] : []),
           ].map(tab => {
@@ -4997,6 +5025,168 @@ function AdminPanel() {
           </div>
         </div>)}
 
+        {/* ── RÉPARATION IA — dans Système ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginTop: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔧</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Réparation IA automatique</h2>
+              <p className="tg-admin-sub">
+                L'IA analyse l'état du moteur, les prédictions bloquées et les logs d'erreurs, puis propose des corrections de code applicables en un clic.
+                {!aiConfigData.hasKey && (
+                  <span style={{ color: '#f87171', marginLeft: 6 }}>⚠️ Configurez d'abord un provider IA dans l'onglet <strong>🧠 Config IA</strong></span>
+                )}
+              </p>
+            </div>
+            {aiConfigData.hasKey && (
+              <span style={{ fontSize: 11, padding: '4px 12px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80', fontWeight: 700 }}>
+                🧠 {aiConfigData.provider} actif
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: aiRepairResult ? 16 : 0 }}>
+            <button
+              onClick={async () => {
+                setAiSmartRepairing(true); setAiRepairResult(null); setAiApplyLog([]);
+                try {
+                  const r = await fetch('/api/ai/repair-smart', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autofix: true }) });
+                  const d = await r.json();
+                  setAiRepairResult(d);
+                } catch (e) { setAiRepairResult({ ok: false, error: e.message }); }
+                setAiSmartRepairing(false);
+              }}
+              disabled={aiSmartRepairing || aiRepairing}
+              style={{ padding: '13px 22px', borderRadius: 12, border: 'none', background: aiSmartRepairing ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg,#059669,#10b981)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: (aiSmartRepairing || aiRepairing) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              {aiSmartRepairing ? (
+                <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Analyse…</>
+              ) : <><span>⚡</span> Diagnostic intelligent</>}
+            </button>
+            <button
+              onClick={async () => {
+                if (!aiConfigData.hasKey) {
+                  alert('Configurez d\'abord un provider IA dans l\'onglet "🧠 Config IA".');
+                  setAdminTab('config-ia');
+                  return;
+                }
+                setAiRepairing(true); setAiRepairResult(null); setAiApplyLog([]);
+                try {
+                  const r = await fetch('/api/ai/repair', { method: 'POST', credentials: 'include' });
+                  const d = await r.json();
+                  setAiRepairResult(d);
+                } catch (e) { setAiRepairResult({ ok: false, error: e.message }); }
+                setAiRepairing(false);
+              }}
+              disabled={aiRepairing || aiSmartRepairing}
+              style={{ padding: '13px 22px', borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: aiRepairing ? 'rgba(168,85,247,0.1)' : 'transparent', color: '#c084fc', fontWeight: 700, fontSize: 13, cursor: (aiRepairing || aiSmartRepairing) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              {aiRepairing ? (
+                <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#c084fc', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Analyse IA (30–60s)…</>
+              ) : <><span>🔍</span> Diagnostic IA</>}
+            </button>
+          </div>
+
+          {aiRepairResult && !aiRepairResult.ok && (
+            <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', fontSize: 13 }}>
+              ❌ {aiRepairResult.error}
+            </div>
+          )}
+
+          {aiRepairResult?.result && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Score santé */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: 38, fontWeight: 900, color: aiRepairResult.result.score_sante >= 80 ? '#4ade80' : aiRepairResult.result.score_sante >= 50 ? '#fbbf24' : '#f87171' }}>
+                  {aiRepairResult.result.score_sante}%
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14, marginBottom: 4 }}>Score de santé du système</div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>{aiRepairResult.result.diagnostic}</div>
+                </div>
+              </div>
+
+              {/* Corrections automatiques appliquées */}
+              {(aiRepairResult.result.fixesApplied || []).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>✅ Corrections appliquées automatiquement</div>
+                  {aiRepairResult.result.fixesApplied.map((f, i) => (
+                    <div key={i} style={{ padding: '9px 14px', borderRadius: 10, marginBottom: 6, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.07)', fontSize: 12, color: '#86efac', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>{f.icon || '🔧'}</span> {f.description}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Problèmes */}
+              {(aiRepairResult.result.problemes || []).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Problèmes détectés</div>
+                  {aiRepairResult.result.problemes.map((p, i) => (
+                    <div key={i} style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 8, border: `1px solid ${p.severity === 'critical' ? 'rgba(239,68,68,0.35)' : p.severity === 'warning' ? 'rgba(234,179,8,0.3)' : 'rgba(99,102,241,0.3)'}`, background: p.severity === 'critical' ? 'rgba(239,68,68,0.07)' : p.severity === 'warning' ? 'rgba(234,179,8,0.07)' : 'rgba(99,102,241,0.07)' }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: p.severity === 'critical' ? '#f87171' : p.severity === 'warning' ? '#fbbf24' : '#a5b4fc', marginBottom: 4 }}>
+                        {p.severity === 'critical' ? '🔴 Critique' : p.severity === 'warning' ? '🟡 Avertissement' : '🔵 Info'} — {p.description}
+                      </div>
+                      {p.solution && <div style={{ fontSize: 12, color: '#94a3b8' }}>💡 {p.solution}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Corrections IA proposées */}
+              {(aiRepairResult.result.corrections || []).length > 0 ? (
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                    {aiRepairResult.result.corrections.length} correction(s) proposée(s)
+                  </div>
+                  {aiRepairResult.result.corrections.map((c, i) => {
+                    const applied = aiApplyLog.find(l => l.i === i);
+                    return (
+                      <div key={i} style={{ padding: '12px 14px', borderRadius: 10, marginBottom: 10, border: `1px solid ${applied?.ok ? 'rgba(34,197,94,0.4)' : 'rgba(99,102,241,0.3)'}`, background: applied?.ok ? 'rgba(34,197,94,0.07)' : 'rgba(99,102,241,0.06)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <div>
+                            <span style={{ fontWeight: 700, fontSize: 12, color: '#c084fc' }}>{c.file}</span>
+                            <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 10 }}>{c.description}</span>
+                          </div>
+                          {!applied ? (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const r = await fetch('/api/ai/apply-fix', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: c.file, old_string: c.old_string, new_string: c.new_string, description: c.description }) });
+                                  const d = await r.json();
+                                  setAiApplyLog(prev => [...prev, { i, ok: d.ok, error: d.error }]);
+                                } catch (e) { setAiApplyLog(prev => [...prev, { i, ok: false, error: e.message }]); }
+                              }}
+                              style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#6366f1,#a855f7)', color: '#fff', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >⚡ Appliquer</button>
+                          ) : (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: applied.ok ? '#4ade80' : '#f87171' }}>
+                              {applied.ok ? '✅ Appliqué' : `❌ ${applied.error}`}
+                            </span>
+                          )}
+                        </div>
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ fontSize: 11, color: '#64748b', cursor: 'pointer' }}>Voir le code</summary>
+                          <pre style={{ marginTop: 8, padding: 10, borderRadius: 8, background: '#0a0e1a', fontSize: 11, color: '#94a3b8', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 250 }}>
+                            <span style={{ color: '#f87171' }}>- {(c.old_string || '').slice(0, 500)}</span>{'\n'}
+                            <span style={{ color: '#4ade80' }}>+ {(c.new_string || '').slice(0, 500)}</span>
+                          </pre>
+                        </details>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80', fontSize: 13, fontWeight: 700 }}>
+                  ✅ Aucune correction nécessaire — le système est sain.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        )}
+
         {/* ══════════════ ONGLET HÉBERGEMENT BOTS ══════════════ */}
         {adminTab === 'bots' && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.5)', marginBottom: 20 }}>
@@ -5191,6 +5381,81 @@ function AdminPanel() {
             >{botSaving ? '⏳ Création…' : '🤖 Créer le bot'}</button>
           </div>
         </div>)}
+
+        {/* ── PRÉ-VÉRIFICATION IA DU BOT ── */}
+        {adminTab === 'bots' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.35)', marginTop: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔍</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Pré-vérification IA du Bot</h2>
+              <p className="tg-admin-sub">
+                Avant de déployer, l'IA analyse le ZIP de votre bot et détecte les problèmes potentiels (erreurs de configuration, tokens manquants, code défaillant).
+                {!aiConfigData.hasKey && <span style={{ color: '#f87171', marginLeft: 6 }}>⚠️ Configurez l'IA d'abord (onglet 🧠 Config IA)</span>}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: aiBotPrecheck ? 16 : 0 }}>
+            <div style={{ flex: 1, minWidth: 200, fontSize: 13, color: '#94a3b8' }}>
+              {newBotZipB64
+                ? <span style={{ color: '#a5b4fc' }}>✅ Fichier ZIP prêt ({(newBotZipB64.length * 0.75 / 1024).toFixed(0)} Ko) — chargé depuis le formulaire ci-dessus</span>
+                : <span style={{ color: '#64748b' }}>Chargez d'abord un fichier ZIP dans le formulaire ci-dessus</span>}
+            </div>
+            <button
+              onClick={async () => {
+                if (!newBotZipB64) { alert('Chargez d\'abord un fichier ZIP dans le formulaire.'); return; }
+                if (!aiConfigData.hasKey) { alert('Configurez d\'abord l\'IA dans l\'onglet "🧠 Config IA".'); return; }
+                setAiBotChecking(true); setAiBotPrecheck(null);
+                try {
+                  const r = await fetch('/api/ai/bot-precheck', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zip_base64: newBotZipB64, language: newBot.language || 'python' }) });
+                  const d = await r.json();
+                  setAiBotPrecheck(d);
+                  if (d.correctedZip64) {
+                    setNewBotZipB64(d.correctedZip64);
+                  }
+                } catch (e) { setAiBotPrecheck({ ok: false, error: e.message }); }
+                setAiBotChecking(false);
+              }}
+              disabled={aiBotChecking || !newBotZipB64 || !aiConfigData.hasKey}
+              style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: (aiBotChecking || !newBotZipB64 || !aiConfigData.hasKey) ? 'rgba(168,85,247,0.2)' : 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: (aiBotChecking || !newBotZipB64 || !aiConfigData.hasKey) ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: (!newBotZipB64 || !aiConfigData.hasKey) ? 0.5 : 1 }}
+            >
+              {aiBotChecking ? '⏳ Analyse…' : '🔍 Analyser avec l\'IA'}
+            </button>
+          </div>
+
+          {aiBotPrecheck && !aiBotPrecheck.ok && (
+            <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', fontSize: 13 }}>
+              ❌ {aiBotPrecheck.error}
+            </div>
+          )}
+
+          {aiBotPrecheck?.result && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ padding: '12px 16px', borderRadius: 10, border: `1px solid ${aiBotPrecheck.result.can_deploy ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}`, background: aiBotPrecheck.result.can_deploy ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', color: aiBotPrecheck.result.can_deploy ? '#4ade80' : '#f87171', fontWeight: 700, fontSize: 14 }}>
+                {aiBotPrecheck.result.can_deploy ? '✅ Bot déployable — aucun problème bloquant détecté' : '❌ Des problèmes bloquants ont été détectés'}
+              </div>
+
+              {(aiBotPrecheck.result.issues || []).length > 0 && (
+                <div>
+                  {aiBotPrecheck.result.issues.map((iss, i) => (
+                    <div key={i} style={{ padding: '9px 14px', borderRadius: 10, marginBottom: 7, border: `1px solid ${iss.severity === 'critical' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.3)'}`, background: iss.severity === 'critical' ? 'rgba(239,68,68,0.07)' : 'rgba(234,179,8,0.07)', fontSize: 12 }}>
+                      <span style={{ fontWeight: 700, color: iss.severity === 'critical' ? '#f87171' : '#fbbf24' }}>{iss.severity === 'critical' ? '🔴' : '🟡'} {iss.file}</span>
+                      <span style={{ color: '#94a3b8', marginLeft: 10 }}>{iss.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {aiBotPrecheck.correctedZip64 && (
+                <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc', fontSize: 13, fontWeight: 700 }}>
+                  ⚡ Des corrections ont été appliquées automatiquement. Le ZIP corrigé est maintenant chargé dans le formulaire — vous pouvez déployer directement.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        )}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
         {adminTab === 'canaux' && (
@@ -6325,6 +6590,265 @@ function AdminPanel() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════
+          TAB : CONFIG IA
+      ══════════════════════════════════════════════ */}
+      {adminTab === 'config-ia' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          {/* ── Sélection du provider ── */}
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">🧠</span>
+              <div style={{ flex: 1 }}>
+                <h2 className="tg-admin-title">Configuration du Provider IA</h2>
+                <p className="tg-admin-sub">
+                  Choisissez un provider IA gratuit et entrez votre clé API.
+                  {aiConfigData.provider && aiConfigData.hasKey && (
+                    <> Actuel : <strong style={{ color: '#a5b4fc' }}>{aiConfigData.provider}</strong> <span style={{ color: '#4ade80' }}>✅ Clé configurée</span></>
+                  )}
+                </p>
+              </div>
+              {aiMsg && (
+                <span style={{ fontSize: 12, fontWeight: 700, color: aiMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>{aiMsg}</span>
+              )}
+            </div>
+
+            {/* Liste des providers */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10, marginBottom: 20 }}>
+              {aiProviders.map(prov => {
+                const active = aiSelectedProv === prov.id;
+                const isCurrent = aiConfigData.provider === prov.id;
+                return (
+                  <div
+                    key={prov.id}
+                    onClick={() => setAiSelectedProv(prov.id)}
+                    style={{
+                      padding: '13px 16px', borderRadius: 12, cursor: 'pointer', transition: 'all .2s',
+                      border: `2px solid ${active ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.07)'}`,
+                      background: active ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.03)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 13, color: active ? '#c084fc' : '#cbd5e1', marginBottom: 4 }}>
+                      {active ? '✅ ' : ''}{prov.name}
+                      {isCurrent && aiConfigData.hasKey && <span style={{ marginLeft: 8, fontSize: 11, color: '#4ade80', fontWeight: 700 }}>EN COURS</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Modèle : {prov.model}</div>
+                    <a href={prov.keyUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 11, color: '#6366f1', textDecoration: 'none' }}>
+                      🔑 Obtenir la clé API gratuitement →
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Clé API */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
+                  Clé API {aiSelectedProv.toUpperCase()} {aiConfigData.provider === aiSelectedProv && aiConfigData.hasKey ? '(clé déjà enregistrée, laissez vide pour conserver)' : ''}
+                </label>
+                <input
+                  type="password"
+                  value={aiApiKey}
+                  onChange={e => setAiApiKey(e.target.value)}
+                  placeholder={aiConfigData.provider === aiSelectedProv && aiConfigData.hasKey ? '••••••••••••••••••••••' : 'Collez votre clé API ici…'}
+                  style={{ width: '100%', padding: '12px 14px', background: '#0f1729', border: '2px solid rgba(168,85,247,0.3)', borderRadius: 10, color: '#e2e8f0', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  setAiSaving(true); setAiMsg('');
+                  try {
+                    const r = await fetch('/api/ai/config', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: aiSelectedProv, key: aiApiKey }) });
+                    const d = await r.json();
+                    if (d.ok) { setAiMsg('✅ Configuré avec succès'); setAiApiKey(''); await loadAiConfig(); }
+                    else setAiMsg('❌ ' + (d.error || 'Erreur'));
+                  } catch { setAiMsg('❌ Erreur réseau'); }
+                  setAiSaving(false);
+                }}
+                disabled={aiSaving}
+                style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: aiSaving ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+              >
+                {aiSaving ? '⏳ Sauvegarde…' : '💾 Enregistrer'}
+              </button>
+              <button
+                onClick={async () => {
+                  setAiTesting(true); setAiTestResult(null);
+                  try {
+                    const r = await fetch('/api/ai/test', { method: 'POST', credentials: 'include' });
+                    const d = await r.json();
+                    setAiTestResult(d);
+                  } catch (e) { setAiTestResult({ ok: false, error: e.message }); }
+                  setAiTesting(false);
+                }}
+                disabled={aiTesting || !aiConfigData.hasKey}
+                style={{ padding: '12px 18px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.1)', color: '#4ade80', fontWeight: 700, fontSize: 13, cursor: (aiTesting || !aiConfigData.hasKey) ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: aiConfigData.hasKey ? 1 : 0.5 }}
+              >
+                {aiTesting ? '⏳ Test…' : '🔌 Tester la connexion'}
+              </button>
+            </div>
+
+            {aiTestResult && (
+              <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 10, border: `1px solid ${aiTestResult.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`, background: aiTestResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', fontSize: 13, color: aiTestResult.ok ? '#4ade80' : '#f87171' }}>
+                {aiTestResult.ok ? `✅ Connexion OK — Réponse : "${aiTestResult.response}"` : `❌ Échec : ${aiTestResult.error}`}
+              </div>
+            )}
+          </div>
+
+          {/* ── Réparation automatique ── */}
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.3)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">🔧</span>
+              <div style={{ flex: 1 }}>
+                <h2 className="tg-admin-title">Réparation IA automatique</h2>
+                <p className="tg-admin-sub">
+                  L'IA analyse l'état du moteur, les prédictions bloquées, les logs d'erreurs et propose des corrections de code appliquables en un clic.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              <button
+                onClick={async () => {
+                  setAiSmartRepairing(true); setAiRepairResult(null); setAiApplyLog([]);
+                  try {
+                    const r = await fetch('/api/ai/repair-smart', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autofix: true }) });
+                    const d = await r.json();
+                    setAiRepairResult(d);
+                  } catch (e) { setAiRepairResult({ ok: false, error: e.message }); }
+                  setAiSmartRepairing(false);
+                }}
+                disabled={aiSmartRepairing || aiRepairing}
+                style={{ padding: '13px 22px', borderRadius: 12, border: 'none', background: aiSmartRepairing ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg,#059669,#10b981)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: (aiSmartRepairing || aiRepairing) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                {aiSmartRepairing ? (
+                  <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Analyse…</>
+                ) : <><span>⚡</span> Diagnostic intelligent</>}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!aiConfigData.hasKey) { setAiRepairResult({ ok: false, error: 'Configurez d\'abord un provider IA ci-dessus.' }); return; }
+                  setAiRepairing(true); setAiRepairResult(null); setAiApplyLog([]);
+                  try {
+                    const r = await fetch('/api/ai/repair', { method: 'POST', credentials: 'include' });
+                    const d = await r.json();
+                    setAiRepairResult(d);
+                  } catch (e) { setAiRepairResult({ ok: false, error: e.message }); }
+                  setAiRepairing(false);
+                }}
+                disabled={aiRepairing || aiSmartRepairing}
+                style={{ padding: '13px 22px', borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: aiRepairing ? 'rgba(168,85,247,0.1)' : 'transparent', color: '#c084fc', fontWeight: 700, fontSize: 13, cursor: (aiRepairing || aiSmartRepairing) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                {aiRepairing ? (
+                  <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#c084fc', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Analyse IA (30–60s)…</>
+                ) : <><span>🔍</span> Diagnostic IA</>}
+              </button>
+            </div>
+
+            {aiRepairResult && !aiRepairResult.ok && (
+              <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', fontSize: 13 }}>
+                ❌ {aiRepairResult.error}
+              </div>
+            )}
+
+            {aiRepairResult?.result && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Score santé */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ fontSize: 38, fontWeight: 900, color: aiRepairResult.result.score_sante >= 80 ? '#4ade80' : aiRepairResult.result.score_sante >= 50 ? '#fbbf24' : '#f87171' }}>
+                    {aiRepairResult.result.score_sante}%
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14, marginBottom: 4 }}>Score de santé du système</div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>{aiRepairResult.result.diagnostic}</div>
+                  </div>
+                </div>
+
+                {/* Corrections automatiques appliquées */}
+                {(aiRepairResult.result.fixesApplied || []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>✅ Corrections appliquées automatiquement</div>
+                    {aiRepairResult.result.fixesApplied.map((f, i) => (
+                      <div key={i} style={{ padding: '9px 14px', borderRadius: 10, marginBottom: 6, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.07)', fontSize: 12, color: '#86efac', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>{f.icon || '🔧'}</span> {f.description}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Problèmes */}
+                {(aiRepairResult.result.problemes || []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Problèmes détectés</div>
+                    {aiRepairResult.result.problemes.map((p, i) => (
+                      <div key={i} style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 8, border: `1px solid ${p.severity === 'critical' ? 'rgba(239,68,68,0.35)' : p.severity === 'warning' ? 'rgba(234,179,8,0.3)' : 'rgba(99,102,241,0.3)'}`, background: p.severity === 'critical' ? 'rgba(239,68,68,0.07)' : p.severity === 'warning' ? 'rgba(234,179,8,0.07)' : 'rgba(99,102,241,0.07)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: p.severity === 'critical' ? '#f87171' : p.severity === 'warning' ? '#fbbf24' : '#a5b4fc', marginBottom: 4 }}>
+                          {p.severity === 'critical' ? '🔴 Critique' : p.severity === 'warning' ? '🟡 Avertissement' : '🔵 Info'} — {p.description}
+                        </div>
+                        {p.solution && <div style={{ fontSize: 12, color: '#94a3b8' }}>💡 {p.solution}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Corrections proposées */}
+                {(aiRepairResult.result.corrections || []).length > 0 ? (
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                      {aiRepairResult.result.corrections.length} correction(s) proposée(s)
+                    </div>
+                    {aiRepairResult.result.corrections.map((c, i) => {
+                      const applied = aiApplyLog.find(l => l.i === i);
+                      return (
+                        <div key={i} style={{ padding: '12px 14px', borderRadius: 10, marginBottom: 10, border: `1px solid ${applied?.ok ? 'rgba(34,197,94,0.4)' : 'rgba(99,102,241,0.3)'}`, background: applied?.ok ? 'rgba(34,197,94,0.07)' : 'rgba(99,102,241,0.06)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <div>
+                              <span style={{ fontWeight: 700, fontSize: 12, color: '#c084fc' }}>{c.file}</span>
+                              <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 10 }}>{c.description}</span>
+                            </div>
+                            {!applied ? (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const r = await fetch('/api/ai/apply-fix', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: c.file, old_string: c.old_string, new_string: c.new_string, description: c.description }) });
+                                    const d = await r.json();
+                                    setAiApplyLog(prev => [...prev, { i, ok: d.ok, error: d.error }]);
+                                  } catch (e) { setAiApplyLog(prev => [...prev, { i, ok: false, error: e.message }]); }
+                                }}
+                                style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#6366f1,#a855f7)', color: '#fff', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              >
+                                ⚡ Appliquer
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 12, fontWeight: 700, color: applied.ok ? '#4ade80' : '#f87171' }}>
+                                {applied.ok ? '✅ Appliqué' : `❌ ${applied.error}`}
+                              </span>
+                            )}
+                          </div>
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ fontSize: 11, color: '#64748b', cursor: 'pointer' }}>Voir le code</summary>
+                            <pre style={{ marginTop: 8, padding: 10, borderRadius: 8, background: '#0a0e1a', fontSize: 11, color: '#94a3b8', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 250 }}>
+                              <span style={{ color: '#f87171' }}>- {(c.old_string || '').slice(0, 500)}</span>{'\n'}
+                              <span style={{ color: '#4ade80' }}>+ {(c.new_string || '').slice(0, 500)}</span>
+                            </pre>
+                          </details>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80', fontSize: 13, fontWeight: 700 }}>
+                    ✅ Aucune correction de code nécessaire — le système semble sain.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
         </div>
       )}
 
