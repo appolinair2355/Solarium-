@@ -184,6 +184,9 @@ export default function SystemLogs() {
   const [lastRefresh, setLastRefresh]     = useState(null);
   const [autoRefresh, setAutoRefresh]     = useState(true);
   const [activeTab, setActiveTab]         = useState('overview');
+  const [timeline, setTimeline]           = useState(null);
+  const [tlHours, setTlHours]             = useState(24);
+  const [tlLoading, setTlLoading]         = useState(false);
   const intervalRef = useRef(null);
 
   const fetchOverview = useCallback(async () => {
@@ -230,10 +233,20 @@ export default function SystemLogs() {
     return () => clearInterval(intervalRef.current);
   }, [autoRefresh, fetchOverview]);
 
+  const fetchTimeline = useCallback(async (h) => {
+    setTlLoading(true);
+    try {
+      const r = await fetch(`/api/system-logs/timeline?hours=${h || tlHours}`, { credentials: 'include' });
+      if (r.ok) setTimeline(await r.json());
+    } catch {}
+    setTlLoading(false);
+  }, [tlHours]);
+
   // Charger les prédictions quand l'onglet est ouvert
   useEffect(() => {
     if (activeTab === 'predictions') fetchPredictions();
-  }, [activeTab, fetchPredictions]);
+    if (activeTab === 'courbes') fetchTimeline();
+  }, [activeTab, fetchPredictions, fetchTimeline]);
 
   const fmt = (n) => n != null ? n.toLocaleString() : '—';
   const fmtUptime = (s) => {
@@ -670,6 +683,180 @@ export default function SystemLogs() {
       {/* ── ONG 4 : Courbes de variation par stratégie ── */}
       {activeTab === 'courbes' && (
         <div>
+
+          {/* ── Courbe de variation temporelle ── */}
+          <div style={{ marginBottom: 32 }}>
+            {/* Titre + contrôles */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase' }}>
+                📉 Courbe de variation — N° prédit (axe Y) / Heure (axe X)
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[12, 24, 48].map(h => (
+                  <button key={h} onClick={() => { setTlHours(h); fetchTimeline(h); }} style={{
+                    padding: '3px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                    background: tlHours === h ? '#6366f1' : 'rgba(99,102,241,0.12)',
+                    color: tlHours === h ? '#fff' : '#818cf8',
+                  }}>{h}h</button>
+                ))}
+                <button onClick={() => fetchTimeline(tlHours)} style={{
+                  padding: '3px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                  background: 'rgba(34,197,94,0.12)', color: '#22c55e',
+                }}>↻</button>
+              </div>
+              {/* Légende */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {[['#22c55e','✅ Gagné'], ['#ef4444','❌ Perdu'], ['#f59e0b','⏳ En cours'], ['#64748b','⏱ Expiré']].map(([c, l]) => (
+                  <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: c }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, display: 'inline-block' }} />
+                    {l}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {tlLoading ? (
+              <div style={{ textAlign: 'center', color: '#475569', padding: 40 }}>Chargement de la courbe...</div>
+            ) : !timeline?.rows?.length ? (
+              <div style={{ textAlign: 'center', color: '#475569', padding: 40 }}>Aucune prédiction sur la période sélectionnée</div>
+            ) : (() => {
+              const rows = timeline.rows;
+              const STATUS_C = { gagne: '#22c55e', perdu: '#ef4444', en_cours: '#f59e0b', expire: '#64748b' };
+              const nowMs   = Date.now();
+              const startMs = nowMs - tlHours * 3600_000;
+              const minGame = Math.min(...rows.map(r => r.game_number));
+              const maxGame = Math.max(...rows.map(r => r.game_number));
+              const gameRange = maxGame - minGame || 1;
+
+              const W = 700, H = 200;
+              const PAD = { l: 52, r: 16, t: 12, b: 36 };
+              const chartW = W - PAD.l - PAD.r;
+              const chartH = H - PAD.t - PAD.b;
+
+              const toX = (tsMs) => PAD.l + ((tsMs - startMs) / (nowMs - startMs)) * chartW;
+              const toY = (gn)   => PAD.t + chartH - ((gn - minGame) / gameRange) * chartH;
+
+              // Ticks X (heures)
+              const hourTicks = [];
+              for (let i = 0; i <= tlHours; i += Math.max(1, Math.floor(tlHours / 8))) {
+                const ms = nowMs - (tlHours - i) * 3600_000;
+                const d  = new Date(ms);
+                hourTicks.push({ ms, label: `${String(d.getHours()).padStart(2,'0')}h` });
+              }
+              // Ticks Y (game numbers)
+              const yStep = Math.max(1, Math.floor(gameRange / 5));
+              const yTicks = [];
+              for (let g = minGame; g <= maxGame; g += yStep) yTicks.push(g);
+              if (!yTicks.includes(maxGame)) yTicks.push(maxGame);
+
+              // Grouper par stratégie pour relier les points
+              const byStrat = {};
+              for (const r of rows) {
+                const s = r.strategy || 'inconnue';
+                if (!byStrat[s]) byStrat[s] = [];
+                const ms = new Date(r.created_at).getTime();
+                byStrat[s].push({ ...r, ms });
+              }
+              const stratColors = ['#818cf8','#f472b6','#34d399','#fbbf24','#60a5fa','#a78bfa'];
+              const stratList   = Object.keys(byStrat);
+
+              return (
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '16px 12px', overflowX: 'auto' }}>
+                  <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 400, height: 'auto' }}>
+                    {/* Grilles Y */}
+                    {yTicks.map(g => {
+                      const y = toY(g);
+                      return (
+                        <g key={g}>
+                          <line x1={PAD.l} y1={y} x2={W - PAD.r} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                          <text x={PAD.l - 4} y={y + 4} textAnchor="end" fontSize="9" fill="#475569">{g}</text>
+                        </g>
+                      );
+                    })}
+                    {/* Grilles X (heures) — lignes fines solides */}
+                    {hourTicks.map(({ ms, label }) => {
+                      const x = toX(ms);
+                      return (
+                        <g key={ms}>
+                          <line x1={x} y1={PAD.t} x2={x} y2={H - PAD.b} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+                          <text x={x} y={H - PAD.b + 12} textAnchor="middle" fontSize="9" fill="#475569">{label}</text>
+                        </g>
+                      );
+                    })}
+                    {/* Axe X */}
+                    <line x1={PAD.l} y1={H - PAD.b} x2={W - PAD.r} y2={H - PAD.b} stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
+                    {/* Axe Y */}
+                    <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={H - PAD.b} stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
+
+                    {/* Courbes solides par stratégie — bezier cubique lissé */}
+                    {stratList.map((s, si) => {
+                      const pts = byStrat[s].sort((a,b) => a.ms - b.ms);
+                      if (pts.length < 2) return null;
+                      const color = stratColors[si % stratColors.length];
+                      // Construit un path bezier cubique lissé
+                      const coords = pts.map(p => ({ x: toX(p.ms), y: toY(p.game_number) }));
+                      let d = `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
+                      for (let i = 1; i < coords.length; i++) {
+                        const prev = coords[i - 1];
+                        const curr = coords[i];
+                        const cpx = (prev.x + curr.x) / 2;
+                        d += ` C${cpx.toFixed(1)},${prev.y.toFixed(1)} ${cpx.toFixed(1)},${curr.y.toFixed(1)} ${curr.x.toFixed(1)},${curr.y.toFixed(1)}`;
+                      }
+                      // Zone de remplissage sous la courbe (léger)
+                      const fillD = d + ` L${coords[coords.length-1].x.toFixed(1)},${(H - PAD.b).toFixed(1)} L${coords[0].x.toFixed(1)},${(H - PAD.b).toFixed(1)} Z`;
+                      return (
+                        <g key={s}>
+                          <path d={fillD} fill={color} fillOpacity="0.06" stroke="none" />
+                          <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </g>
+                      );
+                    })}
+
+                    {/* Points colorés par statut (au-dessus de la ligne) */}
+                    {rows.map((r) => {
+                      const ms = new Date(r.created_at).getTime();
+                      const x  = toX(ms);
+                      const y  = toY(r.game_number);
+                      const c  = STATUS_C[r.status] || '#64748b';
+                      const si = stratList.indexOf(r.strategy || 'inconnue');
+                      const sc = stratColors[si >= 0 ? si % stratColors.length : 0];
+                      return (
+                        <g key={r.id}>
+                          {/* Halo extérieur couleur stratégie */}
+                          <circle cx={x} cy={y} r="6" fill={sc} fillOpacity="0.15" stroke="none" />
+                          {/* Point couleur statut */}
+                          <circle cx={x} cy={y} r="4" fill={c} stroke="#0d1117" strokeWidth="1.5" />
+                          <title>{r.strategy} · Jeu #{r.game_number} · {r.predicted_suit} · {r.status} · {new Date(r.created_at).toLocaleTimeString('fr-FR')}</title>
+                        </g>
+                      );
+                    })}
+
+                    {/* Label axe Y */}
+                    <text x={10} y={H / 2} textAnchor="middle" fontSize="9" fill="#64748b"
+                      transform={`rotate(-90, 10, ${H / 2})`}>N° jeu prédit</text>
+                    {/* Label axe X */}
+                    <text x={W / 2} y={H - 2} textAnchor="middle" fontSize="9" fill="#64748b">Heure</text>
+                  </svg>
+
+                  {/* Légende stratégies */}
+                  {stratList.length > 1 && (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                      {stratList.map((s, si) => (
+                        <span key={s} style={{ fontSize: 10, color: stratColors[si % stratColors.length], display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ width: 14, height: 2, background: stratColors[si % stratColors.length], display: 'inline-block', opacity: 0.5 }} />
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: '#334155', marginTop: 6 }}>
+                    {rows.length} prédiction(s) sur {tlHours}h — survol d'un point pour détails
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Résumé fichiers projet */}
           {data?.fileSizeStats && data.fileSizeStats.count > 0 && (
             <div style={{
