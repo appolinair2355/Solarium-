@@ -694,7 +694,7 @@ export default function Dashboard() {
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
                         ) : absences.map(a => {
                           const isMiroir = a.mode === 'taux_miroir';
-                          const isCarte = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3';
+                          const isCarte = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3' || a.mode === 'victoire_adverse' || a.mode === 'distribution' || a.mode === 'abs_3_vers_2' || a.mode === 'abs_3_vers_3' || a.mode === 'absence_victoire';
                           const barColor = isMiroir
                             ? (a.count >= a.threshold ? '#6366f1' : a.count >= a.threshold * 0.7 ? '#f59e0b' : '#6366f1')
                             : isCarte

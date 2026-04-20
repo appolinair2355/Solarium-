@@ -565,9 +565,9 @@ function ProjectBackupPanel() {
           </button>
         </div>
 
-        {/* Bouton téléchargement ZIP */}
+        {/* Bouton téléchargement ZIP complet */}
         <a
-          href="/api/admin/project-backup/zip"
+          href="/api/admin/project-backup/zip-diff"
           download
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             padding: '10px 20px', borderRadius: 12, textDecoration: 'none', fontWeight: 700, fontSize: 12,
@@ -576,7 +576,22 @@ function ProjectBackupPanel() {
           }}>
           <span>📦</span>
           <span>Télécharger le ZIP de déploiement</span>
-          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>fichiers actuels</span>
+          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>fichiers modifiés</span>
+        </a>
+
+        {/* Bouton téléchargement ZIP différentiel (fichiers modifiés depuis les nouveaux modes) */}
+        <a
+          href="/api/admin/project-backup/zip-diff"
+          download
+          title="Contient uniquement les fichiers modifiés depuis le dernier commit de référence"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '10px 20px', borderRadius: 12, textDecoration: 'none', fontWeight: 700, fontSize: 12,
+            background: 'rgba(34,197,94,0.08)', border: '2px solid rgba(34,197,94,0.3)', color: '#4ade80',
+            transition: 'all 0.2s', marginBottom: 4,
+          }}>
+          <span>🔄</span>
+          <span>ZIP mise à jour différentielle</span>
+          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>fichiers modifiés uniquement</span>
         </a>
 
         {!fileList?.total && (
@@ -772,6 +787,13 @@ function AdminPanel() {
     { value: '6',  label: 'Classique' },
     { value: '7',  label: 'Joueur Carte' },
     { value: '11', label: '📊 Distribution' },
+    { value: '12', label: '🃏 Cartes 2/3 Standard' },
+    { value: '13', label: '🏆 Victoire Pro (Banquier/Joueur)' },
+    { value: '14', label: '🏆 Victoire Compact' },
+    { value: '15', label: '🤝 Match Nul Pro' },
+    { value: '16', label: '🤝 Match Nul Compact' },
+    { value: '17', label: '⚡ 2+3 Cartes Pro' },
+    { value: '18', label: '🃏 Cartes 2/3 Style B' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -920,7 +942,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -1861,7 +1883,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire' };
 
   return (
     <>
@@ -2849,8 +2871,12 @@ function AdminPanel() {
                           : s.mode === 'distribution' ? '📊 Distribution'
                           : s.mode === 'carte_3_vers_2' ? '3️⃣→2️⃣'
                           : s.mode === 'carte_2_vers_3' ? '2️⃣→3️⃣'
+                          : s.mode === 'victoire_adverse' ? '🏆 Victoire Adverse'
+                          : s.mode === 'abs_3_vers_2' ? '🃏 3→2 Abs'
+                          : s.mode === 'abs_3_vers_3' ? '🃏 3→3 Abs'
+                          : s.mode === 'absence_victoire' ? '🏆 Abs Victoire'
                           : s.mode;
-                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3';
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire';
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
@@ -3238,42 +3264,12 @@ function AdminPanel() {
                   </div>
                 )}
 
-                {/* Main à surveiller : Joueur / Banquier */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'distribution' && (
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>Main à surveiller</label>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    {[
-                      { val: 'joueur',   icon: '🧑', label: 'Joueur',   desc: 'Analyse les cartes du Joueur' },
-                      { val: 'banquier', icon: '🏦', label: 'Banquier', desc: 'Analyse les cartes du Banquier' },
-                    ].map(opt => {
-                      const active = (stratForm.hand || 'joueur') === opt.val;
-                      return (
-                        <button key={opt.val} type="button"
-                          onClick={() => setStratForm(p => ({ ...p, hand: opt.val }))}
-                          style={{
-                            flex: 1, textAlign: 'left', padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
-                            background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
-                            border: `2px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
-                            transition: 'all 0.15s',
-                          }}>
-                          <div style={{ fontSize: 18, marginBottom: 2 }}>{opt.icon}</div>
-                          <div style={{ fontWeight: 700, fontSize: 12, color: active ? '#e2e8f0' : '#64748b', marginBottom: 2 }}>{opt.label}</div>
-                          <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.4 }}>{opt.desc}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                )}
-
                 {/* Mode — masqué pour multi-stratégie */}
-                {(<>
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
                   <select value={stratForm.mode} onChange={e => {
                     const m = e.target.value;
-                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3';
+                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire';
                     setStratForm(p => ({
                       ...p,
                       mode: m,
@@ -3291,9 +3287,19 @@ function AdminPanel() {
                     <option value="carte_2_vers_3">2️⃣ 2 cartes → prédit 3 cartes</option>
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="compteur_adverse">🔄 Compteur Adverse</option>
+                    <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
+                  {stratForm.mode === 'absence_victoire' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      🏆 <strong>Absence Victoire</strong> — fonctionne exactement comme Absence → Apparition mais sur les résultats :<br/>
+                      Deux compteurs indépendants tournent en parallèle : <strong>absences de victoire Joueur</strong> et <strong>absences de victoire Banquier</strong>.<br/>
+                      Dès qu'une victoire Joueur survient après ≥ B jeux sans victoire Joueur → <strong>WIN_P prédit</strong>.<br/>
+                      Dès qu'une victoire Banquier survient après ≥ B jeux sans victoire Banquier → <strong>WIN_B prédit</strong>.<br/>
+                      Les égalités incrémentent les deux compteurs. Pas de mapping — la prédiction est toujours le vainqueur déclencheur.
+                    </div>
+                  )}
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
                       ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
@@ -3751,15 +3757,15 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
               </div>
               )}
 
-              {/* Presets de combinaison — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>
+              {/* Presets de combinaison — masqué pour modes automatiques */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -3779,8 +3785,8 @@ function AdminPanel() {
                 </div>
               </div>}
 
-              {/* Mappings manuels — masqué pour absence_apparition, distribution, taux_miroir, relance, aleatoire */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 16 }}>
+              {/* Mappings manuels — masqué pour modes automatiques */}
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -5207,18 +5213,19 @@ function AdminPanel() {
               {hostedBots.map(bot => (
                 <div key={bot.id} style={{
                   borderRadius: 12, padding: '12px 16px',
-                  background: bot.running ? 'rgba(34,197,94,0.06)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${bot.running ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                  background: bot.running ? 'rgba(34,197,94,0.06)' : bot.status === 'installing' ? 'rgba(251,191,36,0.04)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${bot.running ? 'rgba(34,197,94,0.3)' : bot.status === 'installing' ? 'rgba(251,191,36,0.35)' : 'rgba(255,255,255,0.1)'}`,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 16 }}>{bot.language === 'node' ? '🟨' : '🐍'}</span>
                     <span style={{ fontWeight: 700, color: '#e2e8f0', flex: 1 }}>{bot.name}</span>
                     <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                      background: bot.running ? 'rgba(34,197,94,0.15)' : 'rgba(107,114,128,0.2)',
-                      color: bot.running ? '#22c55e' : '#9ca3af' }}>
-                      {bot.running ? '🟢 Actif' : '⚫ Arrêté'}
+                      background: bot.running ? 'rgba(34,197,94,0.15)' : bot.status === 'installing' ? 'rgba(251,191,36,0.2)' : 'rgba(107,114,128,0.2)',
+                      color: bot.running ? '#22c55e' : bot.status === 'installing' ? '#fbbf24' : '#9ca3af' }}>
+                      {bot.running ? '🟢 Actif' : bot.status === 'installing' ? '⏳ Installation...' : '⚫ Arrêté'}
                     </span>
                     {bot.restarts > 0 && <span style={{ fontSize: 10, color: '#fbbf24' }}>🔄 {bot.restarts} redémarrage{bot.restarts > 1 ? 's' : ''}</span>}
+                    {bot.is_prediction_bot && <span style={{ fontSize: 10, color: '#818cf8', background: 'rgba(129,140,248,0.12)', padding: '1px 6px', borderRadius: 10, border: '1px solid rgba(129,140,248,0.3)' }}>🎯 Prédiction</span>}
                   </div>
                   <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
                     {bot.language} · 
@@ -5276,18 +5283,47 @@ function AdminPanel() {
                       }}>🗑 Supprimer</button>
                   </div>
 
-                  {/* Zone logs */}
-                  {botLogId === bot.id && (
-                    <div style={{ marginTop: 12, background: '#0f172a', borderRadius: 8, padding: '10px 12px', maxHeight: 220, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
-                      {botLogs.length === 0 ? (
-                        <span style={{ color: '#64748b' }}>Aucun log disponible.</span>
-                      ) : botLogs.map((l, i) => (
-                        <div key={i} style={{ color: l.s === 'err' ? '#f87171' : '#86efac', marginBottom: 2 }}>
-                          <span style={{ color: '#64748b', marginRight: 6 }}>[{new Date(l.t).toLocaleTimeString()}]</span>{l.m}
+                  {/* Zone logs — avec auto-refresh pendant installation */}
+                  {botLogId === bot.id && (() => {
+                    const isInstalling = bot.status === 'installing';
+                    return (
+                      <div style={{ marginTop: 12 }}>
+                        {isInstalling && (
+                          <div style={{ fontSize: 10, color: '#fbbf24', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                            Installation des dépendances en cours... les logs se rafraîchissent automatiquement.
+                          </div>
+                        )}
+                        <div style={{ background: '#0f172a', borderRadius: 8, padding: '10px 12px', maxHeight: 280, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
+                          {botLogs.length === 0 ? (
+                            <span style={{ color: '#64748b' }}>Aucun log disponible.</span>
+                          ) : botLogs.map((l, i) => {
+                            const isInstallLog = l.m && l.m.startsWith('[Install]');
+                            const clr = l.s === 'err'
+                              ? '#f87171'
+                              : isInstallLog ? '#fbbf24'
+                              : '#86efac';
+                            return (
+                              <div key={i} style={{ color: clr, marginBottom: 2 }}>
+                                <span style={{ color: '#475569', marginRight: 6 }}>[{new Date(l.t).toLocaleTimeString()}]</span>{l.m}
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+                          <button style={{ fontSize: 10, padding: '3px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)', color: '#818cf8', cursor: 'pointer' }}
+                            onClick={async () => {
+                              const r = await fetch(`/api/admin/bots/${bot.id}/logs`, { credentials: 'include' });
+                              const d = await r.json();
+                              setBotLogs(Array.isArray(d) ? d : []);
+                              await loadHostedBots();
+                            }}>↻ Rafraîchir</button>
+                          <button style={{ fontSize: 10, padding: '3px 10px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', border: '1px solid rgba(100,116,139,0.25)', color: '#94a3b8', cursor: 'pointer' }}
+                            onClick={() => { setBotLogId(null); setBotLogs([]); }}>✕ Fermer</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
