@@ -480,7 +480,7 @@ function buildTgMessage(formatId, {
       return {
         text:
           `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\n` +
-          `Game ${gameNumber} :${emoji}\n` +
+          `#N${gameNumber} :${emoji}\n` +
           `${status === null ? 'En cours' : 'Statut'} :${statusLine}`,
         parse_mode: null,
       };
@@ -498,7 +498,7 @@ function buildTgMessage(formatId, {
     case 4:
       return {
         text:
-          `🎰 PRÉDICTION #${gameNumber}\n` +
+          `🎰 PRÉDICTION #N${gameNumber}\n` +
           `🎯 Couleur: ${emoji} ${name}\n` +
           `📊 Statut: ${status === null ? 'En cours ⏳' : statusLine}\n` +
           `🔍 ${status === null ? 'Vérification en cours' : (status === 'gagne' ? 'Vérifié ✓' : 'Résultat final')}`,
@@ -512,9 +512,9 @@ function buildTgMessage(formatId, {
       else                         bar = '🟥'.repeat(maxR + 1);
       return {
         text:
-          `🎰 PRÉDICTION #${gameNumber}\n` +
+          `🎰 PRÉDICTION #N${gameNumber}\n` +
           `🎯 Couleur: ${emoji} ${name}\n\n` +
-          `🔍 Vérification jeu #${gameNumber}\n` +
+          `🔍 Vérification jeu #N${gameNumber}\n` +
           `${bar}\n` +
           `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌')}`,
         parse_mode: null,
@@ -524,7 +524,7 @@ function buildTgMessage(formatId, {
     case 6:
       return {
         text:
-          `🏆 *PRÉDICTION #${gameNumber}*\n\n` +
+          `🏆 *PRÉDICTION #N${gameNumber}*\n\n` +
           `🎯 Couleur: ${emoji} ${name}\n` +
           (status === null
             ? `⏳ Statut: En cours`
@@ -537,7 +537,7 @@ function buildTgMessage(formatId, {
     case 7:
       return {
         text:
-          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
           (status === null
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
@@ -554,7 +554,7 @@ function buildTgMessage(formatId, {
       if (isBank) {
         return {
           text:
-            `🎮 banquier №${gameNumber}\n` +
+            `🎮 banquier #N${gameNumber}\n` +
             `⚜️ Couleur de la carte:${emoji}\n` +
             `🎰 Poursuite  🔰+${maxR} jeux\n` +
             `🗯️ Résultats : ${statusLine8}`,
@@ -563,7 +563,7 @@ function buildTgMessage(formatId, {
       } else {
         return {
           text:
-            `🤖 joueur :${gameNumber}\n` +
+            `🤖 joueur #N${gameNumber}\n` +
             `🔰Couleur de la carte :${emoji}\n` +
             `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
             `🧨 Résultats : ${statusLine8}`,
@@ -578,7 +578,7 @@ function buildTgMessage(formatId, {
                 :                      '❌';
       return {
         text:
-          `🤖 joueur :${gameNumber}\n` +
+          `🤖 joueur #N${gameNumber}\n` +
           `🔰Couleur de la carte :${emoji}\n` +
           `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
           `🧨 Résultats : ${sl9}`,
@@ -592,7 +592,7 @@ function buildTgMessage(formatId, {
                  :                      '❌';
       return {
         text:
-          `🎮 banquier №${gameNumber}\n` +
+          `🎮 banquier #N${gameNumber}\n` +
           `⚜️ Couleur de la carte:${emoji}\n` +
           `🎰 Poursuite  🔰+${maxR} jeux\n` +
           `🗯️ Résultats : ${sl10}`,
@@ -608,7 +608,7 @@ function buildTgMessage(formatId, {
         return {
           text:
             `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #${gameNumber}\n` +
+            `📌 Jeu #N${gameNumber}\n` +
             `━━━━━━━━━━━━━━━━━━\n` +
             `⌛ Vérification en cours...`,
           parse_mode: null,
@@ -618,7 +618,7 @@ function buildTgMessage(formatId, {
         return {
           text:
             `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #${gameNumber}\n` +
+            `📌 Jeu #N${gameNumber}\n` +
             `━━━━━━━━━━━━━━━━━━\n` +
             `✅ Jeu #N${foundGame} trouvé\n` +
             `🃏 Joueur  : ${pEmojis}\n` +
@@ -629,7 +629,7 @@ function buildTgMessage(formatId, {
         return {
           text:
             `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #${gameNumber}\n` +
+            `📌 Jeu #N${gameNumber}\n` +
             `━━━━━━━━━━━━━━━━━━\n` +
             `✅ Distribution : OUI\n` +
             `❌ Non distribué`,
@@ -651,7 +651,7 @@ function buildTgMessage(formatId, {
       return {
         text:
           `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
-          `📌 Jeu #${gameNumber}\n` +
+          `📌 Jeu #N${gameNumber}\n` +
           `━━━━━━━━━━━━━━━\n` +
           `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
           (status === null
@@ -664,7 +664,7 @@ function buildTgMessage(formatId, {
     default:
       return {
         text:
-          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
           (status === null
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
@@ -803,7 +803,7 @@ const _phase2Active = new Set();
 function buildDistribFinalMsg(gameNumber, rattrapage) {
   return (
     `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-    `📌 Jeu #${gameNumber}\n` +
+    `📌 Jeu #N${gameNumber}\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `✅ Distribution : OUI\n` +
     `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ 🎯`
@@ -848,12 +848,14 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
 
     let phase1Text;
     if (status === 'gagne' && hasCards && !isDistrib) {
-      // Formats standard : résultat + section cartes (supprimée après 10s)
-      const pEmojis = formatCardsToEmojis(playerCards);
-      const bEmojis = formatCardsToEmojis(bankerCards);
+      // Formats standard : résultat + numéro du jeu trouvé + section cartes (supprimée après 20s)
+      const foundGame = gameNumber + rattrapage;
+      const pEmojis   = formatCardsToEmojis(playerCards);
+      const bEmojis   = formatCardsToEmojis(bankerCards);
       phase1Text =
         resultText +
         `\n━━━━━━━━━━━━━━━━━━\n` +
+        `✅ Vérifié au jeu #N${foundGame}\n` +
         `🃏 Joueur  : ${pEmojis}\n` +
         `🎴 Banquier : ${bEmojis}`;
     } else {

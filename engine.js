@@ -35,7 +35,30 @@ function extractSuits(cards) {
   return [...suits];
 }
 
+// ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
+async function canEmitNewPrediction(stratId) {
+  try {
+    const r = await db.pool.query(
+      `SELECT status, created_at FROM predictions WHERE strategy = $1 ORDER BY id DESC LIMIT 1`,
+      [stratId]
+    );
+    if (!r.rows.length) return true;
+    const last = r.rows[0];
+    if (last.status !== 'en_cours') return true;
+    const ageMs = Date.now() - new Date(last.created_at).getTime();
+    const TEN_MIN = 10 * 60 * 1000;
+    if (ageMs >= TEN_MIN) {
+      console.log(`[${stratId}] Garde 10min: en_cours depuis ${Math.round(ageMs/60000)}min ≥ 10min → autorisé`);
+      return true;
+    }
+    console.log(`[${stratId}] Garde 10min: en_cours depuis ${Math.round(ageMs/60000)}min < 10min → bloqué`);
+    return false;
+  } catch { return true; }
+}
+
 async function savePrediction(strategy, gameNumber, predictedSuit, triggeredBy, customTg) {
+  // Garde 10 min : ne pas émettre si une prédiction est encore en cours
+  if (!(await canEmitNewPrediction(strategy))) return;
   try {
     const inserted = await db.createPrediction({ strategy, game_number: gameNumber, predicted_suit: predictedSuit, triggered_by: triggeredBy || null });
     if (!inserted) {
@@ -1109,6 +1132,8 @@ class Engine {
         console.log(`[${channelId}] Bloqué — prédiction en attente de vérification`);
         return;
       }
+      // ── Garde 10 min : vérifie aussi en DB (résiste aux redémarrages) ─
+      if (!(await canEmitNewPrediction(channelId))) return;
       // ── Bloque si le live trigger a déjà émis pour ce jeu (évite le doublon) ─
       if (state.liveTriggeredGame === gn) {
         console.log(`[${channelId}] Bloqué — déjà déclenché en live pour jeu #${gn}`);
@@ -1307,15 +1332,17 @@ class Engine {
       // Remise à zéro UNIQUEMENT à l'heure pile.
       // ─────────────────────────────────────────────────────────────────
 
-      // 0. Remise à zéro automatique toutes les heures pile
+      // 0. Remise à zéro automatique toutes les heures pile (UTC epoch-hours — fiable)
       if (!state.mirrorCounts) state.mirrorCounts = {};
-      const currentHour = new Date().getHours();
-      if (state.mirrorLastHour === null) {
-        state.mirrorLastHour = currentHour;
-      } else if (state.mirrorLastHour !== currentHour) {
-        console.log(`[${channelId}] MiroirTaux ⏰ Nouvelle heure (${state.mirrorLastHour}h→${currentHour}h) — compteurs remis à zéro`);
+      const currentEpochHour = Math.floor(Date.now() / 3_600_000);
+      if (state.mirrorLastHour === null || state.mirrorLastHour === undefined) {
+        state.mirrorLastHour = currentEpochHour;
+      } else if (state.mirrorLastHour !== currentEpochHour) {
+        const prevH = state.mirrorLastHour % 24;
+        const newH  = currentEpochHour % 24;
+        console.log(`[${channelId}] MiroirTaux ⏰ Nouvelle heure (${prevH}h→${newH}h) — compteurs remis à zéro`);
         for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;
-        state.mirrorLastHour = currentHour;
+        state.mirrorLastHour = currentEpochHour;
       }
 
       // 1. Mise à jour des compteurs cumulatifs
@@ -1608,18 +1635,20 @@ class Engine {
   // Appelé à chaque tick (indépendant des jeux terminés) pour garantir
   // la remise à zéro dès le passage à la nouvelle heure, même entre deux jeux.
   _checkHourlyMirrorReset() {
-    const currentHour = new Date().getHours();
+    const currentEpochHour = Math.floor(Date.now() / 3_600_000);
     for (const [id, entry] of Object.entries(this.custom)) {
       if (entry.config?.mode !== 'taux_miroir') continue;
       if (!entry.mirrorCounts) entry.mirrorCounts = {};
       if (entry.mirrorLastHour === null || entry.mirrorLastHour === undefined) {
-        entry.mirrorLastHour = currentHour;
+        entry.mirrorLastHour = currentEpochHour;
         continue;
       }
-      if (entry.mirrorLastHour !== currentHour) {
-        console.log(`[S${id}] MiroirTaux ⏰ Heure ${entry.mirrorLastHour}h→${currentHour}h — compteurs remis à zéro (tick)`);
+      if (entry.mirrorLastHour !== currentEpochHour) {
+        const prevH = entry.mirrorLastHour % 24;
+        const newH  = currentEpochHour % 24;
+        console.log(`[S${id}] MiroirTaux ⏰ Heure ${prevH}h→${newH}h — compteurs remis à zéro (tick horaire)`);
         for (const suit of ALL_SUITS) entry.mirrorCounts[suit] = 0;
-        entry.mirrorLastHour = currentHour;
+        entry.mirrorLastHour = currentEpochHour;
       }
     }
   }

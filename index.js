@@ -18,6 +18,7 @@ const engine            = require('./engine');
 const bilan             = require('./bilan');
 const botHost           = require('./bot-host');
 const systemLogsRoutes  = require('./system-logs-route');
+const { router: aiRoutes } = require('./ai-route');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -72,6 +73,7 @@ app.use('/api/telegram',    telegramRoutes);
 app.use('/api/prog',        progRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 app.use('/api/system-logs', systemLogsRoutes);
+app.use('/api/ai', aiRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
@@ -175,7 +177,13 @@ const distPath = path.join(__dirname, 'dist');
 
 if (fs.existsSync(path.join(distPath, 'index.html'))) {
   console.log(`📁 Fichiers client servis depuis : ${distPath}`);
-  app.use(express.static(distPath, { maxAge: IS_PROD ? '1h' : 0 }));
+  // Assets avec hash dans le nom → cache navigateur 30 jours (immutable)
+  app.use('/assets', express.static(path.join(distPath, 'assets'), {
+    maxAge: '30d',
+    immutable: true,
+  }));
+  // Reste des fichiers statiques
+  app.use(express.static(distPath, { maxAge: IS_PROD ? '1h' : '5m' }));
   app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
