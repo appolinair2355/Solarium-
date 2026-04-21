@@ -80,6 +80,7 @@ function createUser(data) {
     last_name: data.last_name || null,
     is_admin: data.is_admin || false,
     is_approved: data.is_approved || false,
+    admin_level: data.admin_level || 2,
     subscription_expires_at: data.subscription_expires_at || null,
     subscription_duration_minutes: data.subscription_duration_minutes || null,
     created_at: new Date().toISOString(),

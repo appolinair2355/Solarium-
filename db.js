@@ -182,8 +182,12 @@ async function initDB() {
         password_hash: hash,
         is_admin: true,
         is_approved: true,
+        admin_level: 2,
       });
       console.log('✅ Compte admin créé: buzzinfluence');
+    } else if (!existing.admin_level) {
+      jsondb.updateUser(existing.id, { admin_level: 2 });
+      console.log('✅ admin_level mis à jour: buzzinfluence');
     }
     console.log('✅ Base de données JSON locale initialisée');
   }
