@@ -331,19 +331,17 @@ async function getMaxResolvedGame() {
 async function expireAllEnCours() {
   if (USE_PG) {
     const r = await pgPool.query(
-      `UPDATE predictions SET status='expire', resolved_at=NOW() WHERE status='en_cours'`
+      `DELETE FROM predictions WHERE status IN ('en_cours','gagne','perdu','expire')`
     );
     return r.rowCount;
   }
+  const preds = jsondb.getPredictions({ limit: 1000 });
   let count = 0;
-  const preds = jsondb.getPredictions({ status: 'en_cours', limit: 1000 });
   for (const p of preds) {
-    jsondb.updatePrediction(
-      { strategy: p.strategy, game_number: p.game_number, predicted_suit: p.predicted_suit, status_filter: 'en_cours' },
-      { status: 'expire', resolved_at: new Date().toISOString() }
-    );
-    count++;
+    if (p.status === 'en_cours' || p.status === 'gagne' || p.status === 'perdu' || p.status === 'expire') count++;
   }
+  jsondb.d().predictions = [];
+  jsondb.d().meta.next_pred_id = 1;
   return count;
 }
 
