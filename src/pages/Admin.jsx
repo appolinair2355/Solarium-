@@ -665,6 +665,7 @@ function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isSuperAdmin = user?.admin_level === 1;
+  const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2100,7 +2101,7 @@ function AdminPanel() {
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro ✨</Link>
         <div className="navbar-actions">
           <Link to="/choisir" className="btn btn-ghost btn-sm">⇄ Canaux</Link>
-          {isSuperAdmin && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
+          {canSeeSystem && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
           <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
@@ -2126,7 +2127,7 @@ function AdminPanel() {
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
-            ...(isSuperAdmin ? [
+            ...(canSeeSystem ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
               { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
@@ -3501,7 +3502,7 @@ function AdminPanel() {
                   </div>
                 )}
 
-                </>)}
+                )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
                 {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <div style={{ gridColumn: '1 / -1' }}>
@@ -4138,7 +4139,6 @@ function AdminPanel() {
 
               </div>{/* fin padding */}
         </div>
-
         </>}
 
         {/* ════════════════════════════════════════════════
@@ -6371,10 +6371,6 @@ function AdminPanel() {
           )}
         </div>
 
-        </>}
-
-      </div>
-
       {/* ── PREMIUM CREDENTIALS MODAL ── */}
       {premiumModal && (
         <div className="vis-modal-overlay" onClick={() => setPremiumModal(false)}>
@@ -6628,6 +6624,7 @@ function AdminPanel() {
           </div>
         </div>
       )}
+        </>}
 
       {/* ══════════════════════════════════════════════
           TAB : CONFIG IA
@@ -6895,8 +6892,8 @@ function AdminPanel() {
           <DeployLogsPanel />
         </>
       )}
-
-    </div>
+      </div>{/* end admin-content */}
+    </div>{/* end admin-page */}
 
     {/* ══════════════════════════════════════════════
         MODAL DE CONFIRMATION POST-SAVE TELEGRAM
