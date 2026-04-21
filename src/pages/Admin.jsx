@@ -664,7 +664,7 @@ export default function Admin() {
 function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const isSuperAdmin = user?.admin_level === 1;
+  const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
 
   const [users, setUsers] = useState([]);
@@ -2101,7 +2101,7 @@ function AdminPanel() {
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro ✨</Link>
         <div className="navbar-actions">
           <Link to="/choisir" className="btn btn-ghost btn-sm">⇄ Canaux</Link>
-          {isSuperAdmin && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
+          {user?.admin_level === 1 && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
           <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
