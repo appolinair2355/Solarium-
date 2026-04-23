@@ -130,6 +130,71 @@ function useCountdown(expiresAt) {
   return text;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper : transforme une ligne de log brute en explication française lisible.
+// Utilisé par la carte compacte ET la modale détaillée (Logs Pro S5001-S5100).
+// ─────────────────────────────────────────────────────────────────────────────
+function explainProLog(rawMsg, kind, proMeta) {
+  const m = String(rawMsg || '');
+  const hand = proMeta?.strategy_info?.hand;
+  const dec  = proMeta?.strategy_info?.decalage;
+  const sname = proMeta?.strategy_name || 'la stratégie';
+
+  // Prédiction émise — on extrait le DERNIER #NNNN et la DERNIÈRE enseigne ♠♥♦♣
+  if (kind === 'pred') {
+    const allNums = [...m.matchAll(/#\s*(\d+)/g)].map(x => x[1]);
+    const allSuits = m.match(/[♠♥♦♣]/g) || [];
+    const targetGame = allNums[allNums.length - 1] || null;   // dernier # = jeu prédit
+    const sourceGame = allNums.length > 1 ? allNums[0] : null; // premier # = jeu source
+    const suit = allSuits[allSuits.length - 1] || '';
+    const decTxt = dec !== undefined ? ` (décalage +${dec})` : '';
+    if (targetGame && suit) {
+      return `${sname} prédit ${suit} pour le jeu #${targetGame}${sourceGame ? ` (depuis #${sourceGame}${decTxt})` : decTxt}${hand ? ` — main ${hand}` : ''}. Envoi Telegram si bot+canal configurés.`;
+    }
+    return `${sname} émet une prédiction${hand ? ` côté ${hand}` : ''}${decTxt}.`;
+  }
+
+  // Main complète "BANQUIER a eu 3 cartes"
+  const handMatch = m.match(/(BANQUIER|JOUEUR)\s+a eu\s+(\d+)\s+cart/i);
+  if (handMatch) {
+    const who = handMatch[1] === 'BANQUIER' ? 'le banquier' : 'le joueur';
+    const n = handMatch[2];
+    const note = n === '3' ? ' (main "tirée" — déclencheur classique de stratégie)' : ' (main de 2 cartes — pas de tirage)';
+    return `Détecté : ${who} a reçu ${n} cartes${note}. La stratégie utilise cette info pour décider d'émettre ou non une prédiction.`;
+  }
+
+  // Carte détectée
+  if (/Carte d[ée]tect/i.test(m)) {
+    const suit = (m.match(/[♠♥♦♣]/) || [])[0];
+    return `Symbole reconnu dans le tirage${suit ? ` : ${suit}` : ''}. La stratégie l'enregistre pour ses calculs internes (séquences, miroir, taux…).`;
+  }
+
+  // Exception
+  if (/Exception/i.test(m)) {
+    return `Une règle d'exception s'est activée : la stratégie a modifié son comportement par défaut sur ce jeu (saute la prédiction, change l'enseigne, etc.).`;
+  }
+
+  // Nouveau jeu — séparateur
+  if (/—{2,}.*Jeu\s*#?\d+|^[—\s]*Jeu\s*#?\d+/i.test(m)) {
+    return `Début de l'analyse d'une nouvelle partie. Tout ce qui suit jusqu'au prochain "Jeu" concerne ce numéro.`;
+  }
+
+  // Erreurs
+  if (kind === 'error') {
+    return `❌ Erreur dans le code de la stratégie. Aucune prédiction n'est émise tant que ce n'est pas corrigé.`;
+  }
+  if (kind === 'warn') {
+    return `⚠️ Anomalie non bloquante. La stratégie continue mais signale quelque chose d'inhabituel.`;
+  }
+
+  // Étiquette de stratégie
+  if (kind === 'tag') {
+    return `Préfixe identifiant le module qui a écrit cette ligne (utile quand plusieurs stratégies tournent en parallèle).`;
+  }
+
+  return null; // pas d'explication automatique
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -165,18 +230,30 @@ export default function Dashboard() {
   // Placeholder while custom strategies are still loading (S7, S8…)
   const channel = CHANNELS[channelId] || {
     name: channelId,
-    emoji: '⚙',
+    emoji: '🔷',
     color: '#a855f7',
     glow: 'rgba(168,85,247,0.3)',
     desc: 'Chargement de la stratégie…',
   };
+  const isProChannel = /^S50\d\d$/.test(channelId);
 
   const [visibleStratIds, setVisibleStratIds] = useState(null); // null = still loading
+
+  // ── Zone Pro ──────────────────────────────────────────────────────────────
+  const [proPredictions, setProPredictions]       = useState([]);
+  const [proMeta, setProMeta]                     = useState(null);
+  const [proLoaded, setProLoaded]                 = useState(false);
+  const [proZoneOpen, setProZoneOpen]             = useState(true);
 
   const [predictions, setPredictions] = useState([]);
   const [games, setGames] = useState([]);
   const [stats, setStats] = useState([]);
   const [absences, setAbsences] = useState([]);
+  const [proLogs, setProLogs] = useState([]);
+  // 'compact' (carte sur dashboard) · 'expanded' (modale 960px) · 'fullscreen' (100vw)
+  const [proLogsView, setProLogsView] = useState('compact');
+  // Affiche/masque les explications "💡 raison" inline sous chaque ligne
+  const [proLogsShowReasons, setProLogsShowReasons] = useState(true);
   const [lossSeqData, setLossSeqData] = useState({ streaks: {}, sequences: [] });
   const [tgMessages, setTgMessages] = useState([]);
   const [alertPred, setAlertPred] = useState(null);
@@ -195,6 +272,12 @@ export default function Dashboard() {
   const stopRingRef = useRef(null); // fonction stop() retournée par startRinging()
   const ringDurRef  = useRef(ringDuration);
   useEffect(() => { ringDurRef.current = ringDuration; }, [ringDuration]);
+
+  // Enrichir le canal Pro avec son vrai nom (dispo après chargement async de proMeta)
+  if (isProChannel && !CHANNELS[channelId] && proMeta?.name) {
+    channel.name  = proMeta.name;
+    channel.desc  = `${proMeta.filename || channelId} · main ${proMeta.hand || 'joueur'} · R${proMeta.max_rattrapage || 2}`;
+  }
 
   const countdown = useCountdown(user?.subscription_expires_at);
 
@@ -349,13 +432,28 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user?.is_admin && !user?.is_premium) return;
+    if (isProChannel) { setAbsences([]); return; } // pas d'absences pour les slots Pro
     const load = () =>
       fetch(`/api/games/absences?channel=${channelId}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : []).then(setAbsences);
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [user?.is_admin, user?.is_premium, channelId]);
+  }, [user?.is_admin, user?.is_premium, channelId, isProChannel]);
+
+  // ── Polling des logs Pro pour les canaux S5001…S5100 ───────────────────────
+  useEffect(() => {
+    if (!user?.is_admin && !user?.is_premium) return;
+    if (!isProChannel) { setProLogs([]); return; }
+    const load = () =>
+      fetch(`/api/games/pro-logs?channel=${channelId}`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : [])
+        .then(arr => setProLogs(Array.isArray(arr) ? arr : []))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [user?.is_admin, user?.is_premium, channelId, isProChannel]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -379,6 +477,46 @@ export default function Dashboard() {
     es.onerror = () => {};
     return () => es.close();
   }, [hasAccess]);
+
+  // ── SSE Pro predictions ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user?.is_pro && !user?.is_admin) return;
+    // Chargement initial REST + méta
+    fetch('/api/predictions/pro', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) { setProPredictions(d.predictions || []); setProMeta(d.meta || null); setProLoaded(true); } })
+      .catch(() => {});
+    // Stream en temps réel
+    const es = new EventSource('/api/predictions/pro/stream');
+    es.onmessage = e => { try { setProPredictions(JSON.parse(e.data)); setProLoaded(true); } catch {} };
+    es.onerror = () => {};
+    return () => es.close();
+  }, [user?.is_pro, user?.is_admin]);
+
+  // ── Méta par-canal Pro : nom réel de la stratégie liée au slot S5xxx ──────
+  useEffect(() => {
+    if (!isProChannel) return;
+    if (!user?.is_pro && !user?.is_admin) return;
+    const slotId = channelId.replace(/^S/, '');
+    fetch('/api/admin/pro-strategies', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d || !Array.isArray(d.strategies)) return;
+        const me = d.strategies.find(s => String(s.id) === String(slotId));
+        if (me) {
+          setProMeta(prev => ({
+            ...(prev || {}),
+            name: me.strategy_name || me.name,
+            strategy_name: me.strategy_name || me.name,
+            filename: me.filename,
+            hand: me.hand,
+            max_rattrapage: me.max_rattrapage,
+            strategy_info: { ...(prev?.strategy_info || {}), hand: me.hand, decalage: me.decalage, max_rattrapage: me.max_rattrapage },
+          }));
+        }
+      })
+      .catch(() => {});
+  }, [isProChannel, channelId, user?.is_pro, user?.is_admin]);
 
   const getStats = id => {
     const s = stats.find(x => x.strategy === id);
@@ -512,7 +650,8 @@ export default function Dashboard() {
               <span className="db-trophy">🏆</span>
               <span className="db-username-small">{user?.username}</span>
               {user?.is_admin && <span className="db-role-badge admin">Admin</span>}
-              {!user?.is_admin && <span className="db-role-badge user">Joueur</span>}
+              {!user?.is_admin && user?.is_pro && <span className="db-role-badge pro">Pro</span>}
+              {!user?.is_admin && !user?.is_pro && <span className="db-role-badge user">Joueur</span>}
             </div>
             {user?.is_admin && (
               <div className="db-timer-row">
@@ -663,7 +802,131 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>En attente de la prochaine partie...</span>
                       </div>
                     )}
-                    {(user?.is_admin || user?.is_premium) && (
+                    {(user?.is_admin || user?.is_premium) && isProChannel ? (
+                      <div className="pro-logs-card" style={{ display:'flex', alignItems:'flex-start', padding:8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setProLogsView('expanded')}
+                          title={`Ouvrir les logs Pro de la stratégie ${channel.name}`}
+                          style={{
+                            display:'inline-flex', alignItems:'center', gap:6,
+                            padding:'6px 12px', borderRadius:8,
+                            border:'1px solid rgba(168,85,247,0.4)',
+                            background:'rgba(168,85,247,0.12)',
+                            color:'#e9d5ff', cursor:'pointer',
+                            fontSize:12, fontWeight:700,
+                          }}>
+                          <span>📜</span>
+                          <span>Logs Pro · {channel.name}</span>
+                        </button>
+
+                        {/* ── MODALE PLEIN ÉCRAN — vue détaillée des logs ─────── */}
+                        {proLogsView !== 'compact' && (
+                          <div className={`pro-logs-modal pro-logs-modal-${proLogsView}`} onClick={() => setProLogsView('compact')}>
+                            <div className="pro-logs-modal-inner" onClick={e => e.stopPropagation()}>
+                              <div className="pro-logs-modal-head">
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div className="pro-logs-modal-title">
+                                    📡 Logs détaillés — <b>{channel.name}</b>
+                                  </div>
+                                  <div className="pro-logs-modal-sub">
+                                    Stratégie : <code>{proMeta?.filename || channelId}</code>
+                                    {proMeta?.strategy_name ? <> · <b style={{color:'#c084fc'}}>{proMeta.strategy_name}</b></> : null}
+                                    {proMeta?.strategy_info?.hand ? <> · {proMeta.strategy_info.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</> : null}
+                                    {proMeta?.strategy_info?.decalage !== undefined ? <> · décalage <b>+{proMeta.strategy_info.decalage}</b></> : null}
+                                  </div>
+                                </div>
+                                <div className="pro-logs-size-toggle">
+                                  <button
+                                    className={`pls-btn ${proLogsView === 'expanded' ? 'is-active' : ''}`}
+                                    title="Taille moyenne (960px)"
+                                    onClick={() => setProLogsView('expanded')}>▭</button>
+                                  <button
+                                    className={`pls-btn ${proLogsView === 'fullscreen' ? 'is-active' : ''}`}
+                                    title="Plein écran"
+                                    onClick={() => setProLogsView('fullscreen')}>⛶</button>
+                                  <button
+                                    className="pls-btn pls-btn-reduce"
+                                    title="Réduire (revenir à la carte du dashboard)"
+                                    onClick={() => setProLogsView('compact')}>━</button>
+                                  <button
+                                    className={`pls-btn pls-btn-reasons ${proLogsShowReasons ? 'is-active' : ''}`}
+                                    title="Afficher / masquer les raisons"
+                                    onClick={() => setProLogsShowReasons(v => !v)}>💡</button>
+                                </div>
+                                <button className="pro-logs-modal-close" onClick={() => setProLogsView('compact')}>✕</button>
+                              </div>
+
+                              <div className="pro-logs-modal-body">
+                                {proLogs.length === 0 ? (
+                                  <div className="pro-logs-empty">
+                                    <div className="pro-logs-empty-pulse" />
+                                    <div>Aucun log capturé pour l'instant</div>
+                                    <div className="pro-logs-empty-hint">Attendez qu'une partie soit analysée par la stratégie Pro</div>
+                                  </div>
+                                ) : proLogs.map((l, i) => {
+                                  const t = new Date(l.ts);
+                                  const hh = String(t.getHours()).padStart(2,'0');
+                                  const mm = String(t.getMinutes()).padStart(2,'0');
+                                  const ss = String(t.getSeconds()).padStart(2,'0');
+                                  const ms = String(t.getMilliseconds()).padStart(3,'0');
+                                  const m = String(l.msg || '');
+                                  let kind = 'info';
+                                  if (l.level === 'error') kind = 'error';
+                                  else if (l.level === 'warn') kind = 'warn';
+                                  else if (/Prédiction\s*:/i.test(m) || /^[#\s]*N?\s*\+\s*\d/.test(m)) kind = 'pred';
+                                  else if (/BANQUIER|JOUEUR/.test(m) && /\d\s*cart/i.test(m)) kind = 'hand';
+                                  else if (/Carte d[ée]tect/i.test(m)) kind = 'card';
+                                  else if (/Exception/i.test(m)) kind = 'exception';
+                                  else if (/—{2,}.*Jeu\s*#?\d+/i.test(m) || /^[—\s]*Jeu\s*#?\d+/i.test(m)) kind = 'game';
+                                  else if (/^\[Pro/i.test(m) || /\[appolinaire/i.test(m)) kind = 'tag';
+
+                                  const parts = m.split(/(♠|♥|♦|♣)/g);
+                                  const rendered = parts.map((p, k) => {
+                                    if (p === '♠' || p === '♣') return <span key={k} className="suit-chip suit-chip-dark">{p}</span>;
+                                    if (p === '♥' || p === '♦') return <span key={k} className="suit-chip suit-chip-red">{p}</span>;
+                                    return <span key={k}>{p}</span>;
+                                  });
+
+                                  const reason = explainProLog(m, kind, proMeta);
+                                  return (
+                                    <div key={i} className={`pro-log-row pro-log-${kind} pro-log-row-big`}>
+                                      <span className="pro-log-num">#{i + 1}</span>
+                                      <span className="pro-log-time">{hh}:{mm}:{ss}<small>.{ms}</small></span>
+                                      <span className="pro-log-kind">{kind}</span>
+                                      <div className="pro-log-msgcol">
+                                        <span className="pro-log-msg">{rendered}</span>
+                                        {reason && <div className="pro-log-reason pro-log-reason-big">💡 {reason}</div>}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="pro-logs-modal-foot">
+                                <span className="pro-logs-count">{proLogs.length} ligne{proLogs.length > 1 ? 's' : ''} affichée{proLogs.length > 1 ? 's' : ''}</span>
+                                <div style={{ display:'flex', gap: 8 }}>
+                                  <button
+                                    className="pro-logs-btn pro-logs-btn-clear"
+                                    onClick={async () => {
+                                      if (!confirm('Effacer définitivement tous les logs de ce canal ?\n\nAstuce : copiez d\'abord ce qui vous intéresse — c\'est irréversible.')) return;
+                                      try {
+                                        await fetch(`/api/games/pro-logs?channel=${channelId}`, { method: 'DELETE', credentials: 'include' });
+                                        setProLogs([]);
+                                      } catch {}
+                                    }}>
+                                    🗑 Effacer définitivement
+                                  </button>
+                                  <button className="pro-logs-btn pro-logs-btn-expand" onClick={() => setProLogsView('compact')}>
+                                    Fermer
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (user?.is_admin || user?.is_premium) && (
                       <div className="absence-counter-chip">
                         <div className="absence-chip-title">
                           <span style={{ color: channel.color }}>📊</span>
@@ -1156,6 +1419,134 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────────
+           ZONE PRO — visible uniquement pour les utilisateurs Pro et admins
+          ──────────────────────────────────────────────────────────────────── */}
+      {(user?.is_pro || user?.is_admin) && !isProChannel && (
+        <div style={{ margin: '28px 0 0', padding: '0 0 48px' }}>
+
+          {/* Header section Pro */}
+          <div
+            onClick={() => setProZoneOpen(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', marginBottom: proZoneOpen ? 18 : 0, userSelect: 'none' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: proPredictions.some(p => p.status === 'en_cours') ? '#22c55e' : '#475569', boxShadow: proPredictions.some(p => p.status === 'en_cours') ? '0 0 8px #22c55e' : 'none', transition: 'all 0.3s' }} />
+              <span style={{ fontSize: 15, fontWeight: 800, color: '#e2e8f0', letterSpacing: '0.03em' }}>
+                ZONE PRO
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, background: 'linear-gradient(135deg,#6366f1,#a855f7)', color: '#fff', padding: '2px 8px', borderRadius: 8, letterSpacing: '0.08em' }}>PRO</span>
+            </div>
+            {proMeta && (
+              <span style={{ fontSize: 11, color: '#64748b', flex: 1 }}>
+                {proMeta.strategy_count} stratégie{proMeta.strategy_count > 1 ? 's' : ''} · {proMeta.filename}
+              </span>
+            )}
+            <span style={{ fontSize: 18, color: '#475569', marginLeft: 'auto' }}>{proZoneOpen ? '▲' : '▼'}</span>
+          </div>
+
+          {proZoneOpen && (
+            <>
+              {!proLoaded ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '16px 0' }}>
+                  <div className="spinner" style={{ width: 16, height: 16 }} /> Chargement des prédictions Pro…
+                </div>
+              ) : proPredictions.length === 0 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: '#475569', fontSize: 13 }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔷</div>
+                  <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>Aucune prédiction Pro active</div>
+                  <div style={{ fontSize: 12, color: '#475569' }}>
+                    {user?.is_admin
+                      ? 'Importez un fichier de stratégie Pro dans Admin → Config Pro'
+                      : "Les prédictions Pro apparaîtront ici dès qu'une stratégie est active"}
+                  </div>
+                </div>
+              ) : (() => {
+                // Grouper les prédictions par stratégie
+                const byStrategy = {};
+                proPredictions.forEach(p => {
+                  if (!byStrategy[p.strategy]) byStrategy[p.strategy] = [];
+                  byStrategy[p.strategy].push(p);
+                });
+                const SUIT_COLORS_PRO = { '♥': '#f87171', '♦': '#fb923c', '♠': '#94a3b8', '♣': '#4ade80' };
+
+                return Object.entries(byStrategy).map(([stratId, preds]) => {
+                  const active = preds.find(p => p.status === 'en_cours');
+                  const history = preds.filter(p => p.status !== 'en_cours').slice(0, 15);
+                  const wins = preds.filter(p => p.status === 'gagne').length;
+                  const losses = preds.filter(p => p.status === 'perdu').length;
+                  const wr = wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(0) : null;
+
+                  return (
+                    <div key={stratId} style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(168,85,247,0.04) 100%)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: '18px 20px', marginBottom: 16 }}>
+
+                      {/* Header stratégie */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: '#a5b4fc', letterSpacing: '0.04em' }}>{stratId}</div>
+                        {active && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)' }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', animation: 'pulse 1.5s infinite' }} />
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#22c55e' }}>EN COURS</span>
+                          </div>
+                        )}
+                        {wr !== null && (
+                          <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: parseInt(wr) >= 50 ? '#4ade80' : '#f87171' }}>
+                            {wr}% Win · {wins}W/{losses}L
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Prédiction active */}
+                      {active && (
+                        <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, padding: '14px 18px', marginBottom: 14 }}>
+                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Prédiction Actuelle</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <div style={{ fontSize: 36, lineHeight: 1, color: SUIT_COLORS_PRO[active.predicted_suit] || '#a5b4fc' }}>{active.predicted_suit || '?'}</div>
+                            <div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0' }}>
+                                {active.predicted_suit === '♥' ? 'Coeur' : active.predicted_suit === '♦' ? 'Carreau' : active.predicted_suit === '♠' ? 'Pique' : active.predicted_suit === '♣' ? 'Trèfle' : active.predicted_suit || '?'}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#64748b' }}>Partie #{active.game_number} · {active.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</div>
+                            </div>
+                            <div style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 10, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>⏳ En cours</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Historique Pro */}
+                      {history.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Historique</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {history.map((p, i) => (
+                              <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                <span style={{ fontSize: 16, color: SUIT_COLORS_PRO[p.predicted_suit] || '#a5b4fc', minWidth: 20, textAlign: 'center' }}>{p.predicted_suit || '?'}</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Partie #{p.game_number}</span>
+                                  {p.hand && <span style={{ fontSize: 10, color: '#475569', marginLeft: 8 }}>{p.hand === 'joueur' ? '❤️ J' : '♣️ B'}</span>}
+                                </div>
+                                <span style={{
+                                  fontSize: 11, padding: '3px 10px', borderRadius: 10, fontWeight: 700, whiteSpace: 'nowrap',
+                                  background: p.status === 'gagne' ? 'rgba(34,197,94,0.15)' : p.status === 'perdu' ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.1)',
+                                  color:      p.status === 'gagne' ? '#4ade80'             : p.status === 'perdu' ? '#f87171'             : '#fbbf24',
+                                  border:     `1px solid ${p.status === 'gagne' ? 'rgba(34,197,94,0.3)' : p.status === 'perdu' ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.25)'}`,
+                                }}>
+                                  {p.status === 'gagne' ? '✅ Gagné' : p.status === 'perdu' ? '❌ Perdu' : '⏳'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
+            </>
+          )}
         </div>
       )}
     </div>
