@@ -50,6 +50,7 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 2;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS predictions (
         id SERIAL PRIMARY KEY,
@@ -70,6 +71,15 @@ async function initDB() {
       ALTER TABLE predictions ALTER COLUMN triggered_by TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN predicted_suit TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN strategy TYPE TEXT;
+      -- Colonnes étendues pour formats Pro et scripts
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS hand TEXT DEFAULT 'joueur';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS prediction_type TEXT DEFAULT 'standard';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence INTEGER DEFAULT 100;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS decalage_applied INTEGER DEFAULT 1;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS source_file TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS suit_label TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS display_name TEXT;
 
       CREATE TABLE IF NOT EXISTS telegram_config (
         id SERIAL PRIMARY KEY,
@@ -116,6 +126,15 @@ async function initDB() {
       );
       ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS bot_token TEXT;
       ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_format INTEGER;
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_template TEXT;
+
+      CREATE TABLE IF NOT EXISTS custom_tg_formats (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        template TEXT NOT NULL,
+        parse_mode TEXT DEFAULT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS strategy_channel_routes (
         strategy TEXT NOT NULL,
@@ -215,11 +234,23 @@ async function getUserByUsername(username) {
 async function getAllUsers() {
   if (USE_PG) {
     const r = await pgPool.query(
-      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
     );
     return r.rows;
   }
   return jsondb.getAllUsers().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+async function getProUsers() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT id, username, email, first_name, last_name, is_pro, is_approved, subscription_expires_at
+       FROM users WHERE is_pro = TRUE AND is_approved = TRUE ORDER BY username`
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  return all.filter(u => u.is_pro && u.is_approved);
 }
 
 async function createUser(data) {
@@ -279,9 +310,23 @@ async function createPrediction(data) {
   if (USE_PG) {
     try {
       const r = await pgPool.query(
-        `INSERT INTO predictions (strategy, game_number, predicted_suit, triggered_by)
-         VALUES ($1,$2,$3,$4) ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
-        [data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null]
+        `INSERT INTO predictions (
+           strategy, game_number, predicted_suit, triggered_by,
+           hand, prediction_type, confidence, decalage_applied, extra_data, source_file, suit_label, display_name
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
+        [
+          data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null,
+          data.hand || 'joueur',
+          data.prediction_type || 'standard',
+          data.confidence !== undefined ? parseInt(data.confidence) : 100,
+          data.decalage_applied !== undefined ? parseInt(data.decalage_applied) : 1,
+          data.extra_data ? JSON.stringify(data.extra_data) : '{}',
+          data.source_file || null,
+          data.suit_label || null,
+          data.display_name || null,
+        ]
       );
       return r.rowCount > 0; // true = nouveau, false = doublon (ON CONFLICT DO NOTHING)
     } catch (e) { console.error('createPrediction error:', e.message); return false; }
@@ -565,20 +610,20 @@ async function clearAllTgPredMessages() {
   }
 }
 
-async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat) {
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat, tgTemplate) {
   if (USE_PG) {
     await pgPool.query(
-      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
-       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format`,
-      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null]
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format, tg_template)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format, tg_template = EXCLUDED.tg_template`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null, tgTemplate || null]
     );
     return;
   }
   const key = `${strategy}:${gameNumber}:${suit}`;
   const list = _tgMsgStore.get(key) || [];
   const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
-  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null };
+  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null, tg_template: tgTemplate || null };
   if (idx !== -1) list[idx] = entry;
   else list.push(entry);
   _tgMsgStore.set(key, list);
@@ -587,13 +632,49 @@ async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, b
 async function getTgMsgIds(strategy, gameNumber, suit) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `SELECT channel_tg_id, message_id, bot_token, tg_format FROM tg_pred_messages
+      `SELECT channel_tg_id, message_id, bot_token, tg_format, tg_template FROM tg_pred_messages
        WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
       [strategy, gameNumber, suit]
     );
     return r.rows;
   }
   return _tgMsgStore.get(`${strategy}:${gameNumber}:${suit}`) || [];
+}
+
+// ── Custom TG Formats ─────────────────────────────────────────────────────
+async function getCustomFormats() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode, created_at FROM custom_tg_formats ORDER BY id`);
+  return r.rows;
+}
+
+async function saveCustomFormat({ name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO custom_tg_formats (name, template, parse_mode) VALUES ($1,$2,$3) RETURNING id, name, template, parse_mode, created_at`,
+    [name, template, parse_mode || null]
+  );
+  return r.rows[0];
+}
+
+async function updateCustomFormat(id, { name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE custom_tg_formats SET name=$2, template=$3, parse_mode=$4 WHERE id=$1 RETURNING id, name, template, parse_mode, created_at`,
+    [id, name, template, parse_mode || null]
+  );
+  return r.rows[0] || null;
+}
+
+async function deleteCustomFormat(id) {
+  if (!USE_PG) return;
+  await pgPool.query(`DELETE FROM custom_tg_formats WHERE id=$1`, [id]);
+}
+
+async function getCustomFormatById(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode FROM custom_tg_formats WHERE id=$1`, [id]);
+  return r.rows[0] || null;
 }
 
 async function deleteTgMsgIds(strategy, gameNumber, suit) {
@@ -873,7 +954,7 @@ async function getDeployLogs(limit = 20) {
 
 module.exports = {
   pool, USE_PG, initDB,
-  getUser, getUserByLogin, getUserByUsername, getAllUsers,
+  getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
   createUser, updateUser, deleteUser,
   getPredictions, createPrediction, updatePrediction,
   getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime, expireAllEnCours,
@@ -891,4 +972,5 @@ module.exports = {
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
   createDeployLog, updateDeployLog, getDeployLogs,
+  getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
 };

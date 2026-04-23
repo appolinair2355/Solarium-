@@ -326,11 +326,40 @@ function parseTgTargets(raw) {
         channel_id: String(t.channel_id || '').trim(),
       };
       if (t.tg_format !== undefined && t.tg_format !== null && t.tg_format !== '')
-        obj.tg_format = Math.max(1, Math.min(18, parseInt(t.tg_format) || 1));
+        obj.tg_format = Math.max(1, parseInt(t.tg_format) || 1);
       return obj;
     })
     .filter(t => t.bot_token && t.channel_id);
 }
+
+// ── Métadonnées des stratégies Pro (pour StrategySelect) ──────────────────
+router.get('/pro-strategies', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  const user = await db.getUser(req.session.userId).catch(() => null);
+  if (!user) return res.status(401).json({ error: 'Non connecté' });
+  if (!user.is_admin && !user.is_pro)
+    return res.status(403).json({ error: 'Accès réservé' });
+  try {
+    const rawIds  = await db.getSetting('pro_strategy_ids').catch(() => null);
+    const proIds  = rawIds ? JSON.parse(rawIds) : [];
+    const strategies = await Promise.all(proIds.map(async (id) => {
+      const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+      const m    = rawM ? JSON.parse(rawM) : {};
+      const info = m.strategy_info || {};
+      return {
+        id,
+        name: m.strategy_name || m.filename || `Stratégie S${id}`,
+        strategy_name: m.strategy_name || null,
+        filename: m.filename || '',
+        hand: info.hand || 'joueur',
+        decalage: info.decalage,
+        max_rattrapage: info.max_rattrapage ?? 2,
+        engine_type: m.engine_type || null,
+      };
+    }));
+    res.json({ strategies, active: proIds.length > 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 router.get('/strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
@@ -405,7 +434,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(18, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, parseInt(tg_format) || 1) : null,
     };
     list.push(strat);
     await saveStrategies(list);
@@ -473,7 +502,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, Math.min(18, parseInt(tg_format) || 1)) : null,
+        ? Math.max(1, parseInt(tg_format) || 1) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -2180,7 +2209,7 @@ router.get('/project-backup/zip', requireAdmin, (req, res) => {
     const distDir  = path.join(root, 'dist');
     const distFiles = fs.existsSync(distDir) ? scanDistFiles(distDir, 'dist') : [];
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-${date}.zip`;
+    const filename = `appolinaire-${date}.zip`;
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -2230,7 +2259,7 @@ router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
     }
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-diff-${date}.zip`;
+    const filename = `appolinaire-diff-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -2597,6 +2626,747 @@ router.post('/bots/validate-token', requireSuperAdmin, async (req, res) => {
     const result = await botHost.validateToken(req.body.token);
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── COMPTE PRO ─────────────────────────────────────────────────────
+
+// Activer / désactiver le statut Pro d'un utilisateur
+router.post('/users/:id/toggle-pro', requireSuperAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const current = await db.getUser(id);
+    if (!current) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    if (current.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
+    const newVal = !current.is_pro;
+    const user = await db.updateUser(id, { is_pro: newVal });
+    console.log(`[Pro] Compte Pro ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
+    res.json({ ok: true, is_pro: newVal, user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Configuration Telegram pour comptes Pro (token + canal)
+router.get('/pro-config', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('pro_telegram_config');
+    if (!raw) return res.json({ bot_token: '', channel_id: '' });
+    res.json(JSON.parse(raw));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/pro-config', requireAdmin, async (req, res) => {
+  const { bot_token, channel_id, strategy_name } = req.body;
+  if (!bot_token || !channel_id)
+    return res.status(400).json({ error: 'Token et ID canal requis' });
+  try {
+    const stratName = (strategy_name || '').trim() || '—';
+
+    // Vérifier le token via l'API Telegram (timeout 8s, non-bloquant si échec)
+    let bot_username = '';
+    let tg_ok = false;
+    try {
+      const ctrl    = new AbortController();
+      const timer   = setTimeout(() => ctrl.abort(), 8000);
+      const tgRes   = await fetch(`https://api.telegram.org/bot${bot_token}/getMe`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      const tgData  = await tgRes.json();
+      if (tgData.ok) { bot_username = tgData.result.username || ''; tg_ok = true; }
+    } catch (_) { /* timeout ou réseau — on sauvegarde quand même */ }
+
+    // Sauvegarder la config dans la DB
+    await db.setSetting('pro_telegram_config', JSON.stringify({ bot_token, channel_id, bot_username, strategy_name: stratName }));
+
+    // Inscrire le canal Pro dans la table telegram_config (Canaux du site)
+    try {
+      const canalLabel = stratName !== '—' ? `🔷 ${stratName}` : `🔷 Pro — @${bot_username || 'bot'}`;
+      await db.upsertTelegramConfig({ channel_id, channel_name: canalLabel });
+    } catch (e) { console.warn('[Pro] Canal non ajouté aux Canaux:', e.message); }
+
+    // Message de bienvenue Telegram (non-bloquant, timeout 8s)
+    if (tg_ok) {
+      const welcomeMsg =
+`🔷 *Bot Pro connecté avec succès !*
+
+🤖 Bot : @${bot_username}
+📢 Canal : \`${channel_id}\`
+📛 Stratégie : *${stratName}*
+
+✅ Les prédictions Pro seront envoyées automatiquement dans ce canal.`;
+      try {
+        const ctrl2  = new AbortController();
+        const timer2 = setTimeout(() => ctrl2.abort(), 8000);
+        await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
+          method: 'POST', signal: ctrl2.signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: channel_id, text: welcomeMsg, parse_mode: 'Markdown' }),
+        });
+        clearTimeout(timer2);
+      } catch (_) {}
+    }
+
+    // Recharger le moteur Pro
+    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+
+    console.log(`[Pro] ✅ Config sauvegardée — Bot: @${bot_username || '?'} | Canal: ${channel_id} | Stratégie: ${stratName} | TG validé: ${tg_ok}`);
+    res.json({ ok: true, bot_username, strategy_name: stratName, tg_validated: tg_ok });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/pro-config', requireAdmin, async (req, res) => {
+  try {
+    await db.setSetting('pro_telegram_config', '');
+    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/pro-config/test-message', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('pro_telegram_config');
+    if (!raw) return res.status(400).json({ error: 'Bot Pro non configuré' });
+    const cfg = JSON.parse(raw);
+    const { bot_token, channel_id, bot_username } = cfg;
+    if (!bot_token || !channel_id) return res.status(400).json({ error: 'Token ou canal manquant' });
+
+    const stratName = cfg.strategy_name || '—';
+
+    const msg =
+`📡 *Message test — Bot Pro*
+
+🤖 Bot : @${bot_username || '—'}
+📢 Canal : \`${channel_id}\`
+📛 Stratégie : *${stratName}*
+
+✅ Le bot Pro fonctionne correctement.`;
+
+    const r = await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: channel_id, text: msg, parse_mode: 'Markdown' }),
+    });
+    const d = await r.json();
+    if (!d.ok) return res.status(400).json({ error: d.description || 'Échec envoi Telegram' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Fichier de stratégie Pro (.json chargé dans le moteur, .js/.py stockés comme référence)
+// ── Analyse complète d'un fichier de stratégie Pro ────────────────────────
+// Retourne { ok, errors[], warnings[], strategy_name, strategy_info{} }
+function analyzeStrategyFile(ext, content, filename) {
+  const errors = [];
+  const warnings = [];
+  let strategy_name = filename.replace(/\.[^.]+$/, '');
+  let strategy_info = {};
+
+  // ── JSON ──────────────────────────────────────────────────────────────────
+  if (ext === 'json') {
+    let parsed;
+    try { parsed = JSON.parse(content); }
+    catch (e) {
+      const m = e.message.match(/position (\d+)/);
+      const pos = m ? parseInt(m[1]) : null;
+      let lineNum = null, col = null;
+      if (pos !== null) {
+        const before = content.substring(0, pos);
+        lineNum = (before.match(/\n/g) || []).length + 1;
+        col = pos - before.lastIndexOf('\n');
+      }
+      errors.push({ type: 'SyntaxError', message: `JSON invalide : ${e.message}`, line: lineNum, col });
+      return { ok: false, errors, warnings, strategy_name, strategy_info };
+    }
+    // Tolérance : accepte aussi un objet stratégie unique (sans tableau "strategies")
+    let strategies = [];
+    if (Array.isArray(parsed.strategies))      strategies = parsed.strategies;
+    else if (parsed.strategy && typeof parsed.strategy === 'object') strategies = [parsed.strategy];
+    else if (parsed.name && (parsed.mode || parsed.hand || parsed.threshold !== undefined)) strategies = [parsed];
+
+    if (!strategies.length) {
+      errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
+    }
+    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','relance'];
+    for (const s of strategies) {
+      if (!s || typeof s !== 'object') {
+        errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });
+        continue;
+      }
+      if (!s.name) warnings.push({ type: 'MissingField', message: 'Champ "name" manquant — un nom par défaut sera utilisé' });
+      if (!s.mode) warnings.push({ type: 'MissingField', message: `Champ "mode" absent dans "${s.name || '?'}" — le moteur utilisera le mode par défaut` });
+      if (s.mode && !VALID_MODES.includes(s.mode)) {
+        warnings.push({ type: 'UnknownMode', message: `Mode "${s.mode}" non reconnu — modes standards : ${VALID_MODES.join(', ')}` });
+      }
+      if (s.threshold === undefined && s.mode && ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse'].includes(s.mode)) {
+        warnings.push({ type: 'MissingField', message: `Champ "threshold" absent dans "${s.name || '?'}" pour le mode "${s.mode}"` });
+      }
+      if (s.decalage === undefined && s.prediction_offset === undefined) {
+        warnings.push({ type: 'MissingField', message: `Champ "decalage" (ou "prediction_offset") absent dans "${s.name || '?'}" — 1 sera utilisé par défaut` });
+      }
+    }
+    if (errors.length === 0) {
+      strategy_name = parsed.name || strategies[0]?.name || strategy_name;
+      strategy_info = {
+        count: strategies.length,
+        names: strategies.map(s => s.name),
+        modes: [...new Set(strategies.map(s => s.mode))],
+        hands: [...new Set(strategies.map(s => s.hand || 'joueur'))],
+        engine_type: 'json',
+      };
+    }
+
+  // ── JavaScript ────────────────────────────────────────────────────────────
+  } else if (ext === 'js' || ext === 'mjs') {
+    const vm = require('vm');
+    // 1. Vérification syntaxique
+    try { new vm.Script(content, { filename }); }
+    catch (e) {
+      errors.push({ type: 'SyntaxError', message: e.message, line: e.lineNumber || null, col: e.columnNumber || null });
+      return { ok: false, errors, warnings, strategy_name, strategy_info };
+    }
+    // 2. Exécution en sandbox pour extraire les exports et valider l'API
+    let exported = {};
+    try {
+      const moduleObj = { exports: {} };
+      const logs = [];
+      const sandbox = {
+        module: moduleObj, exports: moduleObj.exports,
+        console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push('[ERR] '+a.join(' ')), warn: (...a) => logs.push('[WARN] '+a.join(' ')) },
+        setTimeout: () => {}, clearTimeout: () => {}, setInterval: () => {}, clearInterval: () => {},
+        Math, JSON, Date, parseInt, parseFloat, isNaN, isFinite, Array, Object, String, Number, Boolean, RegExp,
+        require: (m) => { throw new Error(`require("${m}") non autorisé dans un fichier stratégie Pro`); },
+      };
+      vm.createContext(sandbox);
+      vm.runInContext(content, sandbox, { timeout: 3000, filename });
+      exported = sandbox.module.exports;
+      if (logs.length) warnings.push({ type: 'ConsoleOutput', message: `Sortie console lors du chargement : ${logs.slice(0,3).join(' | ')}` });
+    } catch (e) {
+      errors.push({ type: 'RuntimeError', message: `Erreur à l'exécution : ${e.message}`, line: e.lineNumber || null });
+      return { ok: false, errors, warnings, strategy_name, strategy_info };
+    }
+    // 3. Validation de l'API exportée — accepte plusieurs styles courants
+    //    - module.exports = { processGame }
+    //    - module.exports = { process_game }  (style Python)
+    //    - module.exports = { predict } | { run } | { strategy }
+    //    - module.exports = function(...) { ... }   (fonction directe)
+    const ALT_FN_NAMES = ['processGame', 'process_game', 'predict', 'run', 'strategy', 'handler'];
+    let fnName = null;
+    let fn = null;
+    if (typeof exported === 'function') {
+      fn = exported; fnName = '(module.exports)';
+      warnings.push({ type: 'LegacyExport', message: 'module.exports est une fonction — elle sera traitée comme processGame()' });
+    } else if (typeof exported !== 'object' || exported === null) {
+      errors.push({ type: 'ExportError', message: 'Le fichier doit exporter un objet { processGame, ... } ou une fonction via module.exports' });
+    } else {
+      for (const n of ALT_FN_NAMES) {
+        if (typeof exported[n] === 'function') { fn = exported[n]; fnName = n; break; }
+      }
+      if (!fn) {
+        errors.push({ type: 'APIError', message: `Aucune fonction de prédiction trouvée dans module.exports — noms acceptés : ${ALT_FN_NAMES.join(', ')}` });
+      } else if (fnName !== 'processGame') {
+        warnings.push({ type: 'AltFunctionName', message: `Fonction "${fnName}" détectée — le moteur la reconnaîtra via alias (nom canonique : processGame)` });
+      }
+    }
+
+    // 4. Test d'appel à sec avec données fictives — accepte plusieurs formats de retour
+    if (fn) {
+      try {
+        const testState = {};
+        const testResult = fn.call(exported, 999, ['♦','♠'], ['♥'], 'Player', testState);
+        if (testResult !== null && testResult !== undefined) {
+          // Normalise plusieurs formats vers { suit }
+          let suit = null, altFormat = null;
+          if (typeof testResult === 'string') {
+            suit = testResult; altFormat = 'chaîne brute';
+          } else if (typeof testResult === 'object') {
+            if (testResult.suit)            suit = testResult.suit;
+            else if (testResult.predicted)  { suit = testResult.predicted; altFormat = 'predicted'; }
+            else if (testResult.prediction) { suit = testResult.prediction; altFormat = 'prediction'; }
+            else if (Array.isArray(testResult.suits) && testResult.suits.length) { suit = testResult.suits[0]; altFormat = 'suits[]'; }
+            else if (testResult.side)       altFormat = 'side (côté joueur/banquier — non consommé par le moteur)';
+            else if (testResult.value)      altFormat = 'value (valeur de carte — non consommé par le moteur)';
+          } else {
+            errors.push({ type: 'ReturnTypeError', message: `La fonction doit retourner un objet, une chaîne ou null (reçu : ${typeof testResult})` });
+          }
+          if (altFormat && !suit) {
+            warnings.push({ type: 'UnsupportedReturnFormat', message: `Format de retour "${altFormat}" détecté — le moteur n'utilisera que le champ "suit". Adaptez votre fonction pour retourner { suit: '♠|♥|♦|♣' }.` });
+          } else if (altFormat && suit) {
+            warnings.push({ type: 'AltReturnFormat', message: `Format de retour "${altFormat}" détecté — normalisé vers { suit: "${suit}" }` });
+          }
+          if (suit && !['♠','♥','♦','♣'].includes(suit)) {
+            warnings.push({ type: 'InvalidSuit', message: `Costume retourné "${suit}" invalide — attendu : ♠ ♥ ♦ ♣` });
+          }
+        }
+      } catch (e) {
+        warnings.push({ type: 'TestCallWarning', message: `Avertissement lors du test d'appel : ${e.message}` });
+      }
+    }
+    if (typeof exported === 'object' && exported !== null) {
+      if (!exported.name) warnings.push({ type: 'MissingField', message: 'Champ "name" (stratégie) absent — un nom par défaut sera utilisé' });
+      if (!exported.hand) warnings.push({ type: 'MissingField', message: 'Champ "hand" absent — "joueur" sera utilisé par défaut' });
+      if (exported.decalage === undefined) warnings.push({ type: 'MissingField', message: 'Champ "decalage" absent — 1 sera utilisé par défaut' });
+    }
+    // Vérifie que la logique de prédiction gère ses exceptions (try/catch)
+    if (fn && !/try\s*\{[\s\S]*?\}\s*catch/.test(content)) {
+      warnings.push({ type: 'NoExceptionHandling', message: 'Aucun bloc try/catch détecté dans le code — la logique de prédiction devrait gérer ses propres exceptions pour éviter d\'interrompre le moteur' });
+    }
+    if (errors.length === 0) {
+      const meta = (typeof exported === 'object' && exported !== null) ? exported : {};
+      strategy_name = meta.name || strategy_name;
+      strategy_info = {
+        count: 1, names: [strategy_name],
+        hand: meta.hand || 'joueur',
+        decalage: meta.decalage || 1,
+        max_rattrapage: meta.max_rattrapage || 3,
+        engine_type: 'script_js',
+        entry_fn: fnName || null,
+      };
+    }
+
+  // ── Python ────────────────────────────────────────────────────────────────
+  } else if (ext === 'py') {
+    const { spawnSync } = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const PYTHON = process.env.PYTHON_BIN || '/home/runner/workspace/.pythonlibs/bin/python3';
+    const tmpPath = path.join(os.tmpdir(), `pro_validate_${Date.now()}.py`);
+
+    try { fs.writeFileSync(tmpPath, content, 'utf8'); } catch (e) {
+      errors.push({ type: 'WriteError', message: `Impossible d'écrire le fichier temporaire : ${e.message}` });
+      return { ok: false, errors, warnings, strategy_name, strategy_info };
+    }
+
+    // 1. Vérification syntaxique via py_compile
+    const compileResult = spawnSync(PYTHON, ['-m', 'py_compile', tmpPath], { encoding: 'utf8', timeout: 8000 });
+    if (compileResult.error) {
+      errors.push({ type: 'SpawnError', message: `Python introuvable : ${compileResult.error.message}` });
+    } else if (compileResult.status !== 0) {
+      const stderr = (compileResult.stderr || '').trim();
+      // Extraire numéro de ligne depuis le message d'erreur Python
+      const lineMatch = stderr.match(/line (\d+)/);
+      const lineNum = lineMatch ? parseInt(lineMatch[1]) : null;
+      const cleanMsg = stderr.replace(tmpPath, filename).replace(/File ".*?", /, '').trim();
+      errors.push({ type: 'SyntaxError', message: cleanMsg || 'Erreur de syntaxe Python', line: lineNum });
+    }
+    try { fs.unlinkSync(tmpPath); } catch {}
+
+    if (errors.length > 0) return { ok: false, errors, warnings, strategy_name, strategy_info };
+
+    // 2. Test d'exécution avec données fictives (vérifie le protocole stdin/stdout)
+    const testInput = JSON.stringify({ game_number: 999, player_suits: ['♦','♠'], banker_suits: ['♥'], winner: 'Player', state: {} });
+    const tmpPath2 = path.join(os.tmpdir(), `pro_test_${Date.now()}.py`);
+    try { fs.writeFileSync(tmpPath2, content, 'utf8'); } catch {}
+    const runResult = spawnSync(PYTHON, [tmpPath2], { input: testInput, encoding: 'utf8', timeout: 8000 });
+    try { fs.unlinkSync(tmpPath2); } catch {}
+
+    // Détection souple de la fonction de prédiction — plusieurs noms acceptés
+    const PY_ALT_FN = ['process_game', 'processGame', 'predict', 'run', 'strategy', 'handler'];
+    const detectedFn = PY_ALT_FN.find(n => new RegExp(`^\\s*def\\s+${n}\\s*\\(`, 'm').test(content));
+    if (!detectedFn) {
+      warnings.push({ type: 'NoEntryFunction', message: `Aucune fonction de prédiction trouvée dans le code — noms acceptés : ${PY_ALT_FN.join(', ')}` });
+    } else if (detectedFn !== 'process_game') {
+      warnings.push({ type: 'AltFunctionName', message: `Fonction "${detectedFn}" détectée — le moteur la reconnaîtra via alias (nom canonique : process_game)` });
+    }
+
+    if (runResult.error) {
+      warnings.push({ type: 'TestRunWarning', message: `Impossible de tester le script : ${runResult.error.message}` });
+    } else if (runResult.status !== 0) {
+      const stderr = (runResult.stderr || '').trim();
+      if (stderr) {
+        const moduleMatch = stderr.match(/ModuleNotFoundError: No module named '([^']+)'/);
+        const nameErrMatch = stderr.match(/NameError:\s*(.+)/);
+        const typeErrMatch = stderr.match(/TypeError:\s*(.+)/);
+        const keyErrMatch  = stderr.match(/KeyError:\s*(.+)/);
+        if (moduleMatch) {
+          errors.push({ type: 'ImportError', message: `Import externe interdit : le module '${moduleMatch[1]}' n'existe pas dans l'environnement d'exécution. Le fichier Python doit être autonome — supprimez les "import" ou "from ... import" vers des modules externes et intégrez toute la logique directement dans le fichier.` });
+        } else if (nameErrMatch) {
+          errors.push({ type: 'NameError', message: `Nom non défini : ${nameErrMatch[1].trim()}` });
+        } else if (typeErrMatch) {
+          errors.push({ type: 'TypeError', message: `Erreur de type : ${typeErrMatch[1].trim()}` });
+        } else if (keyErrMatch) {
+          errors.push({ type: 'KeyError', message: `Clé manquante : ${keyErrMatch[1].trim()}` });
+        } else {
+          errors.push({ type: 'RuntimeError', message: `Erreur à l'exécution : ${stderr.substring(0, 400)}` });
+        }
+      }
+    } else {
+      const stdout = (runResult.stdout || '').trim();
+      if (!stdout) {
+        errors.push({ type: 'ProtocolError', message: 'Le script ne produit aucune sortie sur stdout — il doit imprimer : print(json.dumps({"result": ..., "state": ...}))' });
+      } else {
+        try {
+          const out = JSON.parse(stdout);
+          if (!('result' in out)) errors.push({ type: 'ProtocolError', message: 'Sortie JSON invalide — champ "result" manquant (attendu : {"result": {...}|null, "state": {...}})' });
+          if (!('state' in out)) warnings.push({ type: 'MissingState', message: 'Champ "state" absent de la sortie — l\'état ne persistera pas entre les jeux' });
+          const r = out.result;
+          if (r !== null && r !== undefined) {
+            // Formats de retour acceptés : {suit} | "♥" | {predicted} | {prediction} | {suits:[]} | {side} | {value}
+            let suit = null, altFormat = null;
+            if (typeof r === 'string') { suit = r; altFormat = 'chaîne brute'; }
+            else if (typeof r === 'object') {
+              if (r.suit)            suit = r.suit;
+              else if (r.predicted)  { suit = r.predicted; altFormat = 'predicted'; }
+              else if (r.prediction) { suit = r.prediction; altFormat = 'prediction'; }
+              else if (Array.isArray(r.suits) && r.suits.length) { suit = r.suits[0]; altFormat = 'suits[]'; }
+              else if (r.side)       altFormat = 'side (côté — non consommé par le moteur)';
+              else if (r.value)      altFormat = 'value (valeur de carte — non consommé par le moteur)';
+              else warnings.push({ type: 'NoSuit', message: 'Le champ "suit" est absent du résultat retourné (résultat ignoré si absent)' });
+            } else {
+              warnings.push({ type: 'ReturnTypeWarning', message: `Type de retour inattendu : ${typeof r}` });
+            }
+            if (altFormat && !suit) {
+              warnings.push({ type: 'UnsupportedReturnFormat', message: `Format de retour "${altFormat}" détecté — le moteur n'utilisera que le champ "suit". Adaptez votre script pour retourner {"suit": "♠|♥|♦|♣"}.` });
+            } else if (altFormat && suit) {
+              warnings.push({ type: 'AltReturnFormat', message: `Format de retour "${altFormat}" détecté — normalisé vers {"suit": "${suit}"}` });
+            }
+            if (suit && !['♠','♥','♦','♣'].includes(suit)) {
+              warnings.push({ type: 'InvalidSuit', message: `Costume "${suit}" invalide lors du test — attendu : ♠ ♥ ♦ ♣` });
+            }
+          }
+          if (runResult.stderr?.trim()) warnings.push({ type: 'StderrOutput', message: `Sortie stderr : ${runResult.stderr.trim().substring(0, 200)}` });
+        } catch (e) {
+          errors.push({ type: 'ProtocolError', message: `Sortie non-JSON : "${stdout.substring(0, 100)}"` });
+        }
+      }
+    }
+
+    // 3. Extraction du nom + vérification des métadonnées requises (stratégie, décalage, main)
+    const nameMatch = content.match(/(?:NAME|name|STRATEGY_NAME)\s*=\s*["']([^"']+)["']/);
+    if (nameMatch) strategy_name = nameMatch[1];
+    else {
+      const commentMatch = content.match(/^#\s*(?:name|stratégie|strategy)\s*[:\-]\s*(.+)/im);
+      if (commentMatch) strategy_name = commentMatch[1].trim();
+      else warnings.push({ type: 'MissingField', message: 'Variable "NAME" (stratégie) absente — un nom par défaut sera utilisé' });
+    }
+    if (!/^\s*DECALAGE\s*=/m.test(content)) {
+      warnings.push({ type: 'MissingField', message: 'Variable "DECALAGE" absente — 1 sera utilisé par défaut' });
+    }
+    if (!/^\s*HAND\s*=/m.test(content)) {
+      warnings.push({ type: 'MissingField', message: 'Variable "HAND" absente — "joueur" sera utilisé par défaut' });
+    }
+    // Vérifie la gestion des exceptions (try/except)
+    if (!/\btry\s*:[\s\S]*?\bexcept\b/.test(content)) {
+      warnings.push({ type: 'NoExceptionHandling', message: 'Aucun bloc try/except détecté — la logique de prédiction devrait gérer ses propres exceptions pour éviter d\'interrompre le moteur' });
+    }
+
+    if (errors.length === 0) {
+      strategy_info = { count: 1, names: [strategy_name], engine_type: 'script_py', entry_fn: detectedFn || null };
+    }
+
+  // ── JSX ───────────────────────────────────────────────────────────────────
+  } else if (ext === 'jsx' || ext === 'tsx') {
+    warnings.push({ type: 'NotExecutable', message: 'Les fichiers JSX/TSX sont stockés comme référence — le moteur ne peut pas les exécuter sans transpilation Babel' });
+    const nameMatch = content.match(/name\s*[:=]\s*["'`]([^"'`]+)["'`]/);
+    if (nameMatch) strategy_name = nameMatch[1];
+    strategy_info = { count: 0, names: [], engine_type: 'jsx_ref' };
+  } else {
+    errors.push({ type: 'UnsupportedType', message: `Format ".${ext}" non supporté. Formats exécutables : .json, .js, .py` });
+  }
+
+  return { ok: errors.length === 0, errors, warnings, strategy_name, strategy_info };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MULTI-STRATÉGIES PRO — jusqu'à 100 fichiers stockés séparément
+// Stockage :
+//   pro_strategies_list      = JSON [{ id, filename, file_type, strategy_name, engine_type, engine_loaded, created_at, updated_at }, ...]
+//   pro_strategy_{id}_content = contenu brut (utf8)
+//   pro_strategy_{id}_meta    = meta complète (avec validation)
+//   pro_strategy_ids          = JSON ["S5001", "S5002", ...] (pour predictions.js)
+// IDs : 5001..5100 (100 slots)
+// Migration : l'ancien couple pro_strategy_file_{content,meta} est promu en slot 5001 automatiquement.
+// ══════════════════════════════════════════════════════════════════
+const PRO_BASE_ID   = 5000;
+const PRO_MAX_SLOTS = 100;
+
+async function getProStrategiesList() {
+  const raw = await db.getSetting('pro_strategies_list').catch(() => null);
+  let list = [];
+  if (raw) { try { list = JSON.parse(raw); } catch {} }
+  if (!Array.isArray(list)) list = [];
+
+  // ── Migration automatique de l'ancien système (un seul fichier) ──
+  if (!list.length) {
+    const oldContent = await db.getSetting('pro_strategy_file_content').catch(() => null);
+    const oldMetaRaw = await db.getSetting('pro_strategy_file_meta').catch(() => null);
+    if (oldContent && oldMetaRaw) {
+      try {
+        const oldMeta = JSON.parse(oldMetaRaw);
+        const id = PRO_BASE_ID + 1; // 5001
+        const migrated = { ...oldMeta, id, created_at: oldMeta.updated_at || new Date().toISOString() };
+        list = [{
+          id, filename: oldMeta.filename || 'legacy.js', file_type: oldMeta.file_type || 'js',
+          strategy_name: oldMeta.strategy_name || 'Stratégie Pro',
+          engine_type: oldMeta.engine_type || 'script_js',
+          engine_loaded: oldMeta.engine_loaded !== false,
+          created_at: migrated.created_at, updated_at: oldMeta.updated_at || migrated.created_at,
+        }];
+        await db.setSetting('pro_strategies_list', JSON.stringify(list));
+        await db.setSetting(`pro_strategy_${id}_content`, oldContent);
+        await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(migrated));
+        console.log(`[Pro] 🔁 Migration legacy → slot S${id} "${oldMeta.strategy_name}"`);
+      } catch (e) { console.warn('[Pro] Migration legacy échouée:', e.message); }
+    }
+  }
+  return list;
+}
+
+async function saveProStrategiesList(list) {
+  await db.setSetting('pro_strategies_list', JSON.stringify(list));
+  const loadedIds = list.filter(s => s.engine_loaded !== false).map(s => `S${s.id}`);
+  await db.setSetting('pro_strategy_ids', JSON.stringify(loadedIds));
+}
+
+function allocateProId(list) {
+  const used = new Set(list.map(s => s.id));
+  for (let i = 1; i <= PRO_MAX_SLOTS; i++) {
+    const id = PRO_BASE_ID + i;
+    if (!used.has(id)) return id;
+  }
+  return null;
+}
+
+// ── POST : créer une NOUVELLE stratégie (nouveau slot) OU modifier (id fourni) ──
+router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
+  const { filename, content, mimetype, id: explicitId } = req.body;
+  if (!filename || content === undefined)
+    return res.status(400).json({ error: 'Nom de fichier et contenu requis' });
+  try {
+    const ext = (filename.split('.').pop() || '').toLowerCase();
+    const EXEC_TYPES = ['json', 'js', 'mjs', 'py'];
+    const analysis = analyzeStrategyFile(ext, content, filename);
+
+    let list = await getProStrategiesList();
+    let entryId;
+    let isUpdate = false;
+
+    if (explicitId !== undefined && explicitId !== null && explicitId !== '') {
+      entryId = parseInt(explicitId);
+      const idx = list.findIndex(s => s.id === entryId);
+      if (idx < 0) return res.status(404).json({ error: `Stratégie ID ${explicitId} introuvable` });
+      isUpdate = true;
+    } else {
+      entryId = allocateProId(list);
+      if (entryId === null) {
+        return res.status(409).json({
+          error: `Nombre maximum de stratégies Pro atteint (${PRO_MAX_SLOTS}). Supprimez-en une avant d'en importer une nouvelle.`,
+        });
+      }
+    }
+
+    const existing = isUpdate ? list.find(s => s.id === entryId) : null;
+    const now = new Date().toISOString();
+    const meta = {
+      id: entryId,
+      filename,
+      mimetype: mimetype || 'text/plain',
+      size: content.length,
+      created_at: existing?.created_at || now,
+      updated_at: now,
+      file_type: ext,
+      engine_type: analysis.strategy_info.engine_type || ext,
+      strategy_name: analysis.strategy_name,
+      strategy_names: analysis.strategy_info.names || [analysis.strategy_name],
+      strategy_count: analysis.strategy_info.count || (analysis.ok ? 1 : 0),
+      strategy_info: analysis.strategy_info,
+      engine_loaded: analysis.ok && EXEC_TYPES.includes(ext),
+      validation_errors: analysis.errors,
+      validation_warnings: analysis.warnings,
+    };
+
+    if (!analysis.ok) {
+      console.warn(`[Pro S${entryId}] ❌ Analyse ${ext.toUpperCase()} "${filename}" — ${analysis.errors.length} erreur(s) :`);
+      analysis.errors.forEach(e => console.warn(`   [${e.type}]${e.line ? ' ligne '+e.line : ''} ${e.message}`));
+      return res.status(422).json({
+        ok: false, validation_failed: true, id: entryId, isUpdate,
+        errors: analysis.errors, warnings: analysis.warnings, meta,
+      });
+    }
+
+    await db.setSetting(`pro_strategy_${entryId}_content`, content);
+    await db.setSetting(`pro_strategy_${entryId}_meta`, JSON.stringify(meta));
+
+    const entry = {
+      id: entryId, filename, file_type: ext,
+      strategy_name: analysis.strategy_name,
+      engine_type: meta.engine_type,
+      engine_loaded: meta.engine_loaded,
+      created_at: meta.created_at, updated_at: meta.updated_at,
+    };
+    if (isUpdate) list = list.map(s => s.id === entryId ? entry : s);
+    else list.push(entry);
+    await saveProStrategiesList(list);
+
+    console.log(`[Pro S${entryId}] ✅ ${isUpdate ? 'Modifiée' : 'Créée'} — ${ext.toUpperCase()} "${filename}" "${analysis.strategy_name}" | ${analysis.warnings.length} avertissement(s)`);
+    if (analysis.warnings.length) {
+      analysis.warnings.forEach(w => console.warn(`   [${w.type}]${w.line ? ' ligne '+w.line : ''} ${w.message}`));
+    }
+
+    let engineError = null;
+    if (EXEC_TYPES.includes(ext)) {
+      try { await require('./engine').reloadProStrategies(); }
+      catch (e) { engineError = e.message; console.error('[Pro] Erreur rechargement moteur:', e.message); }
+    }
+
+    res.json({ ok: true, id: entryId, isUpdate, meta, warnings: analysis.warnings, engine_error: engineError || undefined });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET : liste complète (+ 1ᵉʳ élément exposé pour rétrocompat UI) ──
+router.get('/pro-strategy-file', requireAdmin, async (req, res) => {
+  try {
+    const list = await getProStrategiesList();
+    const strategies = [];
+    for (const entry of list) {
+      const metaRaw = await db.getSetting(`pro_strategy_${entry.id}_meta`).catch(() => null);
+      const meta = metaRaw ? JSON.parse(metaRaw) : { ...entry };
+      strategies.push(meta);
+    }
+    let firstMeta = null, firstContent = null;
+    if (strategies.length) {
+      firstMeta = strategies[0];
+      firstContent = await db.getSetting(`pro_strategy_${strategies[0].id}_content`).catch(() => null);
+    }
+    res.json({ meta: firstMeta, content: firstContent, strategies, total: strategies.length, max: PRO_MAX_SLOTS });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET : récupérer contenu + meta d'une stratégie précise ──
+router.get('/pro-strategy-file/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+    if (!metaRaw) return res.status(404).json({ error: 'Stratégie introuvable' });
+    const content = await db.getSetting(`pro_strategy_${id}_content`).catch(() => null);
+    res.json({ id, meta: JSON.parse(metaRaw), content });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE : supprimer UNE stratégie ──
+router.delete('/pro-strategy-file/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    let list = await getProStrategiesList();
+    const found = list.find(s => s.id === id);
+    if (!found) return res.status(404).json({ error: 'Stratégie introuvable' });
+    list = list.filter(s => s.id !== id);
+    await saveProStrategiesList(list);
+    await db.setSetting(`pro_strategy_${id}_content`, '');
+    await db.setSetting(`pro_strategy_${id}_meta`, '');
+    // Supprimer aussi les prédictions associées (stock reset pour ce canal)
+    try {
+      const removed = await db.deleteStrategyPredictions(`S${id}`).catch(() => 0);
+      if (removed) console.log(`[Pro S${id}] ${removed} prédiction(s) supprimée(s) avec la stratégie`);
+    } catch {}
+    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+    console.log(`[Pro S${id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE global : supprimer TOUTES les stratégies Pro ──
+router.delete('/pro-strategy-file', requireAdmin, async (req, res) => {
+  try {
+    const list = await getProStrategiesList();
+    for (const s of list) {
+      await db.setSetting(`pro_strategy_${s.id}_content`, '');
+      await db.setSetting(`pro_strategy_${s.id}_meta`, '');
+      try { await db.deleteStrategyPredictions(`S${s.id}`); } catch {}
+    }
+    await db.setSetting('pro_strategies_list', '[]');
+    await db.setSetting('pro_strategy_ids', '[]');
+    // Legacy cleanup
+    await db.setSetting('pro_strategy_file_meta', '');
+    await db.setSetting('pro_strategy_file_content', '');
+    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+    res.json({ ok: true, deleted: list.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Recharger config Telegram Pro dans le moteur (appelé après modification de la config)
+router.post('/pro-config/reload', requireAdmin, async (req, res) => {
+  try {
+    require('./engine').reloadProStrategies().catch(() => {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// FORMATS DE MESSAGE PERSONNALISÉS (custom_tg_formats)
+// Stockés en DB, nombre illimité, référençables par tg_format > 18
+// ══════════════════════════════════════════════════════════════════
+
+router.get('/tg-formats', requireAdmin, async (req, res) => {
+  try {
+    const rows = await db.getCustomFormats();
+    res.json({ formats: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/tg-formats', requireAdmin, async (req, res) => {
+  try {
+    const { name, template, parse_mode } = req.body || {};
+    if (!name || !name.trim())     return res.status(400).json({ error: 'Le champ "name" est requis' });
+    if (!template || !template.trim()) return res.status(400).json({ error: 'Le champ "template" est requis' });
+    const row = await db.saveCustomFormat({ name: name.trim(), template: template.trim(), parse_mode: parse_mode || null });
+    res.json({ ok: true, format: row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/tg-formats/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { name, template, parse_mode } = req.body || {};
+    if (!name || !name.trim())     return res.status(400).json({ error: 'Le champ "name" est requis' });
+    if (!template || !template.trim()) return res.status(400).json({ error: 'Le champ "template" est requis' });
+    const row = await db.updateCustomFormat(id, { name: name.trim(), template: template.trim(), parse_mode: parse_mode || null });
+    if (!row) return res.status(404).json({ error: 'Format introuvable' });
+    res.json({ ok: true, format: row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/tg-formats/:id', requireAdmin, async (req, res) => {
+  try {
+    await db.deleteCustomFormat(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// LIVE BROADCAST — diffusion en temps réel des jeux vers Telegram
+// ════════════════════════════════════════════════════════════════════
+const liveBroadcast = require('./live-broadcast');
+
+router.get('/live-broadcast/targets', requireAdmin, async (req, res) => {
+  try { res.json({ targets: await liveBroadcast.listTargets() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/live-broadcast/targets', requireAdmin, async (req, res) => {
+  try {
+    const { bot_token, channel_id, label } = req.body || {};
+    if (!bot_token || !channel_id) return res.status(400).json({ error: 'bot_token et channel_id requis' });
+    const t = await liveBroadcast.addTarget({ bot_token, channel_id, label });
+    res.json({ ok: true, target: { id: t.id, label: t.label, channel_id: t.channel_id, enabled: t.enabled } });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/live-broadcast/targets/:id', requireAdmin, async (req, res) => {
+  try { await liveBroadcast.removeTarget(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(404).json({ error: e.message }); }
+});
+
+router.patch('/live-broadcast/targets/:id', requireAdmin, async (req, res) => {
+  try {
+    const { enabled } = req.body || {};
+    await liveBroadcast.setTargetEnabled(req.params.id, !!enabled);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/live-broadcast/targets/:id/test', requireAdmin, async (req, res) => {
+  try {
+    const r = await liveBroadcast.sendTestMessage(req.params.id);
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 module.exports = router;

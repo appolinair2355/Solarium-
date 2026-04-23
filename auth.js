@@ -14,6 +14,7 @@ function publicUser(u) {
   return {
     id: u.id, username: u.username, email: u.email,
     is_admin: u.is_admin, is_approved: u.is_approved, is_premium: u.is_premium || false,
+    is_pro: u.is_pro || false,
     subscription_expires_at: u.subscription_expires_at,
     status: getUserStatus(u),
     admin_level: u.admin_level || 2,

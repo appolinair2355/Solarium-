@@ -58,6 +58,11 @@ function updateCache(parsed, source) {
   lastFingerprint = fp;
   if (source === 'push') lastClientPush = Date.now();
   broadcastGames(gamesCache); // push immédiat à tous les clients SSE
+  // Diffusion live vers les canaux Telegram configurés (sans bloquer)
+  try {
+    require('./live-broadcast').onGamesUpdate(gamesCache).catch(e =>
+      console.warn('[LiveBroadcast] hook error:', e.message));
+  } catch (e) { /* module absent — ignoré */ }
   return true;
 }
 
@@ -175,6 +180,22 @@ router.get('/absences', (req, res) => {
   const data = engine.getAbsences(channel);
   if (!data) return res.json([]);
   res.json(data);
+});
+
+router.get('/pro-logs', (req, res) => {
+  if (!req.session.userId || (!req.session.isAdmin && !req.session.isPremium)) return res.status(403).json({ error: 'Accès non autorisé' });
+  const channel = req.query.channel || '';
+  if (!/^S\d{4,5}$/.test(channel)) return res.json([]);
+  const engine = require('./engine');
+  res.json(engine.getProLogs(channel) || []);
+});
+
+router.delete('/pro-logs', (req, res) => {
+  if (!req.session.userId || !req.session.isAdmin) return res.status(403).json({ error: 'Accès non autorisé' });
+  const channel = req.query.channel || '';
+  const engine = require('./engine');
+  engine.clearProLogs(channel || null);
+  res.json({ ok: true });
 });
 
 router.get('/loss-streaks', async (req, res) => {

@@ -182,10 +182,17 @@ if (fs.existsSync(path.join(distPath, 'index.html'))) {
     maxAge: '30d',
     immutable: true,
   }));
-  // Reste des fichiers statiques
-  app.use(express.static(distPath, { maxAge: IS_PROD ? '1h' : '5m' }));
+  // Reste des fichiers statiques (hors index.html)
+  app.use(express.static(distPath, {
+    maxAge: IS_PROD ? '1h' : '0',
+    index: false, // Ne pas servir index.html automatiquement (on le gère ci-dessous)
+  }));
+  // index.html → toujours sans cache pour que les nouveaux assets soient chargés
   app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     res.sendFile(path.join(distPath, 'index.html'));
   });
 } else {

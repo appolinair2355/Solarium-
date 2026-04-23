@@ -56,6 +56,69 @@ router.get('/stats', checkSubscription, async (req, res) => {
   }
 });
 
+// ── Prédictions Pro (pour les comptes Pro et admins) ──────────────────────
+router.get('/pro', requireAccess, async (req, res) => {
+  try {
+    const user = await db.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
+    if (!user.is_admin && !user.is_pro)
+      return res.status(403).json({ error: 'Accès réservé aux comptes Pro', code: 'NOT_PRO' });
+
+    // Récupérer les IDs des stratégies Pro
+    const rawIds = await db.getSetting('pro_strategy_ids').catch(() => null);
+    const proIds = rawIds ? JSON.parse(rawIds) : [];
+    if (!proIds.length) return res.json({ predictions: [], strategies: [], active: false });
+
+    // Récupérer les prédictions pour chaque ID Pro
+    const limit = parseInt(req.query.limit) || 100;
+    const allPreds = [];
+    for (const stratId of proIds) {
+      const rows = await db.getPredictions({ strategy: stratId, limit });
+      allPreds.push(...rows.map(formatPrediction));
+    }
+
+    // Trier par numéro de jeu décroissant
+    allPreds.sort((a, b) => b.game_number - a.game_number);
+
+    // Méta-infos sur les stratégies Pro
+    const rawMeta = await db.getSetting('pro_strategy_file_meta').catch(() => null);
+    const meta = rawMeta ? JSON.parse(rawMeta) : null;
+
+    res.json({ predictions: allPreds, strategies: proIds, active: proIds.length > 0, meta });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// SSE stream des prédictions Pro
+router.get('/pro/stream', requireAccess, async (req, res) => {
+  const user = await db.getUser(req.session.userId).catch(() => null);
+  if (!user || (!user.is_admin && !user.is_pro))
+    return res.status(403).json({ error: 'Accès réservé aux comptes Pro' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = async () => {
+    try {
+      const rawIds = await db.getSetting('pro_strategy_ids').catch(() => null);
+      const proIds = rawIds ? JSON.parse(rawIds) : [];
+      const allPreds = [];
+      for (const stratId of proIds) {
+        const rows = await db.getPredictions({ strategy: stratId, limit: 100 });
+        allPreds.push(...rows.map(formatPrediction));
+      }
+      allPreds.sort((a, b) => b.game_number - a.game_number);
+      res.write(`data: ${JSON.stringify(allPreds)}\n\n`);
+      if (res.flush) res.flush();
+    } catch (e) { console.error('SSE pro-predictions error:', e.message); }
+  };
+
+  send();
+  const interval = setInterval(send, 5000);
+  req.on('close', () => clearInterval(interval));
+});
+
 router.get('/stream', checkSubscription, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

@@ -433,6 +433,29 @@ function getSuitEmoji(suit) { return SUIT_EMOJI_MAP[suit] || suit; }
 function getSuitName(suit)  { return SUIT_NAME_FR[suit]  || suit; }
 
 /**
+ * renderCustomTemplate — rend un template personnalisé défini dans le fichier de stratégie.
+ * Variables disponibles : {game} {emoji} {suit} {status} {maxR} {hand} {rattrapage} {strategy}
+ * Exemple de template : "🎯 #{game} | {emoji} {suit} | {status}"
+ */
+function renderCustomTemplate(template, { gameNumber, suit, hand, maxR, status, rattrapage, strategy }) {
+  const emoji = getSuitEmoji(suit);
+  const name  = getSuitName(suit);
+  let statusStr;
+  if (status === null)         statusStr = '⌛';
+  else if (status === 'gagne') statusStr = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+  else                         statusStr = '❌';
+  return template
+    .replace(/\{game\}/g,      String(gameNumber  ?? ''))
+    .replace(/\{emoji\}/g,     emoji)
+    .replace(/\{suit\}/g,      name)
+    .replace(/\{status\}/g,    statusStr)
+    .replace(/\{maxR\}/g,      String(maxR        ?? ''))
+    .replace(/\{hand\}/g,      String(hand        ?? 'joueur'))
+    .replace(/\{rattrapage\}/g,String(rattrapage  ?? 0))
+    .replace(/\{strategy\}/g,  String(strategy    ?? ''));
+}
+
+/**
  * buildTgMessage — message unifié pour prédiction ET résultat.
  * status = null  → en cours (⌛)
  * status = 'gagne'  → gagné (✅ + emoji rattrapage)
@@ -454,7 +477,15 @@ function buildTgMessage(formatId, {
   hand = null,
   playerCards = null,
   bankerCards = null,
-}) {
+}, tg_template = null) {
+  // ── Template personnalisé (défini dans le fichier de stratégie ou la DB) ──
+  if (tg_template) {
+    return {
+      text: renderCustomTemplate(tg_template, { gameNumber, suit, hand, maxR, status, rattrapage, strategy }),
+      parse_mode: null,
+    };
+  }
+
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
   // Les modes Carte 2/3 utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
@@ -823,9 +854,15 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   const hand = tgOpts.hand || null;
   const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
 
+  // Résolution du template : inline > custom DB (formatId > 18) > built-in
+  let tg_template = tgOpts.tg_template || null;
+  if (!tg_template && formatId > 18) {
+    try { const row = await db.getCustomFormatById(formatId - 18); if (row) tg_template = row.template; } catch {}
+  }
+
   const { text, parse_mode } = buildTgMessage(formatId, {
     gameNumber, suit, strategy, maxR, status: null, hand,
-  });
+  }, tg_template);
 
   // Déterminer les canaux cibles
   let targets;
@@ -853,7 +890,7 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
       const msgId = await _sendOneMessage(TOKEN, ch.tgId, text, parse_mode);
       if (msgId) {
         // Sauvegarde le format utilisé pour que editStoredMessages puisse re-générer le bon format
-        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null, formatId).catch(() => {});
+        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null, formatId, tg_template || null).catch(() => {});
         console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} fmt=${formatId} (msg_id=${msgId})`);
       }
     } catch (e) { console.error(`[TG] sendToStrategyChannels ${ch.tgId}: ${e.message}`); }
@@ -872,19 +909,26 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
   const defaultFormatId = tgOpts.formatId || currentFormat;
   const hand = tgOpts.hand || null;
   const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+  // Template inline partagé par tous les canaux custom de la stratégie
+  const stratTemplate = tgOpts.tg_template || null;
 
   for (const { bot_token, channel_id, tg_format: targetFormat } of targets) {
     if (!bot_token || !channel_id) continue;
     // ── Chaque canal peut avoir son propre format de message ──
     const channelFormatId = (targetFormat !== undefined && targetFormat !== null)
       ? parseInt(targetFormat) : defaultFormatId;
+    // Résolution template : inline > custom DB > built-in
+    let tg_template = stratTemplate;
+    if (!tg_template && channelFormatId > 18) {
+      try { const row = await db.getCustomFormatById(channelFormatId - 18); if (row) tg_template = row.template; } catch {}
+    }
     const { text, parse_mode } = buildTgMessage(channelFormatId, {
       gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
-    });
+    }, tg_template);
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
-        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token, channelFormatId).catch(() => {});
+        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token, channelFormatId, tg_template || null).catch(() => {});
         console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} fmt=${channelFormatId} (msg_id=${msgId})`);
       }
     } catch (e) {
@@ -938,9 +982,14 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     if (!token) { console.warn(`[TG Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
     const formatId = (row.tg_format !== undefined && row.tg_format !== null)
       ? parseInt(row.tg_format) : defaultFormatId;
+    // Utilise le template stocké (inline ou DB) — résolution : stocké > opts > built-in
+    let tg_template = row.tg_template || tgOpts.tg_template || null;
+    if (!tg_template && formatId > 18) {
+      try { const dbRow = await db.getCustomFormatById(formatId - 18); if (dbRow) tg_template = dbRow.template; } catch {}
+    }
     const { text: resultText, parse_mode } = buildTgMessage(formatId, {
       gameNumber, suit, strategy, maxR, status, rattrapage, hand, playerCards, bankerCards,
-    });
+    }, tg_template);
 
     // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
     // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
