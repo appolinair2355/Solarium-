@@ -35,11 +35,12 @@ function useUiStyles() {
   }, []);
 }
 
-function ProtectedRoute({ children, adminOnly = false }) {
+function ProtectedRoute({ children, adminOnly = false, adminOrPro = false }) {
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
+  if (adminOrPro && !user.is_admin && !user.is_pro) return <Navigate to="/choisir" replace />;
   return children;
 }
 
@@ -63,10 +64,10 @@ export default function App() {
             <Route path="/choisir" element={<ProtectedRoute><StrategySelect /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Navigate to="/choisir" replace /></ProtectedRoute>} />
             <Route path="/dashboard/:strategy" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute adminOrPro><Admin /></ProtectedRoute>} />
             <Route path="/canal-telegram" element={<ProtectedRoute><TelegramFeed /></ProtectedRoute>} />
             <Route path="/programmation" element={<Programmation />} />
-            <Route path="/system-logs" element={<ProtectedRoute adminOnly><SystemLogs /></ProtectedRoute>} />
+            <Route path="/system-logs" element={<ProtectedRoute adminOrPro><SystemLogs /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
