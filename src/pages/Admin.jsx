@@ -260,6 +260,1569 @@ function TgDirectChat() {
   );
 }
 
+function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
+  // Fallback : si les setters ne sont pas fournis (rendu hors AdminPanel),
+  // on utilise un état local pour ne pas crasher.
+  const [_localSaved, _setLocalSaved] = React.useState(null);
+  const [_localError, _setLocalError] = React.useState(null);
+  if (typeof setProSavedModal !== 'function') setProSavedModal = _setLocalSaved;
+  if (typeof setProErrorModal !== 'function') setProErrorModal = _setLocalError;
+
+  // ── Accès utilisateur courant : admin ou Pro ──
+  const { user: _curUser } = useAuth();
+  const _isAdmin = !!_curUser?.is_admin;
+  const _isProOnly = !_isAdmin && !!_curUser?.is_pro;
+  const [proUsers, setProUsers] = React.useState([]); // pour le sélecteur admin
+  const [selectedOwnerId, setSelectedOwnerId] = React.useState(null); // admin: utilisateur ciblé
+  // Helper : suffixe query string « ?owner_user_id=N » (admin uniquement)
+  const qs = React.useCallback((extra = '') => {
+    const sep = extra ? '&' : '?';
+    if (_isAdmin && selectedOwnerId) return `${extra ? extra + sep : '?'}owner_user_id=${selectedOwnerId}`;
+    return extra || '';
+  }, [_isAdmin, selectedOwnerId]);
+
+  const [tgCfg, setTgCfg]         = React.useState({ bot_token: '', channel_id: '', strategy_name: '' });
+  const [tgSaved, setTgSaved]     = React.useState({ bot_token: '', channel_id: '', bot_username: '', strategy_name: '' });
+  const [tgConfigured, setTgConfigured] = React.useState(false);
+  const [tgStratInfo, setTgStratInfo] = React.useState(null);
+  const [testMsgSending, setTestMsgSending] = React.useState(false);
+  const [testMsgResult, setTestMsgResult] = React.useState('');
+  const [saving, setSaving]       = React.useState(false);
+  const [saveMsg, setSaveMsg]     = React.useState('');
+
+  const [stratFile, setStratFile] = React.useState(null);
+  const [stratMeta, setStratMeta] = React.useState(null);
+  const [stratContent, setStratContent] = React.useState(null);
+  const [stratList, setStratList] = React.useState([]); // toutes les stratégies Pro chargées (multi-slots)
+  const [stratTotal, setStratTotal] = React.useState(0);
+  const [stratMax, setStratMax]     = React.useState(100);
+  const [stratMsg, setStratMsg]   = React.useState('');
+  const [stratSaving, setStratSaving] = React.useState(false);
+  const [showPreview, setShowPreview] = React.useState(false);
+  const [stratValidation, setStratValidation] = React.useState(null); // { ok, errors, warnings, strategy_name, meta }
+  const [selectedFormat, setSelectedFormat] = React.useState('all'); // 'all'|'json'|'js'|'py'|'jsx'
+  const [pasteMode, setPasteMode] = React.useState(false); // true = coller le code, false = importer un fichier
+  const [pasteCode, setPasteCode] = React.useState('');
+  const [pasteFilename, setPasteFilename] = React.useState('ma-strategie.js');
+
+  // ── Formats de message personnalisés ──
+  const [customFormats, setCustomFormats] = React.useState([]);
+  const [fmtForm, setFmtForm] = React.useState({ name: '', template: '', parse_mode: '' });
+  const [fmtEditing, setFmtEditing] = React.useState(null); // id en cours d'édition
+  const [fmtSaving, setFmtSaving] = React.useState(false);
+  const [fmtMsg, setFmtMsg] = React.useState('');
+  const [showFmtPanel, setShowFmtPanel] = React.useState(false);
+
+  // ── Config rapide ──
+  const [quickCfg, setQuickCfg] = React.useState({
+    name: '', mode: 'absence_apparition', hand: 'joueur',
+    threshold: 5, decalage: 2, max_rattrapage: 4, tg_format: 1,
+  });
+  const [quickSaving, setQuickSaving] = React.useState(false);
+  const [quickMsg, setQuickMsg] = React.useState('');
+
+  // ── Logs Pro par stratégie (live) ──
+  const [proLogsById, setProLogsById] = React.useState({});           // { [id]: [{ts, level, msg}] }
+  const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // id de la stratégie ouverte en grand
+  const [proSourceById, setProSourceById] = React.useState({});       // { [id]: 'contenu source' }
+
+  const fetchProLogs = React.useCallback(async (id) => {
+    try {
+      const r = await fetch(`/api/games/pro-logs?channel=S${id}`, { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setProLogsById(prev => ({ ...prev, [id]: Array.isArray(d) ? d : [] }));
+    } catch {}
+  }, []);
+
+  const fetchProSource = React.useCallback(async (id) => {
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file/${id}${qs()}`, { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setProSourceById(prev => ({ ...prev, [id]: d.content || '' }));
+    } catch {}
+  }, [qs]);
+
+  const clearProLogs = async (id) => {
+    try {
+      await fetch(`/api/games/pro-logs?channel=S${id}`, { method: 'DELETE', credentials: 'include' });
+      setProLogsById(prev => ({ ...prev, [id]: [] }));
+    } catch {}
+  };
+
+  // Polling automatique des logs de toutes les stratégies chargées (toutes les 3s)
+  React.useEffect(() => {
+    if (!stratList.length) return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      stratList.forEach(s => fetchProLogs(s.id));
+    };
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [stratList, fetchProLogs]);
+
+  // Charger la liste des comptes Pro pour le sélecteur (admin uniquement)
+  React.useEffect(() => {
+    if (!_isAdmin) return;
+    fetch('/api/admin/pro-users', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { if (Array.isArray(d)) setProUsers(d); else if (Array.isArray(d.users)) setProUsers(d.users); })
+      .catch(() => {});
+  }, [_isAdmin]);
+
+  // (Re)charger la config + la liste à chaque changement de propriétaire
+  React.useEffect(() => {
+    fetch(`/api/admin/pro-config${qs()}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { bot_token: '', channel_id: '' })
+      .then(d => { setTgCfg(d); setTgSaved(d); setTgConfigured(!!(d.bot_token && d.channel_id)); })
+      .catch(() => {});
+    loadStratList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOwnerId]);
+
+  const loadStratList = async () => {
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file${qs()}`, { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setStratList(Array.isArray(d.strategies) ? d.strategies : []);
+      setStratTotal(d.total || (d.strategies?.length || 0));
+      setStratMax(d.max || 100);
+      if (d.meta) { setStratMeta(d.meta); setStratContent(d.content); }
+      else { setStratMeta(null); setStratContent(null); }
+    } catch {}
+  };
+
+  const deleteOneStrategy = async (id, label) => {
+    if (!confirm(`Supprimer la stratégie S${id}${label ? ' « '+label+' »' : ''} ?\n\nToutes ses prédictions seront aussi effacées.`)) return;
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file/${id}${qs()}`, { method: 'DELETE', credentials: 'include' });
+      if (r.ok) { setStratMsg(`🗑 Stratégie S${id} supprimée`); await loadStratList(); }
+      else { const d = await r.json().catch(() => ({})); setStratMsg('❌ ' + (d.error || 'Erreur')); }
+    } catch (e) { setStratMsg('❌ ' + e.message); }
+  };
+
+  const downloadOneStrategy = async (id, filename) => {
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file/${id}${qs()}`, { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const mime = filename?.endsWith('.py') ? 'text/x-python' : filename?.endsWith('.json') ? 'application/json' : 'text/javascript';
+      downloadFile(d.content || '', filename || `strategie_S${id}.txt`, mime);
+    } catch {}
+  };
+
+  const handleSaveAll = async () => {
+    setSaving(true); setSaveMsg(''); setStratValidation(null);
+    let botOk = false;
+    let fileOk = false;
+
+    // 1. Sauvegarder la config bot si token + canal renseignés
+    if (tgCfg.bot_token && tgCfg.channel_id) {
+      try {
+        const r = await fetch(`/api/admin/pro-config${qs()}`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tgCfg),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          const username = d.bot_username || '';
+          setTgSaved({ ...tgCfg, bot_username: username, strategy_name: d.strategy_name || tgCfg.strategy_name });
+          setTgConfigured(true);
+          botOk = true;
+        } else {
+          setSaveMsg('❌ Bot : ' + (d.error || 'Erreur')); setSaving(false); return;
+        }
+      } catch (e) { setSaveMsg('❌ ' + e.message); setSaving(false); return; }
+    }
+
+    // 2a. Sauvegarder le fichier importé
+    if (stratFile) {
+      try {
+        const r = await fetch(`/api/admin/pro-strategy-file${qs()}`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: stratFile.name, content: stratFile.content, mimetype: stratFile.mimetype }),
+        });
+        const d = await r.json();
+        if (r.status === 422 || d.validation_failed) {
+          setStratValidation({ ok: false, errors: d.errors || [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+          setSaving(false); return;
+        }
+        if (r.ok) {
+          setStratValidation({ ok: true, errors: [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+          setStratMeta(d.meta); setStratContent(stratFile.content); setStratFile(null); loadStratList();
+          fileOk = true;
+        } else { setSaveMsg('❌ Fichier : ' + (d.error || 'Erreur serveur')); setSaving(false); return; }
+      } catch (e) { setSaveMsg('❌ ' + e.message); setSaving(false); return; }
+    }
+    // 2b. Sauvegarder le code collé
+    else if (pasteMode && pasteCode.trim()) {
+      const fname = pasteFilename.trim() || 'ma-strategie.js';
+      const ext   = fname.split('.').pop().toLowerCase();
+      const mime  = ext === 'py' ? 'text/x-python' : ext === 'json' ? 'application/json' : 'text/javascript';
+      try {
+        const r = await fetch(`/api/admin/pro-strategy-file${qs()}`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: fname, content: pasteCode.trim(), mimetype: mime }),
+        });
+        const d = await r.json();
+        if (r.status === 422 || d.validation_failed) {
+          setStratValidation({ ok: false, errors: d.errors || [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+          setSaving(false); return;
+        }
+        if (r.ok) {
+          setStratValidation({ ok: true, errors: [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+          setStratMeta(d.meta); setStratContent(pasteCode.trim()); loadStratList().catch(()=>{}); setPasteCode(''); setPasteMode(false);
+          fileOk = true;
+        } else { setSaveMsg('❌ Fichier : ' + (d.error || 'Erreur serveur')); setSaving(false); return; }
+      } catch (e) { setSaveMsg('❌ ' + e.message); setSaving(false); return; }
+    }
+
+    const parts = [];
+    if (botOk)  parts.push('Bot configuré');
+    if (fileOk) parts.push('Fichier enregistré');
+    setSaveMsg(parts.length ? '✅ ' + parts.join(' · ') : '✅ Enregistré');
+    setSaving(false);
+  };
+
+  const deleteTgCfg = async () => {
+    if (!confirm('Supprimer la configuration Telegram Pro ?')) return;
+    await fetch(`/api/admin/pro-config${qs()}`, { method: 'DELETE', credentials: 'include' });
+    setTgCfg({ bot_token: '', channel_id: '' }); setTgSaved({ bot_token: '', channel_id: '' });
+    setTgConfigured(false); setSaveMsg(''); setTgStratInfo(null); setTestMsgResult('');
+  };
+
+  const sendTestMessage = async () => {
+    setTestMsgSending(true); setTestMsgResult('');
+    try {
+      const r = await fetch(`/api/admin/pro-config/test-message${qs()}`, {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await r.json();
+      setTestMsgResult(d.ok ? '✅ Message envoyé dans le canal !' : '❌ ' + (d.error || 'Erreur'));
+    } catch (e) { setTestMsgResult('❌ ' + e.message); }
+    finally { setTestMsgSending(false); }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStratMsg(''); setStratValidation(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setStratFile({ name: file.name, content: ev.target.result, mimetype: file.type || 'text/plain' });
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // Helper : POST avec timeout (AbortController) — empêche le bouton de rester bloqué
+  const _postProStrategy = async (payload, timeoutMs = 30000) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file${qs()}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+      const d = await r.json().catch(() => ({}));
+      return { status: r.status, ok: r.ok, body: d };
+    } finally { clearTimeout(t); }
+  };
+
+  const uploadFile = async () => {
+    if (!stratFile) return;
+    setStratSaving(true); setStratMsg(''); setStratValidation(null);
+    try {
+      const { status, ok, body: d } = await _postProStrategy({
+        filename: stratFile.name, content: stratFile.content, mimetype: stratFile.mimetype,
+      });
+
+      // ── Validation échouée (422) ──
+      if (status === 422 || d.validation_failed) {
+        setStratValidation({ ok: false, errors: d.errors || [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+        setProErrorModal({
+          title: 'Fichier non enregistré',
+          message: `La validation de "${stratFile.name}" a échoué.`,
+          errors: d.errors || [],
+          warnings: d.warnings || [],
+        });
+        return;
+      }
+      if (!ok) {
+        setStratMsg('❌ ' + (d.error || 'Erreur serveur'));
+        setProErrorModal({ title: 'Erreur serveur', message: d.error || `Code HTTP ${status}`, errors: [], warnings: [] });
+        return;
+      }
+
+      // ── Succès ──
+      setStratValidation({ ok: true, errors: [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+      setStratMeta(d.meta); setStratContent(stratFile.content); setStratFile(null); loadStratList();
+      setStratMsg('');
+      setProSavedModal({
+        type: d.isUpdate ? 'update' : 'create',
+        id: d.id,
+        filename: d.meta?.filename,
+        strategy_name: d.meta?.strategy_name,
+        hand: d.meta?.strategy_info?.hand,
+        decalage: d.meta?.strategy_info?.decalage,
+        max_rattrapage: d.meta?.strategy_info?.max_rattrapage,
+        engine_type: d.meta?.engine_type,
+        warnings: d.warnings || [],
+        engine_error: d.engine_error || null,
+      });
+    } catch (e) {
+      const msg = e.name === 'AbortError'
+        ? 'Délai dépassé (30 s) — le serveur ne répond pas. Vérifie ta connexion et réessaie.'
+        : e.message;
+      setStratMsg('❌ ' + msg);
+      setProErrorModal({ title: 'Connexion impossible', message: msg, errors: [], warnings: [] });
+    }
+    finally { setStratSaving(false); }
+  };
+
+  const savePastedCode = async () => {
+    const code = pasteCode.trim();
+    if (!code) { setStratMsg('❌ Collez votre code dans le champ avant d\'enregistrer'); return; }
+    const fname = pasteFilename.trim() || 'ma-strategie.js';
+    const ext = fname.split('.').pop().toLowerCase();
+    const mime = ext === 'py' ? 'text/x-python' : ext === 'json' ? 'application/json' : 'text/javascript';
+    setStratSaving(true); setStratMsg(''); setStratValidation(null);
+    try {
+      const { status, ok, body: d } = await _postProStrategy({ filename: fname, content: code, mimetype: mime });
+
+      if (status === 422 || d.validation_failed) {
+        setStratValidation({ ok: false, errors: d.errors || [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+        setProErrorModal({
+          title: 'Fichier non enregistré',
+          message: `La validation de "${fname}" a échoué. Vérifie que le code collé est complet (accolades fermantes + module.exports).`,
+          errors: d.errors || [],
+          warnings: d.warnings || [],
+        });
+        return;
+      }
+      if (!ok) {
+        setStratMsg('❌ ' + (d.error || 'Erreur serveur'));
+        setProErrorModal({ title: 'Erreur serveur', message: d.error || `Code HTTP ${status}`, errors: [], warnings: [] });
+        return;
+      }
+
+      setStratValidation({ ok: true, errors: [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+      setStratMeta(d.meta); setStratContent(code); loadStratList().catch(()=>{});
+      setPasteCode(''); setPasteMode(false);
+      setStratMsg('');
+      setProSavedModal({
+        type: d.isUpdate ? 'update' : 'create',
+        id: d.id,
+        filename: d.meta?.filename,
+        strategy_name: d.meta?.strategy_name,
+        hand: d.meta?.strategy_info?.hand,
+        decalage: d.meta?.strategy_info?.decalage,
+        max_rattrapage: d.meta?.strategy_info?.max_rattrapage,
+        engine_type: d.meta?.engine_type,
+        warnings: d.warnings || [],
+        engine_error: d.engine_error || null,
+      });
+    } catch (e) {
+      const msg = e.name === 'AbortError'
+        ? 'Délai dépassé (30 s) — le serveur ne répond pas. Vérifie ta connexion et réessaie.'
+        : e.message;
+      setStratMsg('❌ ' + msg);
+      setProErrorModal({ title: 'Connexion impossible', message: msg, errors: [], warnings: [] });
+    }
+    finally { setStratSaving(false); }
+  };
+
+  // ── Formats de message personnalisés — chargement + CRUD ──────
+  const loadCustomFormats = async () => {
+    try {
+      const r = await fetch('/api/admin/tg-formats', { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setCustomFormats(d.formats || []); }
+    } catch {}
+  };
+
+  React.useEffect(() => { loadCustomFormats(); }, []);
+
+  const saveFmt = async () => {
+    if (!fmtForm.name.trim()) { setFmtMsg('❌ Nom requis'); return; }
+    if (!fmtForm.template.trim()) { setFmtMsg('❌ Template requis'); return; }
+    setFmtSaving(true); setFmtMsg('');
+    try {
+      const url = fmtEditing ? `/api/admin/tg-formats/${fmtEditing}` : '/api/admin/tg-formats';
+      const method = fmtEditing ? 'PUT' : 'POST';
+      const r = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fmtForm) });
+      const d = await r.json();
+      if (!r.ok) { setFmtMsg('❌ ' + (d.error || 'Erreur')); return; }
+      setFmtMsg(fmtEditing ? '✅ Format mis à jour' : '✅ Format créé');
+      setFmtForm({ name: '', template: '', parse_mode: '' });
+      setFmtEditing(null);
+      loadCustomFormats();
+    } catch (e) { setFmtMsg('❌ ' + e.message); }
+    finally { setFmtSaving(false); }
+  };
+
+  const deleteFmt = async (id) => {
+    if (!window.confirm('Supprimer ce format ?')) return;
+    try {
+      await fetch(`/api/admin/tg-formats/${id}`, { method: 'DELETE', credentials: 'include' });
+      loadCustomFormats();
+    } catch {}
+  };
+
+  const editFmt = (fmt) => {
+    setFmtEditing(fmt.id);
+    setFmtForm({ name: fmt.name, template: fmt.template, parse_mode: fmt.parse_mode || '' });
+    setShowFmtPanel(true);
+  };
+
+  const applyQuickConfig = async () => {
+    if (!quickCfg.name.trim()) { setQuickMsg('❌ Donnez un nom à la stratégie'); return; }
+    setQuickSaving(true); setQuickMsg(''); setStratValidation(null);
+    const json = {
+      name: quickCfg.name.trim(),
+      strategies: [{
+        name: quickCfg.name.trim(),
+        mode: quickCfg.mode,
+        hand: quickCfg.hand,
+        threshold: parseInt(quickCfg.threshold),
+        prediction_offset: parseInt(quickCfg.decalage),
+        max_rattrapage: parseInt(quickCfg.max_rattrapage),
+        tg_format: parseInt(quickCfg.tg_format),
+      }],
+    };
+    const filename = quickCfg.name.trim().toLowerCase().replace(/\s+/g, '_') + '.json';
+    try {
+      const r = await fetch(`/api/admin/pro-strategy-file${qs()}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, content: JSON.stringify(json, null, 2), mimetype: 'application/json' }),
+      });
+      const d = await r.json();
+      if (r.status === 422 || d.validation_failed) {
+        setStratValidation({ ok: false, errors: d.errors || [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+        setQuickMsg('');
+        return;
+      }
+      if (!r.ok) { setQuickMsg('❌ ' + (d.error || 'Erreur serveur')); return; }
+      setStratValidation({ ok: true, errors: [], warnings: d.warnings || [], strategy_name: d.meta?.strategy_name || '', meta: d.meta });
+      setStratMeta(d.meta);
+      setQuickMsg('✅ Stratégie "' + quickCfg.name.trim() + '" appliquée avec succès !');
+    } catch (e) { setQuickMsg('❌ ' + e.message); }
+    finally { setQuickSaving(false); }
+  };
+
+  const deleteFile = async () => {
+    if (stratMeta?.id) { return deleteOneStrategy(stratMeta.id, stratMeta.strategy_name || stratMeta.filename); }
+    if (!confirm('Supprimer TOUTES les stratégies Pro ?')) return;
+    await fetch(`/api/admin/pro-strategy-file${qs()}`, { method: 'DELETE', credentials: 'include' });
+    setStratMeta(null); setStratContent(null); setStratFile(null); setStratMsg('🗑 Toutes les stratégies supprimées');
+    loadStratList();
+  };
+
+  const fmtSize = (n) => n > 1024 ? `${(n / 1024).toFixed(1)} Ko` : `${n} octets`;
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+
+  const extIcon = (name = '') => {
+    if (name.endsWith('.py'))   return '🐍';
+    if (name.endsWith('.js') || name.endsWith('.mjs')) return '🟨';
+    if (name.endsWith('.jsx')) return '⚛️';
+    if (name.endsWith('.ts') || name.endsWith('.tsx'))  return '🔷';
+    if (name.endsWith('.json')) return '📋';
+    return '📄';
+  };
+
+  const downloadFile = (content, filename, mime) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadExampleJson = () => downloadFile(JSON.stringify({
+    version: '1.0',
+    name: 'Stratégie Pro — Template Universel',
+    description: 'Activez/désactivez chaque règle. Toutes les combinaisons mode+hand+seuil sont possibles.',
+
+    strategies: [
+      {
+        name: 'Règle 1 — Absence costume → Joueur',
+        description: 'Prédit un costume quand il est absent depuis N tours côté Joueur. mode=absence_apparition',
+        enabled: true,
+        mode: 'absence_apparition',
+        hand: 'joueur',
+        threshold: 5,
+        max_rattrapage: 3,
+        decalage: 1,
+        tg_format: 1,
+      },
+      {
+        name: 'Règle 2 — Absence puis victoire → Banquier',
+        description: 'Prédit un costume absent depuis N tours, en attendant qu\'il revienne gagnant. mode=absence_victoire',
+        enabled: false,
+        mode: 'absence_victoire',
+        hand: 'banquier',
+        threshold: 5,
+        max_rattrapage: 4,
+        decalage: 2,
+        tg_format: 1,
+      },
+      {
+        name: 'Règle 3 — Costume manquant → Joueur',
+        description: 'Prédit les costumes qui n\'ont pas encore apparu dans ce jeu. mode=manquants',
+        enabled: false,
+        mode: 'manquants',
+        hand: 'joueur',
+        threshold: 1,
+        max_rattrapage: 2,
+        decalage: 1,
+        tg_format: 1,
+      },
+      {
+        name: 'Règle 4 — Compteur adverse → Banquier',
+        description: 'Prédit quand le Banquier a N victoires consécutives sans un costume. mode=compteur_adverse',
+        enabled: false,
+        mode: 'compteur_adverse',
+        hand: 'banquier',
+        threshold: 4,
+        max_rattrapage: 3,
+        decalage: 1,
+        tg_format: 1,
+      },
+      {
+        name: 'Règle 5 — Victoire adverse → Joueur',
+        description: 'Se déclenche quand la main adverse gagne sans un costume depuis N fois. mode=victoire_adverse',
+        enabled: false,
+        mode: 'victoire_adverse',
+        hand: 'joueur',
+        threshold: 3,
+        max_rattrapage: 2,
+        decalage: 2,
+        tg_format: 1,
+      },
+      {
+        name: 'Règle 6 — Costumes apparents → Joueur',
+        description: 'Prédit les costumes qui apparaissent fréquemment. mode=apparents',
+        enabled: false,
+        mode: 'apparents',
+        hand: 'joueur',
+        threshold: 3,
+        max_rattrapage: 2,
+        decalage: 1,
+        tg_format: 1,
+      },
+    ],
+  }, null, 2), 'strategie-pro-exemple.json', 'application/json');
+
+  const downloadExampleJs = () => downloadFile(
+`// ════════════════════════════════════════════════════════════════
+// STRATÉGIE PRO — Fichier JavaScript (.js)
+// Template universel — toute stratégie, toute exception
+// ════════════════════════════════════════════════════════════════
+//
+// DONNÉES REÇUES à chaque jeu via processGame(...) :
+//   gn       → numéro du jeu (entier)
+//   pSuits   → costumes côté Joueur  ex: ['♦','♠']
+//   bSuits   → costumes côté Banquier ex: ['♥']
+//   winner   → résultat : 'Player' | 'Banker' | 'Tie'
+//   state    → objet persistant entre les jeux (libre à vous de le remplir)
+//
+// RETOUR :
+//   { suit: '♦' }  →  déclenche une prédiction pour ce costume
+//   null            →  aucune prédiction ce tour
+//
+// PARAMÈTRES lus automatiquement par le moteur :
+//   name, hand, decalage, max_rattrapage, tg_format
+// ════════════════════════════════════════════════════════════════
+
+module.exports = {
+
+  // ─── Paramètres de la stratégie ────────────────────────────
+  name:           'Ma Stratégie Personnalisée',
+  hand:           'joueur',   // 'joueur' ou 'banquier'
+  decalage:       2,          // Prédit pour le jeu N+2
+  max_rattrapage: 4,          // Max 4 rattrapages si erreur
+
+  // FORMAT DU MESSAGE TELEGRAM
+  // Option A : tg_format   → numéro d'un format intégré (1-18) ou personnalisé (19+)
+  // Option B : tg_template → template défini ici directement (prioritaire sur tg_format)
+  //
+  // Variables disponibles dans tg_template :
+  //   {game}      → numéro du jeu
+  //   {emoji}     → émoji du costume  (ex: ♦️)
+  //   {suit}      → nom du costume    (ex: Carreau)
+  //   {status}    → résultat          (⌛ en cours | ✅ gagné | ❌ perdu)
+  //   {maxR}      → max rattrapages
+  //   {hand}      → main (joueur / banquier)
+  //   {rattrapage}→ numéro du rattrapage
+  //   {strategy}  → identifiant de la stratégie
+  tg_format:      1,          // Format intégré (ignoré si tg_template est défini)
+  tg_template:    null,       // Exemple : '🎯 Jeu #{game} | {emoji} {suit} | {status}'
+  // tg_template: '🎯 *Prédiction #{game}*\n🃏 Costume : {emoji} {suit}\n📊 Statut : {status}',
+
+  // ─── Constantes personnalisées ──────────────────────────────
+  // Définissez ici tous vos seuils, paramètres, règles
+  SEUIL_ABSENCE:        5,   // Déclencher après N absences consécutives
+  SEUIL_SERIE_VICTOIRE: 3,   // Exception : N victoires de suite
+  SEUIL_SERIE_DEFAITE:  3,   // Exception : N défaites de suite
+  COSTUMES:            ['♠', '♥', '♦', '♣'],
+
+  // ─── Logique principale ─────────────────────────────────────
+  processGame(gn, pSuits, bSuits, winner, state) {
+
+    // ── 1. Initialisation du state (première exécution) ──────
+    if (!state.absences)      state.absences      = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+    if (!state.serieVictoires) state.serieVictoires = 0;
+    if (!state.serieDefaites)  state.serieDefaites  = 0;
+    if (!state.dernierWinner)  state.dernierWinner  = null;
+    // Ajoutez autant de compteurs que nécessaire :
+    // if (!state.monCompteur) state.monCompteur = 0;
+
+    // ── 2. Sélection de la main analysée ─────────────────────
+    const suits = this.hand === 'banquier' ? bSuits : pSuits;
+
+    // ── 3. Mise à jour des absences ───────────────────────────
+    for (const s of this.COSTUMES) {
+      suits.includes(s) ? (state.absences[s] = 0) : (state.absences[s]++);
+    }
+
+    // ── 4. Suivi des séries victoire/défaite ──────────────────
+    const handWinner = this.hand === 'joueur' ? 'Player' : 'Banker';
+    if (winner === handWinner) {
+      state.serieVictoires++;
+      state.serieDefaites = 0;
+    } else if (winner !== 'Tie') {
+      state.serieDefaites++;
+      state.serieVictoires = 0;
+    }
+    state.dernierWinner = winner;
+
+    // ════════════════════════════════════════════════════════
+    // EXCEPTIONS — Conditions spéciales qui ont la priorité
+    // Décrivez ici tout cas particulier de votre stratégie
+    // ════════════════════════════════════════════════════════
+
+    // EXCEPTION 1 : Après N défaites consécutives → forcer prédiction sur le costume le plus absent
+    if (state.serieDefaites >= this.SEUIL_SERIE_DEFAITE) {
+      const plusAbsent = this.COSTUMES.reduce((a, b) => state.absences[a] >= state.absences[b] ? a : b);
+      if (state.absences[plusAbsent] >= 2) { // seulement si vraiment absent
+        state.serieDefaites = 0;
+        return { suit: plusAbsent };
+      }
+    }
+
+    // EXCEPTION 2 : Après N victoires consécutives → pause (ne pas prédire)
+    if (state.serieVictoires >= this.SEUIL_SERIE_VICTOIRE) {
+      // Optionnel : réinitialiser les absences après une belle série
+      // state.absences = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+      return null; // Pause stratégique
+    }
+
+    // EXCEPTION 3 : Exemple de condition combinée personnalisée
+    // if (state.absences['♦'] >= 3 && winner === 'Tie') {
+    //   return { suit: '♦' }; // Exception spécifique Tie + absence
+    // }
+
+    // EXCEPTION 4 : Condition sur numéro de jeu
+    // if (gn % 10 === 0) return null; // Pause tous les 10 jeux
+
+    // ════════════════════════════════════════════════════════
+    // RÈGLE PRINCIPALE — Logique normale de prédiction
+    // ════════════════════════════════════════════════════════
+
+    // Règle : costume absent depuis SEUIL tours → prédire son retour
+    for (const s of this.COSTUMES) {
+      if (state.absences[s] >= this.SEUIL_ABSENCE) {
+        state.absences[s] = 0;
+        return { suit: s };
+      }
+    }
+
+    // Règle alternative : si AUCUNE absence critique, chercher le plus absent (seuil réduit)
+    // const candidat = this.COSTUMES.find(s => state.absences[s] >= 3);
+    // if (candidat) { state.absences[candidat] = 0; return { suit: candidat }; }
+
+    return null; // Aucune condition déclenchée ce tour
+  },
+};
+`, 'strategie-pro-exemple.js', 'text/javascript');
+
+  const downloadExamplePy = () => downloadFile(
+`# ════════════════════════════════════════════════════════════════
+# STRATÉGIE PRO — Fichier Python (.py)
+# Template universel — toute stratégie, toute exception
+# ════════════════════════════════════════════════════════════════
+#
+# DONNÉES REÇUES à chaque jeu (via stdin JSON) :
+#   game_number   → numéro du jeu (entier)
+#   player_suits  → costumes côté Joueur  ex: ["♦","♠"]
+#   banker_suits  → costumes côté Banquier ex: ["♥"]
+#   winner        → résultat : "Player" | "Banker" | "Tie"
+#   state         → dict persistant entre les jeux (libre à vous)
+#
+# RETOUR (via stdout JSON) :
+#   {"result": {"suit": "♦"}, "state": {...}}  → prédiction
+#   {"result": null,           "state": {...}}  → aucune prédiction
+#
+# PARAMÈTRES lus automatiquement par le moteur (en haut du fichier) :
+#   NAME, HAND, DECALAGE, MAX_RATTRAPAGE, TG_FORMAT
+#
+# IMPORTANT : Le fichier doit être autonome (pas d'imports externes)
+#             Seuls json et sys sont autorisés
+# ════════════════════════════════════════════════════════════════
+
+import json
+import sys
+
+# ─── Paramètres de la stratégie (lus par le moteur) ──────────────
+NAME           = "Ma Stratégie Personnalisée"
+HAND           = "joueur"    # "joueur" ou "banquier"
+DECALAGE       = 2           # Prédit pour le jeu N+2
+MAX_RATTRAPAGE = 4           # Max 4 rattrapages si erreur
+TG_FORMAT      = 1           # Format intégré (1-18) ou personnalisé (19+)
+
+# FORMAT DU MESSAGE TELEGRAM PERSONNALISÉ (prioritaire sur TG_FORMAT si défini)
+# Variables disponibles : {game} {emoji} {suit} {status} {maxR} {hand} {rattrapage} {strategy}
+# Exemple :
+# TG_TEMPLATE = """🎯 Jeu #{game}
+# 🃏 Costume : {emoji} {suit}
+# 📊 Statut  : {status}"""
+TG_TEMPLATE = None  # Mettre None pour utiliser TG_FORMAT à la place
+
+# ─── Constantes personnalisées ────────────────────────────────────
+# Définissez ici tous vos seuils, paramètres, règles
+COSTUMES             = ["\\u2660", "\\u2665", "\\u2666", "\\u2663"]  # ♠ ♥ ♦ ♣
+SEUIL_ABSENCE        = 5   # Déclencher après N absences consécutives
+SEUIL_SERIE_VICTOIRE = 3   # Exception : N victoires de suite → pause
+SEUIL_SERIE_DEFAITE  = 3   # Exception : N défaites → forcer prédiction
+
+
+def process_game(game_number, player_suits, banker_suits, winner, state):
+    """Appelée à chaque jeu. Retourne {"suit": "♦"} ou None."""
+
+    # ── 1. Initialisation du state (première exécution) ──────────
+    if "absences"       not in state: state["absences"]       = {s: 0 for s in COSTUMES}
+    if "serie_victoires" not in state: state["serie_victoires"] = 0
+    if "serie_defaites"  not in state: state["serie_defaites"]  = 0
+    if "dernier_winner"  not in state: state["dernier_winner"]  = None
+    # Ajoutez autant de compteurs que nécessaire :
+    # if "mon_compteur" not in state: state["mon_compteur"] = 0
+
+    # ── 2. Sélection de la main analysée ─────────────────────────
+    suits = banker_suits if HAND == "banquier" else player_suits
+
+    # ── 3. Mise à jour des absences ──────────────────────────────
+    for s in COSTUMES:
+        if s in suits:
+            state["absences"][s] = 0
+        else:
+            state["absences"][s] += 1
+
+    # ── 4. Suivi des séries victoire/défaite ─────────────────────
+    hand_winner = "Player" if HAND == "joueur" else "Banker"
+    if winner == hand_winner:
+        state["serie_victoires"] += 1
+        state["serie_defaites"]   = 0
+    elif winner != "Tie":
+        state["serie_defaites"]  += 1
+        state["serie_victoires"]  = 0
+    state["dernier_winner"] = winner
+
+    # ════════════════════════════════════════════════════════════
+    # EXCEPTIONS — Conditions spéciales qui ont la priorité
+    # Décrivez ici tout cas particulier de votre stratégie
+    # ════════════════════════════════════════════════════════════
+
+    # EXCEPTION 1 : Après N défaites → forcer prédiction sur le plus absent
+    if state["serie_defaites"] >= SEUIL_SERIE_DEFAITE:
+        plus_absent = max(COSTUMES, key=lambda s: state["absences"][s])
+        if state["absences"][plus_absent] >= 2:
+            state["serie_defaites"] = 0
+            return {"suit": plus_absent}
+
+    # EXCEPTION 2 : Après N victoires consécutives → pause stratégique
+    if state["serie_victoires"] >= SEUIL_SERIE_VICTOIRE:
+        return None  # Pause — ne pas prédire
+
+    # EXCEPTION 3 : Condition combinée personnalisée
+    # if state["absences"]["♦"] >= 3 and winner == "Tie":
+    #     return {"suit": "♦"}
+
+    # EXCEPTION 4 : Condition sur numéro de jeu
+    # if game_number % 10 == 0:
+    #     return None  # Pause tous les 10 jeux
+
+    # EXCEPTION 5 : Condition sur costumes adverses
+    # if "♠" in banker_suits and state["absences"]["♦"] >= 3:
+    #     return {"suit": "♦"}
+
+    # ════════════════════════════════════════════════════════════
+    # RÈGLE PRINCIPALE — Logique normale de prédiction
+    # ════════════════════════════════════════════════════════════
+
+    # Règle : costume absent depuis SEUIL tours → prédire son retour
+    for s in COSTUMES:
+        if state["absences"][s] >= SEUIL_ABSENCE:
+            state["absences"][s] = 0
+            return {"suit": s}
+
+    # Règle alternative commentée (décommentez si besoin) :
+    # candidat = next((s for s in COSTUMES if state["absences"][s] >= 3), None)
+    # if candidat:
+    #     state["absences"][candidat] = 0
+    #     return {"suit": candidat}
+
+    return None  # Aucune condition déclenchée ce tour
+
+
+# ════════════════════════════════════════════════════════════════
+# PROTOCOLE stdin/stdout (NE PAS MODIFIER)
+# ════════════════════════════════════════════════════════════════
+data   = json.loads(sys.stdin.read())
+state  = data.get("state", {})
+result = process_game(
+    data["game_number"],
+    data["player_suits"],
+    data["banker_suits"],
+    data.get("winner"),
+    state,
+)
+print(json.dumps({"result": result, "state": state}))
+`, 'strategie-pro-exemple.py', 'text/x-python');
+
+  const downloadExampleJsx = () => downloadFile(
+`// ════════════════════════════════════════════════════════
+// STRATÉGIE PRO — Fichier JSX (.jsx)
+// ════════════════════════════════════════════════════════
+// NOTE : Les fichiers JSX sont stockés comme référence visuelle.
+// Pour une stratégie exécutable, utilisez .js ou .py
+// ════════════════════════════════════════════════════════
+
+// Exemple de logique de stratégie en format JSX
+// Ce composant illustre la logique de prédiction utilisée
+
+const strategiePro = {
+  name: "Stratégie Absence JSX",
+  hand: "joueur",
+  decalage: 1,
+  max_rattrapage: 3,
+
+  // Logique de prédiction (identique à la version .js)
+  processGame(gn, pSuits, bSuits, winner, state) {
+    if (!state.absences) {
+      state.absences = { "♠": 0, "♥": 0, "♦": 0, "♣": 0 };
+    }
+    const suits = pSuits;
+    for (const s of ["♠", "♥", "♦", "♣"]) {
+      suits.includes(s) ? (state.absences[s] = 0) : (state.absences[s] += 1);
+    }
+    for (const s of ["♠", "♥", "♦", "♣"]) {
+      if (state.absences[s] >= 5) {
+        state.absences[s] = 0;
+        return { suit: s };
+      }
+    }
+    return null;
+  },
+};
+
+// Composant React pour visualiser la stratégie
+export default function StrategieVisualisation({ gameHistory }) {
+  return (
+    <div className="strategie-container">
+      <h3>{strategiePro.name}</h3>
+      <p>Main surveillée : <strong>{strategiePro.hand}</strong></p>
+      <p>Décalage : <strong>{strategiePro.decalage} tour(s)</strong></p>
+      <p>Max rattrapage : <strong>{strategiePro.max_rattrapage}</strong></p>
+    </div>
+  );
+}
+`, 'strategie-pro-exemple.jsx', 'text/jsx');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 860, margin: '0 auto' }}>
+
+      {/* ── EN-TÊTE ── */}
+      <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08))', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 14, padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ fontSize: 40 }}>🔷</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#e2e8f0' }}>Configuration Compte Pro</div>
+          <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+            {_isProOnly
+              ? 'Votre bot Telegram personnel et vos stratégies de prédiction.'
+              : 'Configurez le bot Telegram dédié aux comptes Pro et importez le fichier de stratégie de prédiction.'}
+          </div>
+        </div>
+      </div>
+
+      {/* ── SÉLECTEUR ADMIN : choisir le compte Pro à éditer ── */}
+      {_isAdmin && (
+        <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 20 }}>👁️</div>
+          <div style={{ fontSize: 13, color: '#fbbf24', fontWeight: 700 }}>Voir / éditer le compte Pro de :</div>
+          <select
+            value={selectedOwnerId || ''}
+            onChange={(e) => setSelectedOwnerId(e.target.value ? parseInt(e.target.value) : null)}
+            style={{ flex: 1, minWidth: 220, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', border: '1px solid rgba(251,191,36,0.4)', fontSize: 13, fontWeight: 600 }}
+          >
+            <option value="">— Mon compte (admin) —</option>
+            {proUsers.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.username}{u.first_name ? ` (${u.first_name})` : ''} {u.is_pro ? '🔷' : '⚠️ désactivé'} — id {u.id}
+              </option>
+            ))}
+          </select>
+          {selectedOwnerId && (
+            <button
+              type="button"
+              onClick={() => setSelectedOwnerId(null)}
+              style={{ padding: '6px 12px', background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >
+              Retour à mon compte
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── PANNEAU UNIFIÉ : TELEGRAM + FICHIER ── */}
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 14, padding: 22 }}>
+
+        {/* ── Section Bot Telegram ── */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0' }}>📡 Token API &amp; Canal Telegram</div>
+              <div style={{ fontSize: 12, color: tgConfigured ? '#4ade80' : '#64748b', marginTop: 3 }}>
+                {tgConfigured
+                  ? `✅ Configuré${tgSaved.bot_username ? ' — @' + tgSaved.bot_username : ''} · ${tgSaved.channel_id}`
+                  : 'Non configuré — remplissez les champs ci-dessous et cliquez Enregistrer'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {tgConfigured && (
+                <>
+                  <button type="button" onClick={sendTestMessage} disabled={testMsgSending}
+                    style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', fontWeight: 700, fontSize: 12, cursor: testMsgSending ? 'wait' : 'pointer' }}>
+                    {testMsgSending ? '⏳…' : '📨 Test'}
+                  </button>
+                  {testMsgResult && (
+                    <span style={{ fontSize: 12, color: testMsgResult.startsWith('✅') ? '#4ade80' : '#f87171', fontWeight: 600 }}>
+                      {testMsgResult}
+                    </span>
+                  )}
+                  <button type="button" onClick={deleteTgCfg}
+                    style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>
+                    🗑 Supprimer
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.6, background: 'rgba(99,102,241,0.06)', borderRadius: 8, padding: '9px 14px', borderLeft: '3px solid rgba(99,102,241,0.4)' }}>
+              Le bot doit être <strong style={{ color: '#e2e8f0' }}>administrateur</strong> du canal.
+              Créez un bot via <strong style={{ color: '#818cf8' }}>@BotFather</strong> sur Telegram, puis collez son token ci-dessous.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>🔑 API TOKEN BOT</label>
+                <input value={tgCfg.bot_token} onChange={e => setTgCfg(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder="123456:AAF-xxxxx…"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Fourni par @BotFather</div>
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>📢 ID CANAL TELEGRAM</label>
+                <input value={tgCfg.channel_id} onChange={e => setTgCfg(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder="@canal_pro ou -1001234…"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>@nom ou identifiant numérique</div>
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>📛 NOM DE LA STRATÉGIE</label>
+              <input value={tgCfg.strategy_name} onChange={e => setTgCfg(p => ({ ...p, strategy_name: e.target.value }))}
+                placeholder="ex : Stratégie Absence Joueur 3ème Carte…"
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.06)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+              <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Affiché dans la fiche et dans les messages Telegram</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Séparateur ── */}
+        <div style={{ borderTop: '1px solid rgba(99,102,241,0.15)', marginBottom: 20 }} />
+
+        {/* ── Sous-section Fichier de stratégie ── */}
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>📂 Fichier de stratégie avancée</div>
+          <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.7, marginBottom: 16 }}>
+            Importez un fichier JS, Python ou JSON. Le moteur l'exécutera et enverra les prédictions sur le site et dans le canal Telegram configuré.
+          </div>
+
+          {/* ── Barre horizontale scrollable d'exemples ── */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
+            Format du fichier à importer
+          </div>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6, scrollbarWidth: 'thin', marginBottom: 16 }}>
+            {[
+              { id: 'all',  icon: '📂', ext: '.json / .js / .py / .jsx', label: 'Tous les formats', badge: 'Universel',   badgeColor: '#94a3b8', accent: '#94a3b8', bg: 'rgba(100,116,139,0.08)', border: 'rgba(100,116,139,0.3)',  desc: 'Accepte tous les types',              fn: null,              accept: '.json,.js,.mjs,.py,.jsx,.ts,.tsx,application/json,text/javascript,text/x-python,text/plain' },
+              { id: 'json', icon: '📋', ext: '.json',                    label: 'JSON déclaratif',  badge: 'Déclaratif',  badgeColor: '#4ade80', accent: '#4ade80', bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.3)',   desc: 'Modes intégrés : absence, manquants…', fn: downloadExampleJson, accept: '.json,application/json' },
+              { id: 'js',   icon: '🟨', ext: '.js',                      label: 'JavaScript (vm)',  badge: 'Exécuté (vm)', badgeColor: '#fbbf24', accent: '#fbbf24', bg: 'rgba(251,191,36,0.07)',  border: 'rgba(251,191,36,0.3)',  desc: 'processGame() — chaque jeu',          fn: downloadExampleJs,   accept: '.js,.mjs,text/javascript' },
+              { id: 'py',   icon: '🐍', ext: '.py',                      label: 'Python 3.12',      badge: 'Python 3.12', badgeColor: '#818cf8', accent: '#818cf8', bg: 'rgba(99,102,241,0.07)',  border: 'rgba(99,102,241,0.3)',  desc: 'stdin/stdout JSON — chaque jeu',     fn: downloadExamplePy,   accept: '.py,text/x-python' },
+              { id: 'jsx',  icon: '⚛️', ext: '.jsx / .tsx',              label: 'JSX (référence)',  badge: 'Référence',   badgeColor: '#94a3b8', accent: '#94a3b8', bg: 'rgba(100,116,139,0.06)', border: 'rgba(100,116,139,0.22)', desc: 'Stocké, non exécuté',                fn: downloadExampleJsx,  accept: '.jsx,.tsx' },
+            ].map(({ id, icon, ext, label, badge, badgeColor, accent, bg, border, desc, fn, accept }) => {
+              const active = selectedFormat === id;
+              return (
+                <div key={id} onClick={() => setSelectedFormat(id)}
+                  style={{ flexShrink: 0, width: 148, borderRadius: 12, border: `1px solid ${active ? accent : border}`, background: active ? bg : 'rgba(255,255,255,0.02)', cursor: 'pointer', padding: '12px 12px 10px', display: 'flex', flexDirection: 'column', gap: 6, boxShadow: active ? `0 0 0 2px ${accent}30` : 'none', transition: 'all .15s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ fontSize: 20 }}>{icon}</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: active ? accent : '#e2e8f0', fontFamily: 'monospace' }}>{ext}</div>
+                      <div style={{ fontSize: 9, color: '#475569' }}>{label}</div>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: badgeColor, background: `${accent}15`, border: `1px solid ${accent}40`, borderRadius: 4, padding: '1px 6px', alignSelf: 'flex-start' }}>{badge}</span>
+                  <div style={{ fontSize: 10, color: '#64748b', lineHeight: 1.4, flex: 1 }}>{desc}</div>
+                  {fn && (
+                    <button type="button" onClick={e => { e.stopPropagation(); fn(); }}
+                      style={{ padding: '5px 8px', borderRadius: 7, border: `1px solid ${border}`, background: 'transparent', color: accent, fontWeight: 700, fontSize: 10, cursor: 'pointer', marginTop: 2 }}>
+                      ⬇️ Télécharger
+                    </button>
+                  )}
+                  {active && <span style={{ fontSize: 8, fontWeight: 700, color: accent, textAlign: 'center', letterSpacing: 0.5 }}>SÉLECTIONNÉ</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Liste multi-stratégies Pro (jusqu'à 100 slots) ── */}
+        <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 12, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#c7d2fe', letterSpacing: 0.3 }}>📚 Stratégies Pro chargées</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Chaque import crée un nouveau slot. Vous pouvez modifier ou supprimer, mais pas remplacer.</div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 8, background: stratTotal >= stratMax ? 'rgba(239,68,68,0.12)' : 'rgba(99,102,241,0.15)', color: stratTotal >= stratMax ? '#f87171' : '#a5b4fc', border: `1px solid ${stratTotal >= stratMax ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}` }}>
+              {stratTotal} / {stratMax} slots
+            </div>
+          </div>
+          {stratList.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '10px 0' }}>
+              Aucune stratégie importée — utilisez le bouton d'import ci-dessous pour en ajouter une.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {stratList.map(s => {
+                const logs = proLogsById[s.id] || [];
+                const lastLogs = logs.slice(-4);
+                return (
+                <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: 'rgba(15,23,42,0.5)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.15)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 22 }}>{extIcon(s.filename)}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0', wordBreak: 'break-all', lineHeight: 1.25 }} title={s.strategy_name || s.filename}>
+                        {s.strategy_name || s.filename}
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 5, fontFamily: 'monospace', marginLeft: 8 }}>S{s.id}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2, fontFamily: 'monospace', wordBreak: 'break-all' }} title={s.filename}>
+                        📄 {s.filename} · {s.engine_type || s.file_type}
+                        {s.engine_loaded === true && <span style={{ color: '#4ade80', marginLeft: 6 }}>✓ actif</span>}
+                        {s.engine_loaded === false && <span style={{ color: '#94a3b8', marginLeft: 6 }}>— stocké</span>}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => downloadOneStrategy(s.id, s.filename)}
+                      title="Télécharger"
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)', color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>⬇</button>
+                    <button type="button" onClick={() => deleteOneStrategy(s.id, s.strategy_name || s.filename)}
+                      title="Supprimer"
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>🗑</button>
+                  </div>
+
+                  {/* Bouton d'ouverture des logs Pro */}
+                  {s.engine_loaded === true && (
+                    <button type="button"
+                      onClick={() => { setProLogsExpanded(s.id); fetchProLogs(s.id); fetchProSource(s.id); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                        padding: '10px 14px', borderRadius: 8,
+                        border: '1px solid rgba(168,85,247,0.35)',
+                        background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(99,102,241,0.10))',
+                        color: '#e9d5ff', cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                        textAlign: 'left', width: '100%',
+                      }}
+                      title={`Ouvrir les logs Pro de "${s.strategy_name || s.filename}"`}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 16 }}>📜</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          Ouvrir les logs Pro de la stratégie <span style={{ color: '#fff', fontWeight: 800 }}>{s.strategy_name || s.filename}</span>
+                        </span>
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', padding: '2px 7px', borderRadius: 5, fontFamily: 'monospace' }}>
+                          {logs.length} ligne{logs.length > 1 ? 's' : ''}
+                        </span>
+                        <span style={{ fontSize: 13 }}>⛶</span>
+                      </span>
+                    </button>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {stratMeta && (
+          <div style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 12, padding: '14px 16px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 30 }}>{extIcon(stratMeta.filename)}</span>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{stratMeta.filename}</span>
+                    {stratMeta.engine_loaded === true && stratMeta.engine_type === 'json' && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, padding: '1px 7px' }}>
+                        ✅ JSON · {stratMeta.strategy_count || 0} stratégie{(stratMeta.strategy_count || 0) > 1 ? 's' : ''} chargées
+                      </span>
+                    )}
+                    {stratMeta.engine_loaded === true && stratMeta.engine_type === 'script_js' && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 6, padding: '1px 7px' }}>
+                        ⚡ JS · Exécuté dans le moteur (vm sandbox)
+                      </span>
+                    )}
+                    {stratMeta.engine_loaded === true && stratMeta.engine_type === 'script_py' && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 6, padding: '1px 7px' }}>
+                        🐍 Python · Exécuté via Python 3.12
+                      </span>
+                    )}
+                    {stratMeta.engine_loaded === false && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(100,116,139,0.15)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', borderRadius: 6, padding: '1px 7px' }}>
+                        📁 Stocké · non exécuté
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                    {fmtSize(stratMeta.size)} · Modifié le {fmtDate(stratMeta.updated_at)}
+                    {stratMeta.strategy_names?.length > 0 && (
+                      <span style={{ marginLeft: 8, color: '#475569' }}>— {stratMeta.strategy_names.join(', ')}</span>
+                    )}
+                    {stratMeta.note && stratMeta.engine_loaded !== true && (
+                      <div style={{ marginTop: 4, color: '#64748b', fontStyle: 'italic' }}>{stratMeta.note}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setShowPreview(v => !v)}
+                  style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)', color: '#86efac', fontSize: 12, cursor: 'pointer' }}>
+                  {showPreview ? '🙈 Masquer' : '👁 Aperçu'}
+                </button>
+                <button type="button" onClick={deleteFile}
+                  style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>
+                  🗑 Supprimer
+                </button>
+              </div>
+            </div>
+            {showPreview && stratContent && (
+              <div style={{ marginTop: 14, maxHeight: 320, overflowY: 'auto', background: '#0a0f1e', borderRadius: 8, padding: '12px 14px', fontSize: 11, fontFamily: 'monospace', color: '#4ade80', lineHeight: 1.75, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid rgba(34,197,94,0.15)' }}>
+                {stratContent}
+              </div>
+            )}
+          </div>
+        )}
+
+        {stratFile && (
+          <div style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 12, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 26 }}>{extIcon(stratFile.name)}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{stratFile.name}</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{fmtSize(stratFile.content.length)} · Prêt à enregistrer</div>
+            </div>
+            <button type="button" onClick={() => setStratFile(null)}
+              style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(100,116,139,0.3)', background: 'none', color: '#64748b', fontSize: 11, cursor: 'pointer' }}>✕</button>
+          </div>
+        )}
+
+        {stratMsg && (
+          <div style={{ padding: '8px 14px', borderRadius: 8, marginBottom: 14, background: stratMsg.startsWith('⚠️') ? 'rgba(251,191,36,0.08)' : 'rgba(239,68,68,0.1)', border: `1px solid ${stratMsg.startsWith('⚠️') ? 'rgba(251,191,36,0.3)' : 'rgba(239,68,68,0.3)'}`, color: stratMsg.startsWith('⚠️') ? '#fbbf24' : '#fca5a5', fontSize: 13 }}>
+            {stratMsg}
+          </div>
+        )}
+
+        {/* ── Rapport de validation ── */}
+        {stratValidation && (
+          <div style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden', border: `1px solid ${stratValidation.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}` }}>
+            {/* En-tête résultat */}
+            <div style={{ padding: '12px 16px', background: stratValidation.ok ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 18 }}>{stratValidation.ok ? '✅' : '❌'}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: stratValidation.ok ? '#4ade80' : '#f87171' }}>
+                  {stratValidation.ok ? 'Analyse réussie — fichier enregistré' : `${stratValidation.errors.length} erreur(s) détectée(s) — fichier non enregistré`}
+                </div>
+                {stratValidation.strategy_name && (
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                    Stratégie identifiée : <strong style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>"{stratValidation.strategy_name}"</strong>
+                    {stratValidation.ok && <span style={{ marginLeft: 8, color: '#818cf8' }}>→ apparaîtra sous ce nom dans les Canaux (ID : S5001)</span>}
+                  </div>
+                )}
+              </div>
+              {stratValidation.ok && stratValidation.meta?.strategy_info && (() => {
+                const si = stratValidation.meta.strategy_info;
+                return (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {si.hand && <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 5, padding: '2px 7px' }}>Main : {si.hand}</span>}
+                    {si.decalage !== undefined && <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 5, padding: '2px 7px' }}>Décalage : +{si.decalage}</span>}
+                    {si.max_rattrapage !== undefined && <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 5, padding: '2px 7px' }}>Rattrapages : {si.max_rattrapage}</span>}
+                    {si.count > 1 && <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 5, padding: '2px 7px' }}>{si.count} stratégies</span>}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Erreurs */}
+            {stratValidation.errors.length > 0 && (
+              <div style={{ background: 'rgba(239,68,68,0.05)', borderTop: '1px solid rgba(239,68,68,0.15)' }}>
+                {stratValidation.errors.map((err, i) => (
+                  <div key={i} style={{ padding: '9px 16px', borderBottom: i < stratValidation.errors.length - 1 ? '1px solid rgba(239,68,68,0.1)' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(239,68,68,0.2)', color: '#f87171', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap', marginTop: 1 }}>{err.type}</span>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 12, color: '#fca5a5' }}>{err.message}</span>
+                      {err.line && <span style={{ marginLeft: 8, fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>ligne {err.line}{err.col ? `:${err.col}` : ''}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Avertissements */}
+            {stratValidation.warnings.length > 0 && (
+              <div style={{ background: 'rgba(251,191,36,0.04)', borderTop: '1px solid rgba(251,191,36,0.15)' }}>
+                <div style={{ padding: '6px 16px 2px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Avertissements</div>
+                {stratValidation.warnings.map((w, i) => (
+                  <div key={i} style={{ padding: '7px 16px', borderBottom: i < stratValidation.warnings.length - 1 ? '1px solid rgba(251,191,36,0.08)' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap', marginTop: 1 }}>{w.type}</span>
+                    <span style={{ fontSize: 12, color: '#fde68a', flex: 1 }}>{w.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Noms des stratégies JSON */}
+            {stratValidation.ok && stratValidation.meta?.strategy_info?.names?.length > 0 && stratValidation.meta.strategy_info.names.length > 1 && (
+              <div style={{ padding: '10px 16px', background: 'rgba(34,197,94,0.04)', borderTop: '1px solid rgba(34,197,94,0.12)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Stratégies dans les Canaux :</span>
+                {stratValidation.meta.strategy_info.names.map((n, i) => (
+                  <span key={i} style={{ fontSize: 11, fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#4ade80', borderRadius: 5, padding: '2px 8px', border: '1px solid rgba(34,197,94,0.25)', fontFamily: 'monospace' }}>
+                    S{5001 + i} · {n}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Toggle Fichier / Coller le code ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 14, borderRadius: 9, border: '1px solid rgba(99,102,241,0.25)', overflow: 'hidden', alignSelf: 'flex-start' }}>
+          <button type="button" onClick={() => { setPasteMode(false); setStratFile(null); }}
+            style={{ padding: '8px 18px', border: 'none', background: !pasteMode ? 'rgba(99,102,241,0.25)' : 'transparent', color: !pasteMode ? '#a5b4fc' : '#475569', fontWeight: 700, fontSize: 12, cursor: 'pointer', transition: 'all .15s' }}>
+            📁 Importer un fichier
+          </button>
+          <button type="button" onClick={() => { setPasteMode(true); setStratFile(null); if (selectedFormat !== 'all') setPasteFilename('ma-strategie.' + selectedFormat); }}
+            style={{ padding: '8px 18px', border: 'none', borderLeft: '1px solid rgba(99,102,241,0.2)', background: pasteMode ? 'rgba(99,102,241,0.25)' : 'transparent', color: pasteMode ? '#a5b4fc' : '#475569', fontWeight: 700, fontSize: 12, cursor: 'pointer', transition: 'all .15s' }}>
+            ✏️ Coller le code
+          </button>
+        </div>
+
+        {/* ── Mode Coller le code ── */}
+        {pasteMode && (
+          <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Champ nom de fichier */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700, whiteSpace: 'nowrap' }}>Nom du fichier :</span>
+              <input
+                type="text"
+                value={pasteFilename}
+                onChange={e => setPasteFilename(e.target.value)}
+                placeholder="ma-strategie.js"
+                style={{ flex: 1, maxWidth: 260, padding: '7px 12px', borderRadius: 7, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(15,23,42,0.6)', color: '#e2e8f0', fontSize: 13, fontFamily: 'monospace', outline: 'none' }}
+              />
+              <span style={{ fontSize: 10, color: '#475569' }}>.js · .py · .json</span>
+            </div>
+            {/* Zone de texte pour coller */}
+            <textarea
+              value={pasteCode}
+              onChange={e => setPasteCode(e.target.value)}
+              placeholder={"Collez votre code ici…\n\n// Exemple JS :\nmodule.exports = { name: 'Ma Stratégie', hand: 'joueur', decalage: 2, max_rattrapage: 4, tg_format: 1,\n  processGame(gn, pSuits, bSuits, winner, state) {\n    // votre logique\n    return null;\n  }\n};"}
+              spellCheck={false}
+              style={{ width: '100%', minHeight: 260, padding: '14px 16px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(10,15,30,0.8)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', lineHeight: 1.7, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+            />
+            {/* Bouton enregistrer */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button type="button" onClick={savePastedCode} disabled={stratSaving || !pasteCode.trim()}
+                style={{ padding: '9px 26px', borderRadius: 9, border: 'none', background: (stratSaving || !pasteCode.trim()) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg,#6366f1,#a855f7)', color: (stratSaving || !pasteCode.trim()) ? '#475569' : '#fff', fontWeight: 700, fontSize: 13, cursor: (stratSaving || !pasteCode.trim()) ? 'not-allowed' : 'pointer' }}>
+                {stratSaving ? '⏳ Enregistrement…' : '💾 Enregistrer'}
+              </button>
+              {pasteCode.trim() && (
+                <span style={{ fontSize: 11, color: '#475569', fontFamily: 'monospace' }}>
+                  {Math.round(pasteCode.length / 100) / 10} Ko · {pasteCode.split('\n').length} lignes
+                </span>
+              )}
+              <button type="button" onClick={() => { setPasteCode(''); setPasteMode(false); }}
+                style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 7, border: '1px solid rgba(100,116,139,0.25)', background: 'transparent', color: '#475569', fontSize: 11, cursor: 'pointer' }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Mode Importer un fichier ── */}
+        {!pasteMode && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 9, border: '1px solid rgba(34,197,94,0.35)', background: 'rgba(34,197,94,0.07)', color: '#86efac', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            📁 Choisir un fichier
+            <input type="file"
+              accept={
+                selectedFormat === 'json' ? '.json,application/json' :
+                selectedFormat === 'js'   ? '.js,.mjs,text/javascript' :
+                selectedFormat === 'py'   ? '.py,text/x-python' :
+                selectedFormat === 'jsx'  ? '.jsx,.tsx' :
+                '.json,.js,.mjs,.py,.jsx,.ts,.tsx,application/json,text/javascript,text/x-python,text/plain'
+              }
+              onChange={handleFileChange} style={{ display: 'none' }} />
+          </label>
+          {stratFile && (
+            <button type="button" onClick={uploadFile} disabled={stratSaving}
+              style={{ padding: '9px 22px', borderRadius: 9, border: 'none', background: stratSaving ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg,#16a34a,#22c55e)', color: stratSaving ? '#475569' : '#fff', fontWeight: 700, fontSize: 13, cursor: stratSaving ? 'wait' : 'pointer' }}>
+              {stratSaving ? '⏳ Enregistrement…' : '💾 Enregistrer le fichier'}
+            </button>
+          )}
+          {stratFile && (
+            <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace' }}>
+              📄 {stratFile.name} ({Math.round(stratFile.content.length / 100) / 10} Ko)
+            </span>
+          )}
+        </div>
+        )}
+
+      </div>
+
+      {/* ── Séparateur ── */}
+      <div style={{ borderTop: '1px solid rgba(99,102,241,0.15)', margin: '20px 0' }} />
+
+      {/* ── Formats de message personnalisés ── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0' }}>🎨 Formats de message personnalisés</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, lineHeight: 1.6 }}>
+              Créez vos propres templates Telegram, en nombre illimité. Utilisez <code style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', padding: '1px 5px', borderRadius: 4 }}>tg_template</code> directement dans votre fichier, ou référencez un format DB via <code style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', padding: '1px 5px', borderRadius: 4 }}>tg_format: {'{'}19 + ID{'}'}</code>
+            </div>
+          </div>
+          <button type="button" onClick={() => { setShowFmtPanel(v => !v); setFmtEditing(null); setFmtForm({ name: '', template: '', parse_mode: '' }); setFmtMsg(''); }}
+            style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)', background: showFmtPanel ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.08)', color: '#a5b4fc', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+            {showFmtPanel ? '✕ Fermer' : '➕ Nouveau format'}
+          </button>
+        </div>
+
+        {/* Variables disponibles */}
+        <div style={{ background: 'rgba(15,23,42,0.5)', borderRadius: 10, padding: '10px 14px', marginBottom: 14, border: '1px solid rgba(99,102,241,0.15)', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>Variables :</span>
+          {['{game}','{emoji}','{suit}','{status}','{maxR}','{hand}','{rattrapage}','{strategy}'].map(v => (
+            <code key={v} style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8', padding: '2px 7px', borderRadius: 5, fontSize: 11, fontFamily: 'monospace' }}>{v}</code>
+          ))}
+        </div>
+
+        {/* Formulaire création/édition */}
+        {showFmtPanel && (
+          <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 12, padding: '18px 18px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#a5b4fc' }}>{fmtEditing ? '✏️ Modifier le format' : '➕ Nouveau format'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Nom du format *</div>
+                <input value={fmtForm.name} onChange={e => setFmtForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="ex: Mon format personnalisé"
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 7, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(15,23,42,0.6)', color: '#e2e8f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Parse mode (optionnel)</div>
+                <select value={fmtForm.parse_mode} onChange={e => setFmtForm(f => ({ ...f, parse_mode: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 7, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(15,23,42,0.8)', color: '#e2e8f0', fontSize: 13, outline: 'none' }}>
+                  <option value="">Aucun</option>
+                  <option value="Markdown">Markdown</option>
+                  <option value="HTML">HTML</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Template du message *</div>
+              <textarea value={fmtForm.template} onChange={e => setFmtForm(f => ({ ...f, template: e.target.value }))}
+                placeholder={'🎯 Jeu #{game}\n🃏 Costume : {emoji} {suit}\n📊 Statut  : {status}'}
+                spellCheck={false} rows={4}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(10,15,30,0.8)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', lineHeight: 1.7, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button type="button" onClick={saveFmt} disabled={fmtSaving}
+                style={{ padding: '8px 22px', borderRadius: 8, border: 'none', background: fmtSaving ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg,#6366f1,#a855f7)', color: fmtSaving ? '#475569' : '#fff', fontWeight: 700, fontSize: 13, cursor: fmtSaving ? 'wait' : 'pointer' }}>
+                {fmtSaving ? '⏳…' : fmtEditing ? '💾 Mettre à jour' : '💾 Créer le format'}
+              </button>
+              {fmtEditing && (
+                <button type="button" onClick={() => { setFmtEditing(null); setFmtForm({ name: '', template: '', parse_mode: '' }); }}
+                  style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(100,116,139,0.3)', background: 'transparent', color: '#64748b', fontSize: 12, cursor: 'pointer' }}>
+                  Annuler l'édition
+                </button>
+              )}
+              {fmtMsg && <span style={{ fontSize: 12, color: fmtMsg.startsWith('✅') ? '#4ade80' : '#f87171', fontWeight: 600 }}>{fmtMsg}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Liste des formats */}
+        {customFormats.length === 0 ? (
+          <div style={{ padding: '14px 16px', borderRadius: 10, background: 'rgba(100,116,139,0.06)', border: '1px dashed rgba(100,116,139,0.2)', color: '#475569', fontSize: 12, textAlign: 'center' }}>
+            Aucun format personnalisé — créez-en un avec le bouton ci-dessus, ou utilisez directement <code style={{ color: '#818cf8' }}>tg_template</code> dans votre fichier.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {customFormats.map(fmt => (
+              <div key={fmt.id} style={{ borderRadius: 10, border: '1px solid rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.04)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 5, padding: '2px 8px', fontFamily: 'monospace' }}>
+                      tg_format: {18 + fmt.id}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{fmt.name}</span>
+                    {fmt.parse_mode && <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(100,116,139,0.1)', borderRadius: 4, padding: '1px 6px' }}>{fmt.parse_mode}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" onClick={() => editFmt(fmt)}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', background: 'transparent', color: '#818cf8', fontSize: 11, cursor: 'pointer' }}>✏️ Modifier</button>
+                    <button type="button" onClick={() => deleteFmt(fmt.id)}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>🗑</button>
+                  </div>
+                </div>
+                <pre style={{ margin: 0, padding: '8px 12px', background: 'rgba(10,15,30,0.7)', borderRadius: 7, fontSize: 11, fontFamily: 'monospace', color: '#94a3b8', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, border: '1px solid rgba(99,102,241,0.1)' }}>
+                  {fmt.template}
+                </pre>
+                <div style={{ fontSize: 10, color: '#475569' }}>
+                  Utilisez <code style={{ color: '#818cf8' }}>tg_format: {18 + fmt.id}</code> dans votre stratégie JSON/JS/Python pour ce format
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Modal Logs Pro agrandis ───────────────────────────────────── */}
+      {proLogsExpanded !== null && (() => {
+        const s = stratList.find(x => x.id === proLogsExpanded);
+        const logs = proLogsById[proLogsExpanded] || [];
+        const source = proSourceById[proLogsExpanded] || '';
+        return (
+          <div onClick={() => setProLogsExpanded(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: '#0f172a', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 14, width: '100%', maxWidth: 960, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+              <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0' }}>📜 Logs Pro · S{proLogsExpanded}</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: 2 }}>
+                    {s?.filename} {s?.strategy_name ? `· ${s.strategy_name}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="button" onClick={() => fetchProLogs(proLogsExpanded)}
+                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)', color: '#a5b4fc', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🔄 Rafraîchir</button>
+                  <button type="button" onClick={() => clearProLogs(proLogsExpanded)}
+                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🗑 Vider</button>
+                  <button type="button" onClick={() => setProLogsExpanded(null)}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(100,116,139,0.4)', background: 'transparent', color: '#cbd5e1', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>✕ Fermer</button>
+                </div>
+              </div>
+              {/* Bandeau "idée de la stratégie" : extrait du commentaire en tête du fichier */}
+              {(() => {
+                const headerLines = [];
+                if (source) {
+                  const lines = source.split('\n');
+                  for (const ln of lines) {
+                    const t = ln.trim();
+                    if (t === '' || t === '//' || /^\/\*+/.test(t) || /^\*+\/?$/.test(t)) continue;
+                    const m = t.match(/^(?:\/\/+|#|\*+)\s?(.*)$/);
+                    if (m) {
+                      const cleaned = m[1].replace(/^[=\-─━]+$/, '').trim();
+                      if (cleaned) headerLines.push(cleaned);
+                    } else {
+                      break; // première ligne de code → on s'arrête
+                    }
+                    if (headerLines.length >= 8) break;
+                  }
+                }
+                const info = s?.strategy_info || {};
+                return (
+                  <div style={{ padding: '10px 14px', background: 'rgba(168,85,247,0.06)', borderBottom: '1px solid rgba(168,85,247,0.2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+                      💡 Idée de la stratégie
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: headerLines.length ? 8 : 0 }}>
+                      {info.hand && <span style={{ fontSize: 10, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>main : {info.hand}</span>}
+                      {(info.decalage !== undefined) && <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>décalage : +{info.decalage}</span>}
+                      {(info.max_rattrapage !== undefined) && <span style={{ fontSize: 10, color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>rattrapages max : {info.max_rattrapage}</span>}
+                      {info.entry_fn && <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontFamily: 'monospace' }}>fonction : {info.entry_fn}()</span>}
+                    </div>
+                    {headerLines.length > 0 && (
+                      <div style={{ fontSize: 11.5, color: '#cbd5e1', lineHeight: 1.55, fontStyle: 'italic' }}>
+                        {headerLines.map((l, i) => <div key={i}>· {l}</div>)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'minmax(0,1.2fr) minmax(0,1fr)', gap: 1, background: 'rgba(99,102,241,0.15)' }}>
+                {/* Zone HAUT : logs en direct (la raison des prédictions) */}
+                <div style={{ background: '#0a0f1c', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#0a0f1c', paddingBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span>🔴 Raison des prédictions · logs en direct</span>
+                    <span style={{ color: '#64748b', fontWeight: 700 }}>{logs.length} ligne{logs.length > 1 ? 's' : ''}</span>
+                  </div>
+                  <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, lineHeight: 1.55 }}>
+                    {logs.length === 0 ? (
+                      <div style={{ color: '#475569', fontStyle: 'italic' }}>Aucun log capturé pour l'instant. Les <code>console.log()</code> de votre stratégie apparaîtront ici dès qu'une partie sera traitée.</div>
+                    ) : logs.map((l, i) => (
+                      <div key={i} style={{ color: l.level === 'error' ? '#f87171' : l.level === 'warn' ? '#fbbf24' : '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 3 }}>
+                        <span style={{ color: '#475569', marginRight: 6 }}>{new Date(l.ts).toLocaleTimeString('fr-FR')}</span>{l.msg}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Zone BAS : règles de prédiction (code source) */}
+                <div style={{ background: '#020617', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#020617', paddingBottom: 6 }}>
+                    📄 Règles de prédiction · code source de la stratégie
+                  </div>
+                  <pre style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.5, color: '#cbd5e1', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {source || '— code non chargé —'}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+    </div>
+  );
+}
+
 function DeployLogsPanel() {
   const [logs, setLogs]       = React.useState([]);
   const [loading, setLoading] = React.useState(false);
@@ -565,18 +2128,19 @@ function ProjectBackupPanel() {
           </button>
         </div>
 
-        {/* Bouton téléchargement ZIP complet */}
+        {/* Bouton téléchargement ZIP de déploiement Render.com (léger, < 5 Mo) */}
         <a
-          href="/api/admin/project-backup/zip-diff"
+          href="/api/admin/project-backup/zip-render"
           download
+          title="Pack prêt à déployer sur Render.com — sources serveur + dist/ + render.yaml + DEPLOY.md"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             padding: '10px 20px', borderRadius: 12, textDecoration: 'none', fontWeight: 700, fontSize: 12,
             background: 'rgba(168,85,247,0.1)', border: '2px solid rgba(168,85,247,0.35)', color: '#c084fc',
             transition: 'all 0.2s', marginBottom: 4,
           }}>
           <span>📦</span>
-          <span>Télécharger le ZIP de déploiement</span>
-          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>fichiers modifiés</span>
+          <span>ZIP déploiement Render.com</span>
+          <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>léger, prêt à uploader</span>
         </a>
 
         {/* Bouton téléchargement ZIP différentiel (fichiers modifiés depuis les nouveaux modes) */}
@@ -666,12 +2230,17 @@ function AdminPanel() {
   const navigate = useNavigate();
   const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
+  const isProOnly = !user?.is_admin && !!user?.is_pro;
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const [adminTab, setAdminTab] = useState('utilisateurs');
+  const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
+  useEffect(() => {
+    if (isProOnly && adminTab !== 'config-pro') setAdminTab('config-pro');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProOnly]);
 
   // Duration inputs per user: { userId: { val, unit } }
   const [durInputs, setDurInputs] = useState({});
@@ -811,10 +2380,13 @@ function AdminPanel() {
   ];
 
   const [strategies, setStrategies] = useState([]);
+  const [proStrategies, setProStrategies] = useState([]); // stratégies Pro chargées (S5001+)
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
   const [stratEditing, setStratEditing] = useState(null); // id being edited, null = creating
   const [stratMsg, setStratMsg] = useState('');
   const [successModal, setSuccessModal] = useState(null);
+  const [proSavedModal, setProSavedModal] = useState(null); // { type:'create'|'update', id, filename, strategy_name, hand, decalage, max_rattrapage, engine_type, warnings, engine_error }
+  const [proErrorModal, setProErrorModal] = useState(null); // { title, message, errors:[{type,line,message}], warnings:[] }
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
   const [mirrorCountsData, setMirrorCountsData] = useState({}); // { [stratId]: { counts, threshold } }
@@ -836,6 +2408,76 @@ function AdminPanel() {
   const [renderDbStatus, setRenderDbStatus]   = useState(null); // { connected, has_url, stats }
   const [renderDbSaving, setRenderDbSaving]   = useState(false);
   const [renderDbMsg, setRenderDbMsg]         = useState('');
+
+  // ── Diffusion live des jeux (Telegram multi-canaux) ──
+  const [lbTargets, setLbTargets]             = useState([]);
+  const [lbLoading, setLbLoading]             = useState(false);
+  const [lbMsg, setLbMsg]                     = useState('');
+  const [lbForm, setLbForm]                   = useState({ bot_token: '', channel_id: '', label: '' });
+  const [lbSaving, setLbSaving]               = useState(false);
+
+  const loadLbTargets = async () => {
+    setLbLoading(true);
+    try {
+      const r = await fetch('/api/admin/live-broadcast/targets', { credentials: 'include' });
+      const d = await r.json();
+      setLbTargets(Array.isArray(d.targets) ? d.targets : []);
+    } catch (e) { setLbMsg('❌ ' + e.message); }
+    finally { setLbLoading(false); }
+  };
+
+  const addLbTarget = async () => {
+    if (!lbForm.bot_token.trim() || !lbForm.channel_id.trim()) {
+      setLbMsg('❌ Token et ID canal requis'); return;
+    }
+    setLbSaving(true); setLbMsg('');
+    try {
+      const r = await fetch('/api/admin/live-broadcast/targets', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lbForm),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setLbForm({ bot_token: '', channel_id: '', label: '' });
+      setLbMsg('✅ Cible ajoutée');
+      loadLbTargets();
+    } catch (e) { setLbMsg('❌ ' + e.message); }
+    finally { setLbSaving(false); }
+  };
+
+  const deleteLbTarget = async (id) => {
+    if (!confirm('Supprimer cette cible de diffusion live ?')) return;
+    try {
+      const r = await fetch(`/api/admin/live-broadcast/targets/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Erreur'); }
+      loadLbTargets();
+    } catch (e) { setLbMsg('❌ ' + e.message); }
+  };
+
+  const toggleLbTarget = async (id, enabled) => {
+    try {
+      const r = await fetch(`/api/admin/live-broadcast/targets/${id}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Erreur'); }
+      loadLbTargets();
+    } catch (e) { setLbMsg('❌ ' + e.message); }
+  };
+
+  const testLbTarget = async (id) => {
+    setLbMsg('⏳ Envoi du test…');
+    try {
+      const r = await fetch(`/api/admin/live-broadcast/targets/${id}/test`, { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setLbMsg('✅ Message test envoyé (id ' + d.message_id + ')');
+    } catch (e) { setLbMsg('❌ ' + e.message); }
+  };
+
+  useEffect(() => { if (adminTab === 'canaux') loadLbTargets(); }, [adminTab]);
 
   // Hébergement Bots
   const [hostedBots, setHostedBots]           = useState([]);
@@ -1054,6 +2696,14 @@ function AdminPanel() {
           relance_rules: Array.isArray(s.relance_rules) ? s.relance_rules : [],
         })));
       }
+      // Charger aussi les stratégies Pro (S5001+) pour la modale d'accès utilisateur
+      try {
+        const rp = await fetch('/api/admin/pro-strategies', { credentials: 'include' });
+        if (rp.ok) {
+          const dp = await rp.json();
+          setProStrategies(Array.isArray(dp.strategies) ? dp.strategies : []);
+        }
+      } catch {}
     } catch {}
   }, []);
 
@@ -1890,6 +3540,171 @@ function AdminPanel() {
     <>
     <div className="admin-page">
 
+      {/* ── Modale succès Pro (import / mise à jour fichier) ───────────────── */}
+      {proSavedModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
+          onClick={() => setProSavedModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
+            border: '2px solid rgba(34,197,94,0.45)',
+            borderRadius: 20, padding: '28px 26px', maxWidth: 460, width: 'calc(100% - 32px)',
+            textAlign: 'center', boxShadow: '0 0 60px rgba(34,197,94,0.35), 0 20px 80px rgba(0,0,0,0.6)',
+            animation: 'smPopIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both',
+          }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%', margin: '0 auto 14px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'radial-gradient(circle, rgba(34,197,94,0.35) 0%, rgba(34,197,94,0.08) 70%)',
+              border: '2px solid rgba(34,197,94,0.5)',
+            }}>
+              <span style={{ fontSize: 42 }}>{proSavedModal.type === 'create' ? '✅' : '✏️'}</span>
+            </div>
+            <div style={{
+              display: 'inline-block', fontSize: 11, fontWeight: 800, letterSpacing: 2,
+              color: '#4ade80', background: 'rgba(34,197,94,0.12)',
+              border: '1px solid rgba(34,197,94,0.35)', borderRadius: 6, padding: '3px 12px', marginBottom: 12,
+            }}>
+              {proSavedModal.type === 'create' ? '✦ NOUVELLE STRATÉGIE PRO' : '✦ STRATÉGIE PRO MISE À JOUR'}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 900, color: '#f1f5f9', marginBottom: 4 }}>
+              {proSavedModal.type === 'create' ? 'Importation réussie !' : 'Mise à jour effectuée !'}
+            </div>
+            <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 18 }}>
+              Fichier <code style={{ color: '#e2e8f0', background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: 4 }}>{proSavedModal.filename}</code> enregistré.
+            </div>
+
+            <div style={{
+              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 14, padding: '16px 18px', marginBottom: 18, textAlign: 'left',
+            }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Slot</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#c084fc' }}>S{proSavedModal.id}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Stratégie</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0' }}>{proSavedModal.strategy_name || '—'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Main</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#818cf8' }}>{proSavedModal.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Décalage</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#fbbf24' }}>+{proSavedModal.decalage ?? '?'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Rattrapage</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#fbbf24' }}>R{proSavedModal.max_rattrapage ?? '?'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Moteur</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#4ade80' }}>{(proSavedModal.engine_type || '').toUpperCase() || '—'}</div>
+                </div>
+              </div>
+            </div>
+
+            {proSavedModal.warnings?.length > 0 && (
+              <div style={{
+                background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)',
+                borderRadius: 10, padding: '10px 12px', marginBottom: 14, textAlign: 'left',
+                fontSize: 12, color: '#fcd34d',
+              }}>
+                <div style={{ fontWeight: 800, marginBottom: 4 }}>⚠️ {proSavedModal.warnings.length} avertissement(s)</div>
+                {proSavedModal.warnings.slice(0, 3).map((w, i) => (
+                  <div key={i} style={{ opacity: 0.85 }}>• {w.message}</div>
+                ))}
+              </div>
+            )}
+
+            {proSavedModal.engine_error && (
+              <div style={{
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: 10, padding: '10px 12px', marginBottom: 14, textAlign: 'left',
+                fontSize: 12, color: '#fca5a5',
+              }}>
+                <div style={{ fontWeight: 800, marginBottom: 4 }}>⚠️ Erreur du moteur</div>
+                <div>{proSavedModal.engine_error}</div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              👉 Sélectionne le canal <b style={{ color: '#a78bfa' }}>S{proSavedModal.id}</b> dans le Dashboard pour voir les <b>logs en direct</b>.
+            </div>
+
+            <button
+              onClick={() => setProSavedModal(null)}
+              style={{
+                background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                color: 'white', fontWeight: 800, fontSize: 14, letterSpacing: 0.5,
+                border: 'none', borderRadius: 10, padding: '11px 28px', cursor: 'pointer',
+                boxShadow: '0 4px 20px rgba(34,197,94,0.4)',
+              }}>
+              Parfait, fermer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modale erreur Pro (validation / réseau) ─────────────────────────── */}
+      {proErrorModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
+          onClick={() => setProErrorModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #1f0d10 0%, #2a1418 100%)',
+            border: '2px solid rgba(239,68,68,0.5)',
+            borderRadius: 20, padding: '26px 24px', maxWidth: 480, width: 'calc(100% - 32px)',
+            textAlign: 'center', boxShadow: '0 0 60px rgba(239,68,68,0.35), 0 20px 80px rgba(0,0,0,0.6)',
+            animation: 'smPopIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both',
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: '50%', margin: '0 auto 12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'radial-gradient(circle, rgba(239,68,68,0.35) 0%, rgba(239,68,68,0.08) 70%)',
+              border: '2px solid rgba(239,68,68,0.5)',
+            }}><span style={{ fontSize: 36 }}>⚠️</span></div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#f1f5f9', marginBottom: 6 }}>
+              {proErrorModal.title}
+            </div>
+            <div style={{ fontSize: 13, color: '#fca5a5', marginBottom: 16, lineHeight: 1.5 }}>
+              {proErrorModal.message}
+            </div>
+
+            {proErrorModal.errors?.length > 0 && (
+              <div style={{
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: 10, padding: '12px 14px', marginBottom: 14, textAlign: 'left',
+                fontSize: 12, color: '#fecaca', maxHeight: 180, overflowY: 'auto',
+              }}>
+                <div style={{ fontWeight: 800, marginBottom: 6, color: '#fca5a5' }}>
+                  {proErrorModal.errors.length} erreur(s)
+                </div>
+                {proErrorModal.errors.map((er, i) => (
+                  <div key={i} style={{ marginBottom: 4 }}>
+                    <span style={{ background: 'rgba(239,68,68,0.18)', color: '#fca5a5', padding: '1px 6px', borderRadius: 4, fontWeight: 700, marginRight: 6 }}>
+                      {er.type}{er.line ? ` L${er.line}` : ''}
+                    </span>
+                    {er.message}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => setProErrorModal(null)}
+              style={{
+                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+                color: 'white', fontWeight: 800, fontSize: 14, letterSpacing: 0.5,
+                border: 'none', borderRadius: 10, padding: '11px 28px', cursor: 'pointer',
+                boxShadow: '0 4px 20px rgba(239,68,68,0.4)',
+              }}>
+              J'ai compris
+            </button>
+          </div>
+        </div>
+      )}
+
       {successModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
           onClick={() => setSuccessModal(null)}>
@@ -2120,8 +3935,11 @@ function AdminPanel() {
 
         {/* ── ONGLETS DE NAVIGATION ── */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '2px solid rgba(255,255,255,0.06)', paddingBottom: 0, flexWrap: 'wrap' }}>
-          {[
+          {(isProOnly
+            ? [{ id: 'config-pro', icon: '🔷', label: 'Config Pro', highlight: true }]
+            : [
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
+            { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
@@ -2133,7 +3951,7 @@ function AdminPanel() {
               { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
               { id: 'maj-db',       icon: '💾', label: 'Mise à jour DB' },
             ] : []),
-          ].map(tab => {
+          ]).map(tab => {
             const active = adminTab === tab.id;
             return (
               <button
@@ -2143,11 +3961,19 @@ function AdminPanel() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
                   padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
-                  background: active ? 'rgba(251,191,36,0.12)' : 'transparent',
-                  color: active ? '#fbbf24' : '#64748b',
-                  borderBottom: active ? '2px solid #fbbf24' : '2px solid transparent',
+                  background: active
+                    ? (tab.highlight ? 'rgba(99,102,241,0.18)' : 'rgba(251,191,36,0.12)')
+                    : (tab.highlight ? 'rgba(99,102,241,0.06)' : 'transparent'),
+                  color: active
+                    ? (tab.highlight ? '#818cf8' : '#fbbf24')
+                    : (tab.highlight ? '#6366f1' : '#64748b'),
+                  borderBottom: active
+                    ? (tab.highlight ? '2px solid #6366f1' : '2px solid #fbbf24')
+                    : '2px solid transparent',
                   marginBottom: -2, borderRadius: '8px 8px 0 0',
                   transition: 'all 0.18s',
+                  outline: !active && tab.highlight ? '1px solid rgba(99,102,241,0.25)' : 'none',
+                  outlineOffset: -1,
                 }}
               >
                 <span>{tab.icon}</span>
@@ -2344,6 +4170,18 @@ function AdminPanel() {
                             <button className="btn btn-tg btn-sm" onClick={() => openVisModal(u)}>📡 Canaux</button>
                             {isSuperAdmin && u.status !== 'pending' && (
                               <button className="btn btn-danger btn-sm" onClick={() => revokeUser(u.id)}>🔒 Révoquer</button>
+                            )}
+                            {isSuperAdmin && (
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: u.is_pro ? 'rgba(99,102,241,0.18)' : 'rgba(100,116,139,0.1)', border: `1px solid ${u.is_pro ? 'rgba(99,102,241,0.5)' : 'rgba(100,116,139,0.3)'}`, color: u.is_pro ? '#818cf8' : '#64748b', fontWeight: 700 }}
+                                onClick={async () => {
+                                  if (!confirm(u.is_pro ? `Retirer le statut Pro à ${u.username} ?` : `Activer le compte Pro pour ${u.username} ?`)) return;
+                                  const r = await fetch(`/api/admin/users/${u.id}/toggle-pro`, { method: 'POST', credentials: 'include' });
+                                  if (r.ok) loadUsers();
+                                }}
+                                title={u.is_pro ? 'Retirer le statut Pro' : 'Activer le compte Pro'}
+                              >{u.is_pro ? '🔷 Pro' : '⬜ Pro'}</button>
                             )}
                             {isSuperAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteUser(u.id)} style={{ opacity: 0.7 }}>🗑️</button>}
                           </div>
@@ -2647,6 +4485,9 @@ function AdminPanel() {
         </>}
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
+
+        {/* ── TAB : CONFIG PRO ── */}
+        {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
         {adminTab === 'canaux' && <>
@@ -5747,6 +7588,100 @@ function AdminPanel() {
         ════════════════════════════════════════════════ */}
         {adminTab === 'canaux' && <>
 
+        {/* ── SECTION 0 : DIFFUSION LIVE DES JEUX (multi-canaux) ── */}
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🎰</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Diffusion live des jeux</h2>
+              <p className="tg-admin-sub">
+                Envoie chaque partie en temps réel vers un ou plusieurs canaux Telegram.
+                Le message est édité au fur et à mesure que les cartes sortent, jusqu'à la fin de la partie.
+                <br />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  Format : <code style={{ background: 'rgba(168,85,247,0.12)', padding: '1px 5px', borderRadius: 4 }}>#N1104. ✅9(8♣️A♥️) - 3(6♥️7♠️) #T12 🔵#R</code>
+                  · Égalité : <code style={{ background: 'rgba(168,85,247,0.12)', padding: '1px 5px', borderRadius: 4 }}>🔰</code>
+                  · En cours : <code style={{ background: 'rgba(168,85,247,0.12)', padding: '1px 5px', borderRadius: 4 }}>⏰ ▶️</code>
+                </span>
+              </p>
+            </div>
+            <span className="tg-badge-connected" style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.3)' }}>
+              {lbTargets.length} cible{lbTargets.length > 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {lbMsg && (
+            <div className={`tg-alert ${lbMsg.startsWith('✅') ? 'tg-alert-ok' : (lbMsg.startsWith('⏳') ? '' : 'tg-alert-error')}`} style={{ marginTop: 8 }}>{lbMsg}</div>
+          )}
+
+          {/* Formulaire ajout */}
+          <div style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, padding: 14, marginTop: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#c084fc', marginBottom: 10 }}>➕ Ajouter une cible</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 API TOKEN BOT</label>
+                <input value={lbForm.bot_token} onChange={e => setLbForm(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder="123456:AAF-xxxxx…"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)', background: 'rgba(168,85,247,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID CANAL</label>
+                <input value={lbForm.channel_id} onChange={e => setLbForm(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder="@canal ou -1001234…"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)', background: 'rgba(168,85,247,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📛 Étiquette (optionnel)</label>
+                <input value={lbForm.label} onChange={e => setLbForm(p => ({ ...p, label: e.target.value }))}
+                  placeholder="ex : Canal VIP"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)', background: 'rgba(168,85,247,0.06)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+              </div>
+              <button type="button" onClick={addLbTarget} disabled={lbSaving}
+                style={{ padding: '10px 18px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.5)', background: 'rgba(168,85,247,0.18)', color: '#e9d5ff', fontWeight: 700, fontSize: 12, cursor: lbSaving ? 'wait' : 'pointer' }}>
+                {lbSaving ? '⏳…' : '➕ Ajouter'}
+              </button>
+            </div>
+          </div>
+
+          {/* Liste des cibles */}
+          <div style={{ marginTop: 14 }}>
+            {lbLoading && <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: 10 }}>⏳ Chargement…</div>}
+            {!lbLoading && lbTargets.length === 0 && (
+              <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '14px 10px' }}>
+                Aucune cible configurée. Ajoutez un canal ci-dessus pour commencer la diffusion.
+              </div>
+            )}
+            {!lbLoading && lbTargets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {lbTargets.map(t => (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'rgba(15,23,42,0.5)', borderRadius: 8, border: `1px solid ${t.enabled ? 'rgba(34,197,94,0.25)' : 'rgba(100,116,139,0.25)'}` }}>
+                    <span style={{ fontSize: 18 }}>{t.enabled ? '🟢' : '⚪'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
+                        {t.label || <span style={{ color: '#64748b', fontStyle: 'italic' }}>Sans étiquette</span>}
+                        <span style={{ fontSize: 11, color: '#a78bfa', marginLeft: 8, fontFamily: 'monospace' }}>{t.channel_id}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+                        🔑 {t.bot_token_preview} · {new Date(t.created_at).toLocaleString('fr-FR')}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => testLbTarget(t.id)} title="Envoyer un message test"
+                      style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>📨 Test</button>
+                    <button type="button" onClick={() => toggleLbTarget(t.id, !t.enabled)} title={t.enabled ? 'Désactiver' : 'Activer'}
+                      style={{ padding: '5px 11px', borderRadius: 6, border: `1px solid ${t.enabled ? 'rgba(251,191,36,0.4)' : 'rgba(34,197,94,0.4)'}`, background: t.enabled ? 'rgba(251,191,36,0.1)' : 'rgba(34,197,94,0.1)', color: t.enabled ? '#fbbf24' : '#4ade80', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                      {t.enabled ? '⏸ Pause' : '▶ Activer'}
+                    </button>
+                    <button type="button" onClick={() => deleteLbTarget(t.id)} title="Supprimer"
+                      style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>🗑</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── SECTION 1 : CANAUX PRINCIPAUX DU SITE ── */}
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
           <div className="tg-admin-header">
@@ -6454,7 +8389,11 @@ function AdminPanel() {
                   🎯 Canaux de prédiction (Dashboard)
                 </div>
                 <div className="vis-channels-list">
-                  {[...ALL_STRATEGIES, ...strategies.map(s => ({ id: `S${s.id}`, name: s.name, emoji: '⚙' }))].map(st => {
+                  {[
+                    ...ALL_STRATEGIES,
+                    ...strategies.map(s => ({ id: `S${s.id}`, name: s.name, emoji: '⚙' })),
+                    ...proStrategies.map(s => ({ id: `S${s.id}`, name: s.name || s.strategy_name || `Stratégie S${s.id}`, emoji: '⭐' })),
+                  ].map(st => {
                     const assignedS = visStratData[visModal.userId] || new Set();
                     const isOn = assignedS.has(st.id);
                     return (

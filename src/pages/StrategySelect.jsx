@@ -49,6 +49,7 @@ export default function StrategySelect() {
   const [selected, setSelected] = useState(null);
   const [entering, setEntering] = useState(false);
   const [customStrategies, setCustomStrategies] = useState([]);
+  const [proStrategies, setProStrategies] = useState([]);
   const [visibleStratIds, setVisibleStratIds] = useState(null); // null = loading
 
   useEffect(() => {
@@ -59,9 +60,11 @@ export default function StrategySelect() {
     Promise.all([
       fetch('/api/admin/strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : []),
       fetch('/api/admin/my-strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
-    ]).then(([allStrats, myStrats]) => {
+      fetch('/api/admin/pro-strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : { strategies: [] }),
+    ]).then(([allStrats, myStrats, proData]) => {
       setCustomStrategies(Array.isArray(allStrats) ? allStrats : []);
       setVisibleStratIds(new Set(myStrats.visible || []));
+      setProStrategies(proData.strategies || []);
     }).catch(() => setVisibleStratIds(new Set()));
   }, []);
 
@@ -178,6 +181,57 @@ export default function StrategySelect() {
               <button
                 className="select-card-btn"
                 onClick={() => handleSelect(ch.id)}
+                disabled={entering}
+              >
+                {isSelected ? '⚡ Chargement...' : 'Entrer dans ce canal →'}
+              </button>
+            </div>
+          );
+        })}
+
+        {/* ── Stratégies Pro (S5001, S5002…) ── */}
+        {(user?.is_admin || user?.is_pro) && proStrategies.map((pro, i) => {
+          const st = getStats(pro.id);
+          const isSelected = selected === pro.id;
+          return (
+            <div
+              key={pro.id}
+              className={`select-card ${isSelected ? 'selected' : ''} ${entering && !isSelected ? 'fading' : ''}`}
+              style={{ '--ch-color': '#a855f7', '--ch-glow': 'rgba(168,85,247,0.45)', animationDelay: `${(4 + i) * 0.12}s`, position: 'relative', overflow: 'hidden' }}
+            >
+              {/* Effet fond Pro */}
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,rgba(99,102,241,0.08) 0%,rgba(168,85,247,0.06) 100%)', pointerEvents: 'none' }} />
+              <div className="select-card-top">
+                <div className="select-card-emoji">🔷</div>
+                <div className="select-card-badge" style={{ background: 'linear-gradient(135deg,#6366f1,#a855f7)', color: '#fff', fontWeight: 900 }}>
+                  PRO
+                </div>
+              </div>
+              <h2 className="select-card-name" style={{ color: '#c4b5fd' }}>{pro.name}</h2>
+              <p className="select-card-desc" style={{ color: '#94a3b8', fontSize: 12 }}>
+                {pro.filename && <span style={{ display: 'block', fontFamily: 'monospace', color: '#6366f1', marginBottom: 4 }}>{pro.filename}</span>}
+                Main : {pro.hand} · Rattrapage max : R{pro.max_rattrapage} · ID : {pro.id}
+              </p>
+
+              <div className="select-card-stats">
+                <div className="select-stat">
+                  <span className="select-stat-val" style={{ color: '#22c55e' }}>{st.wins}</span>
+                  <span className="select-stat-label">Gagnés</span>
+                </div>
+                <div className="select-stat">
+                  <span className="select-stat-val" style={{ color: '#ef4444' }}>{st.losses}</span>
+                  <span className="select-stat-label">Perdus</span>
+                </div>
+                <div className="select-stat">
+                  <span className="select-stat-val" style={{ color: '#a855f7' }}>{st.rate}</span>
+                  <span className="select-stat-label">Win %</span>
+                </div>
+              </div>
+
+              <button
+                className="select-card-btn"
+                style={{ background: 'linear-gradient(135deg,#6366f1,#a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}
+                onClick={() => handleSelect(pro.id)}
                 disabled={entering}
               >
                 {isSelected ? '⚡ Chargement...' : 'Entrer dans ce canal →'}

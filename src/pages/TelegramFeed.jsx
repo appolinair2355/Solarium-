@@ -191,7 +191,9 @@ export default function TelegramFeed() {
                 >
                   <span className="tgfeed-tab-icon">✈️</span>
                   <span className="tgfeed-tab-name">{ch.name}</span>
-                  <span className="tgfeed-tab-count">{ch.messages.length}</span>
+                  {(user?.is_admin || user?.is_pro) && (
+                    <span className="tgfeed-tab-count">{ch.messages.length}</span>
+                  )}
                   {user?.is_admin && (
                     <span
                       className="tgfeed-tab-del"
