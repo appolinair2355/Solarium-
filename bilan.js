@@ -100,7 +100,7 @@ function formatBilanText(entry, dateStr) {
 
   // ── En-tête clair avec nom de la stratégie ──
   lines.push(`${BAR_DOUBLE}`);
-  lines.push(`📊 <b>BILAN — ${entry.name}</b>`);
+  lines.push(`📊 <b>BILAN</b>`);
   lines.push(`📅 <i>${dateStr}</i>`);
   lines.push(BAR_THIN);
 

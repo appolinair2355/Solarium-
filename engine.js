@@ -127,6 +127,13 @@ class Engine {
     this.relanceCondCounters = {}; // { `${relanceId}_${sourceId}_D/E`: N } — compteurs conditions D et E
     this.lossSequences  = []; // chargé depuis la DB
     this.gameCardsCache = {}; // { gameNumber: { player: ['♥','♦','♠'], banker: ['♣','♥'] } }
+    this.proStrategyIds = new Set(); // IDs numériques des stratégies Pro (5001, 5002...)
+
+    // ── Logs en direct par stratégie Pro ──────────────────────────────────
+    // { proNumId: [ { ts, level, msg }, ... ] }   tampon circulaire (80 lignes / slot)
+    this.proLogs = {};
+    this._PRO_LOG_MAX = 500;
+    this._proLogsSaveTimer = null;
 
     // ── Bloqueur de mauvaises prédictions ─────────────────────────────────
     // { stratId: { blockedUntilGame: N, reason: '...', triggeredAt: Date } }
@@ -470,6 +477,525 @@ class Engine {
     } catch (e) { console.error('loadCustomStrategies error:', e.message); }
   }
 
+  // ── Stratégies Pro (multi-fichiers — jusqu'à 100 slots) ──────────────────
+  // Supporte JSON (déclaratif), JS (vm sandbox), Python (child_process)
+  // Prédictions sauvegardées en DB avec strategy = "S5001", "S5002"...
+  async loadProStrategies() {
+    try {
+      // Nettoyer les anciennes stratégies Pro
+      for (const id of (this.proStrategyIds || [])) { delete this.custom[id]; }
+      this.proStrategyIds = new Set();
+
+      // Lire la liste des stratégies (avec migration legacy si besoin)
+      let list = [];
+      const rawList = await db.getSetting('pro_strategies_list').catch(() => null);
+      if (rawList) { try { list = JSON.parse(rawList); } catch {} }
+      if (!Array.isArray(list)) list = [];
+
+      // ── Migration du legacy (un seul fichier) ──
+      if (!list.length) {
+        const oldContent = await db.getSetting('pro_strategy_file_content').catch(() => null);
+        const oldMetaRaw = await db.getSetting('pro_strategy_file_meta').catch(() => null);
+        if (oldContent && oldMetaRaw) {
+          try {
+            const oldMeta = JSON.parse(oldMetaRaw);
+            const id = 5001;
+            list = [{
+              id, filename: oldMeta.filename || 'legacy.js',
+              file_type: oldMeta.file_type || 'js',
+              strategy_name: oldMeta.strategy_name || 'Stratégie Pro',
+              engine_loaded: oldMeta.engine_loaded !== false,
+            }];
+            await db.setSetting('pro_strategies_list', JSON.stringify(list));
+            await db.setSetting(`pro_strategy_${id}_content`, oldContent);
+            await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify({ ...oldMeta, id }));
+            console.log(`[Pro] 🔁 Migration legacy → slot S${id}`);
+          } catch {}
+        }
+      }
+
+      if (!list.length) return;
+
+      // Config Telegram Pro commune
+      const rawTg = await db.getSetting('pro_telegram_config');
+      let tgTargets = [];
+      if (rawTg) {
+        try {
+          const tgCfg = JSON.parse(rawTg);
+          if (tgCfg.bot_token && tgCfg.channel_id) tgTargets = [{ bot_token: tgCfg.bot_token, channel_id: tgCfg.channel_id }];
+        } catch {}
+      }
+
+      const loadedIds = [];
+      for (const entry of list) {
+        try {
+          const content = await db.getSetting(`pro_strategy_${entry.id}_content`).catch(() => null);
+          const metaRaw = await db.getSetting(`pro_strategy_${entry.id}_meta`).catch(() => null);
+          if (!content) { console.warn(`[Pro S${entry.id}] contenu manquant — ignoré`); continue; }
+          const meta = metaRaw ? JSON.parse(metaRaw) : entry;
+          const ft = (meta.file_type || entry.file_type || '').toLowerCase();
+          if (ft === 'json') await this._loadJsonProStrategies(content, tgTargets, meta, entry.id);
+          else if (ft === 'js' || ft === 'mjs') await this._loadJsProStrategy(content, tgTargets, meta, entry.id);
+          else if (ft === 'py') await this._loadPyProStrategy(content, tgTargets, meta, entry.id);
+          else { console.log(`[Pro S${entry.id}] Type "${ft}" non exécutable — référence uniquement`); continue; }
+          loadedIds.push(`S${entry.id}`);
+        } catch (e) { console.error(`[Pro S${entry.id}] Erreur chargement:`, e.message); }
+      }
+      await db.setSetting('pro_strategy_ids', JSON.stringify(loadedIds)).catch(() => {});
+      console.log(`[Pro] ✅ ${loadedIds.length}/${list.length} stratégie(s) chargée(s) → ${loadedIds.join(', ') || '(aucune)'}`);
+    } catch (e) { console.error('[Pro] loadProStrategies error:', e.message); }
+  }
+
+  // ── Chargement stratégies JSON (déclaratif, modes existants du moteur) ─────
+  async _loadJsonProStrategies(content, tgTargets, fileMeta, proNumId) {
+    let parsed;
+    try { parsed = JSON.parse(content); } catch { console.error(`[Pro S${proNumId}] JSON invalide`); return; }
+    const strategies = parsed.strategies || (parsed.strategy ? [parsed.strategy] : []);
+    if (!strategies.length) { console.log(`[Pro S${proNumId}] Aucune stratégie dans le JSON`); return; }
+    if (strategies.length > 1) {
+      console.warn(`[Pro S${proNumId}] JSON contient ${strategies.length} stratégies — seule la 1ʳᵉ est chargée dans ce slot. Importez chaque stratégie dans son propre fichier pour utiliser plusieurs slots.`);
+    }
+
+    const proIds = [];
+    {
+      const stratCfg = strategies[0];
+      const decalage = stratCfg.decalage !== undefined ? parseInt(stratCfg.decalage) : (stratCfg.prediction_offset !== undefined ? parseInt(stratCfg.prediction_offset) : 1);
+      const cfg = {
+        ...stratCfg,
+        id: proNumId, is_pro: true, type: 'json',
+        tg_targets: tgTargets,
+        max_rattrapage: stratCfg.max_rattrapage !== undefined ? parseInt(stratCfg.max_rattrapage) : null,
+        threshold: stratCfg.threshold !== undefined ? parseInt(stratCfg.threshold) : 5,
+        prediction_offset: Math.max(1, decalage),
+        bilan_format: parsed.bilan_format || stratCfg.bilan_format || null,
+      };
+      if (!this.custom[proNumId]) { this.custom[proNumId] = this._makeCustomState(); this.custom[proNumId].needsInit = true; }
+      this.custom[proNumId].config = cfg;
+      this.proStrategyIds.add(proNumId);
+      proIds.push(`S${proNumId}`);
+      console.log(`[Pro S${proNumId}] JSON "${cfg.name}" chargée (mode=${cfg.mode}, B=${cfg.threshold}, décalage=${cfg.prediction_offset}, tg=${tgTargets.length > 0})`);
+    }
+  }
+
+  // ── Chargement stratégie JS (exécutée via vm Node.js) ─────────────────────
+  // Le fichier .js doit exporter : { name, hand, decalage, max_rattrapage, processGame(gn, pSuits, bSuits, winner, state) }
+  // processGame retourne : { suit: '♦' } ou null
+  async _loadJsProStrategy(content, tgTargets, fileMeta, proNumId) {
+    const vm = require('vm');
+
+    let scriptModule;
+    try {
+      const moduleObj = { exports: {} };
+      const sandbox = {
+        module: moduleObj, exports: moduleObj.exports,
+        console: { log: (...a) => console.log('[Pro JS]', ...a), error: (...a) => console.error('[Pro JS]', ...a), warn: (...a) => console.warn('[Pro JS]', ...a) },
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        Math, JSON, Date, parseInt, parseFloat, isNaN, isFinite, Array, Object, String, Number, Boolean, RegExp,
+        require: (m) => { if (['path','crypto','fs'].includes(m)) throw new Error(`Module "${m}" non autorisé dans les stratégies Pro`); return require(m); },
+      };
+      vm.createContext(sandbox);
+      vm.runInContext(content, sandbox, { timeout: 5000, filename: fileMeta.filename || 'pro-strategy.js' });
+      scriptModule = sandbox.module.exports;
+    } catch (e) {
+      console.error(`[Pro JS] Erreur d'exécution du script: ${e.message}`);
+      return;
+    }
+
+    // Accepte plusieurs noms de fonction de prédiction
+    const JS_ALT_FN = ['processGame', 'process_game', 'predict', 'run', 'strategy', 'handler'];
+    let entryFn = null, entryName = null;
+    if (typeof scriptModule === 'function') { entryFn = scriptModule; entryName = '(module.exports)'; }
+    else if (scriptModule && typeof scriptModule === 'object') {
+      for (const n of JS_ALT_FN) if (typeof scriptModule[n] === 'function') { entryFn = scriptModule[n]; entryName = n; break; }
+    }
+    if (!entryFn) {
+      console.error(`[Pro JS] Aucune fonction de prédiction trouvée — noms acceptés : ${JS_ALT_FN.join(', ')}`);
+      return;
+    }
+    // Alias : expose la fonction via processGame pour le reste du moteur
+    if (typeof scriptModule === 'function' || entryName !== 'processGame') {
+      const base = (typeof scriptModule === 'object' && scriptModule) ? scriptModule : {};
+      scriptModule = Object.assign({}, base, { processGame: entryFn, _entryFn: entryName });
+    }
+
+    const cfg = {
+      id: proNumId, name: scriptModule.name || fileMeta.filename || 'Stratégie JS Pro',
+      is_pro: true, type: 'script_js',
+      hand: scriptModule.hand || 'joueur',
+      decalage: Math.max(1, parseInt(scriptModule.decalage) || 1),
+      max_rattrapage: (() => { const v = parseInt(scriptModule.max_rattrapage); return Number.isFinite(v) && v >= 0 ? v : 3; })(),
+      tg_format: (() => { const v = parseInt(scriptModule.tg_format); return Number.isFinite(v) ? v : null; })(),
+      tg_template: (typeof scriptModule.tg_template === 'string' && scriptModule.tg_template.trim()) ? scriptModule.tg_template.trim() : null,
+      source_file: fileMeta.filename || null,
+      tg_targets: tgTargets,
+      enabled: scriptModule.enabled !== false,
+      _scriptModule: scriptModule,
+    };
+
+    if (!this.custom[proNumId]) this.custom[proNumId] = this._makeCustomState();
+    this.custom[proNumId].config = cfg;
+    this.custom[proNumId].scriptState = scriptModule.initState ? scriptModule.initState() : {};
+    this.proStrategyIds.add(proNumId);
+    console.log(`[Pro S${proNumId}] ✅ JS "${cfg.name}" chargée (hand=${cfg.hand}, décalage=${cfg.decalage}, maxR=${cfg.max_rattrapage}, fmt=${cfg.tg_format ?? 'global'}, tg=${tgTargets.length > 0})`);
+  }
+
+  // ── Chargement stratégie Python (exécutée via child_process) ──────────────
+  // Le script reçoit JSON via stdin : { game_number, player_suits, banker_suits, winner, state }
+  // Il doit écrire sur stdout : { result: { suit: '♦' } | null, state: {} }
+  // En-tête obligatoire du script Python :
+  //   import json, sys
+  //   data = json.loads(sys.stdin.read())
+  //   ...
+  //   print(json.dumps({ "result": result, "state": state }))
+  async _loadPyProStrategy(content, tgTargets, fileMeta, proNumId) {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
+    // Écrire le script dans un fichier temporaire
+    const tmpPath = path.join(os.tmpdir(), `pro_strategy_${proNumId}.py`);
+    try { fs.writeFileSync(tmpPath, content, 'utf8'); } catch (e) { console.error('[Pro Py] Impossible d\'écrire le fichier temp:', e.message); return; }
+
+    // ── Extraction des paramètres déclarés dans le script Python ──
+    // Formats supportés : NAME = 'valeur'  |  HAND = "joueur"  |  DECALAGE = 2
+    const extractPy = (varName, defaultVal, parser = v => v) => {
+      const m = content.match(new RegExp(`^\\s*${varName}\\s*=\\s*([^\\n#]+)`, 'm'));
+      if (!m) return defaultVal;
+      const raw = m[1].trim().replace(/['"]/g, '').split('#')[0].trim();
+      try { return parser(raw); } catch { return defaultVal; }
+    };
+    const pyName       = extractPy('NAME',          fileMeta.filename?.replace('.py','') || 'Stratégie Python Pro');
+    const pyHand       = extractPy('HAND',          'joueur');
+    const pyDecalage   = extractPy('DECALAGE',      1, v => Math.max(1, parseInt(v) || 1));
+    const pyMaxR       = extractPy('MAX_RATTRAPAGE', 3, v => Math.max(1, parseInt(v) || 3));
+    const pyTgFormat   = extractPy('TG_FORMAT',     null, v => parseInt(v) || null);
+
+    // Extraction TG_TEMPLATE — supporte les chaînes simples, doubles et triples guillemets
+    let pyTgTemplate = null;
+    const tmplMatch = content.match(/^\s*TG_TEMPLATE\s*=\s*(?:"""([\s\S]*?)"""|'''([\s\S]*?)'''|"([^"]*)"|'([^']*)')/m);
+    if (tmplMatch) {
+      pyTgTemplate = (tmplMatch[1] ?? tmplMatch[2] ?? tmplMatch[3] ?? tmplMatch[4] ?? '').trim() || null;
+    }
+
+    const cfg = {
+      id: proNumId, name: pyName,
+      is_pro: true, type: 'script_py',
+      hand: pyHand,
+      decalage: pyDecalage,
+      max_rattrapage: pyMaxR,
+      tg_format: pyTgFormat,
+      tg_template: pyTgTemplate,
+      source_file: fileMeta.filename || null,
+      tg_targets: tgTargets,
+      enabled: true,
+      _scriptPath: tmpPath,
+    };
+
+    if (!this.custom[proNumId]) this.custom[proNumId] = this._makeCustomState();
+    this.custom[proNumId].config = cfg;
+    this.custom[proNumId].scriptState = {};
+    this.proStrategyIds.add(proNumId);
+    console.log(`[Pro S${proNumId}] ✅ Python "${cfg.name}" chargée (hand=${cfg.hand}, décalage=${cfg.decalage}, maxR=${cfg.max_rattrapage}, fmt=${cfg.tg_format ?? 'global'}, tg=${tgTargets.length > 0})`);
+  }
+
+  async reloadProStrategies() {
+    await this.loadProStrategies();
+  }
+
+  // ── Traitement d'une stratégie script (JS ou Python) ──────────────────────
+  async _processScriptStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards, winner) {
+    if (!this.custom[id]) return;
+    const channelId = `S${id}`;
+    const stratMaxR = cfg.max_rattrapage !== undefined ? parseInt(cfg.max_rattrapage) : 3;
+    const stratTgOpts = { formatId: cfg.tg_format || null, tg_template: cfg.tg_template || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
+    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : (suits || []);
+
+    // 1. Résoudre les prédictions en attente
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+        state.lastOutcomes.push({ won, suit: ps });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        if (won) this._onStratWin(channelId);
+        else this._onStratLoss(channelId, gn, ps);
+      }, stratMaxR, stratTgOpts, cfg.hand === 'banquier' ? bCards : pCards, winner);
+    }
+
+    if (state.processed.has(gn)) return;
+    state.processed.add(gn);
+    if (Object.keys(state.pending).length > 0) return; // prédiction en cours
+
+    // 2. Appeler le script pour obtenir une prédiction
+    let result = null;
+    if (cfg.type === 'script_js') {
+      result = await this._callJsStrategy(cfg, gn, suits, bSuits, winner, state);
+    } else if (cfg.type === 'script_py') {
+      result = await this._callPyStrategy(cfg, gn, suits, bSuits, winner, state);
+    }
+
+    if (!result || !result.suit) return;
+    if (!ALL_SUITS.includes(result.suit)) { console.warn(`[${channelId}] Costume invalide retourné: ${result.suit}`); return; }
+
+    const targetGn = gn + Math.max(1, parseInt(result.decalage || cfg.decalage || 1));
+    const ps = result.suit;
+
+    // Garde 10 min
+    if (!(await canEmitNewPrediction(channelId))) return;
+
+    let inserted = false;
+    try {
+      inserted = await db.createPrediction({
+        strategy: channelId, game_number: targetGn, predicted_suit: ps, triggered_by: ps,
+        hand: cfg.hand || 'joueur',
+        prediction_type: cfg.type || 'script_js',
+        decalage_applied: Math.max(1, parseInt(result.decalage || cfg.decalage || 1)),
+        confidence: result.confidence !== undefined ? parseInt(result.confidence) : 100,
+        source_file: cfg.source_file || null,
+        display_name: cfg.name || null,
+        extra_data: result.meta ? result.meta : {},
+      });
+      if (inserted) {
+        console.log(`[${channelId}] Script prédit #${targetGn} ${SUIT_DISPLAY[ps]||ps} (${cfg.type}, hand=${cfg.hand||'joueur'}, fmt=${cfg.tg_format ?? 'global'})`);
+      } else {
+        console.warn(`[${channelId}] Prédiction #${targetGn} déjà existante — doublon ignoré`);
+      }
+    } catch (e) { console.error(`[${channelId}] createPrediction error:`, e.message); }
+
+    state.pending[targetGn] = { suit: ps, rattrapage: 0, maxR: stratMaxR };
+    if (!inserted) return;
+
+    // Envoi Telegram
+    if (cfg.is_pro && this._proTelegramEnabled === false) { console.log(`[${channelId}] Pro Telegram suspendu`); return; }
+    const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
+    if (tgs.length > 0) {
+      sendCustomAndStore(tgs, channelId, targetGn, ps, stratTgOpts).catch(() => {});
+    } else {
+      sendToStrategyChannels(channelId, targetGn, ps, stratTgOpts).catch(() => {});
+    }
+  }
+
+  // ── Normalisation d'un retour de stratégie vers { suit, decalage?, confidence?, meta? }
+  _normalizeStrategyResult(r) {
+    if (r === null || r === undefined) return null;
+    if (typeof r === 'string') return ['♠','♥','♦','♣'].includes(r) ? { suit: r } : null;
+    if (typeof r !== 'object') return null;
+    let suit = r.suit || r.predicted || r.prediction || null;
+    if (!suit && Array.isArray(r.suits) && r.suits.length) suit = r.suits[0];
+    if (!suit) return null;
+    if (!['♠','♥','♦','♣'].includes(suit)) return null;
+    return {
+      suit,
+      decalage:   r.decalage !== undefined ? r.decalage : undefined,
+      confidence: r.confidence !== undefined ? r.confidence : undefined,
+      meta:       r.meta || undefined,
+    };
+  }
+
+  // ── Logs en direct par stratégie Pro ──────────────────────────────────────
+  _pushProLog(proNumId, level, msg) {
+    if (proNumId === undefined || proNumId === null) return;
+    if (!this.proLogs[proNumId]) this.proLogs[proNumId] = [];
+    const buf = this.proLogs[proNumId];
+    buf.push({ ts: Date.now(), level, msg: String(msg) });
+    if (buf.length > this._PRO_LOG_MAX) buf.splice(0, buf.length - this._PRO_LOG_MAX);
+    this._scheduleProLogsSave();
+  }
+
+  _scheduleProLogsSave() {
+    if (this._proLogsSaveTimer) return;
+    this._proLogsSaveTimer = setTimeout(async () => {
+      this._proLogsSaveTimer = null;
+      try { await db.setSetting('pro_logs_state', JSON.stringify(this.proLogs)); }
+      catch (e) { console.error('[Engine] save proLogs:', e.message); }
+    }, 2000);
+  }
+
+  async _loadProLogsState() {
+    try {
+      const raw = await db.getSetting('pro_logs_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') this.proLogs = parsed;
+      }
+    } catch (e) { console.error('[Engine] load proLogs:', e.message); }
+  }
+
+  // Wrap console.log/error pendant l'appel d'une stratégie Pro pour capter sa sortie
+  async _runWithProLogCapture(proNumId, fn) {
+    const origLog  = console.log;
+    const origWarn = console.warn;
+    const origErr  = console.error;
+    const fmt = (args) => args.map(a => {
+      if (a === null || a === undefined) return String(a);
+      if (typeof a === 'string') return a;
+      try { return JSON.stringify(a); } catch { return String(a); }
+    }).join(' ');
+    console.log   = (...args) => { try { this._pushProLog(proNumId, 'log',  fmt(args)); } catch {} origLog.apply(console, args); };
+    console.warn  = (...args) => { try { this._pushProLog(proNumId, 'warn', fmt(args)); } catch {} origWarn.apply(console, args); };
+    console.error = (...args) => { try { this._pushProLog(proNumId, 'error', fmt(args)); } catch {} origErr.apply(console, args); };
+    try {
+      return await fn();
+    } finally {
+      console.log = origLog; console.warn = origWarn; console.error = origErr;
+    }
+  }
+
+  // Accès public utilisé par /api/games/pro-logs
+  getProLogs(channelKey) {
+    if (!channelKey) return [];
+    const m = /^S(\d{4,5})$/.exec(channelKey);
+    if (!m) return [];
+    const id = parseInt(m[1]);
+    return (this.proLogs[id] || []).slice(-this._PRO_LOG_MAX);
+  }
+  clearProLogs(channelKey) {
+    if (!channelKey) { this.proLogs = {}; this._scheduleProLogsSave(); return; }
+    const m = /^S(\d{4,5})$/.exec(channelKey);
+    if (!m) return;
+    const id = parseInt(m[1]);
+    delete this.proLogs[id];
+    this._scheduleProLogsSave();
+  }
+
+  // ── Appel JS (vm sandbox) ─────────────────────────────────────────────────
+  async _callJsStrategy(cfg, gn, suits, bSuits, winner, state) {
+    try {
+      const mod = cfg._scriptModule;
+      if (!mod || typeof mod.processGame !== 'function') return null;
+      if (!state.scriptState) state.scriptState = mod.initState ? mod.initState() : {};
+      const raw = await this._runWithProLogCapture(cfg.id, () => Promise.resolve(
+        mod.processGame(gn, suits || [], bSuits || [], winner, state.scriptState)
+      ));
+      const norm = this._normalizeStrategyResult(raw);
+      // Trace automatique : on garde une trace de chaque appel, même quand la stratégie ne prédit rien
+      try {
+        const pStr = (suits  || []).join(' ') || '∅';
+        const bStr = (bSuits || []).join(' ') || '∅';
+        if (norm && norm.suit) {
+          this._pushProLog(cfg.id, 'log', `▶ #${gn} J:${pStr} | B:${bStr} | W:${winner||'-'} → PRÉDICTION ${norm.suit}`);
+        } else {
+          this._pushProLog(cfg.id, 'log', `· #${gn} J:${pStr} | B:${bStr} | W:${winner||'-'} → (pas de prédiction)`);
+        }
+      } catch {}
+      return norm;
+    } catch (e) {
+      this._pushProLog(cfg.id, 'error', `processGame error à jeu #${gn}: ${e.message}`);
+      console.error(`[Pro JS] processGame error à jeu #${gn}:`, e.message);
+      return null;
+    }
+  }
+
+  // ── Appel Python (child_process stdin/stdout JSON) ────────────────────────
+  async _callPyStrategy(cfg, gn, suits, bSuits, winner, state) {
+    const { spawnSync } = require('child_process');
+    if (!state.scriptState) state.scriptState = {};
+    const input = JSON.stringify({
+      game_number: gn,
+      player_suits: suits || [],
+      banker_suits: bSuits || [],
+      winner: winner || null,
+      state: state.scriptState,
+    });
+    try {
+      const proc = spawnSync('python3', [cfg._scriptPath], {
+        input, encoding: 'utf8', timeout: 5000,
+        env: { ...process.env, PYTHONPATH: '', PYTHONUNBUFFERED: '1' },
+      });
+      if (proc.error) { this._pushProLog(cfg.id, 'error', `spawn: ${proc.error.message}`); console.error('[Pro Py] Erreur spawn:', proc.error.message); return null; }
+      if (proc.stderr) {
+        const s = proc.stderr.trim();
+        if (s) {
+          // Chaque ligne stderr du script Python devient une ligne de log Pro
+          for (const ln of s.split('\n')) { if (ln.trim()) this._pushProLog(cfg.id, 'log', ln.trim()); }
+          console.warn('[Pro Py] stderr:', s.substring(0, 200));
+        }
+      }
+      if (!proc.stdout?.trim()) return null;
+      const out = JSON.parse(proc.stdout.trim());
+      if (out.state) state.scriptState = out.state;
+      if (Array.isArray(out.logs)) { for (const ln of out.logs) this._pushProLog(cfg.id, 'log', String(ln)); }
+      return this._normalizeStrategyResult(out.result);
+    } catch (e) { this._pushProLog(cfg.id, 'error', `lecture résultat: ${e.message}`); console.error('[Pro Py] Erreur lecture résultat:', e.message); return null; }
+  }
+
+  // ── Envoyer un message texte brut via Telegram (notifications Pro) ────────
+  async _sendRawProTelegram(text) {
+    try {
+      const rawTg = await db.getSetting('pro_telegram_config').catch(() => null);
+      if (!rawTg) return false;
+      const { bot_token, channel_id } = JSON.parse(rawTg);
+      if (!bot_token || !channel_id) return false;
+      const r = await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: channel_id, text, parse_mode: 'HTML' }),
+      });
+      const data = await r.json();
+      return data.ok === true;
+    } catch (e) { console.error('[Pro] _sendRawProTelegram error:', e.message); return false; }
+  }
+
+  // ── Vérification des abonnements Pro + notification expiration ─────────────
+  async checkProSubscriptions() {
+    try {
+      // Aucune stratégie Pro chargée → rien à vérifier
+      if (!this.proStrategyIds || this.proStrategyIds.size === 0) return;
+
+      const proUsers = await db.getProUsers().catch(() => []);
+      if (!proUsers.length) return;
+
+      const now = new Date();
+
+      for (const user of proUsers) {
+        const key = `pro_expiry_notif_${user.id}`;
+        const lastNotif = this._proExpiryNotifs?.[user.id];
+
+        if (!user.subscription_expires_at) continue;
+        const expires = new Date(user.subscription_expires_at);
+        const diffMs = expires.getTime() - now.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+
+        // Déjà notifié pour cette expiration → skip
+        if (lastNotif && lastNotif >= expires.getTime()) continue;
+
+        // Expiré : envoyer notification et désactiver les prédictions Pro pour cet utilisateur
+        if (diffMs <= 0) {
+          const displayName = user.first_name || user.username;
+          const msg = `⏰ <b>Abonnement Pro expiré</b>\n\nDurée restante : <b>00</b>\n👤 Constater ${displayName} pour renouveler votre abonnement Pro.\n📞 Contacter <b>Sossou Kouamé</b> pour renouveler votre abonnement.`;
+          const sent = await this._sendRawProTelegram(msg);
+          if (sent) {
+            console.log(`[Pro] Notification expiration envoyée pour ${user.username}`);
+            if (!this._proExpiryNotifs) this._proExpiryNotifs = {};
+            this._proExpiryNotifs[user.id] = expires.getTime();
+          }
+        }
+        // Expire dans moins de 60 minutes → avertissement préalable
+        else if (diffMin <= 60 && diffMin > 0) {
+          if (!this._proExpiryWarnings) this._proExpiryWarnings = {};
+          const lastWarn = this._proExpiryWarnings[user.id];
+          if (!lastWarn || (now.getTime() - lastWarn) > 30 * 60 * 1000) { // Max 1 avertissement / 30 min
+            const displayName = user.first_name || user.username;
+            const msg = `⚠️ <b>Abonnement Pro — Expiration imminente</b>\n\n⏳ Il reste <b>${diffMin} minute${diffMin > 1 ? 's' : ''}</b> à l'abonnement de ${displayName}.\n📞 Contacter <b>Sossou Kouamé</b> pour renouveler.`;
+            const sent = await this._sendRawProTelegram(msg);
+            if (sent) {
+              this._proExpiryWarnings[user.id] = now.getTime();
+              console.log(`[Pro] Avertissement expiration dans ${diffMin} min pour ${user.username}`);
+            }
+          }
+        }
+      }
+
+      // Vérifier s'il reste des utilisateurs Pro actifs : si aucun, désactiver l'envoi Telegram Pro
+      const activeProUsers = proUsers.filter(u => {
+        if (!u.subscription_expires_at) return false;
+        return new Date(u.subscription_expires_at) > now;
+      });
+      this._proTelegramEnabled = activeProUsers.length > 0;
+      if (!this._proTelegramEnabled && proUsers.length > 0) {
+        console.log('[Pro] Aucun utilisateur Pro actif — envoi Telegram Pro suspendu');
+      }
+    } catch (e) { console.error('[Pro] checkProSubscriptions error:', e.message); }
+  }
+
   async processGame(gn, suits, bSuits, pCards, bCards, winner = null) {
     this.gameCardsCache[gn] = { player: suits || [], banker: bSuits || [] };
     const cacheKeys = Object.keys(this.gameCardsCache).map(Number).sort((a, b) => a - b);
@@ -479,10 +1005,18 @@ class Engine {
     await this._processC2(gn, suits, pCards, bCards);
     await this._processC3(gn, suits, pCards, bCards);
     await this._processDC(gn, suits, pCards, bCards);
-    // Passe 1 : stratégies simples (hors multi_strategy et relance)
+    // Passe 1 : stratégies simples (hors multi_strategy, relance, et scripts)
     for (const [id, state] of Object.entries(this.custom)) {
-      if (state.config?.enabled && state.config?.mode !== 'multi_strategy' && state.config?.mode !== 'relance') {
-        await this._processCustomStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards, winner);
+      const cfg = state.config;
+      if (!cfg?.enabled) continue;
+      // Stratégies script JS/Python → traitement dédié
+      if (cfg.type === 'script_js' || cfg.type === 'script_py') {
+        await this._processScriptStrategy(parseInt(id), state, cfg, gn, suits, bSuits, pCards, bCards, winner);
+        continue;
+      }
+      // Stratégies JSON déclaratives standard
+      if (cfg.mode !== 'multi_strategy' && cfg.mode !== 'relance') {
+        await this._processCustomStrategy(parseInt(id), state, cfg, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
     // Passe 2 : stratégies combinaison (peuvent lire les pending des simples)
@@ -1230,6 +1764,11 @@ class Engine {
       state.predHistory.push({ suit: ps, timestamp: Date.now() });
       if (state.predHistory.length > 30) state.predHistory.shift();
       if (!inserted) return; // Prédiction déjà en DB → ne pas renvoyer le message Telegram
+      // Pour les stratégies Pro : vérifier que des comptes Pro actifs existent
+      if (cfg.is_pro && this._proTelegramEnabled === false) {
+        console.log(`[${channelId}] Pro Telegram suspendu — aucun abonnement Pro actif`);
+        return;
+      }
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
         await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
@@ -2039,7 +2578,7 @@ class Engine {
       this.dc.lastOutcomes = [];
     }
 
-    // 6. Reset mémoire — toutes les stratégies custom (S7, S8, S9, S10…)
+    // 6. Reset mémoire — toutes les stratégies custom + Pro (S7, S8, S9, S10…, S5001…S5100)
     for (const [, state] of Object.entries(this.custom)) {
       state.pending           = {};
       state.processed         = new Set();
@@ -2049,6 +2588,15 @@ class Engine {
       state.liveTriggeredGame = null;
       if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
       if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
+      // Reset complet de l'état interne des scripts Pro (stock de prédictions à zéro)
+      if (state.scriptState) {
+        const cfg = state.config;
+        if (cfg?.type === 'script_js' && cfg._scriptModule?.initState) {
+          try { state.scriptState = cfg._scriptModule.initState(); } catch { state.scriptState = {}; }
+        } else {
+          state.scriptState = {};
+        }
+      }
     }
 
     // 7. Compteurs moteur globaux
@@ -2057,6 +2605,10 @@ class Engine {
 
     // 8. Vider le bloqueur de mauvaises prédictions
     this.badPredBlocker = {};
+
+    // 9. Vider les logs Pro de toutes les stratégies (nouvelle journée = logs propres)
+    this.proLogs = {};
+    this._scheduleProLogsSave();
 
     return { deleted, extDeleted };
   }
@@ -2079,6 +2631,8 @@ class Engine {
     await loadMaxRattrapage().catch(() => {});
     console.log('🚀 Moteur de prédiction démarré');
     await this.loadCustomStrategies();
+    await this.loadProStrategies();
+    await this._loadProLogsState();
     await this.loadLossSequences();
     await this.loadAbsences();
     await this.cleanupStale();
@@ -2093,6 +2647,13 @@ class Engine {
     setInterval(() => this._clearExpiredByTime(), 2 * 60_000);
     // Recharger l'URL Render toutes les 5 minutes (si modifiée en admin)
     setInterval(() => renderSync.loadRenderUrl().catch(() => {}), 5 * 60_000);
+    // Vérifier les abonnements Pro toutes les 5 minutes
+    this._proExpiryNotifs   = {};
+    this._proExpiryWarnings = {};
+    this._proTelegramEnabled = true;
+    setInterval(() => this.checkProSubscriptions().catch(() => {}), 5 * 60_000);
+    // Vérification initiale après 30 secondes (laisse le temps aux connexions de s'établir)
+    setTimeout(() => this.checkProSubscriptions().catch(() => {}), 30_000);
   }
 
   async _clearExpiredByTime() {
