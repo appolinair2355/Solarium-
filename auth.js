@@ -60,6 +60,7 @@ router.post('/login', async (req, res) => {
     req.session.userId     = user.id;
     req.session.isAdmin    = user.is_admin;
     req.session.isPremium  = user.is_premium || false;
+    req.session.isPro      = user.is_pro || false;
     req.session.adminLevel = user.admin_level || 2;
     res.json({ user: publicUser(user) });
   } catch (err) {

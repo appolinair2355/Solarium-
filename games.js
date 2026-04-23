@@ -182,17 +182,51 @@ router.get('/absences', (req, res) => {
   res.json(data);
 });
 
-router.get('/pro-logs', (req, res) => {
-  if (!req.session.userId || (!req.session.isAdmin && !req.session.isPremium)) return res.status(403).json({ error: 'Accès non autorisé' });
+// Logs Pro : accessibles à l'admin (tout) et au compte Pro propriétaire de la stratégie
+router.get('/pro-logs', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (!req.session.isAdmin && !req.session.isPro) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || '';
   if (!/^S\d{4,5}$/.test(channel)) return res.json([]);
+  // Vérification ownership pour Pro non-admin
+  if (!req.session.isAdmin) {
+    try {
+      const db = require('./db');
+      const id = parseInt(channel.slice(1));
+      const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+      if (!metaRaw) return res.json([]);
+      const meta = JSON.parse(metaRaw);
+      if (meta.owner_user_id !== req.session.userId) {
+        return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
+      }
+    } catch { return res.json([]); }
+  }
   const engine = require('./engine');
   res.json(engine.getProLogs(channel) || []);
 });
 
-router.delete('/pro-logs', (req, res) => {
-  if (!req.session.userId || !req.session.isAdmin) return res.status(403).json({ error: 'Accès non autorisé' });
+router.delete('/pro-logs', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (!req.session.isAdmin && !req.session.isPro) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || '';
+  // Vérification ownership pour Pro non-admin
+  if (channel && !req.session.isAdmin) {
+    if (!/^S\d{4,5}$/.test(channel)) return res.status(400).json({ error: 'Canal invalide' });
+    try {
+      const db = require('./db');
+      const id = parseInt(channel.slice(1));
+      const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+      if (!metaRaw) return res.status(404).json({ error: 'Stratégie introuvable' });
+      const meta = JSON.parse(metaRaw);
+      if (meta.owner_user_id !== req.session.userId) {
+        return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
+      }
+    } catch (e) { return res.status(500).json({ error: e.message }); }
+  }
+  // Sans canal : seul l'admin peut tout vider
+  if (!channel && !req.session.isAdmin) {
+    return res.status(403).json({ error: 'Vider tous les logs : admin uniquement' });
+  }
   const engine = require('./engine');
   engine.clearProLogs(channel || null);
   res.json({ ok: true });

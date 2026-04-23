@@ -492,7 +492,7 @@ class Engine {
       if (rawList) { try { list = JSON.parse(rawList); } catch {} }
       if (!Array.isArray(list)) list = [];
 
-      // ── Migration du legacy (un seul fichier) ──
+      // ── Migration du legacy (un seul fichier) — assigne au premier admin ──
       if (!list.length) {
         const oldContent = await db.getSetting('pro_strategy_file_content').catch(() => null);
         const oldMetaRaw = await db.getSetting('pro_strategy_file_meta').catch(() => null);
@@ -500,44 +500,82 @@ class Engine {
           try {
             const oldMeta = JSON.parse(oldMetaRaw);
             const id = 5001;
+            const allUsers = await db.getAllUsers().catch(() => []);
+            const admin = allUsers.find(u => u.is_admin && (u.admin_level || 2) === 1) || allUsers.find(u => u.is_admin);
+            const ownerId = admin ? admin.id : 1;
             list = [{
-              id, filename: oldMeta.filename || 'legacy.js',
+              id, owner_user_id: ownerId,
+              filename: oldMeta.filename || 'legacy.js',
               file_type: oldMeta.file_type || 'js',
               strategy_name: oldMeta.strategy_name || 'Stratégie Pro',
               engine_loaded: oldMeta.engine_loaded !== false,
             }];
             await db.setSetting('pro_strategies_list', JSON.stringify(list));
             await db.setSetting(`pro_strategy_${id}_content`, oldContent);
-            await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify({ ...oldMeta, id }));
-            console.log(`[Pro] 🔁 Migration legacy → slot S${id}`);
+            await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify({ ...oldMeta, id, owner_user_id: ownerId }));
+            console.log(`[Pro] 🔁 Migration legacy → slot S${id} (owner=${ownerId})`);
           } catch {}
         }
       }
 
-      if (!list.length) return;
-
-      // Config Telegram Pro commune
-      const rawTg = await db.getSetting('pro_telegram_config');
-      let tgTargets = [];
-      if (rawTg) {
+      // ── Backfill owner_user_id pour entrées legacy ──
+      let needsBackfill = list.some(s => !s.owner_user_id);
+      if (needsBackfill) {
         try {
-          const tgCfg = JSON.parse(rawTg);
-          if (tgCfg.bot_token && tgCfg.channel_id) tgTargets = [{ bot_token: tgCfg.bot_token, channel_id: tgCfg.channel_id }];
+          const allUsers = await db.getAllUsers();
+          const admin = allUsers.find(u => u.is_admin && (u.admin_level || 2) === 1) || allUsers.find(u => u.is_admin);
+          const fallback = admin ? admin.id : 1;
+          for (const s of list) if (!s.owner_user_id) s.owner_user_id = fallback;
+          await db.setSetting('pro_strategies_list', JSON.stringify(list));
         } catch {}
       }
+
+      if (!list.length) return;
+
+      // Récupérer les utilisateurs actifs (Pro + admins) pour filtrer les stratégies désactivées
+      const allUsers = await db.getAllUsers().catch(() => []);
+      const activeOwners = new Set(allUsers.filter(u => u.is_pro || u.is_admin).map(u => u.id));
+
+      // Cache des configs Telegram par propriétaire (évite de relire pour chaque stratégie)
+      const tgCache = new Map();
+      const getTgFor = async (ownerId) => {
+        if (tgCache.has(ownerId)) return tgCache.get(ownerId);
+        let tgs = [];
+        try {
+          const raw = await db.getSetting(`pro_telegram_config_${ownerId}`).catch(() => null);
+          if (raw) {
+            const tgCfg = JSON.parse(raw);
+            if (tgCfg.bot_token && tgCfg.channel_id) tgs = [{ bot_token: tgCfg.bot_token, channel_id: tgCfg.channel_id }];
+          }
+        } catch {}
+        tgCache.set(ownerId, tgs);
+        return tgs;
+      };
 
       const loadedIds = [];
       for (const entry of list) {
         try {
+          const ownerId = entry.owner_user_id;
+          if (!ownerId) { console.warn(`[Pro S${entry.id}] sans owner_user_id — ignoré`); continue; }
+          if (!activeOwners.has(ownerId)) {
+            console.log(`[Pro S${entry.id}] propriétaire ${ownerId} désactivé — stratégie inactive`);
+            continue;
+          }
           const content = await db.getSetting(`pro_strategy_${entry.id}_content`).catch(() => null);
           const metaRaw = await db.getSetting(`pro_strategy_${entry.id}_meta`).catch(() => null);
           if (!content) { console.warn(`[Pro S${entry.id}] contenu manquant — ignoré`); continue; }
           const meta = metaRaw ? JSON.parse(metaRaw) : entry;
+          if (!meta.owner_user_id) meta.owner_user_id = ownerId;
+          const tgTargets = await getTgFor(ownerId);
           const ft = (meta.file_type || entry.file_type || '').toLowerCase();
           if (ft === 'json') await this._loadJsonProStrategies(content, tgTargets, meta, entry.id);
           else if (ft === 'js' || ft === 'mjs') await this._loadJsProStrategy(content, tgTargets, meta, entry.id);
           else if (ft === 'py') await this._loadPyProStrategy(content, tgTargets, meta, entry.id);
           else { console.log(`[Pro S${entry.id}] Type "${ft}" non exécutable — référence uniquement`); continue; }
+          // Marquer le owner sur le state pour usages futurs
+          if (this.custom[entry.id] && this.custom[entry.id].config) {
+            this.custom[entry.id].config.owner_user_id = ownerId;
+          }
           loadedIds.push(`S${entry.id}`);
         } catch (e) { console.error(`[Pro S${entry.id}] Erreur chargement:`, e.message); }
       }
@@ -918,11 +956,22 @@ class Engine {
   }
 
   // ── Envoyer un message texte brut via Telegram (notifications Pro) ────────
-  async _sendRawProTelegram(text) {
+  async _sendRawProTelegram(text, ownerId = null) {
     try {
-      const rawTg = await db.getSetting('pro_telegram_config').catch(() => null);
-      if (!rawTg) return false;
-      const { bot_token, channel_id } = JSON.parse(rawTg);
+      let cfgRaw = null;
+      if (ownerId) {
+        cfgRaw = await db.getSetting(`pro_telegram_config_${ownerId}`).catch(() => null);
+      }
+      // Fallback : envoyer via la config du premier admin si owner non précisé
+      if (!cfgRaw) {
+        try {
+          const all = await db.getAllUsers();
+          const adm = all.find(u => u.is_admin);
+          if (adm) cfgRaw = await db.getSetting(`pro_telegram_config_${adm.id}`).catch(() => null);
+        } catch {}
+      }
+      if (!cfgRaw) return false;
+      const { bot_token, channel_id } = JSON.parse(cfgRaw);
       if (!bot_token || !channel_id) return false;
       const r = await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
         method: 'POST',
@@ -961,7 +1010,7 @@ class Engine {
         if (diffMs <= 0) {
           const displayName = user.first_name || user.username;
           const msg = `⏰ <b>Abonnement Pro expiré</b>\n\nDurée restante : <b>00</b>\n👤 Constater ${displayName} pour renouveler votre abonnement Pro.\n📞 Contacter <b>Sossou Kouamé</b> pour renouveler votre abonnement.`;
-          const sent = await this._sendRawProTelegram(msg);
+          const sent = await this._sendRawProTelegram(msg, user.id);
           if (sent) {
             console.log(`[Pro] Notification expiration envoyée pour ${user.username}`);
             if (!this._proExpiryNotifs) this._proExpiryNotifs = {};
@@ -975,7 +1024,7 @@ class Engine {
           if (!lastWarn || (now.getTime() - lastWarn) > 30 * 60 * 1000) { // Max 1 avertissement / 30 min
             const displayName = user.first_name || user.username;
             const msg = `⚠️ <b>Abonnement Pro — Expiration imminente</b>\n\n⏳ Il reste <b>${diffMin} minute${diffMin > 1 ? 's' : ''}</b> à l'abonnement de ${displayName}.\n📞 Contacter <b>Sossou Kouamé</b> pour renouveler.`;
-            const sent = await this._sendRawProTelegram(msg);
+            const sent = await this._sendRawProTelegram(msg, user.id);
             if (sent) {
               this._proExpiryWarnings[user.id] = now.getTime();
               console.log(`[Pro] Avertissement expiration dans ${diffMin} min pour ${user.username}`);

@@ -26,6 +26,27 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
+// ── Pro OU Admin ────────────────────────────────────────────────────
+// Utilisé pour toutes les routes /pro-config et /pro-strategy-file
+function requireProOrAdmin(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (!req.session.isAdmin && !req.session.isPro)
+    return res.status(403).json({ error: 'Accès réservé aux comptes Pro' });
+  next();
+}
+
+// Détermine le propriétaire effectif d'une ressource Pro :
+//   - admin : peut passer ?owner_user_id=N (sinon = lui-même)
+//   - Pro   : forcé sur req.session.userId (ignore tout owner_user_id passé)
+function effectiveOwnerId(req) {
+  if (req.session.isAdmin) {
+    const q = req.query.owner_user_id || req.body?.owner_user_id;
+    const n = parseInt(q);
+    return Number.isFinite(n) && n > 0 ? n : req.session.userId;
+  }
+  return req.session.userId;
+}
+
 function getUserStatus(user) {
   if (user.is_admin) return 'active';
   if (!user.is_approved) return 'pending';
@@ -2236,6 +2257,142 @@ router.get('/project-backup/zip', requireAdmin, (req, res) => {
   }
 });
 
+// ── ZIP de déploiement Render.com — léger, prêt à uploader (< 5 Mo) ──────────
+// Inclut uniquement ce qui est nécessaire à l'exécution : sources serveur,
+// dist/ compilé, package.json (sans lock), render.yaml + DEPLOY.md.
+// Exclut : node_modules, .git, .env, attached_assets, *.map, logs, backups…
+const RENDER_INCLUDE_ROOT_FILES = new Set([
+  'package.json', 'index.js', 'admin.js', 'auth.js', 'engine.js', 'db.js',
+  'games.js', 'render-sync.js', 'tg-history.js', 'tg-direct.js',
+  'predictions.js', 'broadcast.js', 'render.yaml', '.nvmrc',
+]);
+const RENDER_INCLUDE_DIRS = ['src', 'dist', 'public', 'scripts', 'middleware', 'utils', 'routes', 'lib'];
+const RENDER_EXCLUDE_DIRS = new Set([
+  'node_modules', '.git', '.local', '.cache', '.npm', '.upm', '.config',
+  'attached_assets', 'screenshots', 'backups', 'tmp', 'logs', 'tests',
+  '__tests__', 'coverage', '.replit', '.workflows', 'workflow_history',
+]);
+const RENDER_EXCLUDE_PATTERNS = [
+  /\.env(\..*)?$/i, /\.log$/i, /\.tar\.gz$/i, /\.zip$/i, /\.map$/i,
+  /\.DS_Store$/i, /^\._/, /\.bak$/i, /\.swp$/i, /~$/,
+];
+
+function _isExcludedRender(name) {
+  return RENDER_EXCLUDE_PATTERNS.some(rx => rx.test(name));
+}
+
+function scanRenderFiles(dir, base) {
+  const results = [];
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return results; }
+  for (const entry of entries) {
+    if (RENDER_EXCLUDE_DIRS.has(entry)) continue;
+    if (_isExcludedRender(entry)) continue;
+    const fullPath = path.join(dir, entry);
+    const relPath  = base ? `${base}/${entry}` : entry;
+    let stat;
+    try { stat = fs.statSync(fullPath); } catch { continue; }
+    if (stat.isDirectory()) {
+      results.push(...scanRenderFiles(fullPath, relPath));
+    } else if (stat.isFile()) {
+      if (stat.size > 3 * 1024 * 1024) continue; // skip > 3 Mo (assets lourds)
+      results.push({ fullPath, relPath, size: stat.size });
+    }
+  }
+  return results;
+}
+
+const RENDER_YAML = `services:
+  - type: web
+    name: baccarat-pro
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+    healthCheckPath: /
+    autoDeploy: false
+`;
+
+const DEPLOY_RENDER_README = `# Baccarat Pro — Déploiement Render.com
+
+## 1. Créer une base PostgreSQL
+- Render Dashboard → New + → PostgreSQL → plan Free
+- Copier la chaîne de connexion **Internal Database URL**
+
+## 2. Créer le Web Service
+- New + → Web Service → Build and deploy from a Git repository (ou upload ZIP)
+- Runtime: **Node**
+- Build command: \`npm install && npm run build\`
+- Start command: \`node index.js\`
+
+## 3. Variables d'environnement (Settings → Environment)
+| Clé              | Valeur                                            |
+|------------------|---------------------------------------------------|
+| DATABASE_URL     | (Internal Database URL de l'étape 1)              |
+| SESSION_SECRET   | (chaîne aléatoire ≥ 32 caractères)                |
+| NODE_ENV         | production                                        |
+| PORT             | 5000                                              |
+
+## 4. Premier lancement
+- L'app initialise la base PostgreSQL automatiquement.
+- Connectez-vous avec le compte super admin **sossoukouam**.
+- Configurez vos canaux Telegram dans l'interface Admin.
+
+## Notes
+- Le frontend est déjà compilé dans \`dist/\` — le build Render ne refait que \`npm install\`.
+- Aucun fichier \`.env\` dans le ZIP : tout passe par les variables Render.
+- Les comptes Pro ont chacun leur propre bot Telegram (configurable dans l'onglet Config Pro).
+`;
+
+router.get('/project-backup/zip-render', requireAdmin, (req, res) => {
+  try {
+    const archiver = require('archiver');
+    const root     = path.join(__dirname);
+    const all      = scanRenderFiles(root, '');
+
+    // Filtrer : garder uniquement fichiers racine whitelistés OU fichiers dans dossiers autorisés
+    const files = all.filter(f => {
+      const segs = f.relPath.split('/');
+      if (segs.length === 1) return RENDER_INCLUDE_ROOT_FILES.has(segs[0]);
+      return RENDER_INCLUDE_DIRS.includes(segs[0]);
+    });
+
+    const date     = new Date().toISOString().slice(0, 10);
+    const filename = `baccarat-pro-render-${date}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } }); // compression max
+    archive.on('error', (err) => { console.error('[ZIP-RENDER]', err.message); res.end(); });
+    archive.pipe(res);
+
+    let totalBytes = 0;
+    for (const f of files) {
+      archive.file(f.fullPath, { name: f.relPath });
+      totalBytes += f.size;
+    }
+    archive.append(RENDER_YAML, { name: 'render.yaml' });
+    archive.append(DEPLOY_RENDER_README, { name: 'DEPLOY.md' });
+    // .nvmrc pour fixer la version Node sur Render
+    archive.append('20\n', { name: '.nvmrc' });
+
+    archive.finalize();
+    console.log(`[ZIP-RENDER] Archive Render générée : ${files.length} fichier(s), ${(totalBytes/1024).toFixed(0)} Ko sources → ${filename}`);
+  } catch (e) {
+    console.error('[ZIP-RENDER] Erreur:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── ZIP différentiel — uniquement les fichiers modifiés depuis un commit ──────
 router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
   try {
@@ -2640,20 +2797,68 @@ router.post('/users/:id/toggle-pro', requireSuperAdmin, async (req, res) => {
     const newVal = !current.is_pro;
     const user = await db.updateUser(id, { is_pro: newVal });
     console.log(`[Pro] Compte Pro ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
+    // Refresh pro_strategy_ids (la liste tient compte des owners désactivés) + recharger le moteur
+    try {
+      const list = await getProStrategiesList();
+      await saveProStrategiesList(list);
+      require('./engine').reloadProStrategies().catch(() => {});
+    } catch (e) { console.warn('[Pro] reload après toggle:', e.message); }
     res.json({ ok: true, is_pro: newVal, user });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Configuration Telegram pour comptes Pro (token + canal)
-router.get('/pro-config', requireAdmin, async (req, res) => {
+// Configuration Telegram pour comptes Pro (token + canal) — PAR UTILISATEUR
+// Clé DB : pro_telegram_config_{userId}
+async function getProTgConfigKey(ownerId) { return `pro_telegram_config_${ownerId}`; }
+
+// Migration legacy : ancienne clé globale `pro_telegram_config` → admin principal
+async function migrateLegacyProConfigOnce() {
+  if (global.__proConfigMigrated) return;
+  global.__proConfigMigrated = true;
   try {
-    const raw = await db.getSetting('pro_telegram_config');
-    if (!raw) return res.json({ bot_token: '', channel_id: '' });
-    res.json(JSON.parse(raw));
+    const legacy = await db.getSetting('pro_telegram_config').catch(() => null);
+    if (!legacy) return;
+    const cfg = JSON.parse(legacy);
+    if (!cfg.bot_token || !cfg.channel_id) return;
+    const allUsers = await db.getAllUsers().catch(() => []);
+    const adm = allUsers.find(u => u.is_admin && (u.admin_level || 2) === 1) || allUsers.find(u => u.is_admin);
+    if (!adm) return;
+    const newKey = `pro_telegram_config_${adm.id}`;
+    const exists = await db.getSetting(newKey).catch(() => null);
+    if (!exists) {
+      await db.setSetting(newKey, legacy);
+      console.log(`[Pro] 🔁 Migration legacy pro_telegram_config → ${newKey} (admin "${adm.username}")`);
+    }
+    await db.setSetting('pro_telegram_config', '');
+  } catch (e) { console.warn('[Pro] migrateLegacyProConfigOnce:', e.message); }
+}
+migrateLegacyProConfigOnce();
+
+router.get('/pro-config', requireProOrAdmin, async (req, res) => {
+  try {
+    const ownerId = effectiveOwnerId(req);
+    const raw = await db.getSetting(await getProTgConfigKey(ownerId));
+    const cfg = raw ? JSON.parse(raw) : { bot_token: '', channel_id: '' };
+    res.json({ ...cfg, owner_user_id: ownerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/pro-config', requireAdmin, async (req, res) => {
+// Liste des comptes Pro (pour le sélecteur admin)
+router.get('/pro-users', requireProOrAdmin, async (req, res) => {
+  try {
+    if (!req.session.isAdmin) {
+      // Pro : ne voit que lui-même
+      const u = await db.getUser(req.session.userId);
+      return res.json({ users: u ? [{ id: u.id, username: u.username, email: u.email }] : [] });
+    }
+    const all = await db.getAllUsers();
+    const users = all.filter(u => u.is_pro && !u.is_admin)
+                      .map(u => ({ id: u.id, username: u.username, email: u.email, is_approved: u.is_approved }));
+    res.json({ users });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/pro-config', requireProOrAdmin, async (req, res) => {
   const { bot_token, channel_id, strategy_name } = req.body;
   if (!bot_token || !channel_id)
     return res.status(400).json({ error: 'Token et ID canal requis' });
@@ -2672,12 +2877,14 @@ router.post('/pro-config', requireAdmin, async (req, res) => {
       if (tgData.ok) { bot_username = tgData.result.username || ''; tg_ok = true; }
     } catch (_) { /* timeout ou réseau — on sauvegarde quand même */ }
 
-    // Sauvegarder la config dans la DB
-    await db.setSetting('pro_telegram_config', JSON.stringify({ bot_token, channel_id, bot_username, strategy_name: stratName }));
+    // Sauvegarder la config dans la DB — clé par utilisateur
+    const ownerId = effectiveOwnerId(req);
+    await db.setSetting(await getProTgConfigKey(ownerId), JSON.stringify({ bot_token, channel_id, bot_username, strategy_name: stratName, owner_user_id: ownerId }));
 
     // Inscrire le canal Pro dans la table telegram_config (Canaux du site)
     try {
-      const canalLabel = stratName !== '—' ? `🔷 ${stratName}` : `🔷 Pro — @${bot_username || 'bot'}`;
+      const ownerLabel = req.session.isAdmin && ownerId !== req.session.userId ? ` (uid ${ownerId})` : '';
+      const canalLabel = stratName !== '—' ? `🔷 ${stratName}${ownerLabel}` : `🔷 Pro — @${bot_username || 'bot'}${ownerLabel}`;
       await db.upsertTelegramConfig({ channel_id, channel_name: canalLabel });
     } catch (e) { console.warn('[Pro] Canal non ajouté aux Canaux:', e.message); }
 
@@ -2706,22 +2913,24 @@ router.post('/pro-config', requireAdmin, async (req, res) => {
     // Recharger le moteur Pro
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
 
-    console.log(`[Pro] ✅ Config sauvegardée — Bot: @${bot_username || '?'} | Canal: ${channel_id} | Stratégie: ${stratName} | TG validé: ${tg_ok}`);
-    res.json({ ok: true, bot_username, strategy_name: stratName, tg_validated: tg_ok });
+    console.log(`[Pro][uid=${ownerId}] ✅ Config sauvegardée — Bot: @${bot_username || '?'} | Canal: ${channel_id} | Stratégie: ${stratName} | TG validé: ${tg_ok}`);
+    res.json({ ok: true, bot_username, strategy_name: stratName, tg_validated: tg_ok, owner_user_id: ownerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/pro-config', requireAdmin, async (req, res) => {
+router.delete('/pro-config', requireProOrAdmin, async (req, res) => {
   try {
-    await db.setSetting('pro_telegram_config', '');
+    const ownerId = effectiveOwnerId(req);
+    await db.setSetting(await getProTgConfigKey(ownerId), '');
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    res.json({ ok: true });
+    res.json({ ok: true, owner_user_id: ownerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/pro-config/test-message', requireAdmin, async (req, res) => {
+router.post('/pro-config/test-message', requireProOrAdmin, async (req, res) => {
   try {
-    const raw = await db.getSetting('pro_telegram_config');
+    const ownerId = effectiveOwnerId(req);
+    const raw = await db.getSetting(await getProTgConfigKey(ownerId));
     if (!raw) return res.status(400).json({ error: 'Bot Pro non configuré' });
     const cfg = JSON.parse(raw);
     const { bot_token, channel_id, bot_username } = cfg;
@@ -3065,18 +3274,20 @@ function analyzeStrategyFile(ext, content, filename) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MULTI-STRATÉGIES PRO — jusqu'à 100 fichiers stockés séparément
+// MULTI-STRATÉGIES PRO — jusqu'à 100 slots, isolés par owner_user_id
 // Stockage :
-//   pro_strategies_list      = JSON [{ id, filename, file_type, strategy_name, engine_type, engine_loaded, created_at, updated_at }, ...]
+//   pro_strategies_list      = JSON [{ id, owner_user_id, filename, ... }, ...]  (GLOBAL)
 //   pro_strategy_{id}_content = contenu brut (utf8)
-//   pro_strategy_{id}_meta    = meta complète (avec validation)
-//   pro_strategy_ids          = JSON ["S5001", "S5002", ...] (pour predictions.js)
-// IDs : 5001..5100 (100 slots)
-// Migration : l'ancien couple pro_strategy_file_{content,meta} est promu en slot 5001 automatiquement.
+//   pro_strategy_{id}_meta    = meta complète (inclut owner_user_id)
+//   pro_strategy_ids          = JSON ["S5001", ...] (uniquement les actives & owner non désactivé)
+//   pro_telegram_config_{userId} = { bot_token, channel_id, ... } par compte Pro
+// IDs : 5001..5100, alloués globalement mais filtrés par owner pour Pro
 // ══════════════════════════════════════════════════════════════════
 const PRO_BASE_ID   = 5000;
 const PRO_MAX_SLOTS = 100;
+const PRO_MAX_PER_OWNER = 10;  // chaque Pro peut avoir jusqu'à 10 stratégies
 
+// Récupère la liste globale ; assigne owner_user_id aux entrées legacy
 async function getProStrategiesList() {
   const raw = await db.getSetting('pro_strategies_list').catch(() => null);
   let list = [];
@@ -3091,9 +3302,11 @@ async function getProStrategiesList() {
       try {
         const oldMeta = JSON.parse(oldMetaRaw);
         const id = PRO_BASE_ID + 1; // 5001
-        const migrated = { ...oldMeta, id, created_at: oldMeta.updated_at || new Date().toISOString() };
+        const adm = await pickFallbackAdminId();
+        const migrated = { ...oldMeta, id, owner_user_id: adm, created_at: oldMeta.updated_at || new Date().toISOString() };
         list = [{
-          id, filename: oldMeta.filename || 'legacy.js', file_type: oldMeta.file_type || 'js',
+          id, owner_user_id: adm,
+          filename: oldMeta.filename || 'legacy.js', file_type: oldMeta.file_type || 'js',
           strategy_name: oldMeta.strategy_name || 'Stratégie Pro',
           engine_type: oldMeta.engine_type || 'script_js',
           engine_loaded: oldMeta.engine_loaded !== false,
@@ -3102,16 +3315,68 @@ async function getProStrategiesList() {
         await db.setSetting('pro_strategies_list', JSON.stringify(list));
         await db.setSetting(`pro_strategy_${id}_content`, oldContent);
         await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(migrated));
-        console.log(`[Pro] 🔁 Migration legacy → slot S${id} "${oldMeta.strategy_name}"`);
+        console.log(`[Pro] 🔁 Migration legacy → slot S${id} "${oldMeta.strategy_name}" (owner=${adm})`);
       } catch (e) { console.warn('[Pro] Migration legacy échouée:', e.message); }
     }
   }
+
+  // ── Backfill owner_user_id pour les entrées sans propriétaire ──
+  let needsResave = false;
+  const fallbackOwnerId = await pickFallbackAdminId();
+  for (const s of list) {
+    if (!s.owner_user_id) { s.owner_user_id = fallbackOwnerId; needsResave = true; }
+  }
+  if (needsResave) {
+    await db.setSetting('pro_strategies_list', JSON.stringify(list));
+    // Backfill aussi les meta
+    for (const s of list) {
+      try {
+        const mRaw = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
+        if (mRaw) {
+          const m = JSON.parse(mRaw);
+          if (!m.owner_user_id) {
+            m.owner_user_id = s.owner_user_id;
+            await db.setSetting(`pro_strategy_${s.id}_meta`, JSON.stringify(m));
+          }
+        }
+      } catch {}
+    }
+    console.log(`[Pro] 🔁 Backfill owner_user_id sur ${list.length} stratégie(s) → admin ${fallbackOwnerId}`);
+  }
+
   return list;
+}
+
+let __fallbackAdminCache = null;
+async function pickFallbackAdminId() {
+  if (__fallbackAdminCache) return __fallbackAdminCache;
+  try {
+    const all = await db.getAllUsers();
+    const adm = all.find(u => u.is_admin && (u.admin_level || 2) === 1) || all.find(u => u.is_admin);
+    __fallbackAdminCache = adm ? adm.id : 1;
+    return __fallbackAdminCache;
+  } catch { return 1; }
+}
+
+// Filtre la liste globale pour ne garder que les stratégies du propriétaire
+async function getProStrategiesListForOwner(ownerId) {
+  const list = await getProStrategiesList();
+  return list.filter(s => s.owner_user_id === ownerId);
 }
 
 async function saveProStrategiesList(list) {
   await db.setSetting('pro_strategies_list', JSON.stringify(list));
-  const loadedIds = list.filter(s => s.engine_loaded !== false).map(s => `S${s.id}`);
+  // Liste des IDs actifs : ignorer les stratégies dont l'owner est désactivé (pour le moteur)
+  const ownersDisabled = new Set();
+  try {
+    const all = await db.getAllUsers();
+    for (const u of all) {
+      if (!u.is_pro && !u.is_admin) ownersDisabled.add(u.id);
+    }
+  } catch {}
+  const loadedIds = list
+    .filter(s => s.engine_loaded !== false && !ownersDisabled.has(s.owner_user_id))
+    .map(s => `S${s.id}`);
   await db.setSetting('pro_strategy_ids', JSON.stringify(loadedIds));
 }
 
@@ -3125,7 +3390,7 @@ function allocateProId(list) {
 }
 
 // ── POST : créer une NOUVELLE stratégie (nouveau slot) OU modifier (id fourni) ──
-router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
+router.post('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
   const { filename, content, mimetype, id: explicitId } = req.body;
   if (!filename || content === undefined)
     return res.status(400).json({ error: 'Nom de fichier et contenu requis' });
@@ -3137,17 +3402,31 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
     let list = await getProStrategiesList();
     let entryId;
     let isUpdate = false;
+    const sessionOwnerId = effectiveOwnerId(req);
+    let entryOwnerId = sessionOwnerId;
 
     if (explicitId !== undefined && explicitId !== null && explicitId !== '') {
       entryId = parseInt(explicitId);
-      const idx = list.findIndex(s => s.id === entryId);
-      if (idx < 0) return res.status(404).json({ error: `Stratégie ID ${explicitId} introuvable` });
+      const found = list.find(s => s.id === entryId);
+      if (!found) return res.status(404).json({ error: `Stratégie ID ${explicitId} introuvable` });
+      // Vérification ownership : un Pro ne peut modifier que ses stratégies
+      if (!req.session.isAdmin && found.owner_user_id !== req.session.userId) {
+        return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
+      }
+      entryOwnerId = found.owner_user_id;
       isUpdate = true;
     } else {
+      // Quota par propriétaire
+      const ownerCount = list.filter(s => s.owner_user_id === sessionOwnerId).length;
+      if (ownerCount >= PRO_MAX_PER_OWNER) {
+        return res.status(409).json({
+          error: `Nombre maximum de stratégies Pro pour ce compte atteint (${PRO_MAX_PER_OWNER}). Supprimez-en une avant d'en importer une nouvelle.`,
+        });
+      }
       entryId = allocateProId(list);
       if (entryId === null) {
         return res.status(409).json({
-          error: `Nombre maximum de stratégies Pro atteint (${PRO_MAX_SLOTS}). Supprimez-en une avant d'en importer une nouvelle.`,
+          error: `Nombre maximum global de stratégies Pro atteint (${PRO_MAX_SLOTS}).`,
         });
       }
     }
@@ -3156,6 +3435,7 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
     const now = new Date().toISOString();
     const meta = {
       id: entryId,
+      owner_user_id: entryOwnerId,
       filename,
       mimetype: mimetype || 'text/plain',
       size: content.length,
@@ -3173,7 +3453,7 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
     };
 
     if (!analysis.ok) {
-      console.warn(`[Pro S${entryId}] ❌ Analyse ${ext.toUpperCase()} "${filename}" — ${analysis.errors.length} erreur(s) :`);
+      console.warn(`[Pro S${entryId}][uid=${entryOwnerId}] ❌ Analyse ${ext.toUpperCase()} "${filename}" — ${analysis.errors.length} erreur(s) :`);
       analysis.errors.forEach(e => console.warn(`   [${e.type}]${e.line ? ' ligne '+e.line : ''} ${e.message}`));
       return res.status(422).json({
         ok: false, validation_failed: true, id: entryId, isUpdate,
@@ -3185,7 +3465,8 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
     await db.setSetting(`pro_strategy_${entryId}_meta`, JSON.stringify(meta));
 
     const entry = {
-      id: entryId, filename, file_type: ext,
+      id: entryId, owner_user_id: entryOwnerId,
+      filename, file_type: ext,
       strategy_name: analysis.strategy_name,
       engine_type: meta.engine_type,
       engine_loaded: meta.engine_loaded,
@@ -3195,7 +3476,7 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
     else list.push(entry);
     await saveProStrategiesList(list);
 
-    console.log(`[Pro S${entryId}] ✅ ${isUpdate ? 'Modifiée' : 'Créée'} — ${ext.toUpperCase()} "${filename}" "${analysis.strategy_name}" | ${analysis.warnings.length} avertissement(s)`);
+    console.log(`[Pro S${entryId}][uid=${entryOwnerId}] ✅ ${isUpdate ? 'Modifiée' : 'Créée'} — ${ext.toUpperCase()} "${filename}" "${analysis.strategy_name}" | ${analysis.warnings.length} avertissement(s)`);
     if (analysis.warnings.length) {
       analysis.warnings.forEach(w => console.warn(`   [${w.type}]${w.line ? ' ligne '+w.line : ''} ${w.message}`));
     }
@@ -3206,18 +3487,21 @@ router.post('/pro-strategy-file', requireAdmin, async (req, res) => {
       catch (e) { engineError = e.message; console.error('[Pro] Erreur rechargement moteur:', e.message); }
     }
 
-    res.json({ ok: true, id: entryId, isUpdate, meta, warnings: analysis.warnings, engine_error: engineError || undefined });
+    res.json({ ok: true, id: entryId, owner_user_id: entryOwnerId, isUpdate, meta, warnings: analysis.warnings, engine_error: engineError || undefined });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── GET : liste complète (+ 1ᵉʳ élément exposé pour rétrocompat UI) ──
-router.get('/pro-strategy-file', requireAdmin, async (req, res) => {
+// ── GET : liste filtrée par propriétaire (+ 1ᵉʳ élément pour rétrocompat UI) ──
+router.get('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
   try {
-    const list = await getProStrategiesList();
+    const ownerId = effectiveOwnerId(req);
+    const allList = await getProStrategiesList();
+    const list = allList.filter(s => s.owner_user_id === ownerId);
     const strategies = [];
     for (const entry of list) {
       const metaRaw = await db.getSetting(`pro_strategy_${entry.id}_meta`).catch(() => null);
       const meta = metaRaw ? JSON.parse(metaRaw) : { ...entry };
+      if (!meta.owner_user_id) meta.owner_user_id = entry.owner_user_id;
       strategies.push(meta);
     }
     let firstMeta = null, firstContent = null;
@@ -3225,64 +3509,78 @@ router.get('/pro-strategy-file', requireAdmin, async (req, res) => {
       firstMeta = strategies[0];
       firstContent = await db.getSetting(`pro_strategy_${strategies[0].id}_content`).catch(() => null);
     }
-    res.json({ meta: firstMeta, content: firstContent, strategies, total: strategies.length, max: PRO_MAX_SLOTS });
+    res.json({
+      meta: firstMeta, content: firstContent, strategies,
+      total: strategies.length, max: PRO_MAX_PER_OWNER,
+      owner_user_id: ownerId,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── GET : récupérer contenu + meta d'une stratégie précise ──
-router.get('/pro-strategy-file/:id', requireAdmin, async (req, res) => {
+// ── GET : récupérer contenu + meta d'une stratégie précise (avec contrôle d'accès) ──
+router.get('/pro-strategy-file/:id', requireProOrAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
     if (!metaRaw) return res.status(404).json({ error: 'Stratégie introuvable' });
+    const meta = JSON.parse(metaRaw);
+    if (!req.session.isAdmin && meta.owner_user_id !== req.session.userId) {
+      return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
+    }
     const content = await db.getSetting(`pro_strategy_${id}_content`).catch(() => null);
-    res.json({ id, meta: JSON.parse(metaRaw), content });
+    res.json({ id, meta, content });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── DELETE : supprimer UNE stratégie ──
-router.delete('/pro-strategy-file/:id', requireAdmin, async (req, res) => {
+// ── DELETE : supprimer UNE stratégie (avec contrôle d'accès) ──
+router.delete('/pro-strategy-file/:id', requireProOrAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     let list = await getProStrategiesList();
     const found = list.find(s => s.id === id);
     if (!found) return res.status(404).json({ error: 'Stratégie introuvable' });
+    if (!req.session.isAdmin && found.owner_user_id !== req.session.userId) {
+      return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
+    }
     list = list.filter(s => s.id !== id);
     await saveProStrategiesList(list);
     await db.setSetting(`pro_strategy_${id}_content`, '');
     await db.setSetting(`pro_strategy_${id}_meta`, '');
-    // Supprimer aussi les prédictions associées (stock reset pour ce canal)
     try {
       const removed = await db.deleteStrategyPredictions(`S${id}`).catch(() => 0);
       if (removed) console.log(`[Pro S${id}] ${removed} prédiction(s) supprimée(s) avec la stratégie`);
     } catch {}
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    console.log(`[Pro S${id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée`);
+    console.log(`[Pro S${id}][uid=${found.owner_user_id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── DELETE global : supprimer TOUTES les stratégies Pro ──
-router.delete('/pro-strategy-file', requireAdmin, async (req, res) => {
+// ── DELETE : supprimer toutes les stratégies du propriétaire effectif ──
+router.delete('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
   try {
-    const list = await getProStrategiesList();
-    for (const s of list) {
+    const ownerId = effectiveOwnerId(req);
+    const fullList = await getProStrategiesList();
+    const toDelete = fullList.filter(s => s.owner_user_id === ownerId);
+    for (const s of toDelete) {
       await db.setSetting(`pro_strategy_${s.id}_content`, '');
       await db.setSetting(`pro_strategy_${s.id}_meta`, '');
       try { await db.deleteStrategyPredictions(`S${s.id}`); } catch {}
     }
-    await db.setSetting('pro_strategies_list', '[]');
-    await db.setSetting('pro_strategy_ids', '[]');
-    // Legacy cleanup
-    await db.setSetting('pro_strategy_file_meta', '');
-    await db.setSetting('pro_strategy_file_content', '');
+    const remaining = fullList.filter(s => s.owner_user_id !== ownerId);
+    await saveProStrategiesList(remaining);
+    // Legacy cleanup uniquement si on supprime tout en mode admin (no remaining)
+    if (!remaining.length && req.session.isAdmin) {
+      await db.setSetting('pro_strategy_file_meta', '');
+      await db.setSetting('pro_strategy_file_content', '');
+    }
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    res.json({ ok: true, deleted: list.length });
+    res.json({ ok: true, deleted: toDelete.length, owner_user_id: ownerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Recharger config Telegram Pro dans le moteur (appelé après modification de la config)
-router.post('/pro-config/reload', requireAdmin, async (req, res) => {
+router.post('/pro-config/reload', requireProOrAdmin, async (req, res) => {
   try {
     require('./engine').reloadProStrategies().catch(() => {});
     res.json({ ok: true });
