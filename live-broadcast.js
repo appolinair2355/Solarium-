@@ -9,9 +9,12 @@
 //  • Format des messages :
 //      En cours :        ⏰#N{n}. ▶️{p}({pCards}) - {b}({bCards})
 //                        ⏰#N{n}. {p}({pCards}) - ▶️{b}({bCards})
-//      Joueur gagne :    #N{n}. ✅{p}({pCards}) - {b}({bCards}) #T{tot} 🔵#R
-//      Banquier gagne :  #N{n}. {p}({pCards}) - ✅{b}({bCards}) #T{tot} 🔴#R
-//      Égalité :         #N{n}. {p}({pCards}) 🔰 {b}({bCards}) #T{tot} 🟣#X
+//      Joueur gagne (2 cartes / 2 cartes) :  #N{n}. ✅{p}({pCards}) - {b}({bCards}) #T{tot} 🔵#R
+//      Joueur gagne (3ᵉ carte tirée) :       #N{n}. ✅{p}({pCards}) - {b}({bCards}) #T{tot} 🔵
+//      Banquier gagne (2/2) :                #N{n}. {p}({pCards}) - ✅{b}({bCards}) #T{tot} 🔴#R
+//      Banquier gagne (3ᵉ carte tirée) :     #N{n}. {p}({pCards}) - ✅{b}({bCards}) #T{tot} 🔴
+//      Égalité :                             #N{n}. {p}({pCards}) 🔰 {b}({bCards}) #T{tot} 🟣#X
+//   Le tag #R signifie "jeu terminé après distribution initiale" (aucune 3ᵉ carte).
 // ════════════════════════════════════════════════════════════════════════════
 
 const fetch = require('node-fetch');
@@ -160,19 +163,25 @@ function buildMessage(g) {
   const finished = !!g.is_finished || winner === 'Player' || winner === 'Banker' || winner === 'Tie';
 
   if (finished) {
+    // #R = jeu terminé après distribution initiale (2 cartes chacun, aucune 3ᵉ carte tirée)
+    const pLen = Array.isArray(g.player_cards) ? g.player_cards.length : 0;
+    const bLen = Array.isArray(g.banker_cards) ? g.banker_cards.length : 0;
+    const naturalEnd = pLen === 2 && bLen === 2;
+    const tag = naturalEnd ? ' #R' : '';
+
     if (winner === 'Tie') {
-      return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X`;
+      return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${tag}`;
     }
     if (winner === 'Player') {
-      return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵#R`;
+      return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
     }
     if (winner === 'Banker') {
-      return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴#R`;
+      return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
     }
     // Cas limite : finished sans winner explicite → comparer les points
-    if (p === b) return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X`;
-    if (p > b)   return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵#R`;
-                 return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴#R`;
+    if (p === b) return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${tag}`;
+    if (p > b)   return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
+                 return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
   }
 
   // En cours

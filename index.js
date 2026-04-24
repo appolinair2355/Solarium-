@@ -64,12 +64,29 @@ app.use(session({
   },
 }));
 
+// ── Middleware : bloquer les comptes expirés sur tous les endpoints protégés
+// (sauf /api/auth pour permettre logout, et /api/admin/users pour que l'admin gère)
+const dbForExpiry = require('./db');
+async function blockExpired(req, res, next) {
+  if (!req.session?.userId) return next();
+  if (req.session.isAdmin) return next();
+  try {
+    const u = await dbForExpiry.getUser(req.session.userId);
+    if (!u) return res.status(401).json({ error: 'Session invalide' });
+    if (!u.is_approved) return res.status(403).json({ error: 'Compte en attente de validation', status: 'pending' });
+    if (!u.subscription_expires_at || new Date(u.subscription_expires_at) <= new Date()) {
+      return res.status(403).json({ error: 'Abonnement expiré. Contactez l\'administrateur.', status: 'expired' });
+    }
+    next();
+  } catch { next(); }
+}
+
 // ── Routes API ─────────────────────────────────────────────────────
 app.use('/api/auth',        authRoutes);
-app.use('/api/admin',       adminRoutes);
-app.use('/api/predictions', predictionsRoutes);
-app.use('/api/games',       gamesRouter);
-app.use('/api/telegram',    telegramRoutes);
+app.use('/api/admin',       blockExpired, adminRoutes);
+app.use('/api/predictions', blockExpired, predictionsRoutes);
+app.use('/api/games',       blockExpired, gamesRouter);
+app.use('/api/telegram',    blockExpired, telegramRoutes);
 app.use('/api/prog',        progRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 app.use('/api/system-logs', systemLogsRoutes);

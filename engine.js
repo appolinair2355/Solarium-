@@ -144,6 +144,33 @@ class Engine {
       this.c2.absences[s] = 0;
       this.c3.absences[s] = 0;
     }
+
+    // Cache d'activité des propriétaires Pro (TTL 60s) pour éviter de surcharger la DB
+    this._ownerActiveCache = new Map(); // userId -> { active: bool, until: ts }
+  }
+
+  // Vérifie si le propriétaire d'une stratégie Pro est encore actif (non expiré, approuvé)
+  // Renvoie true pour les stratégies non-Pro (sans owner_user_id) ou pour les admins.
+  async _isOwnerActive(cfg) {
+    if (!cfg || !cfg.is_pro) return true;
+    const ownerId = cfg.owner_user_id;
+    if (!ownerId) return true; // legacy : on laisse passer
+    const now = Date.now();
+    const cached = this._ownerActiveCache.get(ownerId);
+    if (cached && cached.until > now) return cached.active;
+    let active = false;
+    try {
+      const u = await db.getUser(ownerId);
+      if (u) {
+        if (u.is_admin) active = true;
+        else if (!u.is_approved) active = false;
+        else if (!u.subscription_expires_at) active = false;
+        else active = new Date(u.subscription_expires_at) > new Date();
+      }
+    } catch { active = true; } // tolérant en cas d'erreur DB
+    this._ownerActiveCache.set(ownerId, { active, until: now + 60000 });
+    if (!active) console.log(`[Pro owner=${ownerId}] ⛔ Compte expiré/non approuvé — envois Telegram bloqués`);
+    return active;
   }
 
   _makeCustomState() {
@@ -407,11 +434,12 @@ class Engine {
         ? parseInt(state.config.max_rattrapage) : globalMaxR;
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
       const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
-      db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(inserted => {
+      db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(async inserted => {
         if (!inserted) {
           console.warn(`[${stratId}] _forceNextPrediction #${nextGn} déjà existante — Telegram ignoré`);
           return;
         }
+        if (!(await this._isOwnerActive(state.config))) { console.log(`[${stratId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
         if (tgs.length > 0) {
           sendCustomAndStore(tgs, stratId, nextGn, suit, stratTgOpts).catch(() => {});
         } else {
@@ -803,6 +831,7 @@ class Engine {
 
     // Envoi Telegram
     if (cfg.is_pro && this._proTelegramEnabled === false) { console.log(`[${channelId}] Pro Telegram suspendu`); return; }
+    if (!(await this._isOwnerActive(cfg))) { console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
     const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
     if (tgs.length > 0) {
       sendCustomAndStore(tgs, channelId, targetGn, ps, stratTgOpts).catch(() => {});
@@ -1162,6 +1191,7 @@ class Engine {
     state.pending[targetGame] = { suit: ps, rattrapage: 0, maxR: stratMaxR };
     if (!inserted) return;
 
+    if (!(await this._isOwnerActive(cfg))) { console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
     const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
     if (tgs.length > 0) {
       sendCustomAndStore(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
@@ -1818,6 +1848,7 @@ class Engine {
         console.log(`[${channelId}] Pro Telegram suspendu — aucun abonnement Pro actif`);
         return;
       }
+      if (!(await this._isOwnerActive(cfg))) { console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
         await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
@@ -2341,7 +2372,9 @@ class Engine {
               hand:     config.hand      || 'joueur',
               maxR:     liveMaxR,
             };
-            if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+            if (!(await this._isOwnerActive(config))) {
+              console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`);
+            } else if (Array.isArray(tg_targets) && tg_targets.length > 0) {
               await sendCustomAndStore(tg_targets, channelId, next, ps, liveTgOpts).catch(() => {});
             } else {
               await sendToStrategyChannels(channelId, next, ps, liveTgOpts).catch(() => {});

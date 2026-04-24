@@ -363,7 +363,7 @@ router.get('/pro-strategies', async (req, res) => {
   try {
     const rawIds  = await db.getSetting('pro_strategy_ids').catch(() => null);
     const proIds  = rawIds ? JSON.parse(rawIds) : [];
-    const strategies = await Promise.all(proIds.map(async (id) => {
+    const allStrategies = await Promise.all(proIds.map(async (id) => {
       const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
       const m    = rawM ? JSON.parse(rawM) : {};
       const info = m.strategy_info || {};
@@ -376,9 +376,15 @@ router.get('/pro-strategies', async (req, res) => {
         decalage: info.decalage,
         max_rattrapage: info.max_rattrapage ?? 2,
         engine_type: m.engine_type || null,
+        owner_user_id: m.owner_user_id || null,
       };
     }));
-    res.json({ strategies, active: proIds.length > 0 });
+    // Un compte Pro (non-admin) ne voit QUE ses propres stratégies importées.
+    // L'admin voit toutes les stratégies Pro pour pouvoir les gérer.
+    const strategies = user.is_admin
+      ? allStrategies
+      : allStrategies.filter(s => s.owner_user_id === req.session.userId);
+    res.json({ strategies, active: strategies.length > 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
