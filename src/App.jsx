@@ -11,6 +11,7 @@ const Admin         = lazy(() => import('./pages/Admin'));
 const TelegramFeed  = lazy(() => import('./pages/TelegramFeed'));
 const Programmation = lazy(() => import('./pages/Programmation'));
 const SystemLogs    = lazy(() => import('./pages/SystemLogs'));
+const Comptages     = lazy(() => import('./pages/Comptages'));
 
 function PageLoader() {
   return (
@@ -35,7 +36,7 @@ function useUiStyles() {
   }, []);
 }
 
-function ProtectedRoute({ children, adminOnly = false, adminOrPro = false }) {
+function ProtectedRoute({ children, adminOnly = false, adminOrPro = false, adminProOrPremium = false }) {
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
@@ -44,6 +45,7 @@ function ProtectedRoute({ children, adminOnly = false, adminOrPro = false }) {
   if (!user.is_admin && user.status === 'pending') return <Navigate to="/choisir" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
   if (adminOrPro && !user.is_admin && !user.is_pro) return <Navigate to="/choisir" replace />;
+  if (adminProOrPremium && !user.is_admin && !user.is_pro && !user.is_premium) return <Navigate to="/choisir" replace />;
   return children;
 }
 
@@ -71,6 +73,7 @@ export default function App() {
             <Route path="/canal-telegram" element={<ProtectedRoute><TelegramFeed /></ProtectedRoute>} />
             <Route path="/programmation" element={<Programmation />} />
             <Route path="/system-logs" element={<ProtectedRoute adminOrPro><SystemLogs /></ProtectedRoute>} />
+            <Route path="/comptages" element={<ProtectedRoute adminProOrPremium><Comptages /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
