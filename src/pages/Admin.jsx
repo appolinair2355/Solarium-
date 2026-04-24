@@ -260,6 +260,473 @@ function TgDirectChat() {
   );
 }
 
+function ComptagesPanel() {
+  const [data, setData]       = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [cfg, setCfg]         = React.useState({ bot_token: '', channel_id: '', enabled: false });
+  const [tokenDirty, setTokenDirty] = React.useState(false);
+  const [savingCfg, setSavingCfg]   = React.useState(false);
+  const [busy, setBusy]       = React.useState('');
+  const [msg, setMsg]         = React.useState({ text: '', error: false });
+
+  // ── Canaux Telegram supplémentaires ──
+  const [extraChannels, setExtraChannels] = React.useState([]);
+  const [showChannelsPanel, setShowChannelsPanel] = React.useState(false);
+  const [editingChannel, setEditingChannel] = React.useState(null); // { id?, label, bot_token, channel_id, enabled, _tokenDirty }
+
+  // Helper: parser une réponse fetch en JSON même si le serveur a renvoyé du HTML
+  // (par ex. la version déployée sur Render n'a pas encore le module Comptages).
+  const safeJson = async (r) => {
+    const txt = await r.text();
+    try { return JSON.parse(txt); }
+    catch {
+      throw new Error(
+        r.status === 404 || /<!DOCTYPE/i.test(txt)
+          ? 'Module Comptages non disponible sur ce serveur — importez la dernière mise à jour.'
+          : `Réponse inattendue (HTTP ${r.status})`
+      );
+    }
+  };
+
+  const load = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/comptages', { credentials: 'include' });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setData(d);
+      setCfg({
+        bot_token:  d.config?.bot_token  || '',
+        channel_id: d.config?.channel_id || '',
+        enabled:    !!d.config?.enabled,
+      });
+      setExtraChannels(Array.isArray(d.extraChannels) ? d.extraChannels : []);
+      setTokenDirty(false);
+    } catch (e) {
+      setMsg({ text: '❌ ' + e.message, error: true });
+    } finally { setLoading(false); }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+    const iv = setInterval(load, 15000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  const saveCfg = async () => {
+    setSavingCfg(true); setMsg({ text: '', error: false });
+    try {
+      const body = {
+        channel_id: cfg.channel_id,
+        enabled: cfg.enabled,
+      };
+      // N'envoie le token que s'il a été modifié (sinon on garde celui du serveur)
+      if (tokenDirty) body.bot_token = cfg.bot_token;
+      const r = await fetch('/api/admin/comptages/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Configuration sauvegardée', error: false });
+      await load();
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setSavingCfg(false); }
+  };
+
+  const sendTest = async () => {
+    setBusy('test'); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/test-report', {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      if (d.error) throw new Error(d.error);
+      const channelsInfo = Array.isArray(d.channels) && d.channels.length
+        ? ' (' + d.channels.map(c => `${c.label} ${c.sent ? '✓' : '✗'}`).join(' · ') + ')'
+        : '';
+      setMsg({
+        text: d.sent
+          ? '✅ Bilan envoyé sur Telegram' + channelsInfo
+          : 'ℹ️ Bilan généré (aucun canal activé ou tous en erreur)' + channelsInfo,
+        error: false,
+      });
+      await load();
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  const resetAll = async () => {
+    if (!confirm('Réinitialiser tous les compteurs et historiques ?')) return;
+    setBusy('reset'); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/reset', {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Compteurs réinitialisés', error: false });
+      await load();
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  // ── Gestion des canaux supplémentaires ────────────────────────────────
+  const startEditChannel = (ch) => {
+    setEditingChannel(ch
+      ? { ...ch, _tokenDirty: false }
+      : { id: '', label: '', bot_token: '', channel_id: '', enabled: true, _tokenDirty: true });
+    setShowChannelsPanel(true);
+  };
+  const cancelEditChannel = () => setEditingChannel(null);
+
+  const saveChannel = async () => {
+    if (!editingChannel) return;
+    setBusy('chsave'); setMsg({ text: '', error: false });
+    try {
+      const body = {
+        id: editingChannel.id || undefined,
+        label: editingChannel.label || '',
+        channel_id: editingChannel.channel_id || '',
+        enabled: !!editingChannel.enabled,
+      };
+      if (editingChannel._tokenDirty) body.bot_token = editingChannel.bot_token || '';
+      const r = await fetch('/api/admin/comptages/extra-channels', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Canal sauvegardé', error: false });
+      setEditingChannel(null);
+      await load();
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  const deleteChannel = async (ch) => {
+    if (!confirm(`Supprimer le canal « ${ch.label || ch.channel_id} » ?`)) return;
+    setBusy('chdel'); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/extra-channels/' + encodeURIComponent(ch.id), {
+        method: 'DELETE', credentials: 'include',
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Canal supprimé', error: false });
+      await load();
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  const testChannel = async (id) => {
+    setBusy('chtest:' + id); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/extra-channels/' + encodeURIComponent(id) + '/test', {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Test envoyé sur ' + (d.label || 'le canal'), error: false });
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  // Regrouper par "group"
+  const grouped = React.useMemo(() => {
+    if (!data?.summary) return [];
+    const map = {};
+    for (const r of data.summary) {
+      if (!map[r.group]) map[r.group] = [];
+      map[r.group].push(r);
+    }
+    return Object.entries(map);
+  }, [data]);
+
+  // Précédent bilan (pour comparaison max global vs précédent)
+  const prevByKey = React.useMemo(() => {
+    const map = {};
+    if (data?.lastReport?.summary) {
+      for (const r of data.lastReport.summary) map[r.key] = r;
+    }
+    return map;
+  }, [data]);
+
+  const lastReportTs = data?.lastReport?.timestamp
+    ? new Date(data.lastReport.timestamp).toLocaleString('fr-FR')
+    : '—';
+
+  return (
+    <>
+      {/* Carte de configuration */}
+      <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)' }}>
+        <div className="tg-admin-header">
+          <span className="tg-admin-icon">📈</span>
+          <div style={{ flex: 1 }}>
+            <h2 className="tg-admin-title">Comptages — écarts entre catégories</h2>
+            <p className="tg-admin-sub">
+              Suit les écarts (séries sans apparition) pour costumes, victoires, parité,
+              distribution, nombre de cartes et points. Bilan envoyé toutes les heures pile
+              sur le canal Telegram configuré, avec comparaison au bilan précédent.
+            </p>
+          </div>
+        </div>
+
+        {msg.text && (
+          <div className={`alert ${msg.error ? 'alert-error' : 'alert-success'}`} style={{ marginTop: 12 }}>
+            {msg.text}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginTop: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Bot Token</label>
+            <input
+              type="text"
+              value={cfg.bot_token}
+              placeholder="123456:ABC-DEF…"
+              onChange={e => { setCfg({ ...cfg, bot_token: e.target.value }); setTokenDirty(true); }}
+              onFocus={() => { if (cfg.bot_token.startsWith('••••')) { setCfg({ ...cfg, bot_token: '' }); setTokenDirty(true); } }}
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)',
+                background: 'rgba(34,197,94,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Channel ID</label>
+            <input
+              type="text"
+              value={cfg.channel_id}
+              placeholder="-1001234567890 ou @canal"
+              onChange={e => setCfg({ ...cfg, channel_id: e.target.value })}
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)',
+                background: 'rgba(34,197,94,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#e2e8f0', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={cfg.enabled}
+                onChange={e => setCfg({ ...cfg, enabled: e.target.checked })}
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <span>Activer l'envoi horaire</span>
+            </label>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn btn-gold btn-sm" onClick={saveCfg} disabled={savingCfg}>
+            {savingCfg ? '…' : '💾 Sauvegarder'}
+          </button>
+          <button className="btn btn-sm" onClick={sendTest} disabled={busy === 'test'}
+            style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
+            {busy === 'test' ? '…' : '✈️ Envoyer un bilan maintenant'}
+          </button>
+          <button className="btn btn-sm" onClick={resetAll} disabled={busy === 'reset'}
+            style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }}>
+            {busy === 'reset' ? '…' : '🗑️ Réinitialiser les compteurs'}
+          </button>
+          <button className="btn btn-sm" onClick={() => setShowChannelsPanel(v => !v)}
+            style={{ background: 'rgba(168,85,247,0.12)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
+            ⚙️ Configurer les canaux {extraChannels.length > 0 && <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 8, background: 'rgba(168,85,247,0.3)', fontSize: 11 }}>+{extraChannels.length}</span>}
+          </button>
+          <div style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: '#64748b' }}>
+            Dernier bilan : <b style={{ color: '#94a3b8' }}>{lastReportTs}</b>
+            {' · '}Jeux comptés : <b style={{ color: '#94a3b8' }}>{data?.processedCount ?? 0}</b>
+          </div>
+        </div>
+      </div>
+
+      {/* Carte des canaux Telegram supplémentaires */}
+      {showChannelsPanel && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginTop: 16 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">📡</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Canaux Telegram supplémentaires</h2>
+              <p className="tg-admin-sub">
+                Le bilan horaire est envoyé sur le canal principal <b>et</b> sur tous les canaux
+                supplémentaires actifs ci-dessous. Chaque canal a son propre bot token et channel id.
+              </p>
+            </div>
+            <button className="btn btn-sm btn-gold" onClick={() => startEditChannel(null)}>
+              ➕ Ajouter un canal
+            </button>
+          </div>
+
+          {/* Liste des canaux */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {extraChannels.length === 0 && !editingChannel && (
+              <div style={{ color: '#64748b', padding: 12, textAlign: 'center', fontSize: 13 }}>
+                Aucun canal supplémentaire. Cliquez sur « Ajouter un canal » pour en créer un.
+              </div>
+            )}
+            {extraChannels.map(ch => (
+              <div key={ch.id} style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr auto',
+                gap: 12, alignItems: 'center',
+                background: 'rgba(15,23,42,0.4)',
+                border: '1px solid rgba(168,85,247,0.2)',
+                borderRadius: 10, padding: '10px 14px',
+              }}>
+                <div title={ch.enabled ? 'Actif' : 'Désactivé'} style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: ch.enabled ? '#22c55e' : '#64748b',
+                }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#e2e8f0' }}>
+                    {ch.label || <i style={{ color: '#64748b' }}>(sans nom)</i>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>
+                    {ch.channel_id} · token {ch.bot_token || '—'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-sm" onClick={() => testChannel(ch.id)} disabled={busy.startsWith('chtest:')}
+                    style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
+                    {busy === 'chtest:' + ch.id ? '…' : '✈️ Test'}
+                  </button>
+                  <button className="btn btn-sm" onClick={() => startEditChannel(ch)}
+                    style={{ background: 'rgba(148,163,184,0.12)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.3)' }}>
+                    ✏️ Éditer
+                  </button>
+                  <button className="btn btn-sm" onClick={() => deleteChannel(ch)} disabled={busy === 'chdel'}
+                    style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }}>
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Formulaire d'édition / création */}
+          {editingChannel && (
+            <div style={{
+              marginTop: 14, padding: 14, borderRadius: 10,
+              background: 'rgba(168,85,247,0.06)',
+              border: '1px solid rgba(168,85,247,0.4)',
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#c4b5fd', marginBottom: 10 }}>
+                {editingChannel.id ? '✏️ Modifier le canal' : '➕ Nouveau canal'}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Nom du canal</label>
+                  <input
+                    type="text"
+                    value={editingChannel.label}
+                    placeholder="Ex. Canal de secours"
+                    onChange={e => setEditingChannel({ ...editingChannel, label: e.target.value })}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)',
+                      background: 'rgba(168,85,247,0.05)', color: '#e2e8f0', fontSize: 13 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Bot Token</label>
+                  <input
+                    type="text"
+                    value={editingChannel.bot_token}
+                    placeholder="123456:ABC-DEF…"
+                    onChange={e => setEditingChannel({ ...editingChannel, bot_token: e.target.value, _tokenDirty: true })}
+                    onFocus={() => { if (editingChannel.bot_token.startsWith('••••')) setEditingChannel({ ...editingChannel, bot_token: '', _tokenDirty: true }); }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)',
+                      background: 'rgba(168,85,247,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>Channel ID</label>
+                  <input
+                    type="text"
+                    value={editingChannel.channel_id}
+                    placeholder="-1001234567890 ou @canal"
+                    onChange={e => setEditingChannel({ ...editingChannel, channel_id: e.target.value })}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.3)',
+                      background: 'rgba(168,85,247,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#e2e8f0', fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!editingChannel.enabled}
+                      onChange={e => setEditingChannel({ ...editingChannel, enabled: e.target.checked })}
+                      style={{ width: 16, height: 16, cursor: 'pointer' }}
+                    />
+                    <span>Canal actif</span>
+                  </label>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                <button className="btn btn-gold btn-sm" onClick={saveChannel} disabled={busy === 'chsave'}>
+                  {busy === 'chsave' ? '…' : '💾 Enregistrer'}
+                </button>
+                <button className="btn btn-sm" onClick={cancelEditChannel}
+                  style={{ background: 'rgba(148,163,184,0.12)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.3)' }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tableau des écarts */}
+      <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.4)', marginTop: 16 }}>
+        <div className="tg-admin-header">
+          <span className="tg-admin-icon">📊</span>
+          <div style={{ flex: 1 }}>
+            <h2 className="tg-admin-title">État courant des écarts</h2>
+            <p className="tg-admin-sub">
+              <b>actuel</b> = série en cours sans apparition · <b>période</b> = plus grand écart
+              depuis le dernier bilan · <b>max global</b> = record toutes périodes ·
+              <span style={{ color: '#22c55e' }}> 📈 = nouveau record vs bilan précédent</span>.
+            </p>
+          </div>
+        </div>
+
+        {loading && <div style={{ color: '#64748b', padding: 12 }}>Chargement…</div>}
+
+        {!loading && grouped.length === 0 && (
+          <div style={{ color: '#64748b', padding: 12 }}>Aucune donnée disponible (le moteur n'a pas encore traité de jeu).</div>
+        )}
+
+        {!loading && grouped.map(([group, rows]) => (
+          <div key={group} style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#cbd5e1', marginBottom: 6 }}>{group}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+              {rows.map(row => {
+                const prev = prevByKey[row.key];
+                const isRecord = prev && row.maxAll > (prev.maxAll || 0);
+                return (
+                  <div key={row.key} style={{
+                    background: 'rgba(15,23,42,0.4)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                  }}>
+                    <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>
+                      {row.label} {isRecord && <span style={{ color: '#22c55e' }} title="Nouveau record vs bilan précédent">📈</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#64748b' }}>
+                      <span>actuel <b style={{ color: '#e2e8f0', fontSize: 14 }}>{row.cur}</b></span>
+                      <span>période <b style={{ color: '#fbbf24', fontSize: 14 }}>{row.maxPeriod}</b></span>
+                      <span>max <b style={{ color: '#a78bfa', fontSize: 14 }}>{row.maxAll}</b></span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
   // Fallback : si les setters ne sont pas fournis (rendu hors AdminPanel),
   // on utilise un état local pour ne pas crasher.
@@ -3974,6 +4441,7 @@ function AdminPanel() {
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
+            { id: 'comptages',      icon: '📈', label: 'Comptages' },
             ...(canSeeSystem ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
@@ -4663,6 +5131,8 @@ function AdminPanel() {
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
 
+        {/* ── TAB : COMPTAGES ── */}
+        {adminTab === 'comptages' && <ComptagesPanel />}
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
