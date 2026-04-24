@@ -39,6 +39,9 @@ function ProtectedRoute({ children, adminOnly = false, adminOrPro = false }) {
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
+  // Bloquer les comptes expirés sur tous les espaces sauf /choisir (où le bandeau "expiré" s'affiche)
+  if (!user.is_admin && user.status === 'expired') return <Navigate to="/choisir" replace />;
+  if (!user.is_admin && user.status === 'pending') return <Navigate to="/choisir" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
   if (adminOrPro && !user.is_admin && !user.is_pro) return <Navigate to="/choisir" replace />;
   return children;
