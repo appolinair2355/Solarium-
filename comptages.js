@@ -426,6 +426,29 @@ router.get('/view', requireViewer, (req, res) => {
   });
 });
 
+// Helper : liste des canaux qui recevront le bilan (sans tokens, pour affichage)
+function listActiveChannelsPublic() {
+  const out = [];
+  const cfg = state.config || {};
+  if (cfg.enabled && cfg.bot_token && cfg.channel_id) {
+    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id, bot_token_masked: maskToken(cfg.bot_token), enabled: true });
+  } else if (cfg.bot_token || cfg.channel_id) {
+    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id || '—', bot_token_masked: maskToken(cfg.bot_token), enabled: !!cfg.enabled });
+  }
+  for (const ch of (state.extraChannels || [])) {
+    out.push({ id: ch.id, label: ch.label || `Canal ${ch.channel_id}`, channel_id: ch.channel_id, bot_token_masked: maskToken(ch.bot_token), enabled: !!ch.enabled });
+  }
+  return out;
+}
+
+// Calcule la prochaine heure pile (à laquelle le bilan sera envoyé automatiquement)
+function nextHourSchedule() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(next.getHours() + 1, 0, 0, 0);
+  return next.toISOString();
+}
+
 router.get('/', requireAdmin, (req, res) => {
   res.json({
     config: { ...state.config, bot_token: maskToken(state.config.bot_token) },
@@ -433,6 +456,24 @@ router.get('/', requireAdmin, (req, res) => {
     summary: buildSummary(),
     lastReport: state.lastReport,
     processedCount: state.processed.size,
+    activeChannels: listActiveChannelsPublic(),
+    nextScheduledAt: nextHourSchedule(),
+  });
+});
+
+// Aperçu du prochain bilan — texte HTML formaté qui sera envoyé à l'heure pile
+router.get('/preview', requireAdmin, (req, res) => {
+  const now = new Date();
+  const summary = buildSummary();
+  const prev = state.lastReport ? state.lastReport.summary : null;
+  const text = buildReportText(now, summary, prev);
+  res.json({
+    text,
+    summary,
+    activeChannels: listActiveChannelsPublic(),
+    nextScheduledAt: nextHourSchedule(),
+    processedCount: state.processed.size,
+    lastReport: state.lastReport,
   });
 });
 
