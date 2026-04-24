@@ -2236,9 +2236,10 @@ function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
+  const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'strategies', 'bilan', 'config', 'tg-direct'];
   const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
   useEffect(() => {
-    if (isProOnly && adminTab !== 'config-pro') setAdminTab('config-pro');
+    if (isProOnly && !PRO_ALLOWED_TABS.includes(adminTab)) setAdminTab('config-pro');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProOnly]);
 
@@ -2250,6 +2251,10 @@ function AdminPanel() {
 
   // Visibility modal (canaux Telegram + stratégies)
   const [visModal, setVisModal] = useState(null); // { userId, username }
+  const [expandedUserId, setExpandedUserId] = useState(null); // ID de l'utilisateur dont la liste de canaux est dépliée
+  const [savingVis, setSavingVis] = useState(false);
+  const [visCounts, setVisCounts] = useState({}); // { userId: nombreTotalCanaux+strats }
+  const [savedFlash, setSavedFlash] = useState(null); // userId pour lequel afficher le bandeau "✅ Enregistré"
   const [visData, setVisData] = useState({}); // { userId: Set<dbId> } for channels
   const [visStratData, setVisStratData] = useState({}); // { userId: Set<stratId> } for strategies
   const [visLoading, setVisLoading] = useState(false);
@@ -3455,22 +3460,24 @@ function AdminPanel() {
     setNameEdit(p => ({ ...p, [u.id]: { first_name: u.first_name || '', last_name: u.last_name || '' } }));
 
   // Visibility modal (opt-in : canaux Telegram + stratégies)
-  const openVisModal = async u => {
+  const openVisModal = (u) => {
     setVisModal({ userId: u.id, username: u.username });
     setVisLoading(true);
-    const [chRes, stRes] = await Promise.all([
+    Promise.all([
       fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }),
       fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }),
-    ]);
-    if (chRes.ok) {
-      const d = await chRes.json();
-      setVisData(p => ({ ...p, [u.id]: new Set(d.visible) }));
-    }
-    if (stRes.ok) {
-      const d = await stRes.json();
-      setVisStratData(p => ({ ...p, [u.id]: new Set(d.visible) }));
-    }
-    setVisLoading(false);
+    ]).then(async ([chRes, stRes]) => {
+      if (chRes.ok) {
+        const d = await chRes.json();
+        setVisData(p => ({ ...p, [u.id]: new Set(d.visible) }));
+      }
+      if (stRes.ok) {
+        const d = await stRes.json();
+        setVisStratData(p => ({ ...p, [u.id]: new Set(d.visible) }));
+      }
+    }).catch(e => {
+      showMsg(`Erreur chargement : ${e.message}`, true);
+    }).finally(() => setVisLoading(false));
   };
 
   const toggleVisChannel = (userId, chDbId) => {
@@ -3489,24 +3496,39 @@ function AdminPanel() {
     });
   };
 
-  const saveVisibility = async () => {
-    const { userId } = visModal;
+  const saveVisibility = async (userIdArg = null) => {
+    const userId = userIdArg || (visModal && visModal.userId);
+    if (!userId) return;
+    setSavingVis(true);
     const visibleChannels = [...(visData[userId] || new Set())];
     const visibleStrategies = [...(visStratData[userId] || new Set())];
-    const [r1, r2] = await Promise.all([
-      fetch(`/api/telegram/users/${userId}/visibility`, {
-        method: 'PUT', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visible_channel_ids: visibleChannels }),
-      }),
-      fetch(`/api/admin/users/${userId}/strategies`, {
-        method: 'PUT', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ strategy_ids: visibleStrategies }),
-      }),
-    ]);
-    if (r1.ok && r2.ok) { showMsg('Accès assignés avec succès'); setVisModal(null); }
-    else showMsg('Erreur lors de la sauvegarde', true);
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch(`/api/telegram/users/${userId}/visibility`, {
+          method: 'PUT', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visible_channel_ids: visibleChannels }),
+        }),
+        fetch(`/api/admin/users/${userId}/strategies`, {
+          method: 'PUT', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strategy_ids: visibleStrategies }),
+        }),
+      ]);
+      if (r1.ok && r2.ok) {
+        showMsg('✅ Accès enregistrés');
+        // Met à jour le compteur visible sur le bouton
+        setVisCounts(p => ({ ...p, [userId]: visibleChannels.length + visibleStrategies.length }));
+        // Affiche le bandeau de confirmation pendant 4s
+        setSavedFlash(userId);
+        setTimeout(() => setSavedFlash(f => (f === userId ? null : f)), 4000);
+        if (!userIdArg) setVisModal(null);
+      } else {
+        showMsg('Erreur lors de la sauvegarde', true);
+      }
+    } finally {
+      setSavingVis(false);
+    }
   };
 
   // Add telegram channel
@@ -3936,7 +3958,14 @@ function AdminPanel() {
         {/* ── ONGLETS DE NAVIGATION ── */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '2px solid rgba(255,255,255,0.06)', paddingBottom: 0, flexWrap: 'wrap' }}>
           {(isProOnly
-            ? [{ id: 'config-pro', icon: '🔷', label: 'Config Pro', highlight: true }]
+            ? [
+                { id: 'config-pro', icon: '🔷', label: 'Config Pro', highlight: true },
+                { id: 'canaux',     icon: '✈️', label: 'Telegram',     badge: tgChannels.length > 0 ? tgChannels.length : null },
+                { id: 'strategies', icon: '⚙️', label: 'Stratégies',   badge: strategies.filter(s => s.owner_user_id === user?.id).length || null },
+                { id: 'bilan',      icon: '📊', label: 'Bilan' },
+                { id: 'config',     icon: '🔀', label: 'Routage' },
+                { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
+              ]
             : [
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
@@ -4079,7 +4108,8 @@ function AdminPanel() {
                     const dur = getDur(u.id);
                     const edit = nameEdit[u.id];
                     return (
-                      <tr key={u.id}>
+                      <React.Fragment key={u.id}>
+                      <tr>
                         {/* Username */}
                         <td>
                           <div style={{ fontWeight: 700 }}>{u.username}</div>
@@ -4167,7 +4197,27 @@ function AdminPanel() {
                             {isSuperAdmin && u.status === 'active' && (
                               <button className="btn btn-ghost btn-sm" onClick={() => extendUser(u.id)}>➕ Prolonger</button>
                             )}
-                            <button className="btn btn-tg btn-sm" onClick={() => openVisModal(u)}>📡 Canaux</button>
+                            <button
+                              type="button"
+                              className="btn btn-tg btn-sm"
+                              onClick={() => {
+                                if (expandedUserId === u.id) {
+                                  setExpandedUserId(null);
+                                } else {
+                                  setExpandedUserId(u.id);
+                                  setSavedFlash(null);
+                                  // Pré-charger les canaux/stratégies déjà cochés + compteur
+                                  Promise.all([
+                                    fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
+                                    fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
+                                  ]).then(([chD, stD]) => {
+                                    setVisData(p => ({ ...p, [u.id]: new Set(chD.visible) }));
+                                    setVisStratData(p => ({ ...p, [u.id]: new Set(stD.visible) }));
+                                    setVisCounts(p => ({ ...p, [u.id]: (chD.visible || []).length + (stD.visible || []).length }));
+                                  });
+                                }
+                              }}
+                            >📡 {expandedUserId === u.id ? 'Fermer' : 'Canaux'}{visCounts[u.id] != null && expandedUserId !== u.id ? ` (${visCounts[u.id]})` : ''}</button>
                             {isSuperAdmin && u.status !== 'pending' && (
                               <button className="btn btn-danger btn-sm" onClick={() => revokeUser(u.id)}>🔒 Révoquer</button>
                             )}
@@ -4187,6 +4237,133 @@ function AdminPanel() {
                           </div>
                         </td>
                       </tr>
+                      {expandedUserId === u.id && (
+                        <tr key={`${u.id}-canaux`}>
+                          <td colSpan={isSuperAdmin ? 7 : 4} style={{ background: 'rgba(56,189,248,0.05)', borderLeft: '4px solid #38bdf8', padding: 16 }}>
+                            <div style={{ marginBottom: 12, fontWeight: 700, color: '#38bdf8', fontSize: 14 }}>
+                              📡 Canaux & stratégies visibles pour <span style={{ color: '#fff' }}>{u.username}</span>
+                            </div>
+
+                            {savedFlash === u.id && (
+                              <div style={{
+                                background: 'rgba(34,197,94,0.15)',
+                                border: '1px solid rgba(34,197,94,0.5)',
+                                borderRadius: 8,
+                                padding: '10px 14px',
+                                marginBottom: 12,
+                                color: '#86efac',
+                                fontWeight: 700,
+                                fontSize: 13,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                              }}>
+                                ✅ Enregistré ! {u.username} verra maintenant {(visData[u.id]?.size || 0) + (visStratData[u.id]?.size || 0)} canal/stratégie à sa prochaine connexion (ou rafraîchissement de page).
+                              </div>
+                            )}
+
+                            {/* Stratégies */}
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase' }}>🎯 Stratégies (Dashboard)</div>
+                              {(() => {
+                                const cur = u;
+                                const baseStrats = [
+                                  { id: 'C1', name: 'C1' },
+                                  { id: 'C2', name: 'C2' },
+                                  { id: 'C3', name: 'C3' },
+                                  { id: 'DC', name: 'DC' },
+                                ];
+                                const customStrats = strategies.filter(s => !s.is_pro_only);
+                                const proStrats = (cur && cur.is_pro)
+                                  ? strategies.filter(s => s.is_pro_only && s.owner_user_id === u.id)
+                                  : [];
+                                const allStrats = [...baseStrats, ...customStrats, ...proStrats];
+                                const assignedS = visStratData[u.id] || new Set();
+                                if (allStrats.length === 0) {
+                                  return <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>Aucune stratégie disponible.</div>;
+                                }
+                                return (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {allStrats.map(st => {
+                                      const isOn = assignedS.has(st.id);
+                                      return (
+                                        <label
+                                          key={st.id}
+                                          style={{
+                                            display: 'flex', alignItems: 'center', gap: 6,
+                                            padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                                            background: isOn ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.08)',
+                                            border: `1px solid ${isOn ? 'rgba(34,197,94,0.4)' : 'rgba(100,116,139,0.25)'}`,
+                                            fontSize: 13, color: isOn ? '#86efac' : '#cbd5e1', fontWeight: 600,
+                                          }}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={isOn}
+                                            onChange={() => toggleVisStrategy(u.id, st.id)}
+                                            style={{ width: 16, height: 16, accentColor: '#22c55e', cursor: 'pointer' }}
+                                          />
+                                          {st.name}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Canaux Telegram */}
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase' }}>📡 Canaux Telegram</div>
+                              {tgChannels.length === 0 ? (
+                                <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic' }}>Aucun canal Telegram configuré.</div>
+                              ) : (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                  {tgChannels.map(ch => {
+                                    const assigned = visData[u.id] || new Set();
+                                    const isOn = assigned.has(ch.dbId);
+                                    return (
+                                      <label
+                                        key={ch.dbId}
+                                        style={{
+                                          display: 'flex', alignItems: 'center', gap: 6,
+                                          padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                                          background: isOn ? 'rgba(56,189,248,0.12)' : 'rgba(100,116,139,0.08)',
+                                          border: `1px solid ${isOn ? 'rgba(56,189,248,0.4)' : 'rgba(100,116,139,0.25)'}`,
+                                          fontSize: 13, color: isOn ? '#7dd3fc' : '#cbd5e1', fontWeight: 600,
+                                        }}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isOn}
+                                          onChange={() => toggleVisChannel(u.id, ch.dbId)}
+                                          style={{ width: 16, height: 16, accentColor: '#38bdf8', cursor: 'pointer' }}
+                                        />
+                                        {ch.name || ch.channel_id}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Boutons */}
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12, borderTop: '1px solid rgba(100,116,139,0.2)', paddingTop: 12 }}>
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setExpandedUserId(null)}
+                                disabled={savingVis}
+                              >Fermer</button>
+                              <button
+                                className="btn btn-gold btn-sm"
+                                onClick={() => saveVisibility(u.id)}
+                                disabled={savingVis}
+                              >{savingVis ? '⏳ Enregistrement…' : '💾 Enregistrer'}</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -8392,7 +8569,9 @@ function AdminPanel() {
                   {[
                     ...ALL_STRATEGIES,
                     ...strategies.map(s => ({ id: `S${s.id}`, name: s.name, emoji: '⚙' })),
-                    ...proStrategies.map(s => ({ id: `S${s.id}`, name: s.name || s.strategy_name || `Stratégie S${s.id}`, emoji: '⭐' })),
+                    ...proStrategies
+                      .filter(s => s.owner_user_id === visModal.userId)
+                      .map(s => ({ id: `S${s.id}`, name: s.name || s.strategy_name || `Stratégie S${s.id}`, emoji: '⭐' })),
                   ].map(st => {
                     const assignedS = visStratData[visModal.userId] || new Set();
                     const isOn = assignedS.has(st.id);

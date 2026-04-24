@@ -110,10 +110,38 @@ export default function StrategySelect() {
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
+          {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro & Telegram</Link>}
           {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
       </nav>
+
+      {!user?.is_admin && user?.status === 'expired' && (
+        <div style={{
+          margin: '20px auto', maxWidth: 720, padding: '16px 20px', borderRadius: 12,
+          background: 'rgba(239,68,68,0.1)', border: '2px solid rgba(239,68,68,0.5)',
+          display: 'flex', alignItems: 'center', gap: 14, color: '#fca5a5',
+        }}>
+          <div style={{ fontSize: 32 }}>🔒</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: '#fff', marginBottom: 4 }}>Abonnement expiré</div>
+            <div style={{ fontSize: 13 }}>Toutes les fonctionnalités sont bloquées. Contactez l'administrateur pour renouveler votre accès.</div>
+          </div>
+        </div>
+      )}
+      {!user?.is_admin && user?.status === 'pending' && (
+        <div style={{
+          margin: '20px auto', maxWidth: 720, padding: '16px 20px', borderRadius: 12,
+          background: 'rgba(251,191,36,0.1)', border: '2px solid rgba(251,191,36,0.5)',
+          display: 'flex', alignItems: 'center', gap: 14, color: '#fcd34d',
+        }}>
+          <div style={{ fontSize: 32 }}>⏳</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: '#fff', marginBottom: 4 }}>Compte en attente</div>
+            <div style={{ fontSize: 13 }}>Votre compte attend la validation de l'administrateur.</div>
+          </div>
+        </div>
+      )}
 
       <div className="select-header">
         <div className="select-header-badge">🎯 ACCÈS PRÉDICTIONS</div>

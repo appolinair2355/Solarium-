@@ -621,6 +621,7 @@ export default function Dashboard() {
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
+          {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro</Link>}
           {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>← Retour</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
