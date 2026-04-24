@@ -268,6 +268,8 @@ function ComptagesPanel() {
   const [savingCfg, setSavingCfg]   = React.useState(false);
   const [busy, setBusy]       = React.useState('');
   const [msg, setMsg]         = React.useState({ text: '', error: false });
+  const [preview, setPreview] = React.useState(null); // { text, activeChannels, nextScheduledAt, processedCount }
+  const [showPreview, setShowPreview] = React.useState(false);
 
   // ── Canaux Telegram supplémentaires ──
   const [extraChannels, setExtraChannels] = React.useState([]);
@@ -312,6 +314,19 @@ function ComptagesPanel() {
     return () => clearInterval(iv);
   }, [load]);
 
+  const fetchPreview = async () => {
+    try {
+      const r = await fetch('/api/admin/comptages/preview', { credentials: 'include' });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setPreview(d);
+      return d;
+    } catch (e) {
+      setMsg({ text: '❌ Aperçu indisponible : ' + e.message, error: true });
+      return null;
+    }
+  };
+
   const saveCfg = async () => {
     setSavingCfg(true); setMsg({ text: '', error: false });
     try {
@@ -330,8 +345,16 @@ function ComptagesPanel() {
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setMsg({ text: '✅ Configuration sauvegardée', error: false });
       await load();
+      // Récupérer aperçu et ouvrir la fenêtre récapitulative
+      const p = await fetchPreview();
+      if (p) setShowPreview(true);
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setSavingCfg(false); }
+  };
+
+  const openPreview = async () => {
+    const p = await fetchPreview();
+    if (p) setShowPreview(true);
   };
 
   const sendTest = async () => {
@@ -538,7 +561,192 @@ function ComptagesPanel() {
             {' · '}Jeux comptés : <b style={{ color: '#94a3b8' }}>{data?.processedCount ?? 0}</b>
           </div>
         </div>
+
+        {/* ── Configuration actuelle (persistante, visible dès qu'un canal est paramétré) ── */}
+        {(() => {
+          const activeChannels = data?.activeChannels || [];
+          const hasAny = activeChannels.length > 0
+            || !!data?.config?.bot_token
+            || !!data?.config?.channel_id;
+          if (!hasAny) return null;
+          const nextSched = data?.nextScheduledAt
+            ? new Date(data.nextScheduledAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+            : '—';
+          const enabledMain = !!data?.config?.enabled && data?.config?.bot_token && data?.config?.channel_id;
+          return (
+            <div style={{
+              marginTop: 16, padding: 14, borderRadius: 10,
+              background: 'rgba(34,197,94,0.06)',
+              border: '1px solid rgba(34,197,94,0.4)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 16 }}>🛰️</span>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#86efac' }}>
+                  Configuration Telegram active
+                </div>
+                <button className="btn btn-sm" onClick={openPreview}
+                  style={{ marginLeft: 'auto', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
+                  👁️ Voir l'aperçu du prochain bilan
+                </button>
+              </div>
+
+              {/* Récap du canal principal */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 10, marginBottom: 10,
+              }}>
+                <div style={{ background: 'rgba(15,23,42,0.4)', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>Statut</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: enabledMain ? '#22c55e' : '#f87171' }}>
+                    {enabledMain ? '🟢 Actif' : '🔴 Désactivé'}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(15,23,42,0.4)', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>Bot Token</div>
+                  <div style={{ fontSize: 13, fontFamily: 'ui-monospace, monospace', color: '#e2e8f0' }}>
+                    {data?.config?.bot_token || '—'}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(15,23,42,0.4)', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>Channel ID</div>
+                  <div style={{ fontSize: 13, fontFamily: 'ui-monospace, monospace', color: '#e2e8f0' }}>
+                    {data?.config?.channel_id || '—'}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(15,23,42,0.4)', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>Prochain envoi auto</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>⏰ {nextSched}</div>
+                </div>
+              </div>
+
+              {/* Liste de tous les canaux qui recevront le bilan */}
+              {activeChannels.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                    📡 Destinataires du bilan horaire ({activeChannels.filter(c => c.enabled).length} actif{activeChannels.filter(c => c.enabled).length > 1 ? 's' : ''} sur {activeChannels.length})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {activeChannels.map(c => (
+                      <div key={c.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '6px 10px', borderRadius: 6,
+                        background: 'rgba(15,23,42,0.4)',
+                      }}>
+                        <span style={{ fontSize: 12 }}>{c.enabled ? '🟢' : '⚪'}</span>
+                        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, minWidth: 110 }}>{c.label}</span>
+                        <span style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
+                          {c.channel_id || '—'}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#64748b', marginLeft: 'auto', fontFamily: 'ui-monospace, monospace' }}>
+                          token : {c.bot_token_masked || '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
+
+      {/* ── Fenêtre modale : récap configuration + aperçu du premier bilan ── */}
+      {showPreview && preview && (
+        <div onClick={() => setShowPreview(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            border: '1px solid rgba(34,197,94,0.5)',
+            borderRadius: 14, padding: 22,
+            maxWidth: 720, width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: 24 }}>✅</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#86efac' }}>Configuration enregistrée</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                  Voici les détails du canal et un aperçu du bilan qui sera envoyé à la prochaine heure pile.
+                </div>
+              </div>
+              <button onClick={() => setShowPreview(false)} style={{
+                background: 'transparent', border: 'none', color: '#94a3b8',
+                fontSize: 24, cursor: 'pointer', padding: '0 6px',
+              }}>✕</button>
+            </div>
+
+            {/* Récap canaux actifs */}
+            <div style={{
+              padding: 12, borderRadius: 10, marginBottom: 14,
+              background: 'rgba(34,197,94,0.07)',
+              border: '1px solid rgba(34,197,94,0.3)',
+            }}>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
+                📡 Canaux qui recevront le bilan
+              </div>
+              {(preview.activeChannels || []).length === 0 ? (
+                <div style={{ fontSize: 13, color: '#fbbf24' }}>
+                  ⚠️ Aucun canal actif — activez au moins un canal pour recevoir le bilan automatiquement.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {preview.activeChannels.map(c => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                      <span>{c.enabled ? '🟢' : '⚪'}</span>
+                      <span style={{ color: '#e2e8f0', fontWeight: 600, minWidth: 110 }}>{c.label}</span>
+                      <span style={{ color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>{c.channel_id}</span>
+                      <span style={{ color: '#64748b', fontFamily: 'ui-monospace, monospace', marginLeft: 'auto', fontSize: 11 }}>
+                        {c.bot_token_masked}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.1)', display: 'flex', gap: 16, fontSize: 12, color: '#94a3b8', flexWrap: 'wrap' }}>
+                <span>⏰ Prochain envoi automatique : <b style={{ color: '#fbbf24' }}>
+                  {preview.nextScheduledAt ? new Date(preview.nextScheduledAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                </b></span>
+                <span>🎰 Jeux déjà comptés : <b style={{ color: '#e2e8f0' }}>{preview.processedCount ?? 0}</b></span>
+              </div>
+            </div>
+
+            {/* Aperçu du bilan */}
+            <div>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
+                👁️ Aperçu du prochain bilan
+              </div>
+              <div
+                style={{
+                  background: '#0b1220',
+                  border: '1px solid rgba(99,102,241,0.4)',
+                  borderRadius: 10, padding: 14,
+                  fontSize: 13, color: '#e2e8f0',
+                  lineHeight: 1.55, whiteSpace: 'pre-wrap',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  maxHeight: 320, overflowY: 'auto',
+                }}
+                dangerouslySetInnerHTML={{ __html: preview.text || '<i style="color:#64748b">(aucune donnée)</i>' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+              <button className="btn btn-sm" onClick={() => { setShowPreview(false); sendTest(); }}
+                disabled={(preview.activeChannels || []).filter(c => c.enabled).length === 0}
+                style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
+                ✈️ Envoyer ce bilan maintenant
+              </button>
+              <button className="btn btn-gold btn-sm" onClick={() => setShowPreview(false)}>
+                ✓ OK, fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Carte des canaux Telegram supplémentaires */}
       {showChannelsPanel && (
