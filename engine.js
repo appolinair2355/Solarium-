@@ -2514,6 +2514,8 @@ class Engine {
           }
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
+        // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
+        try { require('./comptages').onFinishedGame(game); } catch {}
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
         if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
       }
@@ -2700,6 +2702,10 @@ class Engine {
     const { deleted, extDeleted } = await this.fullReset();
     // Nettoyer aussi les enregistrements 'expire' résiduels
     const expireDeleted = await db.deleteExpiredPredictions().catch(() => 0);
+    // Reset des compteurs d'écarts (panneau Comptages) — nouveau jour
+    try { await require('./comptages').onGameOneReset(); } catch (e) {
+      console.warn('[Engine] reset comptages échoué:', e.message);
+    }
     console.log(`[Engine] 🕛 ${deleted} préd. supprimée(s) en local, ${extDeleted} sur Render externe, ${expireDeleted} expire nettoyé(s)`);
     console.log('[Engine] 🕛 Reset complet terminé — moteur prêt pour le nouveau jour');
   }

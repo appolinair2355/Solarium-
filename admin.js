@@ -2271,6 +2271,7 @@ const RENDER_INCLUDE_ROOT_FILES = new Set([
   'package.json', 'index.js', 'admin.js', 'auth.js', 'engine.js', 'db.js',
   'games.js', 'render-sync.js', 'tg-history.js', 'tg-direct.js',
   'predictions.js', 'broadcast.js', 'render.yaml', '.nvmrc',
+  'comptages.js',
 ]);
 const RENDER_INCLUDE_DIRS = ['src', 'dist', 'public', 'scripts', 'middleware', 'utils', 'routes', 'lib'];
 const RENDER_EXCLUDE_DIRS = new Set([

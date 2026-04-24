@@ -19,6 +19,7 @@ const bilan             = require('./bilan');
 const botHost           = require('./bot-host');
 const systemLogsRoutes  = require('./system-logs-route');
 const { router: aiRoutes } = require('./ai-route');
+const comptages         = require('./comptages');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -91,6 +92,7 @@ app.use('/api/prog',        progRoutes);
 app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'postgresql' : 'json', time: new Date() }));
 app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/admin/comptages', comptages.router);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
@@ -364,6 +366,7 @@ async function main() {
   // ⚠️ IMPORTANT : loadConfig AVANT engine.start pour que maxRattrapage soit
   // chargé depuis la DB avant cleanupStale() et loadExistingPending().
   await telegramService.loadConfig();
+  await comptages.init();
   await engine.start(2000);
   bilan.scheduleMidnight();
   // Initialiser la table hébergement bots + restaurer bots actifs
