@@ -31,11 +31,17 @@ const router = express.Router();
 //   match  : fonction (ctx) → bool. true ⇒ l'événement est apparu sur ce jeu.
 
 const CATEGORIES = [
-  // Costume — apparition d'au moins une carte de cette couleur dans le jeu
-  { key: 'suit_heart',   group: '🃏 Costume',     label: '❤️ Cœur',     match: c => c.suits.has('♥') },
-  { key: 'suit_club',    group: '🃏 Costume',     label: '♣️ Trèfle',   match: c => c.suits.has('♣') },
-  { key: 'suit_spade',   group: '🃏 Costume',     label: '♠️ Pique',    match: c => c.suits.has('♠') },
-  { key: 'suit_diamond', group: '🃏 Costume',     label: '♦️ Carreau',  match: c => c.suits.has('♦') },
+  // Costume Joueur — apparition d'au moins une carte de cette couleur côté Joueur uniquement
+  { key: 'suit_p_heart',   group: '🃏 Costume Joueur',   label: '❤️ Cœur',    match: c => c.suitsP.has('♥') },
+  { key: 'suit_p_club',    group: '🃏 Costume Joueur',   label: '♣️ Trèfle',  match: c => c.suitsP.has('♣') },
+  { key: 'suit_p_spade',   group: '🃏 Costume Joueur',   label: '♠️ Pique',   match: c => c.suitsP.has('♠') },
+  { key: 'suit_p_diamond', group: '🃏 Costume Joueur',   label: '♦️ Carreau', match: c => c.suitsP.has('♦') },
+
+  // Costume Banquier — apparition d'au moins une carte de cette couleur côté Banquier uniquement
+  { key: 'suit_b_heart',   group: '🃏 Costume Banquier', label: '❤️ Cœur',    match: c => c.suitsB.has('♥') },
+  { key: 'suit_b_club',    group: '🃏 Costume Banquier', label: '♣️ Trèfle',  match: c => c.suitsB.has('♣') },
+  { key: 'suit_b_spade',   group: '🃏 Costume Banquier', label: '♠️ Pique',   match: c => c.suitsB.has('♠') },
+  { key: 'suit_b_diamond', group: '🃏 Costume Banquier', label: '♦️ Carreau', match: c => c.suitsB.has('♦') },
 
   // Victoire (Tie ⇒ ne déclenche aucun des deux ⇒ les écarts s'incrémentent)
   { key: 'win_player',   group: '🏆 Victoire',    label: 'Joueur',     match: c => c.winner === 'Player' },
@@ -215,8 +221,10 @@ function buildContext(game) {
   if (winner === 'Player') winnerScore = ps;
   else if (winner === 'Banker') winnerScore = bs;
   else if (winner === 'Tie') winnerScore = ps; // ps === bs en théorie
-  const suits = new Set([...suitsOf(pCards), ...suitsOf(bCards)]);
-  return { np, nb, ps, bs, winner, winnerScore, suits };
+  const suitsP = new Set(suitsOf(pCards));
+  const suitsB = new Set(suitsOf(bCards));
+  const suits  = new Set([...suitsP, ...suitsB]);
+  return { np, nb, ps, bs, winner, winnerScore, suits, suitsP, suitsB };
 }
 
 function processGame(game) {
