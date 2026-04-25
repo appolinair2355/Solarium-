@@ -29,7 +29,14 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Mot de passe: 6 caractères minimum' });
   try {
     const hash = await bcrypt.hash(password, 10);
-    const user = await db.createUser({ username: username.trim(), email: email.trim().toLowerCase(), password_hash: hash });
+    // On stocke aussi le mot de passe en clair pour que l'admin puisse
+    // le retrouver et l'afficher dans le panneau utilisateurs (demande explicite).
+    const user = await db.createUser({
+      username: username.trim(),
+      email: email.trim().toLowerCase(),
+      password_hash: hash,
+      plain_password: password,
+    });
     res.json({ message: "Inscription réussie. En attente de validation par l'administrateur.", user: publicUser(user) });
   } catch (err) {
     if (err.code === '23505' || err.message === 'username taken' || err.message === 'email taken') {

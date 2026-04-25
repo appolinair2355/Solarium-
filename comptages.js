@@ -109,8 +109,8 @@ function suitsOf(cards) {
 // ── État en mémoire ────────────────────────────────────────────────────────
 
 const state = {
-  config: { bot_token: '', channel_id: '', enabled: false },
-  extraChannels: [],    // [{ id, label, bot_token, channel_id, enabled }]
+  config: { bot_token: '', channel_id: '', enabled: false, per_game: false },
+  extraChannels: [],    // [{ id, label, bot_token, channel_id, enabled, per_game }]
   streaks: {},          // key → { cur, maxAll, maxPeriod }
   processed: new Set(), // game_numbers déjà comptés
   lastReport: null,     // { timestamp, summary: [{key,group,label,maxPeriod,maxAll}] }
@@ -127,6 +127,7 @@ function normalizeChannel(ch) {
     bot_token:  typeof ch.bot_token === 'string' ? ch.bot_token : '',
     channel_id: typeof ch.channel_id === 'string' ? ch.channel_id : '',
     enabled:    !!ch.enabled,
+    per_game:   !!ch.per_game,
   };
 }
 
@@ -391,6 +392,79 @@ async function sendToAllChannels(text) {
   return results;
 }
 
+// Envoie le bilan UNIQUEMENT sur les canaux qui ont activé l'envoi par jeu.
+async function sendToPerGameChannels(text) {
+  const targets = [];
+  const cfg = state.config || {};
+  if (cfg.enabled && cfg.per_game && cfg.bot_token && cfg.channel_id) {
+    targets.push({ id: 'main', label: 'Canal principal', bot_token: cfg.bot_token, channel_id: cfg.channel_id });
+  }
+  for (const ch of (state.extraChannels || [])) {
+    if (ch.enabled && ch.per_game && ch.bot_token && ch.channel_id) {
+      targets.push({ id: ch.id, label: ch.label || `Canal ${ch.channel_id}`, bot_token: ch.bot_token, channel_id: ch.channel_id });
+    }
+  }
+  if (targets.length === 0) return [];
+  const results = [];
+  for (const t of targets) {
+    try { await sendOne(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
+    catch (e) { results.push({ id: t.id, label: t.label, sent: false, error: e.message }); }
+  }
+  return results;
+}
+
+// ── Bilan « après chaque jeu » ─────────────────────────────────────────────
+// Format compact : titre indiquant le n° du jeu, puis liste des écarts par groupe.
+function buildPerGameReportText(now, gameNumber, summary, prevSummary) {
+  const lines = [];
+  const prevByKey = {};
+  if (prevSummary && Array.isArray(prevSummary)) {
+    for (const r of prevSummary) prevByKey[r.key] = r;
+  }
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mn = String(now.getMinutes()).padStart(2, '0');
+
+  lines.push('🎰 <b>BACCARAT PRO</b> — bilan après jeu');
+  lines.push(`📅 ${dd}/${mm} · ⏰ ${hh}:${mn}` + (gameNumber != null ? ` · 🃏 jeu #<b>${gameNumber}</b>` : ''));
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━');
+  let currentGroup = null;
+  for (const row of summary) {
+    if (row.group !== currentGroup) {
+      currentGroup = row.group;
+      lines.push('');
+      lines.push(`<b>${escapeHtml(currentGroup.toUpperCase())}</b>`);
+    }
+    const prev = prevByKey[row.key];
+    const prevMaxAll = prev ? prev.maxAll : 0;
+    const tag = row.maxAll > prevMaxAll ? '  🔥' : '';
+    lines.push(
+      `   ▸ ${escapeHtml(row.label)} — actuel <b>${row.cur}</b> · max période <b>${row.maxPeriod}</b> · max <b>${row.maxAll}</b>${tag}`
+    );
+  }
+  return lines.join('\n');
+}
+
+// Hook : envoie un mini-bilan immédiatement après un jeu terminé,
+// sur tous les canaux qui ont activé `per_game`.
+async function sendPerGameReport(game) {
+  try {
+    const summary = buildSummary();
+    const prev = state.lastReport ? state.lastReport.summary : null;
+    const text = buildPerGameReportText(new Date(), game?.game_number ?? null, summary, prev);
+    const results = await sendToPerGameChannels(text);
+    for (const r of results) {
+      if (r.sent) console.log(`[Comptages] ✅ bilan/jeu envoyé sur ${r.label} (jeu #${game?.game_number})`);
+      else        console.warn(`[Comptages] ❌ bilan/jeu échoué sur ${r.label}: ${r.error}`);
+    }
+    return results;
+  } catch (e) {
+    console.warn('[Comptages] sendPerGameReport error:', e.message);
+    return [];
+  }
+}
+
 // ── Bilan horaire ──────────────────────────────────────────────────────────
 
 async function runReport(forced = false) {
@@ -471,12 +545,12 @@ function listActiveChannelsPublic() {
   const out = [];
   const cfg = state.config || {};
   if (cfg.enabled && cfg.bot_token && cfg.channel_id) {
-    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id, bot_token_masked: maskToken(cfg.bot_token), enabled: true });
+    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id, bot_token_masked: maskToken(cfg.bot_token), enabled: true, per_game: !!cfg.per_game });
   } else if (cfg.bot_token || cfg.channel_id) {
-    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id || '—', bot_token_masked: maskToken(cfg.bot_token), enabled: !!cfg.enabled });
+    out.push({ id: 'main', label: 'Canal principal', channel_id: cfg.channel_id || '—', bot_token_masked: maskToken(cfg.bot_token), enabled: !!cfg.enabled, per_game: !!cfg.per_game });
   }
   for (const ch of (state.extraChannels || [])) {
-    out.push({ id: ch.id, label: ch.label || `Canal ${ch.channel_id}`, channel_id: ch.channel_id, bot_token_masked: maskToken(ch.bot_token), enabled: !!ch.enabled });
+    out.push({ id: ch.id, label: ch.label || `Canal ${ch.channel_id}`, channel_id: ch.channel_id, bot_token_masked: maskToken(ch.bot_token), enabled: !!ch.enabled, per_game: !!ch.per_game });
   }
   return out;
 }
@@ -519,7 +593,7 @@ router.get('/preview', requireAdmin, (req, res) => {
 
 router.post('/config', requireAdmin, async (req, res) => {
   try {
-    const { bot_token, channel_id, enabled } = req.body || {};
+    const { bot_token, channel_id, enabled, per_game } = req.body || {};
     // Si bot_token est vide ou masqué (••••XXXX), on conserve l'ancien
     const newToken = (typeof bot_token === 'string' && bot_token && !bot_token.startsWith('••••'))
       ? bot_token.trim() : state.config.bot_token;
@@ -529,10 +603,14 @@ router.post('/config', requireAdmin, async (req, res) => {
     const finalEnabled = (typeof enabled === 'boolean')
       ? enabled
       : !!(newToken && newChannelId);
+    const finalPerGame = (typeof per_game === 'boolean')
+      ? per_game
+      : !!state.config.per_game;
     state.config = {
       bot_token: newToken,
       channel_id: newChannelId,
       enabled: !!finalEnabled,
+      per_game: !!finalPerGame,
     };
     await db.setSetting('comptages_config', JSON.stringify(state.config));
 
@@ -558,7 +636,7 @@ router.post('/config', requireAdmin, async (req, res) => {
 // Suppression complète de la configuration principale (token + channel + désactivation)
 router.delete('/config', requireAdmin, async (req, res) => {
   try {
-    state.config = { bot_token: '', channel_id: '', enabled: false };
+    state.config = { bot_token: '', channel_id: '', enabled: false, per_game: false };
     await db.setSetting('comptages_config', JSON.stringify(state.config));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -583,7 +661,7 @@ router.get('/extra-channels', requireAdmin, (req, res) => {
 // Création / mise à jour d'un canal supplémentaire
 router.post('/extra-channels', requireAdmin, async (req, res) => {
   try {
-    const { id, label, bot_token, channel_id, enabled } = req.body || {};
+    const { id, label, bot_token, channel_id, enabled, per_game } = req.body || {};
     const list = state.extraChannels || [];
     const existing = id ? list.find(c => c.id === id) : null;
     // Si bot_token est masqué (••••XXXX), on conserve l'ancien
@@ -596,6 +674,7 @@ router.post('/extra-channels', requireAdmin, async (req, res) => {
       bot_token: newToken,
       channel_id: typeof channel_id === 'string' ? channel_id.trim() : (existing ? existing.channel_id : ''),
       enabled: typeof enabled === 'boolean' ? enabled : (existing ? existing.enabled : true),
+      per_game: typeof per_game === 'boolean' ? per_game : (existing ? !!existing.per_game : false),
     });
     if (!ch.bot_token || !ch.channel_id) {
       return res.status(400).json({ error: 'bot_token et channel_id requis' });
@@ -604,6 +683,25 @@ router.post('/extra-channels', requireAdmin, async (req, res) => {
     else state.extraChannels = [...list, ch];
     await db.setSetting('comptages_extra_channels', JSON.stringify(state.extraChannels));
     res.json({ ok: true, channel: { ...ch, bot_token: maskToken(ch.bot_token) } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Toggle rapide « envoi après chaque jeu » pour un canal (id='main' = canal principal)
+router.post('/channels/:id/per-game', requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { per_game } = req.body || {};
+    const flag = !!per_game;
+    if (id === 'main') {
+      state.config = { ...state.config, per_game: flag };
+      await db.setSetting('comptages_config', JSON.stringify(state.config));
+      return res.json({ ok: true, id, per_game: flag });
+    }
+    const ch = (state.extraChannels || []).find(c => c.id === id);
+    if (!ch) return res.status(404).json({ error: 'Canal introuvable' });
+    ch.per_game = flag;
+    await db.setSetting('comptages_extra_channels', JSON.stringify(state.extraChannels));
+    res.json({ ok: true, id, per_game: flag });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -681,6 +779,14 @@ async function onFinishedGame(game) {
       if (!onFinishedGame._lastSave || now - onFinishedGame._lastSave > 15_000) {
         onFinishedGame._lastSave = now;
         persistState().catch(() => {});
+      }
+
+      // Envoi immédiat sur les canaux qui ont activé l'option « après chaque jeu »
+      const cfg = state.config || {};
+      const mainPerGame = cfg.per_game && cfg.enabled && cfg.bot_token && cfg.channel_id;
+      const extraPerGame = (state.extraChannels || []).some(c => c.per_game && c.enabled && c.bot_token && c.channel_id);
+      if (mainPerGame || extraPerGame) {
+        sendPerGameReport(game).catch(e => console.warn('[Comptages] per-game send error:', e.message));
       }
     }
   } catch (e) {

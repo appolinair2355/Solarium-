@@ -77,9 +77,11 @@ router.get('/users', requireAdmin, async (req, res) => {
     const users = await db.getAllUsers();
     res.json(users.map(u => {
       const out = { ...u, status: getUserStatus(u) };
-      // Le mot de passe en clair n'est exposé que pour les comptes premium
-      // (générés depuis le panneau admin). Pour tous les autres, on le supprime.
-      if (!u.is_premium) delete out.plain_password;
+      // Le mot de passe en clair est exposé pour TOUS les comptes non-admin
+      // (demande explicite : l'administrateur doit pouvoir voir le mot de passe
+      // configuré pour chaque utilisateur — simple, pro ou premium).
+      // Pour les comptes admin, on ne le diffuse pas.
+      if (u.is_admin) delete out.plain_password;
       // password_hash n'a aucune utilité côté UI
       delete out.password_hash;
       return out;
@@ -150,6 +152,34 @@ router.put('/users/:id', requireAdmin, async (req, res) => {
     renderSync.syncUser(user).catch(() => {});
     res.json({ ok: true, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+/**
+ * Définir / régénérer le mot de passe d'un utilisateur.
+ * Body : { password?: string }  — si absent ou trop court, on en génère un aléatoire.
+ * Stocke à la fois le hash (pour l'auth) ET le clair (pour l'affichage admin).
+ */
+router.post('/users/:id/set-password', requireSuperAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const target = await db.getUser(id);
+    if (!target) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    if (target.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
+
+    let pwd = (req.body?.password || '').toString().trim();
+    let generated = false;
+    if (!pwd || pwd.length < 6) {
+      pwd = genPassword(10);
+      generated = true;
+    }
+    const hash = await bcrypt.hash(pwd, 10);
+    const user = await db.updateUser(id, { password_hash: hash, plain_password: pwd });
+    if (!user) return res.status(500).json({ error: 'Mise à jour échouée' });
+    renderSync.syncUser(user).catch(() => {});
+    res.json({ ok: true, password: pwd, generated });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
 });
 
 router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
