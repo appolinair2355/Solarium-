@@ -65,6 +65,7 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
     req.session.userId     = user.id;
+    req.session.username   = user.username;
     req.session.isAdmin    = user.is_admin;
     req.session.isPremium  = user.is_premium || false;
     req.session.isPro      = user.is_pro || false;

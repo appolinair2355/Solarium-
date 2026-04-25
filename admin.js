@@ -18,12 +18,23 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function requireSuperAdmin(req, res, next) {
+async function requireSuperAdmin(req, res, next) {
   if (!req.session.userId || !req.session.isAdmin)
     return res.status(403).json({ error: 'Accès admin requis' });
-  if ((req.session.adminLevel || 2) !== 1)
-    return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
-  next();
+  // Admin principal (admin_level=1) : accès complet
+  if ((req.session.adminLevel || 2) === 1) return next();
+  // Compte 'buzzinfluence' : pouvoirs étendus identiques au super admin
+  // (cohérent avec l'UI qui lui montre tous les boutons d'action)
+  let uname = req.session.username;
+  if (!uname) {
+    try {
+      const u = await db.getUser(req.session.userId);
+      uname = u?.username;
+      if (uname) req.session.username = uname;
+    } catch {}
+  }
+  if (uname === 'buzzinfluence') return next();
+  return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
 }
 
 // ── Pro OU Admin ────────────────────────────────────────────────────
@@ -66,8 +77,25 @@ router.get('/my-strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   if (req.session.isAdmin) return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] });
   try {
-    const visible = await db.getVisibleStrategies(req.session.userId);
-    // Tous les utilisateurs (normal ou premium) : exactement ce que l'admin a assigné
+    let visible = await db.getVisibleStrategies(req.session.userId);
+    // Backfill : si un utilisateur approuvé n'a aucun canal assigné (cas des
+    // comptes validés avant la mise à jour qui ajoute les canaux par défaut),
+    // on lui assigne automatiquement C1, C2, C3, DC.
+    if (visible.length === 0) {
+      try {
+        const u = await db.getUser(req.session.userId);
+        if (u && u.is_approved) {
+          const defaults = ['C1', 'C2', 'C3', 'DC'];
+          for (const sid of defaults) {
+            await db.pool.query(
+              'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+              [req.session.userId, sid]
+            );
+          }
+          visible = defaults;
+        }
+      } catch (_) {}
+    }
     res.json({ visible });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -99,8 +127,15 @@ router.post('/users/:id/approve', requireSuperAdmin, async (req, res) => {
     const user = await db.updateUser(id, { is_approved: true, subscription_expires_at: expires.toISOString(), subscription_duration_minutes: Math.round(mins) });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
     renderSync.syncUser(user).catch(() => {});
-    // Auto-assignation du mode aléatoire à chaque nouvel utilisateur approuvé
+    // Auto-assignation : 4 canaux par défaut + stratégies personnalisées en mode aléatoire
     try {
+      const defaults = ['C1', 'C2', 'C3', 'DC'];
+      for (const sid of defaults) {
+        await db.pool.query(
+          'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [id, sid]
+        );
+      }
       const stratRaw = await db.getSetting('custom_strategies');
       const strats = stratRaw ? JSON.parse(stratRaw) : [];
       for (let i = 0; i < strats.length; i++) {
