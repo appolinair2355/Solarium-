@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import TutorialCreateAccount from '../components/TutorialCreateAccount';
 import TutorialReadPredictions from '../components/TutorialReadPredictions';
@@ -46,7 +46,16 @@ const CHANNELS = [
 
 export default function Home() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [broadcastMsg, setBroadcastMsg] = useState(null);
+  const [navLoading, setNavLoading] = useState(false);
+
+  // Animated transition when clicking on CTA buttons
+  const goWithLoader = (path) => (e) => {
+    e.preventDefault();
+    setNavLoading(true);
+    setTimeout(() => navigate(path), 650);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -68,52 +77,140 @@ export default function Home() {
 
   return (
     <div className="home-page">
+      {navLoading && <div className="top-loader" />}
       <nav className="navbar">
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
           {user ? (
-            <Link to="/choisir" className="btn btn-gold btn-sm">Mon espace</Link>
+            <Link to="/choisir" onClick={goWithLoader('/choisir')} className="btn btn-gold btn-sm">Mon espace</Link>
           ) : (
             <>
-              <Link to="/connexion" className="btn btn-ghost btn-sm">Connexion</Link>
-              <Link to="/inscription" className="btn btn-gold btn-sm">S'inscrire</Link>
+              <Link to="/connexion" onClick={goWithLoader('/connexion')} className="btn btn-ghost btn-sm">Connexion</Link>
+              <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-sm">S'inscrire</Link>
             </>
           )}
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="hero">
-        <div className="hero-badge">
-          <span>🎯</span>
-          <span>PRÉDICTIONS EN TEMPS RÉEL — 1xBET BACCARAT</span>
+      {/* Hero — version premium */}
+      <section className="hero hero-v2">
+        {/* Background animated layers */}
+        <div className="hero-grid-bg" />
+        <div className="hero-aurora aurora-1" />
+        <div className="hero-aurora aurora-2" />
+        <div className="hero-aurora aurora-3" />
+
+        {/* Floating decorative cards */}
+        <div className="hero-float hero-float-1">♠</div>
+        <div className="hero-float hero-float-2">♥</div>
+        <div className="hero-float hero-float-3">♦</div>
+        <div className="hero-float hero-float-4">♣</div>
+        <div className="hero-chip hero-chip-1">🎲</div>
+        <div className="hero-chip hero-chip-2">🎯</div>
+
+        <div className="hero-content">
+          <div className="hero-badge hero-badge-pulse">
+            <span className="hero-badge-dot" />
+            <span>EN DIRECT</span>
+            <span style={{ opacity: 0.7 }}>·</span>
+            <span>PRÉDICTIONS 1XBET BACCARAT</span>
+          </div>
+
+          <h1 className="hero-title">
+            <span className="hero-title-line1">Prediction Baccara Pro</span>
+            <span className="hero-title-line2">
+              Vos signaux <span className="hero-title-glow">live</span>, en temps réel
+            </span>
+          </h1>
+
+          <p className="hero-subtitle">
+            Inscrivez-vous, choisissez votre canal et recevez des prédictions automatiques
+            générées en direct à partir des parties 1xBet — sans rien rater.
+          </p>
+
+          <div className="hero-cta">
+            <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg btn-shine">
+              ✨ Créer mon compte
+            </Link>
+            <Link to="/connexion" onClick={goWithLoader('/connexion')} className="btn btn-ghost btn-lg">
+              🚀 Se connecter
+            </Link>
+          </div>
+
+          {/* Trust strip */}
+          <div className="hero-stats">
+            <div className="hero-stat">
+              <div className="hero-stat-num">4</div>
+              <div className="hero-stat-lbl">Canaux dédiés</div>
+            </div>
+            <div className="hero-stat-sep" />
+            <div className="hero-stat">
+              <div className="hero-stat-num">24/7</div>
+              <div className="hero-stat-lbl">Temps réel</div>
+            </div>
+            <div className="hero-stat-sep" />
+            <div className="hero-stat">
+              <div className="hero-stat-num">⚡</div>
+              <div className="hero-stat-lbl">Réponse instantanée</div>
+            </div>
+            <div className="hero-stat-sep" />
+            <div className="hero-stat">
+              <div className="hero-stat-num">🔐</div>
+              <div className="hero-stat-lbl">Accès sécurisé</div>
+            </div>
+          </div>
         </div>
-        <h1>Prediction Baccara Pro<br />Vos signaux live</h1>
-        <p>
-          Connectez-vous, choisissez votre canal et recevez des prédictions automatiques
-          générées en direct à partir des parties 1xBet.
-        </p>
-        <div className="hero-cta">
-          <Link to="/inscription" className="btn btn-gold btn-lg">Créer mon compte</Link>
-          <Link to="/connexion" className="btn btn-ghost btn-lg">Se connecter</Link>
+
+        {/* Mini live mockup card */}
+        <div className="hero-mock">
+          <div className="hero-mock-head">
+            <span className="hero-mock-dot red" />
+            <span className="hero-mock-dot amber" />
+            <span className="hero-mock-dot green" />
+            <span className="hero-mock-title">📡 Canal Cœur Rouge — Live</span>
+          </div>
+          <div className="hero-mock-body">
+            <div className="hero-mock-row">
+              <span className="hero-mock-tag">PARTIE</span>
+              <span className="hero-mock-game">#N821</span>
+              <span className="hero-mock-status live">● EN COURS</span>
+            </div>
+            <div className="hero-mock-pred">
+              <div className="hero-mock-pred-label">Prédiction active</div>
+              <div className="hero-mock-pred-suit">♥</div>
+              <div className="hero-mock-pred-text">Cœur Rouge attendu</div>
+            </div>
+            <div className="hero-mock-history">
+              <span className="hero-mock-h ok">✅ #819</span>
+              <span className="hero-mock-h ok">✅ #818</span>
+              <span className="hero-mock-h ko">❌ #817</span>
+              <span className="hero-mock-h ok">✅ #816</span>
+              <span className="hero-mock-h ok">✅ #815</span>
+            </div>
+          </div>
+          <div className="hero-mock-glow" />
         </div>
       </section>
 
-      {/* Channels */}
-      <section className="strategies-section">
+      {/* Channels — premium */}
+      <section className="strategies-section strategies-section-v2">
         <div className="section-title">
           <div className="section-badge">NOS CANAUX</div>
           <h2>4 Canaux de Prédiction</h2>
           <p>Choisissez le canal qui vous correspond après connexion</p>
         </div>
         <div className="strategies-grid">
-          {CHANNELS.map(c => (
-            <div className="strategy-card" key={c.name} style={{ '--sc': c.color }}>
+          {CHANNELS.map((c, i) => (
+            <div className="strategy-card strategy-card-v2" key={c.name} style={{ '--sc': c.color, animationDelay: `${i * 0.1}s` }}>
+              <div className="strategy-card-shine" />
               <div className="strategy-icon-wrap">
                 <span className="strategy-icon" style={{ color: c.color }}>{c.icon}</span>
               </div>
               <h3 style={{ color: c.color }}>{c.name}</h3>
               <p>{c.desc}</p>
+              <div className="strategy-card-foot">
+                <span className="strategy-card-live">● Actif 24/7</span>
+              </div>
             </div>
           ))}
         </div>
@@ -224,7 +321,7 @@ export default function Home() {
           <div className="cta-glow" />
           <h2>Prêt à commencer ?</h2>
           <p>Créez votre compte et attendez la validation pour accéder aux signaux en direct.</p>
-          <Link to="/inscription" className="btn btn-gold btn-lg">Créer mon compte</Link>
+          <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg">Créer mon compte</Link>
         </div>
       </section>
 

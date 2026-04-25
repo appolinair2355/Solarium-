@@ -505,6 +505,29 @@ function ComptagesPanel() {
     finally { setBusy(''); }
   };
 
+  // Toggle « bilan après chaque jeu » pour un canal (id='main' = canal principal)
+  const togglePerGame = async (id, currentValue, label) => {
+    const next = !currentValue;
+    setBusy('pg:' + id); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/channels/' + encodeURIComponent(id) + '/per-game', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ per_game: next }),
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({
+        text: next
+          ? `▶️ ${label || 'Canal'} — bilan envoyé après chaque jeu terminé`
+          : `⏹ ${label || 'Canal'} — retour au bilan horaire seulement`,
+        error: false,
+      });
+      await load(true);
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
   // Regrouper par "group"
   const grouped = React.useMemo(() => {
     if (!data?.summary) return [];
@@ -694,12 +717,36 @@ function ComptagesPanel() {
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '6px 10px', borderRadius: 6,
                         background: 'rgba(15,23,42,0.4)',
+                        flexWrap: 'wrap',
                       }}>
                         <span style={{ fontSize: 12 }}>{c.enabled ? '🟢' : '⚪'}</span>
                         <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, minWidth: 110 }}>{c.label}</span>
                         <span style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
                           {c.channel_id || '—'}
                         </span>
+                        {c.per_game && (
+                          <span title="Envoi du bilan après CHAQUE jeu terminé" style={{
+                            fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 700,
+                            background: 'rgba(34,197,94,0.15)', color: '#86efac',
+                            border: '1px solid rgba(34,197,94,0.4)',
+                          }}>📩 après chaque jeu</span>
+                        )}
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => togglePerGame(c.id, !!c.per_game, c.label)}
+                          disabled={busy === 'pg:' + c.id}
+                          title={c.per_game
+                            ? 'Stopper l\'envoi par jeu (revenir au bilan horaire seulement)'
+                            : 'Envoyer le bilan après chaque jeu terminé'}
+                          style={{
+                            fontSize: 11, padding: '2px 8px',
+                            background: c.per_game ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.15)',
+                            color:      c.per_game ? '#f87171' : '#4ade80',
+                            border:     '1px solid ' + (c.per_game ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'),
+                          }}
+                        >
+                          {busy === 'pg:' + c.id ? '…' : (c.per_game ? '⏹ Stop' : '▶️ Bilan/jeu')}
+                        </button>
                         <span style={{ fontSize: 11, color: '#64748b', marginLeft: 'auto', fontFamily: 'ui-monospace, monospace' }}>
                           token : {c.bot_token_masked || '—'}
                         </span>
@@ -869,7 +916,21 @@ function ComptagesPanel() {
                     {ch.channel_id} · token {ch.bot_token || '—'}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => togglePerGame(ch.id, !!ch.per_game, ch.label || ch.channel_id)}
+                    disabled={busy === 'pg:' + ch.id}
+                    title={ch.per_game
+                      ? 'Stopper l\'envoi par jeu (revenir au bilan horaire seulement)'
+                      : 'Envoyer le bilan après chaque jeu terminé'}
+                    style={{
+                      background: ch.per_game ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.15)',
+                      color:      ch.per_game ? '#f87171' : '#4ade80',
+                      border:     '1px solid ' + (ch.per_game ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'),
+                    }}>
+                    {busy === 'pg:' + ch.id ? '…' : (ch.per_game ? '⏹ Stop' : '▶️ Bilan/jeu')}
+                  </button>
                   <button className="btn btn-sm" onClick={() => testChannel(ch.id)} disabled={busy.startsWith('chtest:')}
                     style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
                     {busy === 'chtest:' + ch.id ? '…' : '✈️ Test'}
@@ -4210,6 +4271,32 @@ function AdminPanel() {
   const startNameEdit = u =>
     setNameEdit(p => ({ ...p, [u.id]: { first_name: u.first_name || '', last_name: u.last_name || '' } }));
 
+  // Définir / régénérer le mot de passe d'un utilisateur (rend visible côté admin)
+  const setUserPassword = async (uid, opts = {}) => {
+    const { custom = false } = opts;
+    let body = {};
+    if (custom) {
+      const pwd = window.prompt('Nouveau mot de passe (min. 6 caractères) :');
+      if (pwd == null) return;            // annulé
+      if (pwd.trim().length < 6) { showMsg('❌ Mot de passe trop court (min. 6 caractères)'); return; }
+      body.password = pwd.trim();
+    } else {
+      if (!confirm('Générer un nouveau mot de passe aléatoire pour cet utilisateur ?\n\n⚠ Son ancien mot de passe ne fonctionnera plus.')) return;
+    }
+    const res = await fetch(`/api/admin/users/${uid}/set-password`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showMsg(`🔑 Mot de passe ${d.generated ? 'généré' : 'défini'} : ${d.password}`);
+      loadUsers();
+    } else {
+      showMsg('❌ ' + (d.error || 'Erreur'));
+    }
+  };
+
   // Visibility modal (opt-in : canaux Telegram + stratégies)
   const openVisModal = (u) => {
     setVisModal({ userId: u.id, username: u.username });
@@ -4869,22 +4956,49 @@ function AdminPanel() {
                             {u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
-                          {u.is_premium && u.plain_password && (
-                            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem' }}>
-                              <span style={{ color: 'var(--text-muted)' }}>🔑</span>
+                          {/* Mot de passe configuré — affiché pour TOUS les utilisateurs (simple, pro, premium) */}
+                          {u.plain_password ? (
+                            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', flexWrap: 'wrap' }}>
+                              <span style={{ color: 'var(--text-muted)' }} title="Mot de passe configuré">🔑</span>
                               <code style={{ color: '#22c55e', background: 'rgba(34,197,94,0.08)', padding: '1px 6px', borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>
                                 {u.plain_password}
                               </code>
                               <button
                                 title="Copier le mot de passe"
-                                onClick={() => { navigator.clipboard?.writeText(u.plain_password); }}
+                                onClick={() => { navigator.clipboard?.writeText(u.plain_password); showMsg('✓ Mot de passe copié'); }}
                                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 12, padding: 0 }}
                               >📋</button>
+                              <button
+                                title="Définir un autre mot de passe"
+                                onClick={() => setUserPassword(u.id, { custom: true })}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#fbbf24', fontSize: 11, padding: '0 4px', fontWeight: 700 }}
+                              >✏️</button>
+                              <button
+                                title="Régénérer un mot de passe aléatoire"
+                                onClick={() => setUserPassword(u.id, { custom: false })}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#3b82f6', fontSize: 11, padding: '0 4px', fontWeight: 700 }}
+                              >🔄</button>
                             </div>
-                          )}
-                          {u.is_premium && !u.plain_password && (
-                            <div style={{ marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                              🔑 mdp non disponible (compte créé avant cette mise à jour)
+                          ) : (
+                            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}
+                                title="Compte créé avant l'enregistrement du mot de passe en clair">
+                                🔑 mdp non enregistré
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setUserPassword(u.id, { custom: true })}
+                                  style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24', cursor: 'pointer', fontSize: 10, padding: '3px 8px', borderRadius: 5, fontWeight: 700 }}
+                                  title="Saisir un mot de passe précis pour ce compte"
+                                >✏️ Définir un mdp</button>
+                                <button
+                                  type="button"
+                                  onClick={() => setUserPassword(u.id, { custom: false })}
+                                  style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.4)', color: '#93c5fd', cursor: 'pointer', fontSize: 10, padding: '3px 8px', borderRadius: 5, fontWeight: 700 }}
+                                  title="Générer automatiquement un mot de passe aléatoire"
+                                >🔄 Générer</button>
+                              </div>
                             </div>
                           )}
                         </td>
