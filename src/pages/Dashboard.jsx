@@ -3,74 +3,114 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ContactAdminModal from '../components/ContactAdminModal';
 
-// Durées de sonnerie disponibles (0 = infini jusqu'au raccroché)
-const RING_DURATIONS = [
-  { label: '5 s',  value: 5 },
-  { label: '10 s', value: 10 },
-  { label: '15 s', value: 15 },
-  { label: '30 s', value: 30 },
-  { label: '∞',    value: 0, title: "Jusqu'au raccroché" },
+// Voix d'annonce vocale des prédictions (Web Speech API)
+const VOICE_OPTIONS = [
+  { value: 'female', label: '👩 Femme' },
+  { value: 'male',   label: '👨 Homme' },
+  { value: 'off',    label: '🔇 Silencieux' },
 ];
 
-/**
- * Démarre la sonnerie en boucle + vibration.
- * Retourne une fonction stop() pour arrêter proprement.
- */
-function startRinging() {
-  let stopped  = false;
-  let audioCtx = null;
-  let ringLoop = null;
-  let vibLoop  = null;
-
-  const TONES  = [880, 1109.73];   // double-ton sonnerie
-  const PERIOD = 2600;             // ms entre chaque cycle
-
-  function playOneCycle() {
-    if (stopped || !audioCtx) return;
-    const master = audioCtx.createGain();
-    master.gain.value = 0.72;
-    master.connect(audioCtx.destination);
-
-    // Double sonnerie : deux rafales
-    [[0.00, 0.40], [0.50, 0.90]].forEach(([ts, te]) => {
-      const t0 = audioCtx.currentTime + ts;
-      const t1 = audioCtx.currentTime + te;
-      TONES.forEach(freq => {
-        const osc  = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain); gain.connect(master);
-        osc.type = 'sine'; osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, t0);
-        gain.gain.linearRampToValueAtTime(0.55, t0 + 0.025);
-        gain.gain.setValueAtTime(0.55, t1 - 0.025);
-        gain.gain.linearRampToValueAtTime(0, t1);
-        osc.start(t0); osc.stop(t1 + 0.05);
-      });
-    });
-  }
-
-  function vibrate() {
-    if (!stopped && navigator.vibrate) {
-      // Motif téléphone : 3 impulsions + pause longue
-      navigator.vibrate([220, 110, 220, 110, 220, 600]);
+// Conversion d'un nombre en mots français (0 → 9999, suffisant pour les n° de partie)
+function numberToFrenchWords(n) {
+  n = parseInt(n, 10);
+  if (!Number.isFinite(n) || n < 0) return String(n ?? '');
+  const units = ['zéro','un','deux','trois','quatre','cinq','six','sept','huit','neuf','dix','onze','douze','treize','quatorze','quinze','seize'];
+  const tens  = ['', '', 'vingt','trente','quarante','cinquante','soixante','soixante','quatre-vingt','quatre-vingt'];
+  function below100(x) {
+    if (x < 17) return units[x];
+    if (x < 20) return 'dix-' + units[x - 10];
+    if (x < 70) {
+      const t = Math.floor(x / 10), u = x % 10;
+      if (u === 0) return tens[t];
+      if (u === 1 && t < 8) return tens[t] + ' et un';
+      return tens[t] + '-' + units[u];
     }
+    if (x < 80) {
+      const u = x - 60;
+      if (u === 11) return 'soixante et onze';
+      return 'soixante-' + (u < 17 ? units[u] : 'dix-' + units[u - 10]);
+    }
+    // 80..99
+    const u = x - 80;
+    if (u === 0) return 'quatre-vingts';
+    return 'quatre-vingt-' + (u < 17 ? units[u] : 'dix-' + units[u - 10]);
   }
+  function below1000(x) {
+    if (x < 100) return below100(x);
+    const c = Math.floor(x / 100), r = x % 100;
+    let s;
+    if (c === 1) s = 'cent';
+    else s = units[c] + ' cent' + (r === 0 ? 's' : '');
+    if (r > 0) s += ' ' + below100(r);
+    return s;
+  }
+  if (n < 1000) return below1000(n);
+  if (n < 10000) {
+    const k = Math.floor(n / 1000), r = n % 1000;
+    let s = (k === 1 ? 'mille' : units[k] + ' mille');
+    if (r > 0) s += ' ' + below1000(r);
+    return s;
+  }
+  return String(n);
+}
 
+// Normalise n'importe quelle représentation de couleur vers Pique/Cœur/Carreau/Trèfle
+function suitToFrench(s) {
+  if (!s) return '';
+  const str = String(s);
+  if (str.includes('♠')) return 'Pique';
+  if (str.includes('♥') || str.includes('❤')) return 'Cœur';
+  if (str.includes('♦')) return 'Carreau';
+  if (str.includes('♣')) return 'Trèfle';
+  const m = { 'P': 'Pique', 'H': 'Cœur', 'C': 'Cœur', 'D': 'Carreau', 'T': 'Trèfle' };
+  return m[str.toUpperCase()[0]] || str;
+}
+
+function pickFrenchVoice(gender) {
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    playOneCycle();
-    vibrate();
-    ringLoop = setInterval(() => { if (!stopped) { playOneCycle(); } }, PERIOD);
-    vibLoop  = setInterval(() => { if (!stopped) { vibrate();      } }, PERIOD);
-  } catch {}
+    const voices = window.speechSynthesis.getVoices() || [];
+    const fr = voices.filter(v => /^fr(-|_|$)/i.test(v.lang));
+    if (fr.length === 0) return null;
+    const femaleHints = /(femme|female|amelie|amélie|audrey|virginie|marie|julie|celine|céline|google\s*français)/i;
+    const maleHints   = /(homme|male|thomas|nicolas|pierre|paul|antoine|daniel)/i;
+    if (gender === 'female') return fr.find(v => femaleHints.test(v.name)) || fr.find(v => !maleHints.test(v.name)) || fr[0];
+    if (gender === 'male')   return fr.find(v => maleHints.test(v.name))   || fr[0];
+    return fr[0];
+  } catch { return null; }
+}
 
-  return function stop() {
-    stopped = true;
-    clearInterval(ringLoop);
-    clearInterval(vibLoop);
-    if (navigator.vibrate) navigator.vibrate(0); // coupe vibration immédiatement
-    try { if (audioCtx) audioCtx.close(); } catch {}
-  };
+// Une seule fois par session : « réveille » la synthèse vocale après le 1ᵉʳ geste de l'utilisateur
+let voicePrimed = false;
+function primeVoice() {
+  if (voicePrimed) return;
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0; u.lang = 'fr-FR';
+    window.speechSynthesis.speak(u);
+    voicePrimed = true;
+  } catch {}
+}
+
+function speakPrediction(pred, gender) {
+  if (gender === 'off') return;
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    const numWords = numberToFrenchWords(pred.game_number);
+    const suit = suitToFrench(pred.predicted_suit);
+    const text = `Numéro ${numWords}, recevra une carte enseigne ${suit}.`;
+    if (typeof console !== 'undefined') console.log('[Voix] →', text);
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'fr-FR';
+    u.rate = 0.95;
+    u.pitch = gender === 'male' ? 0.85 : 1.15;
+    u.volume = 1;
+    const v = pickFrenchVoice(gender);
+    if (v) u.voice = v;
+    // Petit délai pour laisser le cancel() prendre effet sur certains navigateurs
+    setTimeout(() => { try { window.speechSynthesis.speak(u); } catch {} }, 60);
+  } catch {}
 }
 
 const BASE_CHANNELS = {
@@ -256,22 +296,43 @@ export default function Dashboard() {
   const [proLogsShowReasons, setProLogsShowReasons] = useState(true);
   const [lossSeqData, setLossSeqData] = useState({ streaks: {}, sequences: [] });
   const [tgMessages, setTgMessages] = useState([]);
-  const [alertPred, setAlertPred] = useState(null);
   const [dailyBilan, setDailyBilan] = useState(null);
   const [bilanOpen, setBilanOpen] = useState(false);
   const [loadingGames, setLoadingGames] = useState(true);
-  const [showRingSettings, setShowRingSettings] = useState(false);
-  const [ringDuration, setRingDuration] = useState(() => {
-    const s = localStorage.getItem('ringDuration');
-    return s !== null ? parseInt(s, 10) : 10;
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const [voiceGender, setVoiceGender] = useState(() => {
+    const s = localStorage.getItem('voiceGender');
+    return s || 'female';
   });
 
   const gamesRef    = useRef(null);
   const knownPredIds = useRef(new Set());
-  const alertTimer  = useRef(null);
-  const stopRingRef = useRef(null); // fonction stop() retournée par startRinging()
-  const ringDurRef  = useRef(ringDuration);
-  useEffect(() => { ringDurRef.current = ringDuration; }, [ringDuration]);
+  const voiceGenderRef = useRef(voiceGender);
+  useEffect(() => { voiceGenderRef.current = voiceGender; }, [voiceGender]);
+
+  // Précharge la liste des voix + débloque la synthèse vocale au 1ᵉʳ geste utilisateur
+  // (les navigateurs bloquent speechSynthesis avant toute interaction)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    try { window.speechSynthesis.getVoices(); } catch {}
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = () => { try { window.speechSynthesis.getVoices(); } catch {} };
+    }
+    const unlock = () => {
+      primeVoice();
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+    };
+    window.addEventListener('click', unlock, { once: false });
+    window.addEventListener('keydown', unlock, { once: false });
+    window.addEventListener('touchstart', unlock, { once: false });
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+    };
+  }, []);
 
   // Enrichir le canal Pro avec son vrai nom (dispo après chargement async de proMeta)
   if (isProChannel && !CHANNELS[channelId] && proMeta?.name) {
@@ -373,30 +434,8 @@ export default function Dashboard() {
     return () => clearInterval(iv);
   }, [aleatDashPanel?.history?.map(h => h.game_number + h.status).join(','), aleatDashPanel?.stratId]); // eslint-disable-line
 
-  const dismissAlert = useCallback(() => {
-    if (stopRingRef.current) { stopRingRef.current(); stopRingRef.current = null; }
-    if (alertTimer.current)  { clearTimeout(alertTimer.current); alertTimer.current = null; }
-    setAlertPred(null);
-    setShowRingSettings(false);
-  }, []);
-
-  const triggerAlert = useCallback((pred) => {
-    // Arrêter une sonnerie précédente si elle tourne encore
-    if (stopRingRef.current) { stopRingRef.current(); stopRingRef.current = null; }
-    if (alertTimer.current)  { clearTimeout(alertTimer.current); alertTimer.current = null; }
-
-    setAlertPred(pred);
-    stopRingRef.current = startRinging();
-
-    const dur = ringDurRef.current;
-    if (dur > 0) {
-      // Auto-raccroché après la durée configurée
-      alertTimer.current = setTimeout(() => {
-        if (stopRingRef.current) { stopRingRef.current(); stopRingRef.current = null; }
-        setAlertPred(null);
-      }, dur * 1000);
-    }
-    // Si dur === 0 → sonne indéfiniment jusqu'au raccroché manuel
+  const announcePrediction = useCallback((pred) => {
+    speakPrediction(pred, voiceGenderRef.current);
   }, []);
 
   useEffect(() => {
@@ -408,7 +447,7 @@ export default function Dashboard() {
       // detect new en_cours predictions for current channel
       data.forEach(p => {
         if (p.strategy === channelId && p.status === 'en_cours' && !knownPredIds.current.has(p.id)) {
-          if (knownPredIds.current.size > 0) triggerAlert(p); // skip initial load
+          if (knownPredIds.current.size > 0) announcePrediction(p); // skip initial load
           knownPredIds.current.add(p.id);
         }
       });
@@ -418,7 +457,7 @@ export default function Dashboard() {
     };
     es.onerror = () => {};
     return () => es.close();
-  }, [hasAccess, channelId, triggerAlert]);
+  }, [hasAccess, channelId, announcePrediction]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -543,83 +582,56 @@ export default function Dashboard() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const handleChangeChannel = () => navigate('/choisir');
 
-  const alertSuitLabel = alertPred ? (SUIT_LABELS[alertPred.predicted_suit] || alertPred.predicted_suit || '?') : '';
-
   return (
     <div className="dashboard" style={{ '--ch-color': channel.color, '--ch-glow': channel.glow }}>
-
-      {/* ── Prediction alert overlay ── */}
-      {alertPred && (
-        <div className="pred-alert-overlay">
-          <div className="pred-alert-box" style={{ '--alert-color': channel.color, '--alert-glow': channel.glow }}>
-
-            {/* Cercles pulsants — style appel entrant */}
-            <div className="pred-alert-rings">
-              <div className="ring-circle ring-c1" style={{ borderColor: channel.color }} />
-              <div className="ring-circle ring-c2" style={{ borderColor: channel.color }} />
-              <div className="ring-circle ring-c3" style={{ borderColor: channel.color }} />
-              <span className="pred-alert-phone">📲</span>
-            </div>
-
-            <div className="pred-alert-title">PRÉDICTION ENTRANTE</div>
-            <div className="pred-alert-channel" style={{ color: channel.color }}>
-              {channel.emoji} {channel.name}
-            </div>
-            <div className="pred-alert-suit">{alertSuitLabel}</div>
-            <div className="pred-alert-game">Partie #{alertPred.game_number}</div>
-
-            {/* Barre de progression (durée finie) ou pulsation infinie */}
-            {ringDuration > 0 ? (
-              <div className="pred-alert-bar" style={{ margin: '12px 0 20px' }}>
-                <div className="pred-alert-bar-fill" key={alertPred.id} style={{ animationDuration: `${ringDuration}s` }} />
-              </div>
-            ) : (
-              <div className="pred-alert-bar" style={{ margin: '12px 0 20px' }}>
-                <div className="pred-alert-bar-infinite" />
-              </div>
-            )}
-
-            {/* Bouton RACCROCHER */}
-            <button className="pred-alert-hangup" onClick={dismissAlert} title="Raccrocher">
-              📵
-            </button>
-
-            {/* Durée de sonnerie configurable */}
-            <div style={{ marginTop: 18, position: 'relative' }}>
-              <button
-                className="ring-settings-trigger"
-                onClick={e => { e.stopPropagation(); setShowRingSettings(v => !v); }}
-                title="Changer la durée de sonnerie"
-              >
-                🔔 {ringDuration > 0 ? `${ringDuration}s` : '∞'} ▾
-              </button>
-              {showRingSettings && (
-                <div className="ring-settings-menu" onClick={e => e.stopPropagation()}>
-                  <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.08em' }}>DURÉE DE SONNERIE</div>
-                  {RING_DURATIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      className={`ring-dur-opt${ringDuration === opt.value ? ' active' : ''}`}
-                      onClick={() => {
-                        setRingDuration(opt.value);
-                        localStorage.setItem('ringDuration', opt.value);
-                        setShowRingSettings(false);
-                      }}
-                    >
-                      <span>{opt.label}</span>
-                      {opt.title && <span style={{ color: '#64748b', fontSize: 10 }}>· {opt.title}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       <nav className="navbar">
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
+          {/* Sélecteur de voix d'annonce */}
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={e => { e.stopPropagation(); setShowVoiceSettings(v => !v); }}
+              title="Voix d'annonce des prédictions"
+            >
+              {VOICE_OPTIONS.find(o => o.value === voiceGender)?.label || '🔊 Voix'} ▾
+            </button>
+            {showVoiceSettings && (
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50,
+                  background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10,
+                  padding: 8, minWidth: 170, boxShadow: '0 10px 30px rgba(0,0,0,0.4)'
+                }}
+              >
+                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.08em', padding: '0 6px' }}>VOIX D'ANNONCE</div>
+                {VOICE_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      setVoiceGender(opt.value);
+                      localStorage.setItem('voiceGender', opt.value);
+                      setShowVoiceSettings(false);
+                      if (opt.value !== 'off') {
+                        speakPrediction({ game_number: '0', predicted_suit: '♥' }, opt.value);
+                      }
+                    }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      background: voiceGender === opt.value ? '#1e293b' : 'transparent',
+                      color: '#e2e8f0', border: 'none', padding: '8px 10px',
+                      borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {(user?.is_admin || user?.is_pro || user?.is_premium) && (
             <Link to="/comptages" className="btn btn-ghost btn-sm" style={{ color: '#4ade80', borderColor: 'rgba(34,197,94,0.4)' }}>📈 Comptages</Link>
           )}
