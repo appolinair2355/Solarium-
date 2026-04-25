@@ -273,39 +273,79 @@ function fmtHourTitle(date) {
   return `${dd}/${mm}/${yy} à ${hh}:00`;
 }
 
+// Échappe les caractères spéciaux HTML pour Telegram (mode parse_mode=HTML).
+// Indispensable car certains libellés contiennent « < » ou « > »
+// (ex. « Joueur < 4.5 », « Banquier > 6.5 ») que Telegram tente d'interpréter
+// comme des balises HTML, ce qui fait échouer l'envoi avec
+// « Bad Request: can't parse entities: Unsupported start tag ».
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function buildReportText(now, summary, prevSummary) {
   const lines = [];
-  lines.push(`🕐 <b>Bilan horaire des écarts</b>`);
-  lines.push(`<i>${fmtHourTitle(now)}</i>`);
-  lines.push('');
 
-  // Index pour comparer avec le précédent bilan
+  // Index pour comparer avec le précédent bilan + compter les nouveaux records
   const prevByKey = {};
   if (prevSummary && Array.isArray(prevSummary)) {
     for (const r of prevSummary) prevByKey[r.key] = r;
   }
+  const recordCount = summary.filter(row => {
+    const prev = prevByKey[row.key];
+    const prevMaxAll = prev ? prev.maxAll : 0;
+    return row.maxAll > prevMaxAll;
+  }).length;
 
+  // Heure courante + heure suivante (pour annoncer le prochain bilan)
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yy = now.getFullYear();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const nextH = String((now.getHours() + 1) % 24).padStart(2, '0');
+
+  // ── En-tête ──────────────────────────────────────────
+  lines.push('✨━━━━━━━━━━━━━━━━━━━━━━✨');
+  lines.push('   🎰 <b>BACCARAT PRO</b> 🎰');
+  lines.push('   📊 <i>Bilan horaire des écarts</i>');
+  lines.push('✨━━━━━━━━━━━━━━━━━━━━━━✨');
+  lines.push('');
+  lines.push(`📅  <b>${dd}/${mm}/${yy}</b>   ⏰  <b>${hh}:00</b>`);
+  if (recordCount > 0) {
+    lines.push(`🔥  <b>${recordCount}</b> nouveau${recordCount > 1 ? 'x' : ''} record${recordCount > 1 ? 's' : ''} battu${recordCount > 1 ? 's' : ''} !`);
+  }
+  lines.push('');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  // ── Sections par groupe ──────────────────────────────
   let currentGroup = null;
   for (const row of summary) {
     if (row.group !== currentGroup) {
       currentGroup = row.group;
       lines.push('');
-      lines.push(`<b>${currentGroup}</b>`);
+      // Titre du groupe en majuscules, encadré pour la lisibilité
+      lines.push(`<b>${escapeHtml(currentGroup.toUpperCase())}</b>`);
     }
     const prev = prevByKey[row.key];
     const prevMaxAll = prev ? prev.maxAll : 0;
     const newRecord = row.maxAll > prevMaxAll;
-    const tag = newRecord ? '  📈 <b>nouveau record</b>' : '';
-    // « écart période » = max écart observé depuis le dernier bilan
-    // « max global » = plus grand écart jamais vu
+    const tag = newRecord ? '  🔥' : '';
     lines.push(
-      `• ${row.label} — heure : <b>${row.maxPeriod}</b> | max : <b>${row.maxAll}</b>${tag}`
+      `   ▸  ${escapeHtml(row.label)}  —  Absence C : <b>${row.maxPeriod}</b>  ·  max : <b>${row.maxAll}</b>${tag}`
     );
   }
 
-  // Petit rappel pédagogique de lecture
+  // ── Pied de page ─────────────────────────────────────
   lines.push('');
-  lines.push(`<i>« heure » = plus grand écart de la dernière heure ; « max » = record toutes périodes confondues.</i>`);
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━');
+  lines.push('');
+  lines.push('📌 <b>Absence C</b> : plus grand écart de la dernière heure');
+  lines.push('📌 <b>max</b> : record toutes périodes confondues');
+  lines.push('🔥 : nouveau record battu cette heure');
+  lines.push('');
+  lines.push(`⏳ Prochain bilan automatique à <b>${nextH}:00</b>`);
   return lines.join('\n');
 }
 
@@ -483,11 +523,42 @@ router.post('/config', requireAdmin, async (req, res) => {
     // Si bot_token est vide ou masqué (••••XXXX), on conserve l'ancien
     const newToken = (typeof bot_token === 'string' && bot_token && !bot_token.startsWith('••••'))
       ? bot_token.trim() : state.config.bot_token;
+    const newChannelId = typeof channel_id === 'string' ? channel_id.trim() : state.config.channel_id;
+    // Auto-activation : si token + channel sont présents et enabled n'est pas explicitement false,
+    // on active automatiquement (l'utilisateur a clairement voulu configurer ce canal).
+    const finalEnabled = (typeof enabled === 'boolean')
+      ? enabled
+      : !!(newToken && newChannelId);
     state.config = {
       bot_token: newToken,
-      channel_id: typeof channel_id === 'string' ? channel_id.trim() : state.config.channel_id,
-      enabled: !!enabled,
+      channel_id: newChannelId,
+      enabled: !!finalEnabled,
     };
+    await db.setSetting('comptages_config', JSON.stringify(state.config));
+
+    // Si la config est complète et active, on envoie immédiatement le premier bilan
+    // (sans attendre l'heure pile) — pratique pour valider la configuration.
+    let firstReport = null;
+    if (state.config.enabled && state.config.bot_token && state.config.channel_id) {
+      try {
+        firstReport = await runReport(true);
+      } catch (e) {
+        firstReport = { skipped: false, sent: false, error: e.message };
+      }
+    }
+
+    res.json({
+      ok: true,
+      config: { ...state.config, bot_token: maskToken(state.config.bot_token) },
+      firstReport,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Suppression complète de la configuration principale (token + channel + désactivation)
+router.delete('/config', requireAdmin, async (req, res) => {
+  try {
+    state.config = { bot_token: '', channel_id: '', enabled: false };
     await db.setSetting('comptages_config', JSON.stringify(state.config));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

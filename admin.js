@@ -75,7 +75,15 @@ router.get('/my-strategies', async (req, res) => {
 router.get('/users', requireAdmin, async (req, res) => {
   try {
     const users = await db.getAllUsers();
-    res.json(users.map(u => ({ ...u, status: getUserStatus(u) })));
+    res.json(users.map(u => {
+      const out = { ...u, status: getUserStatus(u) };
+      // Le mot de passe en clair n'est exposé que pour les comptes premium
+      // (générés depuis le panneau admin). Pour tous les autres, on le supprime.
+      if (!u.is_premium) delete out.plain_password;
+      // password_hash n'a aucune utilité côté UI
+      delete out.password_hash;
+      return out;
+    }));
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -194,6 +202,7 @@ router.post('/generate-premium', requireSuperAdmin, async (req, res) => {
         first_name: 'Premium', last_name: String(i),
         is_approved: true, is_premium: true, subscription_expires_at: expiresAt.toISOString(),
         subscription_duration_minutes: durationH * 60,
+        plain_password: password, // permet de retrouver le mdp côté admin
       });
       accounts.push({ username, email, password, expires_at: expiresAt });
       generatedUsernames.push(username);
