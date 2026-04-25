@@ -290,27 +290,36 @@ function ComptagesPanel() {
     }
   };
 
-  const load = React.useCallback(async () => {
+  // `resetForm` : si true, écrase aussi les champs du formulaire (utilisé au montage
+  // initial et après save/suppression). Si false (rafraîchissement auto toutes les 15 s),
+  // on n'écrase JAMAIS les champs en cours d'édition pour ne pas effacer ce que
+  // l'admin est en train de taper (bug : la saisie disparaît si > 15 s).
+  const load = React.useCallback(async (resetForm = false) => {
     try {
       const r = await fetch('/api/admin/comptages', { credentials: 'include' });
       const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setData(d);
-      setCfg({
-        bot_token:  d.config?.bot_token  || '',
-        channel_id: d.config?.channel_id || '',
-        enabled:    !!d.config?.enabled,
-      });
-      setExtraChannels(Array.isArray(d.extraChannels) ? d.extraChannels : []);
-      setTokenDirty(false);
+      if (resetForm) {
+        setCfg({
+          bot_token:  d.config?.bot_token  || '',
+          channel_id: d.config?.channel_id || '',
+          enabled:    !!d.config?.enabled,
+        });
+        setExtraChannels(Array.isArray(d.extraChannels) ? d.extraChannels : []);
+        setTokenDirty(false);
+      }
     } catch (e) {
       setMsg({ text: '❌ ' + e.message, error: true });
     } finally { setLoading(false); }
   }, []);
 
   React.useEffect(() => {
-    load();
-    const iv = setInterval(load, 15000);
+    // Au montage : on charge tout (data + champs du formulaire)
+    load(true);
+    // Rafraîchissement auto : on ne met à jour QUE les statistiques (data),
+    // pas les champs en cours de saisie.
+    const iv = setInterval(() => load(false), 15000);
     return () => clearInterval(iv);
   }, [load]);
 
@@ -332,9 +341,9 @@ function ComptagesPanel() {
     try {
       const body = {
         channel_id: cfg.channel_id,
-        enabled: cfg.enabled,
+        // On laisse le backend décider de l'activation : si token+channel sont remplis,
+        // il active automatiquement (sauf si on envoie explicitement enabled:false).
       };
-      // N'envoie le token que s'il a été modifié (sinon on garde celui du serveur)
       if (tokenDirty) body.bot_token = cfg.bot_token;
       const r = await fetch('/api/admin/comptages/config', {
         method: 'POST', credentials: 'include',
@@ -343,11 +352,16 @@ function ComptagesPanel() {
       });
       const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error || 'Erreur');
-      setMsg({ text: '✅ Configuration sauvegardée', error: false });
-      await load();
-      // Récupérer aperçu et ouvrir la fenêtre récapitulative
+      const sentInfo = d.firstReport?.sent
+        ? ' · ✈️ Premier bilan envoyé immédiatement sur Telegram'
+        : (d.firstReport?.error ? ` · ⚠️ Envoi : ${d.firstReport.error}` : '');
+      setMsg({ text: '✅ Configuration sauvegardée' + sentInfo, error: false });
+      await load(true);
       const p = await fetchPreview();
-      if (p) setShowPreview(true);
+      if (p) {
+        setPreview({ ...p, _firstReport: d.firstReport || null });
+        setShowPreview(true);
+      }
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setSavingCfg(false); }
   };
@@ -355,6 +369,40 @@ function ComptagesPanel() {
   const openPreview = async () => {
     const p = await fetchPreview();
     if (p) setShowPreview(true);
+  };
+
+  const deleteCfg = async () => {
+    if (!confirm('Supprimer définitivement la configuration Telegram principale ?\n\nLe token et le channel ID seront effacés.')) return;
+    setBusy('delcfg'); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/config', {
+        method: 'DELETE', credentials: 'include',
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: '✅ Configuration supprimée', error: false });
+      setCfg({ bot_token: '', channel_id: '', enabled: false });
+      setTokenDirty(false);
+      await load(true);
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
+  };
+
+  // Active/désactive rapidement le canal principal sans toucher token/channel_id
+  const toggleEnabled = async () => {
+    setBusy('togcfg'); setMsg({ text: '', error: false });
+    try {
+      const r = await fetch('/api/admin/comptages/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !data?.config?.enabled }),
+      });
+      const d = await safeJson(r);
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setMsg({ text: data?.config?.enabled ? '🔴 Canal désactivé' : '🟢 Canal activé', error: false });
+      await load(true);
+    } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
+    finally { setBusy(''); }
   };
 
   const sendTest = async () => {
@@ -375,7 +423,7 @@ function ComptagesPanel() {
           : 'ℹ️ Bilan généré (aucun canal activé ou tous en erreur)' + channelsInfo,
         error: false,
       });
-      await load();
+      await load(true);
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setBusy(''); }
   };
@@ -390,7 +438,7 @@ function ComptagesPanel() {
       const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setMsg({ text: '✅ Compteurs réinitialisés', error: false });
-      await load();
+      await load(true);
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setBusy(''); }
   };
@@ -424,7 +472,7 @@ function ComptagesPanel() {
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setMsg({ text: '✅ Canal sauvegardé', error: false });
       setEditingChannel(null);
-      await load();
+      await load(true);
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setBusy(''); }
   };
@@ -439,7 +487,7 @@ function ComptagesPanel() {
       const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error || 'Erreur');
       setMsg({ text: '✅ Canal supprimé', error: false });
-      await load();
+      await load(true);
     } catch (e) { setMsg({ text: '❌ ' + e.message, error: true }); }
     finally { setBusy(''); }
   };
@@ -527,16 +575,12 @@ function ComptagesPanel() {
                 background: 'rgba(34,197,94,0.05)', color: '#e2e8f0', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}
             />
           </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#e2e8f0', fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={cfg.enabled}
-                onChange={e => setCfg({ ...cfg, enabled: e.target.checked })}
-                style={{ width: 16, height: 16, cursor: 'pointer' }}
-              />
-              <span>Activer l'envoi horaire</span>
-            </label>
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
+              💡 L'envoi horaire est <b style={{ color: '#86efac' }}>activé automatiquement</b> dès
+              qu'un token + channel ID sont remplis et sauvegardés. Le premier bilan part
+              immédiatement, puis chaque heure pile.
+            </div>
           </div>
         </div>
 
@@ -579,15 +623,33 @@ function ComptagesPanel() {
               background: 'rgba(34,197,94,0.06)',
               border: '1px solid rgba(34,197,94,0.4)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 16 }}>🛰️</span>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#86efac' }}>
                   Configuration Telegram active
                 </div>
-                <button className="btn btn-sm" onClick={openPreview}
-                  style={{ marginLeft: 'auto', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
-                  👁️ Voir l'aperçu du prochain bilan
-                </button>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button className="btn btn-sm" onClick={openPreview}
+                    style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.4)' }}>
+                    👁️ Aperçu
+                  </button>
+                  {(data?.config?.bot_token || data?.config?.channel_id) && (
+                    <button className="btn btn-sm" onClick={toggleEnabled} disabled={busy === 'togcfg'}
+                      style={{
+                        background: enabledMain ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.15)',
+                        color:      enabledMain ? '#f87171' : '#4ade80',
+                        border:     '1px solid ' + (enabledMain ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'),
+                      }}>
+                      {busy === 'togcfg' ? '…' : (enabledMain ? '⏸ Désactiver' : '▶️ Activer')}
+                    </button>
+                  )}
+                  {(data?.config?.bot_token || data?.config?.channel_id) && (
+                    <button className="btn btn-sm" onClick={deleteCfg} disabled={busy === 'delcfg'}
+                      style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }}>
+                      {busy === 'delcfg' ? '…' : '🗑️ Supprimer'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Récap du canal principal */}
@@ -679,6 +741,20 @@ function ComptagesPanel() {
                 fontSize: 24, cursor: 'pointer', padding: '0 6px',
               }}>✕</button>
             </div>
+
+            {/* Statut envoi immédiat du premier bilan */}
+            {preview._firstReport && (
+              <div style={{
+                marginBottom: 12, padding: '10px 12px', borderRadius: 10, fontSize: 13,
+                background: preview._firstReport.sent ? 'rgba(34,197,94,0.12)' : 'rgba(251,191,36,0.10)',
+                border:     '1px solid ' + (preview._firstReport.sent ? 'rgba(34,197,94,0.4)' : 'rgba(251,191,36,0.4)'),
+                color:      preview._firstReport.sent ? '#86efac' : '#fcd34d',
+              }}>
+                {preview._firstReport.sent
+                  ? <>✈️ <b>Premier bilan envoyé immédiatement sur Telegram</b> — vous le verrez dans le canal dans quelques secondes. Les bilans suivants partiront chaque heure pile.</>
+                  : <>⚠️ Bilan généré mais non envoyé{preview._firstReport.error ? <> : <i>{preview._firstReport.error}</i></> : ' (aucun canal actif).'}</>}
+              </div>
+            )}
 
             {/* Récap canaux actifs */}
             <div style={{
@@ -4788,8 +4864,29 @@ function AdminPanel() {
                       <tr>
                         {/* Username */}
                         <td>
-                          <div style={{ fontWeight: 700 }}>{u.username}</div>
+                          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {u.username}
+                            {u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
+                          </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
+                          {u.is_premium && u.plain_password && (
+                            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>🔑</span>
+                              <code style={{ color: '#22c55e', background: 'rgba(34,197,94,0.08)', padding: '1px 6px', borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>
+                                {u.plain_password}
+                              </code>
+                              <button
+                                title="Copier le mot de passe"
+                                onClick={() => { navigator.clipboard?.writeText(u.plain_password); }}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 12, padding: 0 }}
+                              >📋</button>
+                            </div>
+                          )}
+                          {u.is_premium && !u.plain_password && (
+                            <div style={{ marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                              🔑 mdp non disponible (compte créé avant cette mise à jour)
+                            </div>
+                          )}
                         </td>
 
                         {/* First / Last name */}
