@@ -142,6 +142,35 @@ export default function StrategySelect() {
           </div>
         </div>
       )}
+      {!user?.is_admin && user?.status === 'active' && user?.subscription_expires_at && (() => {
+        const ms = new Date(user.subscription_expires_at) - new Date();
+        if (ms <= 0) return null;
+        const totalMin = Math.floor(ms / 60000);
+        const days = Math.floor(totalMin / (60 * 24));
+        const hours = Math.floor((totalMin % (60 * 24)) / 60);
+        const mins = totalMin % 60;
+        let txt = '';
+        if (days > 0) txt = `${days} j ${hours} h`;
+        else if (hours > 0) txt = `${hours} h ${mins} min`;
+        else txt = `${mins} min`;
+        const dt = new Date(user.subscription_expires_at);
+        const fmt = dt.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return (
+          <div style={{
+            margin: '20px auto', maxWidth: 720, padding: '14px 20px', borderRadius: 12,
+            background: 'rgba(34,197,94,0.08)', border: '2px solid rgba(34,197,94,0.4)',
+            display: 'flex', alignItems: 'center', gap: 14, color: '#86efac',
+          }}>
+            <div style={{ fontSize: 28 }}>⏱️</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#fff', marginBottom: 2 }}>
+                Abonnement actif — {txt} restant{days > 1 || (days === 0 && hours > 1) ? 's' : ''}
+              </div>
+              <div style={{ fontSize: 12, color: '#bbf7d0' }}>Expire le {fmt}</div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="select-header">
         <div className="select-header-badge">🎯 ACCÈS PRÉDICTIONS</div>
