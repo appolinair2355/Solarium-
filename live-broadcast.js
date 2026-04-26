@@ -112,7 +112,8 @@ async function listTargets() {
 
 // ── Calcul du score Baccarat ────────────────────────────────────────────────
 
-// L'API 1xBet envoie les rangs en numérique : 0/1=As, 2-9=valeur, 10=10, 11=J, 12=Q, 13=K
+// L'API 1xBet envoie les rangs en numérique : 0/1/14=As, 2-9=valeur, 10=10, 11=J, 12=Q, 13=K
+// (1xBet utilise indifféremment 1 ou 14 pour l'As selon l'encodage du paquet)
 function rankValue(r) {
   if (r === null || r === undefined || r === '?') return 0;
   const s = String(r).toUpperCase();
@@ -120,9 +121,10 @@ function rankValue(r) {
   if (s === 'T' || s === 'J' || s === 'Q' || s === 'K') return 0;
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) return 0;
-  if (n === 0 || n === 1) return 1;        // As
-  if (n >= 10) return 0;                    // 10, J, Q, K
-  return n;
+  if (n === 0 || n === 1 || n === 14) return 1;   // As (encodage bas ou haut)
+  if (n >= 10 && n <= 13) return 0;                // 10, J, Q, K
+  if (n >= 2 && n <= 9) return n;
+  return 0;
 }
 
 function rankLabel(r) {
@@ -133,10 +135,11 @@ function rankLabel(r) {
   }
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) return String(r);
-  if (n === 0 || n === 1) return 'A';
+  if (n === 0 || n === 1 || n === 14) return 'A'; // As (encodage bas ou haut)
   if (n === 11) return 'J';
   if (n === 12) return 'Q';
   if (n === 13) return 'K';
+  if (n >= 2 && n <= 10) return String(n);
   return String(n);
 }
 
