@@ -5901,6 +5901,46 @@ function AdminPanel() {
                 />
               </div>
 
+              {/* ══════════════ MAIN SURVEILLÉE (Joueur / Banquier) ══════════════ */}
+              <div style={{ marginBottom: 18, padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  🎯 Main surveillée *
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button type="button"
+                    onClick={() => setStratForm(p => ({ ...p, hand: 'joueur' }))}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      border: stratForm.hand === 'joueur' ? '2px solid #3b82f6' : '1px solid rgba(99,102,241,0.3)',
+                      background: stratForm.hand === 'joueur' ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.03)',
+                      color: stratForm.hand === 'joueur' ? '#93c5fd' : '#94a3b8',
+                      fontSize: 14, fontWeight: 800, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      transition: 'all .15s',
+                    }}>
+                    🔵 JOUEUR
+                  </button>
+                  <button type="button"
+                    onClick={() => setStratForm(p => ({ ...p, hand: 'banquier' }))}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      border: stratForm.hand === 'banquier' ? '2px solid #ef4444' : '1px solid rgba(239,68,68,0.3)',
+                      background: stratForm.hand === 'banquier' ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.03)',
+                      color: stratForm.hand === 'banquier' ? '#fca5a5' : '#94a3b8',
+                      fontSize: 14, fontWeight: 800, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      transition: 'all .15s',
+                    }}>
+                    🔴 BANQUIER
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 8, lineHeight: 1.5 }}>
+                  Choisit la main dont les costumes/résultats seront analysés par cette stratégie.
+                </div>
+              </div>
+
               {/* ══════════════ SECTION 1 — ALGORITHME ══════════════ */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 14px', borderRadius: 9,
                 background: stratForm.mode === 'relance' ? 'rgba(251,146,60,0.08)' : 'rgba(168,85,247,0.08)',
