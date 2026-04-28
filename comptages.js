@@ -46,6 +46,7 @@ const CATEGORIES = [
   // Victoire (Tie ⇒ ne déclenche aucun des deux ⇒ les écarts s'incrémentent)
   { key: 'win_player',   group: '🏆 Victoire',    label: 'Joueur',     match: c => c.winner === 'Player' },
   { key: 'win_banker',   group: '🏆 Victoire',    label: 'Banquier',   match: c => c.winner === 'Banker' },
+  { key: 'win_tie',      group: '🏆 Victoire',    label: 'Égalité',    match: c => c.winner === 'Tie' },
 
   // Parité du score gagnant (Tie ⇒ on prend la parité du score commun)
   { key: 'parite_pair',  group: '⚖️ Parité',      label: 'Pair',       match: c => c.winnerScore !== null && c.winnerScore % 2 === 0 },

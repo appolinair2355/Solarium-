@@ -908,7 +908,7 @@ router.get('/announcements', requireAdmin, async (req, res) => {
 
 router.post('/announcements', requireAdmin, async (req, res) => {
   try {
-    const { name, bot_token, channel_id, text, media_type, media_url, schedule_type, interval_hours, times } = req.body;
+    const { name, bot_token, channel_id, text, media_type, media_url, media_data, media_filename, schedule_type, interval_hours, times } = req.body;
     if (!name || !bot_token || !channel_id || !text || !schedule_type)
       return res.status(400).json({ error: 'name, bot_token, channel_id, text, schedule_type requis' });
     if (schedule_type === 'interval' && !interval_hours)
@@ -924,6 +924,8 @@ router.post('/announcements', requireAdmin, async (req, res) => {
       text: text.trim(),
       media_type: media_type || null,
       media_url: media_url ? media_url.trim() : null,
+      media_data: media_data || null,           // base64 fichier téléversé
+      media_filename: media_filename || null,    // nom d'origine du fichier
       schedule_type,
       interval_hours: schedule_type === 'interval' ? parseFloat(interval_hours) : null,
       times: schedule_type === 'times' ? times : [],
@@ -942,9 +944,17 @@ router.patch('/announcements/:id', requireAdmin, async (req, res) => {
     const current = JSON.parse(await db.getSetting('tg_announcements') || '[]');
     const idx = current.findIndex(a => a.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Annonce introuvable' });
-    current[idx] = { ...current[idx], ...req.body };
+    // Liste blanche des champs modifiables (évite d'écraser id, last_sent par accident)
+    const ALLOWED = ['name', 'bot_token', 'channel_id', 'text', 'media_type', 'media_url',
+                     'media_data', 'media_filename', 'schedule_type', 'interval_hours',
+                     'times', 'enabled'];
+    const patch = {};
+    for (const k of ALLOWED) {
+      if (k in req.body) patch[k] = req.body[k];
+    }
+    current[idx] = { ...current[idx], ...patch };
     await db.setSetting('tg_announcements', JSON.stringify(current));
-    res.json({ ok: true });
+    res.json({ ok: true, announcement: current[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
