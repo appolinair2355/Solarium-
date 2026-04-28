@@ -42,6 +42,16 @@ export default function ContactAdminModal({ trigger }) {
     if (pollRef.current) clearInterval(pollRef.current);
   };
 
+  // Charge l'historique au montage et le rafraîchit en arrière-plan toutes les
+  // 30 s — comme ça, le badge "réponse non-lue" devient visible AVANT même
+  // d'ouvrir la modale.
+  useEffect(() => {
+    loadHistory(true);
+    const bgPoll = setInterval(() => loadHistory(true), 30000);
+    return () => clearInterval(bgPoll);
+  }, []);
+
+  // Quand la modale est ouverte, on accélère le polling à 10 s
   useEffect(() => {
     if (open) {
       pollRef.current = setInterval(() => loadHistory(true), 10000);
