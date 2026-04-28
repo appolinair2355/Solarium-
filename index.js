@@ -208,9 +208,18 @@ if (fs.existsSync(path.join(distPath, 'index.html'))) {
     maxAge: IS_PROD ? '1h' : '0',
     index: false, // Ne pas servir index.html automatiquement (on le gère ci-dessous)
   }));
-  // index.html → toujours sans cache pour que les nouveaux assets soient chargés
+  // ── Anti page-noire ────────────────────────────────────────────────
+  // Si le navigateur demande un asset qui n'existe pas (ex: ancien hash JS/CSS
+  // mis en cache après un re-build), on renvoie un 404 EXPLICITE plutôt que
+  // index.html. Sans ce garde-fou, le navigateur recevait du HTML pour un
+  // script attendu en JS → erreur MIME → React ne démarre jamais → page noire.
+  const ASSET_EXT_RE = /\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|eot|json|wasm|mp3|mp4|webm|ogg|pdf|txt|xml)$/i;
   app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    if (req.path.startsWith('/assets/') || ASSET_EXT_RE.test(req.path)) {
+      return res.status(404).type('text/plain').send('Not Found');
+    }
+    // index.html → toujours sans cache pour que les nouveaux assets soient chargés
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
