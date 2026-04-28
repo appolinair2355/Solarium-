@@ -12,6 +12,7 @@ const TelegramFeed  = lazy(() => import('./pages/TelegramFeed'));
 const Programmation = lazy(() => import('./pages/Programmation'));
 const SystemLogs    = lazy(() => import('./pages/SystemLogs'));
 const Comptages     = lazy(() => import('./pages/Comptages'));
+const Payment       = lazy(() => import('./pages/Payment'));
 
 function PageLoader() {
   return (
@@ -40,8 +41,8 @@ function ProtectedRoute({ children, adminOnly = false, adminOrPro = false, admin
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
-  // Bloquer les comptes expirés sur tous les espaces sauf /choisir (où le bandeau "expiré" s'affiche)
-  if (!user.is_admin && user.status === 'expired') return <Navigate to="/choisir" replace />;
+  // Bloquer les comptes expirés sur tous les espaces sauf /choisir et /paiement
+  if (!user.is_admin && user.status === 'expired') return <Navigate to="/paiement" replace />;
   if (!user.is_admin && user.status === 'pending') return <Navigate to="/choisir" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
   if (adminOrPro && !user.is_admin && !user.is_pro) return <Navigate to="/choisir" replace />;
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/connexion" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/inscription" element={<PublicRoute><Register /></PublicRoute>} />
             <Route path="/choisir" element={<ProtectedRoute><StrategySelect /></ProtectedRoute>} />
+            <Route path="/paiement" element={<ProtectedRoute><Payment /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Navigate to="/choisir" replace /></ProtectedRoute>} />
             <Route path="/dashboard/:strategy" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute adminOrPro><Admin /></ProtectedRoute>} />
