@@ -165,6 +165,19 @@ router.get('/me', async (req, res) => {
   try {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Session invalide' });
+    // ── Re-synchronise les drapeaux de session depuis la base ─────────
+    // Sans ça, si l'admin active is_pro / is_admin pendant que l'utilisateur
+    // est déjà connecté, sa session conserve l'ancienne valeur et toutes les
+    // routes /admin/pro-* renvoient 403 → panneaux Config Pro & Telegram vides.
+    const freshIsAdmin = !!user.is_admin;
+    const freshIsPro   = !!user.is_pro;
+    if (req.session.isAdmin !== freshIsAdmin || req.session.isPro !== freshIsPro) {
+      req.session.isAdmin = freshIsAdmin;
+      req.session.isPro   = freshIsPro;
+      // Persiste immédiatement la session mise à jour avant de répondre
+      req.session.save(() => res.json(publicUser(user)));
+      return;
+    }
     res.json(publicUser(user));
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });

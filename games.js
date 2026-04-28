@@ -173,8 +173,24 @@ router.post('/client-push', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/absences', (req, res) => {
-  if (!req.session.userId || (!req.session.isAdmin && !req.session.isPremium)) return res.status(403).json({ error: 'Accès non autorisé' });
+// Middleware : bloque les utilisateurs non admin dont l'abonnement est expiré
+async function requireActiveSub(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (req.session.isAdmin) return next();
+  try {
+    const db = require('./db');
+    const u = await db.getUser(req.session.userId);
+    if (!u) return res.status(401).json({ error: 'Utilisateur non trouvé' });
+    if (!u.is_approved)
+      return res.status(403).json({ error: 'Compte en attente de validation', code: 'PENDING' });
+    if (!u.subscription_expires_at || new Date(u.subscription_expires_at) <= new Date())
+      return res.status(403).json({ error: 'Abonnement expiré', code: 'EXPIRED' });
+    next();
+  } catch { return res.status(500).json({ error: 'Erreur serveur' }); }
+}
+
+router.get('/absences', requireActiveSub, (req, res) => {
+  if (!req.session.isAdmin && !req.session.isPremium) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || 'C1';
   const engine = require('./engine');
   const data = engine.getAbsences(channel);
@@ -183,8 +199,7 @@ router.get('/absences', (req, res) => {
 });
 
 // Logs Pro : accessibles à l'admin (tout) et au compte Pro propriétaire de la stratégie
-router.get('/pro-logs', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+router.get('/pro-logs', requireActiveSub, async (req, res) => {
   if (!req.session.isAdmin && !req.session.isPro) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || '';
   if (!/^S\d{4,5}$/.test(channel)) return res.json([]);
@@ -205,8 +220,7 @@ router.get('/pro-logs', async (req, res) => {
   res.json(engine.getProLogs(channel) || []);
 });
 
-router.delete('/pro-logs', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+router.delete('/pro-logs', requireActiveSub, async (req, res) => {
   if (!req.session.isAdmin && !req.session.isPro) return res.status(403).json({ error: 'Accès non autorisé' });
   const channel = req.query.channel || '';
   // Vérification ownership pour Pro non-admin
@@ -232,8 +246,7 @@ router.delete('/pro-logs', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.get('/loss-streaks', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+router.get('/loss-streaks', requireActiveSub, async (req, res) => {
   try {
     const engine = require('./engine');
     const db     = require('./db');
@@ -243,8 +256,7 @@ router.get('/loss-streaks', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/live', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+router.get('/live', requireActiveSub, async (req, res) => {
   try {
     const games = await fetchGames();
     res.json(games);
@@ -256,8 +268,7 @@ router.get('/live', async (req, res) => {
 // GET /api/games/stream — SSE event-driven
 // Le client reçoit les données IMMÉDIATEMENT quand elles changent (via broadcast),
 // plus un keepalive toutes les 15s pour maintenir la connexion active.
-router.get('/stream', (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+router.get('/stream', requireActiveSub, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');

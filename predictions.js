@@ -57,7 +57,7 @@ router.get('/stats', checkSubscription, async (req, res) => {
 });
 
 // ── Prédictions Pro (pour les comptes Pro et admins) ──────────────────────
-router.get('/pro', requireAccess, async (req, res) => {
+router.get('/pro', checkSubscription, async (req, res) => {
   try {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
@@ -89,7 +89,7 @@ router.get('/pro', requireAccess, async (req, res) => {
 });
 
 // SSE stream des prédictions Pro
-router.get('/pro/stream', requireAccess, async (req, res) => {
+router.get('/pro/stream', checkSubscription, async (req, res) => {
   const user = await db.getUser(req.session.userId).catch(() => null);
   if (!user || (!user.is_admin && !user.is_pro))
     return res.status(403).json({ error: 'Accès réservé aux comptes Pro' });
