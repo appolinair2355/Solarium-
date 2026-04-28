@@ -3456,6 +3456,19 @@ function AdminPanel() {
   const [annEditingId,     setAnnEditingId]     = useState(null);
   const [annUploading,     setAnnUploading]     = useState(false);
 
+  // Quand on entre en mode édition d'une annonce, on s'assure que le formulaire
+  // s'ouvre et défile dans la vue APRÈS le rendu (plus fiable que setTimeout).
+  useEffect(() => {
+    if (annEditingId !== null && annOpen) {
+      const id = requestAnimationFrame(() => {
+        if (annFormRef.current) {
+          annFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+      return () => cancelAnimationFrame(id);
+    }
+  }, [annEditingId, annOpen]);
+
   const saveStratTg = async (id) => {
     setStratChSaving(true);
     try {
@@ -8809,12 +8822,8 @@ function AdminPanel() {
                         });
                         setAnnOpen(true);
                         setAnnMsg('');
-                        // Défile vers le formulaire (et non vers le bas de page)
-                        setTimeout(() => {
-                          if (annFormRef.current) {
-                            annFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }
-                        }, 80);
+                        // Le défilement vers le formulaire est géré par useEffect
+                        // (annEditingId, annOpen) — plus fiable qu'un setTimeout.
                       }}
                       style={{ padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
                       ✏️ Modifier cette annonce

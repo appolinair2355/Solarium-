@@ -583,6 +583,39 @@ export default function Dashboard() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const handleChangeChannel = () => navigate('/choisir');
 
+  // ── Verrouillage total si abonnement expiré (non admin) ───────────────
+  // Aucun canal, aucune prédiction, aucun jeu : seul le bandeau de renouvellement.
+  const lockedExpired = !!user && !user.is_admin && user.status === 'expired';
+  if (lockedExpired) {
+    return (
+      <div className="dashboard" style={{ '--ch-color': channel.color, '--ch-glow': channel.glow }}>
+        <nav className="navbar">
+          <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
+          <div className="navbar-actions">
+            <Avatar user={user} size={36} style={{ marginLeft: 6 }} />
+            <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Se déconnecter</button>
+          </div>
+        </nav>
+        <div style={{
+          maxWidth: 720, margin: '40px auto', padding: '28px 24px', borderRadius: 16,
+          background: 'rgba(239,68,68,0.08)', border: '2px solid rgba(239,68,68,0.55)',
+          textAlign: 'center', color: '#fca5a5',
+        }}>
+          <div style={{ fontSize: 56, marginBottom: 12 }}>🔒</div>
+          <h2 style={{ color: '#fff', margin: '0 0 8px', fontSize: 22 }}>Abonnement expiré</h2>
+          <p style={{ color: '#fecaca', margin: '0 0 18px', fontSize: 14, lineHeight: 1.5 }}>
+            Toutes les prédictions, canaux et statistiques sont bloqués.<br/>
+            Renouvelez votre abonnement pour retrouver l'accès complet.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link to="/paiement" className="btn btn-gold">💳 Renouveler maintenant</Link>
+            <Link to="/" className="btn btn-ghost">Retour à l'accueil</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard" style={{ '--ch-color': channel.color, '--ch-glow': channel.glow }}>
 
