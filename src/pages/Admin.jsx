@@ -3375,6 +3375,10 @@ function AdminPanel() {
   // ── Config IA ──────────────────────────────────────────────────────
   const [aiProviders,    setAiProviders]      = useState([]);
   const [aiConfigData,   setAiConfigData]     = useState({ provider: null, hasKey: false });
+  const [visionKeyData,  setVisionKeyData]    = useState({ hasKey: false });
+  const [visionKeyInput, setVisionKeyInput]   = useState('');
+  const [visionKeySaving, setVisionKeySaving] = useState(false);
+  const [visionKeyMsg,   setVisionKeyMsg]     = useState('');
   const [aiSelectedProv, setAiSelectedProv]   = useState('groq');
   const [aiApiKey,       setAiApiKey]         = useState('');
   const [aiSaving,       setAiSaving]         = useState(false);
@@ -4253,12 +4257,14 @@ function AdminPanel() {
 
   const loadAiConfig = useCallback(async () => {
     try {
-      const [provR, cfgR] = await Promise.all([
-        fetch('/api/ai/providers', { credentials: 'include' }),
-        fetch('/api/ai/config',    { credentials: 'include' }),
+      const [provR, cfgR, visR] = await Promise.all([
+        fetch('/api/ai/providers',   { credentials: 'include' }),
+        fetch('/api/ai/config',      { credentials: 'include' }),
+        fetch('/api/ai/vision-key',  { credentials: 'include' }),
       ]);
       if (provR.ok) { const d = await provR.json(); setAiProviders(d.providers || []); }
       if (cfgR.ok)  { const d = await cfgR.json();  setAiConfigData(d); setAiSelectedProv(d.provider || 'groq'); }
+      if (visR.ok)  { const d = await visR.json();  setVisionKeyData(d); }
     } catch {}
   }, []);
 
@@ -5181,18 +5187,6 @@ function AdminPanel() {
                             >📡 {expandedUserId === u.id ? 'Fermer' : 'Canaux'}{visCounts[u.id] != null && expandedUserId !== u.id ? ` (${visCounts[u.id]})` : ''}</button>
                             {isSuperAdmin && u.status !== 'pending' && (
                               <button className="btn btn-danger btn-sm" onClick={() => revokeUser(u.id)}>🔒 Révoquer</button>
-                            )}
-                            {isSuperAdmin && (
-                              <button
-                                className="btn btn-sm"
-                                style={{ background: u.is_pro ? 'rgba(99,102,241,0.18)' : 'rgba(100,116,139,0.1)', border: `1px solid ${u.is_pro ? 'rgba(99,102,241,0.5)' : 'rgba(100,116,139,0.3)'}`, color: u.is_pro ? '#818cf8' : '#64748b', fontWeight: 700 }}
-                                onClick={async () => {
-                                  if (!confirm(u.is_pro ? `Retirer le statut Pro à ${u.username} ?` : `Activer le compte Pro pour ${u.username} ?`)) return;
-                                  const r = await fetch(`/api/admin/users/${u.id}/toggle-pro`, { method: 'POST', credentials: 'include' });
-                                  if (r.ok) loadUsers();
-                                }}
-                                title={u.is_pro ? 'Retirer le statut Pro' : 'Activer le compte Pro'}
-                              >{u.is_pro ? '🔷 Pro' : '⬜ Pro'}</button>
                             )}
                             {isSuperAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteUser(u.id)} style={{ opacity: 0.7 }}>🗑️</button>}
                           </div>
@@ -8820,7 +8814,7 @@ function AdminPanel() {
                           }
                         }, 80);
                       }}
-                      style={{ padding: '5px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
+                      style={{ padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
                       ✏️ Modifier cette annonce
                     </button>
                     <button
@@ -10253,6 +10247,82 @@ function AdminPanel() {
                 {aiTestResult.ok ? `✅ Connexion OK — Réponse : "${aiTestResult.response}"` : `❌ Échec : ${aiTestResult.error}`}
               </div>
             )}
+          </div>
+
+          {/* ── Clé API gratuite Vision (paiements) ── */}
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">🎁</span>
+              <div style={{ flex: 1 }}>
+                <h2 className="tg-admin-title">Clé API gratuite — Vérification des paiements</h2>
+                <p className="tg-admin-sub">
+                  Clé <b>Gemini Vision</b> (gratuite) utilisée pour analyser les captures d'écran de paiement
+                  envoyées par les utilisateurs (montant, devise, date, référence, identifiant).
+                  {visionKeyData.hasKey
+                    ? <span style={{ color: '#4ade80', marginLeft: 6 }}>✅ Clé enregistrée</span>
+                    : <span style={{ color: '#f87171', marginLeft: 6 }}>⚠️ Aucune clé — la vérification IA des paiements est désactivée</span>}
+                </p>
+              </div>
+              {visionKeyMsg && (
+                <span style={{ fontSize: 12, fontWeight: 700, color: visionKeyMsg.startsWith('✅') ? '#22c55e' : '#f87171' }}>{visionKeyMsg}</span>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 12, fontSize: 12, color: '#94a3b8' }}>
+              📌 Obtenez votre clé gratuite sur{' '}
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#6366f1' }}>
+                aistudio.google.com/app/apikey
+              </a>
+              {' '}— totalement gratuite, sans carte bancaire. Si vous laissez cette section vide,
+              la clé du provider Gemini configuré ci-dessus sera utilisée.
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
+                  Clé API Gemini gratuite {visionKeyData.hasKey ? '(laissez vide pour conserver l\'actuelle)' : ''}
+                </label>
+                <input
+                  type="password"
+                  value={visionKeyInput}
+                  onChange={e => setVisionKeyInput(e.target.value)}
+                  placeholder={visionKeyData.hasKey ? '••••••••••••••••••••••' : 'AIza...'}
+                  style={{ width: '100%', padding: '12px 14px', background: '#0f1729', border: '2px solid rgba(251,191,36,0.3)', borderRadius: 10, color: '#e2e8f0', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!visionKeyInput.trim()) { setVisionKeyMsg('❌ Clé vide'); return; }
+                  setVisionKeySaving(true); setVisionKeyMsg('');
+                  try {
+                    const r = await fetch('/api/ai/vision-key', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: visionKeyInput.trim() }) });
+                    const d = await r.json();
+                    if (d.ok) { setVisionKeyMsg('✅ Clé enregistrée'); setVisionKeyInput(''); await loadAiConfig(); }
+                    else setVisionKeyMsg('❌ ' + (d.error || 'Erreur'));
+                  } catch { setVisionKeyMsg('❌ Erreur réseau'); }
+                  setVisionKeySaving(false);
+                }}
+                disabled={visionKeySaving}
+                style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#f59e0b,#fbbf24)', color: '#0f172a', fontWeight: 800, fontSize: 13, cursor: visionKeySaving ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+              >
+                {visionKeySaving ? '⏳ Sauvegarde…' : '💾 Enregistrer'}
+              </button>
+              {visionKeyData.hasKey && (
+                <button
+                  onClick={async () => {
+                    if (!confirm('Supprimer la clé Vision enregistrée ?')) return;
+                    try {
+                      await fetch('/api/ai/vision-key', { method: 'DELETE', credentials: 'include' });
+                      setVisionKeyMsg('✅ Supprimée');
+                      await loadAiConfig();
+                    } catch { setVisionKeyMsg('❌ Erreur'); }
+                  }}
+                  style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+                >
+                  🗑 Retirer
+                </button>
+              )}
+            </div>
           </div>
 
           {/* ── Réparation automatique ── */}

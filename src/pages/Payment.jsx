@@ -12,12 +12,15 @@ export default function Payment() {
   const [referral, setReferral] = useState({ discount_percent: 20, bonus_percent: 20 });
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [request, setRequest] = useState(null);     // demande créée { id, plan, whatsapp_link }
+  const [request, setRequest] = useState(null);
+  // Étapes : 'plan' → 'whatsapp_sent' → 'screenshot' → 'patience' → 'result'
+  const [phase, setPhase] = useState('plan');
   const [imagePreview, setImagePreview] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const [imageMime, setImageMime] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState(null);       // résultat de l'upload (IA)
+  const [patienceLeft, setPatienceLeft] = useState(10);
+  const [result, setResult] = useState(null);
   const [myRequests, setMyRequests] = useState([]);
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
@@ -43,7 +46,6 @@ export default function Payment() {
       .catch(() => {});
   };
 
-  // Refresh user info pour récupérer la nouvelle expiration éventuelle
   const refreshUser = () => {
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
@@ -51,6 +53,7 @@ export default function Payment() {
       .catch(() => {});
   };
 
+  // ── ÉTAPE 1 → 2 : Création de la demande + ouverture WhatsApp ──
   const startPlan = async (plan) => {
     setError('');
     setSelectedPlan(plan);
@@ -65,7 +68,8 @@ export default function Payment() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erreur lors de la création');
       setRequest({ ...data.request, whatsapp_link: data.whatsapp_link });
-      // Ouvrir WhatsApp dans un nouvel onglet
+      setPhase('whatsapp_sent');
+      // Ouvre WhatsApp dans un nouvel onglet
       window.open(data.whatsapp_link, '_blank', 'noopener,noreferrer');
     } catch (e) {
       setError(e.message);
@@ -99,25 +103,50 @@ export default function Payment() {
     reader.readAsDataURL(file);
   };
 
+  // ── ÉTAPE 3 → 4 → 5 : Envoi capture + attente 10s + résultat ──
   const submitScreenshot = async () => {
     if (!request || !imageBase64) return;
     setUploading(true);
     setError('');
     setResult(null);
+    setPhase('patience');
+    setPatienceLeft(10);
+
+    // Compteur 10 s en parallèle de la requête
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const left = Math.max(0, 10 - Math.floor(elapsed));
+      setPatienceLeft(left);
+    }, 250);
+
     try {
-      const res = await fetch(`/api/payments/${request.id}/screenshot`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ image_base64: imageBase64, mime_type: imageMime }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erreur lors de l\'envoi');
+      const [data] = await Promise.all([
+        // L'appel réseau
+        (async () => {
+          const res = await fetch(`/api/payments/${request.id}/screenshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ image_base64: imageBase64, mime_type: imageMime }),
+          });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.error || "Erreur lors de l'envoi");
+          return d;
+        })(),
+        // Le délai minimum d'attente
+        new Promise(r => setTimeout(r, 10_000)),
+      ]);
+
+      clearInterval(tick);
       setResult(data);
+      setPhase('result');
       refreshMyRequests();
       refreshUser();
     } catch (e) {
+      clearInterval(tick);
       setError(e.message);
+      setPhase('screenshot');
     } finally {
       setUploading(false);
     }
@@ -131,12 +160,20 @@ export default function Payment() {
     setImageMime(null);
     setResult(null);
     setError('');
+    setPhase('plan');
+  };
+
+  const goBackToPlan = () => {
+    if (request && phase === 'whatsapp_sent') {
+      if (!confirm('Annuler cette demande et revenir au choix du plan ?')) return;
+    }
+    reset();
   };
 
   const StatusBadge = ({ status }) => {
     const map = {
       awaiting_screenshot: { color: '#fbbf24', bg: 'rgba(251,191,36,0.15)', label: '📤 En attente capture' },
-      ai_validated:        { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',  label: '🤖 Validée IA — accès 2 h' },
+      ai_validated:        { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',  label: '🤖 Validée IA (sous réserve admin)' },
       pending_admin:       { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', label: '⏳ Attente admin' },
       approved:            { color: '#86efac', bg: 'rgba(134,239,172,0.15)', label: '✅ Approuvée' },
       rejected:            { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',  label: '❌ Rejetée' },
@@ -209,8 +246,8 @@ export default function Payment() {
           </div>
         )}
 
-        {/* ═══════ ÉTAPE 1 : Choix du plan ═══════ */}
-        {!request && !result && (
+        {/* ═══════ PHASE 1 : Choix du plan ═══════ */}
+        {phase === 'plan' && (
           <>
             <div style={{
               display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -246,7 +283,7 @@ export default function Payment() {
                     className="btn btn-gold btn-sm"
                     style={{ width: '100%' }}
                   >
-                    {creating && selectedPlan?.id === p.id ? '...' : '💳 Acheter'}
+                    {creating && selectedPlan?.id === p.id ? '...' : '💳 Payer ce plan'}
                   </button>
                 </div>
               ))}
@@ -267,16 +304,16 @@ export default function Payment() {
           </>
         )}
 
-        {/* ═══════ ÉTAPE 2 : Upload de la capture ═══════ */}
-        {request && !result && (
+        {/* ═══════ PHASE 2 : WhatsApp envoyé — Retour + "Valider mon paiement" ═══════ */}
+        {phase === 'whatsapp_sent' && request && (
           <div style={{
             maxWidth: 700, margin: '0 auto',
             background: 'rgba(15,23,42,0.7)', borderRadius: 16,
-            border: '1px solid rgba(255,255,255,0.08)', padding: 26,
+            border: '1px solid rgba(37,211,102,0.3)', padding: 26,
           }}>
             <div style={{ marginBottom: 20 }}>
-              <div style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-                ÉTAPE 1 / 2 — PAIEMENT WHATSAPP
+              <div style={{ color: '#25D366', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
+                ÉTAPE 1 / 3 — PAIEMENT WHATSAPP
               </div>
               <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
                 Plan « {request.plan_label} » — {request.amount_usd} $
@@ -286,10 +323,21 @@ export default function Payment() {
                   </span>
                 )}
               </h2>
-              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
-                Envoyez le paiement à <b>{whatsapp.number}</b> via WhatsApp,
-                puis prenez une capture d'écran de la confirmation.
-              </p>
+            </div>
+
+            <div style={{
+              padding: 18, background: 'rgba(37,211,102,0.08)',
+              border: '1px solid rgba(37,211,102,0.3)', borderRadius: 12, marginBottom: 22,
+            }}>
+              <div style={{ color: '#86efac', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
+                💬 WhatsApp s'est ouvert avec votre message pré-rempli
+              </div>
+              <ol style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+                <li>Envoyez le message au support (<b>{whatsapp.number}</b>)</li>
+                <li>Le support vous renvoie le lien de paiement</li>
+                <li>Effectuez le paiement et prenez une <b>capture d'écran</b></li>
+                <li>Revenez ici puis cliquez <b>« Valider mon paiement »</b></li>
+              </ol>
             </div>
 
             <a
@@ -304,20 +352,48 @@ export default function Payment() {
                 fontWeight: 700, textDecoration: 'none', marginBottom: 24,
               }}
             >
-              💬 Ouvrir WhatsApp ({whatsapp.number})
+              💬 Rouvrir WhatsApp ({whatsapp.number})
             </a>
 
             <div style={{
-              padding: 16, background: 'rgba(59,130,246,0.08)',
-              border: '1px solid rgba(59,130,246,0.25)', borderRadius: 12, marginBottom: 22,
+              display: 'flex', gap: 12, justifyContent: 'space-between',
+              flexWrap: 'wrap', alignItems: 'center',
             }}>
-              <div style={{ color: '#93c5fd', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-                📸 ÉTAPE 2 / 2 — Envoyez votre capture d'écran
+              <button onClick={goBackToPlan} className="btn btn-ghost">
+                ← Revenir au choix du plan
+              </button>
+              <button
+                onClick={() => setPhase('screenshot')}
+                className="btn btn-gold"
+                style={{
+                  minWidth: 240, padding: '14px 24px', fontSize: 15,
+                  boxShadow: '0 0 18px rgba(251,191,36,0.35)',
+                }}
+              >
+                ✅ Valider mon paiement
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ PHASE 3 : Upload de la capture ═══════ */}
+        {phase === 'screenshot' && request && (
+          <div style={{
+            maxWidth: 700, margin: '0 auto',
+            background: 'rgba(15,23,42,0.7)', borderRadius: 16,
+            border: '1px solid rgba(255,255,255,0.08)', padding: 26,
+          }}>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
+                ÉTAPE 2 / 3 — CAPTURE D'ÉCRAN DU PAIEMENT
               </div>
-              <div style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 1.5 }}>
-                Une intelligence artificielle va analyser votre capture pour vous donner accès dans les 2 minutes,
-                puis l'administrateur confirmera définitivement.
-              </div>
+              <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
+                Envoyez la preuve de votre paiement
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
+                Notre IA va vérifier le <b>montant</b>, la <b>devise</b>, la <b>date</b>,
+                la <b>référence</b> et l'<b>identifiant</b> de la transaction.
+              </p>
             </div>
 
             {imagePreview ? (
@@ -365,23 +441,60 @@ export default function Payment() {
             )}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <button onClick={reset} className="btn btn-ghost btn-sm" disabled={uploading}>
-                ← Annuler
+              <button onClick={() => setPhase('whatsapp_sent')} className="btn btn-ghost btn-sm" disabled={uploading}>
+                ← Précédent
               </button>
               <button
                 onClick={submitScreenshot}
                 disabled={!imageBase64 || uploading}
                 className="btn btn-gold"
-                style={{ minWidth: 200 }}
+                style={{ minWidth: 220 }}
               >
-                {uploading ? <><span className="btn-spinner" /> Analyse IA en cours...</> : '🚀 Envoyer la capture'}
+                {uploading ? <><span className="btn-spinner" /> Envoi...</> : '🤖 Vérifier avec l\'IA'}
               </button>
             </div>
           </div>
         )}
 
-        {/* ═══════ ÉTAPE 3 : Résultat ═══════ */}
-        {result && (
+        {/* ═══════ PHASE 4 : Veuillez patienter ═══════ */}
+        {phase === 'patience' && (
+          <div style={{
+            maxWidth: 600, margin: '0 auto',
+            background: 'rgba(15,23,42,0.85)', borderRadius: 18,
+            border: '2px solid rgba(251,191,36,0.4)', padding: '40px 30px',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              display: 'inline-block', width: 80, height: 80,
+              border: '6px solid rgba(251,191,36,0.2)',
+              borderTop: '6px solid #fbbf24',
+              borderRadius: '50%', animation: 'spin 1s linear infinite',
+              marginBottom: 20,
+            }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <h2 style={{ color: '#fff', margin: '0 0 10px', fontSize: '1.6rem' }}>
+              Veuillez patienter…
+            </h2>
+            <p style={{ color: '#cbd5e1', fontSize: 14, lineHeight: 1.6, marginBottom: 18 }}>
+              Notre intelligence artificielle analyse votre capture d'écran<br />
+              (montant, devise, date, référence, identifiant).
+            </p>
+            <div style={{
+              display: 'inline-block', padding: '8px 18px', borderRadius: 100,
+              background: 'rgba(251,191,36,0.15)', color: '#fcd34d',
+              fontWeight: 800, fontSize: 22, fontFamily: 'monospace',
+              border: '1px solid rgba(251,191,36,0.4)',
+            }}>
+              {patienceLeft}s
+            </div>
+            <div style={{ color: '#64748b', fontSize: 12, marginTop: 16 }}>
+              Merci de ne pas fermer cette page.
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ PHASE 5 : Résultat ═══════ */}
+        {phase === 'result' && result && (
           <div style={{
             maxWidth: 700, margin: '0 auto',
             background: 'rgba(15,23,42,0.7)', borderRadius: 16,
@@ -392,31 +505,55 @@ export default function Payment() {
               {result.ai_validated ? '🎉' : '📬'}
             </div>
             <h2 style={{ color: '#fff', marginBottom: 12 }}>
-              {result.ai_validated ? 'Accès accordé temporairement !' : 'Capture reçue'}
+              {result.ai_validated
+                ? 'Abonnement activé !'
+                : 'Capture reçue — vérification administrateur'}
             </h2>
             <p style={{ color: '#cbd5e1', fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
               {result.message}
             </p>
 
-            {result.ai_analysis && result.ai_analysis.reason && (
+            {result.ai_validated && (
               <div style={{
-                padding: 12, borderRadius: 10,
+                padding: 14, borderRadius: 12,
+                background: 'rgba(251,191,36,0.1)',
+                border: '1px solid rgba(251,191,36,0.35)',
+                color: '#fcd34d', marginBottom: 18, fontSize: 13, fontWeight: 600,
+              }}>
+                ⚠ <b>Sous réserve de vérification de l'administrateur</b><br />
+                Si l'admin détecte une fraude, votre abonnement sera retiré.
+              </div>
+            )}
+
+            {result.ai_analysis && (
+              <div style={{
+                padding: 14, borderRadius: 10,
                 background: 'rgba(0,0,0,0.3)', textAlign: 'left',
                 fontSize: 12, color: '#94a3b8', marginBottom: 18,
               }}>
-                <b style={{ color: '#cbd5e1' }}>🤖 Analyse IA :</b> {result.ai_analysis.reason}
+                <div style={{ color: '#cbd5e1', fontWeight: 700, marginBottom: 6 }}>🤖 Analyse IA :</div>
+                {result.ai_analysis.reason && <div>• {result.ai_analysis.reason}</div>}
+                {result.ai_analysis.amount_detected && (
+                  <div>• Montant détecté : <b>{result.ai_analysis.amount_detected}</b> {result.ai_analysis.currency_detected || ''}</div>
+                )}
+                {result.ai_analysis.transaction_id && (
+                  <div>• Référence : <code>{result.ai_analysis.transaction_id}</code></div>
+                )}
+                {result.ai_analysis.transaction_date && (
+                  <div>• Date : {result.ai_analysis.transaction_date}</div>
+                )}
                 {result.ai_analysis.confidence !== undefined && (
-                  <span style={{ marginLeft: 8 }}>(confiance : {result.ai_analysis.confidence}%)</span>
+                  <div>• Confiance : {result.ai_analysis.confidence}%</div>
                 )}
               </div>
             )}
 
-            {result.ai_validated && result.ai_temp_access_until && (
+            {result.ai_validated && result.provisional_expiry && (
               <div style={{
                 padding: 12, borderRadius: 10,
-                background: 'rgba(34,197,94,0.1)', color: '#86efac', marginBottom: 18,
+                background: 'rgba(34,197,94,0.1)', color: '#86efac', marginBottom: 18, fontSize: 13,
               }}>
-                ⏱ Accès temporaire jusqu'au {new Date(result.ai_temp_access_until).toLocaleString('fr-FR')}
+                ⏱ Abonnement actif jusqu'au <b>{new Date(result.provisional_expiry).toLocaleString('fr-FR')}</b>
               </div>
             )}
 
@@ -432,7 +569,7 @@ export default function Payment() {
         )}
 
         {/* ═══════ HISTORIQUE ═══════ */}
-        {myRequests.length > 0 && !request && !result && (
+        {myRequests.length > 0 && phase === 'plan' && (
           <div style={{ maxWidth: 700, margin: '40px auto 0' }}>
             <h3 style={{ color: '#fff', fontSize: 16, marginBottom: 12 }}>
               📋 Mes demandes de paiement

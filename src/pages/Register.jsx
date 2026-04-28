@@ -10,6 +10,8 @@ export default function Register() {
     username: '', email: '', password: '', confirm: '',
     account_type: 'simple', promo_code: '',
   });
+  const [profilePhoto, setProfilePhoto] = useState(''); // dataURL base64
+  const [photoError, setPhotoError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [generatedPromoCode, setGeneratedPromoCode] = useState('');
@@ -20,6 +22,43 @@ export default function Register() {
   const progressTimer = useRef(null);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  // Upload + redimensionnement client de la photo (max 400px, ~80 ko)
+  const handlePhotoFile = (file) => {
+    setPhotoError('');
+    if (!file) { setProfilePhoto(''); return; }
+    if (!/^image\//.test(file.type)) {
+      setPhotoError('Veuillez choisir une image (JPG, PNG, WebP)');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError('Image trop grande (max 5 Mo avant compression)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 400;
+        let { width, height } = img;
+        if (width > height) {
+          if (width > MAX) { height = Math.round(height * MAX / width); width = MAX; }
+        } else {
+          if (height > MAX) { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setProfilePhoto(dataUrl);
+      };
+      img.onerror = () => setPhotoError('Image illisible');
+      img.src = reader.result;
+    };
+    reader.onerror = () => setPhotoError('Lecture impossible');
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     if (loading) {
@@ -50,6 +89,7 @@ export default function Register() {
           password: form.password,
           account_type: form.account_type,
           promo_code: form.promo_code.trim() || undefined,
+          profile_photo: profilePhoto || undefined,
         }),
       });
       const data = await res.json();
@@ -197,14 +237,50 @@ export default function Register() {
                 onChange={set('account_type')}
                 style={{ cursor: 'pointer' }}
               >
-                <option value="simple">👤 Compte Simple — tarif de base</option>
-                <option value="premium">⭐ Compte Premium — +10 % (fonctions avancées)</option>
-                <option value="pro">💎 Compte Pro — +20 % (toutes les fonctions Pro)</option>
+                <option value="simple">👤 Compte Utilisateur</option>
+                <option value="pro">💎 Compte Pro</option>
+                <option value="premium">⭐ Compte Premium</option>
               </select>
             </div>
+          </div>
+
+          {/* Photo de profil (optionnelle) */}
+          <div className="form-group">
+            <label className="form-label">Photo de profil <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnelle)</span></label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: '50%',
+                background: profilePhoto ? `url(${profilePhoto}) center/cover` : 'rgba(148,163,184,0.18)',
+                border: '2px solid rgba(251,191,36,0.45)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28, color: '#94a3b8', flexShrink: 0,
+              }}>
+                {!profilePhoto && '📷'}
+              </div>
+              <div style={{ flex: 1 }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handlePhotoFile(e.target.files?.[0])}
+                  style={{ fontSize: 12, color: '#cbd5e1', width: '100%' }}
+                />
+                {profilePhoto && (
+                  <button
+                    type="button"
+                    onClick={() => { setProfilePhoto(''); setPhotoError(''); }}
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginTop: 6, fontSize: 11 }}
+                  >
+                    🗑 Retirer la photo
+                  </button>
+                )}
+                {photoError && (
+                  <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 4 }}>⚠ {photoError}</div>
+                )}
+              </div>
+            </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              Choix définitif. Tarif 1 jour : Simple <b>2 $</b> · Premium <b>2,20 $</b> · Pro <b>2,40 $</b>.
-              L'administrateur valide simplement votre paiement.
+              Image automatiquement réduite à 400px (max 500 Ko après compression).
             </div>
           </div>
 
