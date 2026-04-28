@@ -3377,6 +3377,8 @@ function AdminPanel() {
   const [annMsg,           setAnnMsg]           = useState('');
   const [annOpen,          setAnnOpen]          = useState(false);
   const [annSendingId,     setAnnSendingId]     = useState(null);
+  const [annEditingId,     setAnnEditingId]     = useState(null);
+  const [annUploading,     setAnnUploading]     = useState(false);
 
   const saveStratTg = async (id) => {
     setStratChSaving(true);
@@ -5902,6 +5904,9 @@ function AdminPanel() {
               </div>
 
               {/* ══════════════ MAIN SURVEILLÉE (Joueur / Banquier) ══════════════ */}
+              {/* Cachée pour les modes qui surveillent les 2 mains automatiquement
+                  (absence_victoire, distribution) ou qui n'utilisent pas la main (relance) */}
+              {!['absence_victoire', 'distribution', 'relance'].includes(stratForm.mode) && (
               <div style={{ marginBottom: 18, padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' }}>
                 <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                   🎯 Main surveillée *
@@ -5940,6 +5945,7 @@ function AdminPanel() {
                   Choisit la main dont les costumes/résultats seront analysés par cette stratégie.
                 </div>
               </div>
+              )}
 
               {/* ══════════════ SECTION 1 — ALGORITHME ══════════════ */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 14px', borderRadius: 9,
@@ -8511,6 +8517,29 @@ function AdminPanel() {
                       {ann.enabled ? '⏸ Désactiver' : '▶ Activer'}
                     </button>
                     <button
+                      onClick={() => {
+                        setAnnEditingId(ann.id);
+                        setAnnForm({
+                          name: ann.name || '',
+                          bot_token: ann.bot_token || '',
+                          channel_id: ann.channel_id || '',
+                          text: ann.text || '',
+                          media_type: ann.media_type || '',
+                          media_url: ann.media_url || '',
+                          media_data: ann.media_data || '',
+                          media_filename: ann.media_filename || '',
+                          schedule_type: ann.schedule_type || 'interval',
+                          interval_hours: ann.interval_hours ?? 1,
+                          times_input: Array.isArray(ann.times) ? ann.times.join(', ') : '',
+                        });
+                        setAnnOpen(true);
+                        setAnnMsg('');
+                        setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+                      }}
+                      style={{ padding: '5px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.15)', color: '#c4b5fd' }}>
+                      ✏️ Modifier
+                    </button>
+                    <button
                       onClick={async () => {
                         if (!confirm(`Supprimer l'annonce "${ann.name}" ?`)) return;
                         await fetch(`/api/admin/announcements/${ann.id}`, { method: 'DELETE', credentials: 'include' });
@@ -8535,11 +8564,22 @@ function AdminPanel() {
 
           {/* Bouton ouvrir/fermer le formulaire */}
           <button
-            onClick={() => { setAnnOpen(o => !o); setAnnMsg(''); }}
+            onClick={() => {
+              if (annOpen) {
+                setAnnOpen(false);
+                setAnnEditingId(null);
+                setAnnForm(ANN_BLANK);
+              } else {
+                setAnnOpen(true);
+                setAnnEditingId(null);
+                setAnnForm(ANN_BLANK);
+              }
+              setAnnMsg('');
+            }}
             style={{ padding: '9px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
               background: annOpen ? 'rgba(239,68,68,0.12)' : 'linear-gradient(135deg,#92400e,#fbbf24)',
               color: annOpen ? '#f87171' : '#fff', marginBottom: annOpen ? 16 : 0 }}>
-            {annOpen ? '✕ Fermer le formulaire' : '+ Nouvelle annonce'}
+            {annOpen ? (annEditingId ? '✕ Annuler la modification' : '✕ Fermer le formulaire') : '+ Nouvelle annonce'}
           </button>
 
           {annOpen && (
@@ -8557,20 +8597,27 @@ function AdminPanel() {
                   text: annForm.text,
                   media_type: annForm.media_type || null,
                   media_url: annForm.media_url || null,
+                  media_data: annForm.media_data || null,
+                  media_filename: annForm.media_filename || null,
                   schedule_type: annForm.schedule_type,
                   interval_hours: annForm.schedule_type === 'interval' ? parseFloat(annForm.interval_hours) : null,
                   times,
                 };
-                const r = await fetch('/api/admin/announcements', {
-                  method: 'POST', credentials: 'include',
+                const isEdit = annEditingId !== null;
+                const url = isEdit
+                  ? `/api/admin/announcements/${annEditingId}`
+                  : '/api/admin/announcements';
+                const r = await fetch(url, {
+                  method: isEdit ? 'PATCH' : 'POST', credentials: 'include',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(body),
                 });
                 const d = await r.json();
                 if (d.ok) {
-                  setAnnMsg('✅ Annonce créée !');
+                  setAnnMsg(isEdit ? '✅ Annonce modifiée !' : '✅ Annonce créée !');
                   setAnnForm(ANN_BLANK);
                   setAnnOpen(false);
+                  setAnnEditingId(null);
                   loadAnnouncements();
                 } else {
                   setAnnMsg('❌ ' + (d.error || 'Erreur'));
@@ -8613,9 +8660,9 @@ function AdminPanel() {
               </div>
 
               {/* Type de media */}
-              <div>
+              <div style={{ gridColumn: '1 / -1' }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>🎞️ Type de média (optionnel)</label>
-                <select value={annForm.media_type} onChange={e => setAnnForm(p => ({ ...p, media_type: e.target.value }))}
+                <select value={annForm.media_type} onChange={e => setAnnForm(p => ({ ...p, media_type: e.target.value, media_url: '', media_data: '', media_filename: '' }))}
                   style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
                   <option value="">Aucun (texte uniquement)</option>
                   <option value="image">🖼️ Image</option>
@@ -8623,14 +8670,85 @@ function AdminPanel() {
                 </select>
               </div>
 
-              {/* URL du media */}
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>🔗 URL de l'image / vidéo</label>
-                <input value={annForm.media_url} onChange={e => setAnnForm(p => ({ ...p, media_url: e.target.value }))}
-                  placeholder="https://example.com/image.jpg"
-                  disabled={!annForm.media_type}
-                  style={{ width: '100%', padding: '9px 12px', background: annForm.media_type ? '#1e1b2e' : '#111', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: annForm.media_type ? '#fff' : '#475569', fontSize: 13, boxSizing: 'border-box' }} />
-              </div>
+              {annForm.media_type && (
+                <>
+                  {/* Upload direct du fichier */}
+                  <div style={{ gridColumn: '1 / -1', padding: '12px 14px', borderRadius: 10, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.25)' }}>
+                    <label style={{ display: 'block', color: '#c4b5fd', fontSize: 12, marginBottom: 8, fontWeight: 700 }}>
+                      📁 Téléverser un fichier {annForm.media_type === 'image' ? 'image' : 'vidéo'} depuis votre appareil
+                    </label>
+                    <input
+                      type="file"
+                      accept={annForm.media_type === 'image' ? 'image/*' : 'video/*'}
+                      disabled={annUploading}
+                      onChange={async ev => {
+                        const f = ev.target.files?.[0];
+                        if (!f) return;
+                        const maxMB = annForm.media_type === 'video' ? 50 : 10;
+                        if (f.size > maxMB * 1024 * 1024) {
+                          setAnnMsg(`❌ Fichier trop lourd (max ${maxMB} Mo pour ${annForm.media_type === 'video' ? 'vidéo' : 'image'})`);
+                          ev.target.value = '';
+                          return;
+                        }
+                        setAnnUploading(true);
+                        try {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const dataUrl = reader.result; // "data:image/png;base64,..."
+                            const base64 = String(dataUrl).split(',')[1] || '';
+                            setAnnForm(p => ({
+                              ...p,
+                              media_data: base64,
+                              media_filename: f.name,
+                              media_url: '', // efface l'URL si on téléverse un fichier
+                            }));
+                            setAnnUploading(false);
+                            setAnnMsg(`✅ Fichier "${f.name}" prêt (${(f.size / 1024 / 1024).toFixed(2)} Mo)`);
+                            setTimeout(() => setAnnMsg(''), 4000);
+                          };
+                          reader.onerror = () => {
+                            setAnnUploading(false);
+                            setAnnMsg('❌ Erreur lecture du fichier');
+                          };
+                          reader.readAsDataURL(f);
+                        } catch (err) {
+                          setAnnUploading(false);
+                          setAnnMsg('❌ ' + err.message);
+                        }
+                      }}
+                      style={{ width: '100%', padding: 8, background: '#1e1b2e', border: '1px dashed rgba(168,85,247,0.4)', borderRadius: 8, color: '#fff', fontSize: 12, boxSizing: 'border-box' }}
+                    />
+                    {annForm.media_filename && annForm.media_data && (
+                      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 12, color: '#86efac', fontWeight: 700 }}>
+                          ✓ {annForm.media_filename} ({Math.round(annForm.media_data.length * 0.75 / 1024)} Ko)
+                        </span>
+                        <button type="button"
+                          onClick={() => setAnnForm(p => ({ ...p, media_data: '', media_filename: '' }))}
+                          style={{ padding: '3px 8px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'rgba(239,68,68,0.15)', color: '#fca5a5' }}>
+                          ✕ Retirer
+                        </button>
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 6, lineHeight: 1.4 }}>
+                      Limite : {annForm.media_type === 'video' ? '50 Mo' : '10 Mo'} (limite Telegram).
+                      Si vous téléversez un fichier, l'URL ci-dessous est ignorée.
+                    </div>
+                  </div>
+
+                  {/* OU URL */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
+                      🔗 …ou URL distante de l'{annForm.media_type === 'image' ? 'image' : 'vidéo'}
+                    </label>
+                    <input value={annForm.media_url}
+                      onChange={e => setAnnForm(p => ({ ...p, media_url: e.target.value, media_data: '', media_filename: '' }))}
+                      placeholder="https://example.com/image.jpg"
+                      disabled={!!annForm.media_data}
+                      style={{ width: '100%', padding: '9px 12px', background: annForm.media_data ? '#111' : '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: annForm.media_data ? '#475569' : '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                </>
+              )}
 
               {/* Type de planification */}
               <div style={{ gridColumn: '1 / -1' }}>
@@ -8682,7 +8800,7 @@ function AdminPanel() {
                 <button type="submit" disabled={annSaving}
                   style={{ padding: '10px 28px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700,
                     background: 'linear-gradient(135deg,#92400e,#fbbf24)', color: '#fff', opacity: annSaving ? 0.7 : 1 }}>
-                  {annSaving ? '⏳ Création…' : '✅ Créer l\'annonce'}
+                  {annSaving ? '⏳ Enregistrement…' : (annEditingId ? '💾 Enregistrer les modifications' : '✅ Créer l\'annonce')}
                 </button>
               </div>
             </form>
