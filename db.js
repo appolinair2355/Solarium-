@@ -57,6 +57,7 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_user_id INTEGER;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
@@ -285,19 +286,21 @@ async function getProUsers() {
 async function createUser(data) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id, profile_photo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
          last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
          is_premium = EXCLUDED.is_premium,
          subscription_expires_at = EXCLUDED.subscription_expires_at, subscription_duration_minutes = EXCLUDED.subscription_duration_minutes,
-         plain_password = COALESCE(EXCLUDED.plain_password, users.plain_password)
+         plain_password = COALESCE(EXCLUDED.plain_password, users.plain_password),
+         profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo)
        RETURNING *`,
       [data.username, data.email || null, data.password_hash, data.first_name || null, data.last_name || null,
        data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
        data.subscription_duration_minutes || null, data.plain_password || null,
-       data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null]
+       data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null,
+       data.profile_photo || null]
     );
     return r.rows[0];
   }

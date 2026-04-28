@@ -362,7 +362,23 @@ async function autoSaveDeployFiles() {
 
 // ── Démarrage ─────────────────────────────────────────────────────
 async function main() {
+  // ── Phase 1 : init DB (obligatoire avant d'écouter les requêtes) ──
   await initDB();
+
+  // ── Phase 2 : ouvrir le port IMMÉDIATEMENT pour que Render détecte le port ──
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
+  });
+
+  // ── Phase 3 : initialiser tout le reste EN ARRIÈRE-PLAN ───────────
+  // (sync externe, moteur, bots Telegram, etc. — peuvent prendre du temps
+  // sans bloquer l'ouverture du port HTTP)
+  initBackgroundServices().catch(err => {
+    console.error('[Init] Erreur initialisation services arrière-plan:', err);
+  });
+}
+
+async function initBackgroundServices() {
   await autoSaveDeployFiles();
 
   // ⚠️ IMPORTANT : loadConfig AVANT engine.start pour que maxRattrapage soit
@@ -409,10 +425,6 @@ async function main() {
   // Première exécution après 20 min puis toutes les 20 min
   setInterval(runMemoryCleanup, CLEANUP_INTERVAL_MS);
   console.log(`[Cleanup] ⏱ Nettoyage automatique actif — toutes les 20 min`);
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
-  });
 }
 
 main().catch(err => {

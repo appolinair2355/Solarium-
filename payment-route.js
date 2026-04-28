@@ -131,9 +131,17 @@ router.post('/request', requireAuth, async (req, res) => {
       discount_applied: discount,
     });
 
-    // Message pré-rempli pour WhatsApp
-    const typeLabel = accountType === 'pro' ? 'PRO' : accountType === 'premium' ? 'PREMIUM' : 'SIMPLE';
-    const msg = `Bonjour, je viens de payer ${amount}$ pour l'abonnement "${basePlan.label}" (compte ${typeLabel}) sur Prediction Baccara Pro.\nMon identifiant: ${user.username}\nRéférence: #${pr.id}`;
+    // Message pré-rempli pour WhatsApp (format demandé par l'utilisateur)
+    const typeLabel = accountType === 'premium' ? 'PREMIUM' : accountType === 'pro' ? 'PRO' : 'SIMPLE';
+    const msg =
+`Je veux payer l'abonnement ${basePlan.label}.
+Compte : ${typeLabel}
+Abonnement : ${basePlan.label}
+Montant à payer : ${amount} $
+Identifiant : ${user.username}
+Référence : #${pr.id}
+
+Je veux le lien de paiement.`;
     const whatsappLink = `${WHATSAPP_LINK}?text=${encodeURIComponent(msg)}`;
 
     res.json({
@@ -191,23 +199,31 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       console.warn('[Payment] IA Vision indisponible :', e.message);
     }
 
-    // Décision : si l'IA valide → accès temporaire 2 h, sinon attente admin
+    // Décision : si l'IA valide → on applique la DURÉE COMPLÈTE du plan
+    // (sous réserve de vérification administrateur). Si l'admin rejette plus tard,
+    // la durée sera retirée. Si l'IA n'est pas sûre → attente admin sans durée.
     const isValid = aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 50;
-    let tempUntil = null;
+    let provisionalExpiry = null;
     let newStatus = 'pending_admin';
 
     if (isValid) {
       newStatus = 'ai_validated';
-      tempUntil = new Date(Date.now() + AI_TEMP_HOURS * 60 * 60 * 1000);
-
-      // Étendre temporairement l'abonnement de l'utilisateur
+      // Étendre l'abonnement de la durée complète du plan
       const u = await db.getUser(pr.user_id);
-      const currentExpiry = u.subscription_expires_at && new Date(u.subscription_expires_at) > new Date()
+      const baseDate = u.subscription_expires_at && new Date(u.subscription_expires_at) > new Date()
         ? new Date(u.subscription_expires_at) : new Date();
-      const tempExpiry = new Date(Math.max(currentExpiry.getTime(), tempUntil.getTime()));
+      provisionalExpiry = new Date(baseDate.getTime() + pr.duration_minutes * 60 * 1000);
+
+      const accountType = u.account_type || 'simple';
+      const isPremium   = accountType === 'premium';
+      const isPro       = accountType === 'pro';
+
       await db.updateUser(pr.user_id, {
         is_approved: true,
-        subscription_expires_at: tempExpiry.toISOString(),
+        is_premium: isPremium,
+        is_pro: isPro,
+        subscription_expires_at: provisionalExpiry.toISOString(),
+        subscription_duration_minutes: (u.subscription_duration_minutes || 0) + pr.duration_minutes,
       });
 
       // Assigner les canaux par défaut si pas encore fait
@@ -226,20 +242,21 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
     await db.updatePaymentRequest(id, {
       screenshot_data: cleanB64,
       ai_analysis: aiResult || { error: aiError, is_payment_screenshot: false },
-      ai_temp_access_until: tempUntil,
+      ai_temp_access_until: provisionalExpiry,
       status: newStatus,
     });
 
     res.json({
       ok: true,
       ai_validated: isValid,
-      ai_temp_access_until: tempUntil,
-      ai_temp_hours: AI_TEMP_HOURS,
+      ai_temp_access_until: provisionalExpiry,
+      provisional_expiry: provisionalExpiry,
+      duration_minutes: pr.duration_minutes,
       ai_analysis: aiResult || { error: aiError },
       status: newStatus,
       message: isValid
-        ? `✅ Capture validée par l'IA — accès accordé pour ${AI_TEMP_HOURS} h en attendant la confirmation finale de l'administrateur.`
-        : `📤 Capture reçue. L'administrateur va la vérifier manuellement. Vous serez notifié dès validation.`,
+        ? `✅ Paiement détecté par l'IA — votre durée complète de ${pr.plan_label} a été créditée à votre compte (sous réserve de vérification de l'administrateur).`
+        : `📤 Capture reçue. L'IA n'a pas pu confirmer automatiquement — l'administrateur va la vérifier manuellement.`,
     });
   } catch (e) {
     console.error('payment/screenshot error:', e);

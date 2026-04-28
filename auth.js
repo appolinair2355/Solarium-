@@ -21,6 +21,7 @@ function publicUser(u) {
     subscription_expires_at: u.subscription_expires_at,
     status: getUserStatus(u),
     admin_level: u.admin_level || 2,
+    profile_photo: u.profile_photo || null,
   };
 }
 
@@ -62,15 +63,28 @@ async function generateUniquePromoCode(now = new Date()) {
 }
 
 router.post('/register', async (req, res) => {
-  const { username, email, password, account_type, promo_code } = req.body;
+  const { username, email, password, account_type, promo_code, profile_photo } = req.body;
   if (!username || !email || !password)
     return res.status(400).json({ error: 'Tous les champs sont requis' });
   if (password.length < 6)
     return res.status(400).json({ error: 'Mot de passe: 6 caractères minimum' });
 
-  // Trois types autorisés : simple / pro / premium
+  // Trois types autorisés à l'inscription : simple / pro / premium
+  // (l'ancien bouton d'activation côté admin a été retiré, mais le choix
+  //  reste libre pour l'utilisateur lors de son inscription.)
   const ALLOWED_TYPES = ['simple', 'pro', 'premium'];
   const accountType = ALLOWED_TYPES.includes(account_type) ? account_type : 'simple';
+
+  // Validation de la photo de profil (optionnelle, max ~600 ko base64 = ~450 ko binaire)
+  let profilePhoto = null;
+  if (profile_photo && typeof profile_photo === 'string') {
+    if (profile_photo.length > 800_000) {
+      return res.status(413).json({ error: 'Photo trop volumineuse (max 500 Ko)' });
+    }
+    if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(profile_photo)) {
+      profilePhoto = profile_photo;
+    }
+  }
 
   // Validation du code promo (optionnel)
   let referrerUserId = null;
@@ -94,6 +108,7 @@ router.post('/register', async (req, res) => {
       account_type: accountType,
       promo_code: newPromoCode,
       referrer_user_id: referrerUserId,
+      profile_photo: profilePhoto,
     });
 
     res.json({

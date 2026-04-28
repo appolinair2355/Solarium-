@@ -98,6 +98,30 @@ router.delete('/config', requireSuperAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Clé Gemini Vision (gratuite) — dédiée aux paiements ───────────────────────
+// Utilisée pour analyser les captures d'écran (montant, devise, date, référence,
+// id de transaction). Gratuite : https://aistudio.google.com/app/apikey
+router.get('/vision-key', requireSuperAdmin, async (req, res) => {
+  try {
+    const k = await db.getSetting('gemini_vision_key');
+    res.json({ hasKey: !!k });
+  } catch { res.json({ hasKey: false }); }
+});
+
+router.post('/vision-key', requireSuperAdmin, async (req, res) => {
+  const { key } = req.body;
+  if (!key || typeof key !== 'string' || key.trim().length < 10) {
+    return res.status(400).json({ error: 'Clé invalide' });
+  }
+  await db.setSetting('gemini_vision_key', key.trim());
+  res.json({ ok: true });
+});
+
+router.delete('/vision-key', requireSuperAdmin, async (req, res) => {
+  await db.setSetting('gemini_vision_key', '');
+  res.json({ ok: true });
+});
+
 // ── Limites par provider (tokens d'entrée max, tokens de sortie max) ─────────
 const PROVIDER_LIMITS = {
   groq:        { maxInputChars: 3500,  maxOutputTokens: 1200 },
@@ -580,23 +604,24 @@ router.post('/bot-precheck', requireSuperAdmin, async (req, res) => {
 // Utilise Gemini 1.5 Flash (multimodal, gratuit). Pas besoin du provider
 // par défaut — on lit directement la clé Gemini en DB si elle existe.
 async function callGeminiVision(base64Image, mimeType, prompt) {
-  // Récupère la clé Gemini : soit dans ai_config (si provider=gemini),
-  // soit dans une clé dédiée 'gemini_vision_key'.
+  // Récupère la clé Gemini : on prend EN PRIORITÉ la clé dédiée Vision
+  // ('gemini_vision_key', gratuite) ; à défaut, on retombe sur ai_config
+  // si le provider principal est Gemini.
   let key = null;
   try {
-    const raw = await db.getSetting('ai_config');
-    if (raw) {
-      const cfg = JSON.parse(raw);
-      if (cfg.provider === 'gemini' && cfg.key) key = cfg.key;
-    }
+    const dedicated = await db.getSetting('gemini_vision_key');
+    if (dedicated && dedicated.trim()) key = dedicated.trim();
   } catch {}
   if (!key) {
     try {
-      const fallback = await db.getSetting('gemini_vision_key');
-      if (fallback) key = fallback;
+      const raw = await db.getSetting('ai_config');
+      if (raw) {
+        const cfg = JSON.parse(raw);
+        if (cfg.provider === 'gemini' && cfg.key) key = cfg.key;
+      }
     } catch {}
   }
-  if (!key) throw new Error('Aucune clé Gemini configurée — l\'admin doit configurer Gemini dans Configuration IA');
+  if (!key) throw new Error('Aucune clé Gemini configurée — l\'admin doit configurer la clé gratuite dans "🎁 Clé API gratuite — Vérification des paiements"');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
   const body = {
@@ -642,24 +667,39 @@ async function callGeminiVision(base64Image, mimeType, prompt) {
 }
 
 async function analyzePaymentScreenshot(base64Image, mimeType, expectedAmountUsd) {
-  const prompt = `Tu es un agent qui valide des captures d'écran de paiement (WhatsApp / Mobile Money / virement / capture de transfert).
+  // Conversion USD → FCFA (~600 par USD)
+  const expectedFcfaMin = Math.round(expectedAmountUsd * 550);
+  const expectedFcfaMax = Math.round(expectedAmountUsd * 700);
+
+  const prompt = `Tu es un agent qui valide des captures d'écran de paiement (WhatsApp / Mobile Money / MTN Money / Moov Money / virement bancaire / Orange Money).
 On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après, avec ce format:
 {
   "is_payment_screenshot": true|false,
   "confidence": 0-100,
-  "amount_detected": "montant lisible dans l'image ou null",
+  "amount_detected": "montant lisible dans l'image (chiffres uniquement) ou null",
+  "amount_matches_expected": true|false,
   "currency_detected": "USD|EUR|XOF|FCFA|null",
+  "transaction_id": "ID/référence de la transaction visible ou null",
+  "transaction_date": "date visible (format libre) ou null",
   "recipient_visible": "nom/numéro destinataire ou null",
   "looks_legit": true|false,
   "reason": "courte phrase en français expliquant la décision"
 }
-Critères pour is_payment_screenshot=true :
-- L'image montre clairement une transaction financière (transfert envoyé, reçu de paiement, conversation WhatsApp avec montant et confirmation)
-- Un montant et/ou un destinataire est visible
-- Pas une simple photo, pas un meme, pas un screenshot d'interface non-financière
 
-Montant attendu (à titre indicatif) : ${expectedAmountUsd} USD. Tolère les conversions vers d'autres devises (FCFA ~600 par USD).
-Réponds UNIQUEMENT le JSON.`;
+CRITÈRES pour is_payment_screenshot=true :
+- L'image montre clairement une transaction financière réussie (transfert envoyé/confirmé, reçu de paiement)
+- Un montant ET un destinataire ET (un ID de transaction OU une date) sont visibles
+- Ce n'est PAS une simple photo, ni un meme, ni un screenshot d'interface non-financière
+
+CRITÈRES pour amount_matches_expected=true :
+- Montant attendu : ${expectedAmountUsd} USD
+  (équivalent FCFA/XOF entre ${expectedFcfaMin} et ${expectedFcfaMax})
+- Tolérance : ±5% sur le montant exact
+- Le montant détecté dans l'image doit correspondre à cette plage (en USD ou en FCFA)
+
+Sois STRICT : si l'image n'est pas une preuve de paiement claire, mets is_payment_screenshot=false.
+Si le montant ne correspond pas à l'attendu, baisse la confidence en dessous de 50.
+Réponds UNIQUEMENT le JSON, sans markdown, sans backticks.`;
 
   const raw = await callGeminiVision(base64Image, mimeType, prompt);
   // Extraire le premier bloc JSON
