@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ContactAdminModal from '../components/ContactAdminModal';
+import Avatar from '../components/Avatar';
 
 // Voix d'annonce vocale des prédictions (Web Speech API)
 const VOICE_OPTIONS = [
@@ -637,9 +638,13 @@ export default function Dashboard() {
           )}
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
           {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro</Link>}
+          {!user?.is_admin && (
+            <Link to="/paiement" className="btn btn-ghost btn-sm" style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)' }}>💳 Paiement</Link>
+          )}
           {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>← Retour</button>
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
+          <Avatar user={user} size={36} style={{ marginLeft: 6 }} />
         </div>
       </nav>
 
@@ -662,12 +667,14 @@ export default function Dashboard() {
             )}
           </div>
           <div className="db-header-bottom">
-            <div className="db-user-row">
+            <div className="db-user-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Avatar user={user} size={42} />
               <span className="db-trophy">🏆</span>
               <span className="db-username-small">{user?.username}</span>
               {user?.is_admin && <span className="db-role-badge admin">Admin</span>}
               {!user?.is_admin && user?.is_pro && <span className="db-role-badge pro">Pro</span>}
-              {!user?.is_admin && !user?.is_pro && <span className="db-role-badge user">Joueur</span>}
+              {!user?.is_admin && user?.is_premium && !user?.is_pro && <span className="db-role-badge" style={{ background: 'rgba(251,191,36,0.18)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>⭐ Premium</span>}
+              {!user?.is_admin && !user?.is_pro && !user?.is_premium && <span className="db-role-badge user">Joueur</span>}
             </div>
             {user?.is_admin && (
               <div className="db-timer-row">

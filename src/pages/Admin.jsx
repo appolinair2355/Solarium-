@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Avatar from '../components/Avatar';
 
 class AdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -5031,8 +5032,9 @@ function AdminPanel() {
                       <tr>
                         {/* Username */}
                         <td>
-                          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {u.username}
+                          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar user={u} size={32} />
+                            <span>{u.username}</span>
                             {u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>

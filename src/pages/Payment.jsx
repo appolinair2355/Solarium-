@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Avatar from '../components/Avatar';
 
 export default function Payment() {
   const { user, setUser } = useAuth();
@@ -198,9 +199,12 @@ export default function Payment() {
         <Link to="/" style={{ color: '#fbbf24', fontSize: 18, fontWeight: 800, textDecoration: 'none' }}>
           🎲 Prediction Baccara Pro
         </Link>
-        <Link to="/choisir" className="btn btn-ghost btn-sm" style={{ color: '#94a3b8' }}>
-          ← Retour
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Link to="/choisir" className="btn btn-ghost btn-sm" style={{ color: '#94a3b8' }}>
+            ← Retour
+          </Link>
+          <Avatar user={user} size={36} />
+        </div>
       </nav>
 
       <div style={{ maxWidth: 980, margin: '0 auto' }}>

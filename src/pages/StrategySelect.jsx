@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ContactAdminModal from '../components/ContactAdminModal';
+import Avatar from '../components/Avatar';
 
 const CHANNELS = [
   {
@@ -111,8 +112,12 @@ export default function StrategySelect() {
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
           {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro & Telegram</Link>}
+          {!user?.is_admin && (
+            <Link to="/paiement" className="btn btn-ghost btn-sm" style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)' }}>💳 Paiement</Link>
+          )}
           {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
+          <Avatar user={user} size={36} style={{ marginLeft: 6 }} />
         </div>
       </nav>
 
