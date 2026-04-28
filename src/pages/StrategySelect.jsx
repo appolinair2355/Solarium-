@@ -118,15 +118,52 @@ export default function StrategySelect() {
 
       {!user?.is_admin && user?.status === 'expired' && (
         <div style={{
-          margin: '20px auto', maxWidth: 720, padding: '16px 20px', borderRadius: 12,
+          margin: '20px auto', maxWidth: 720, padding: '18px 22px', borderRadius: 12,
           background: 'rgba(239,68,68,0.1)', border: '2px solid rgba(239,68,68,0.5)',
-          display: 'flex', alignItems: 'center', gap: 14, color: '#fca5a5',
+          display: 'flex', alignItems: 'center', gap: 14, color: '#fca5a5', flexWrap: 'wrap',
         }}>
           <div style={{ fontSize: 32 }}>🔒</div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: '#fff', marginBottom: 4 }}>Abonnement expiré</div>
-            <div style={{ fontSize: 13 }}>Toutes les fonctionnalités sont bloquées. Contactez l'administrateur pour renouveler votre accès.</div>
+            <div style={{ fontSize: 13 }}>Renouvelez maintenant pour continuer à utiliser les prédictions.</div>
           </div>
+          <Link to="/paiement" className="btn btn-gold">💳 Renouveler</Link>
+        </div>
+      )}
+
+      {!user?.is_admin && user?.promo_code && (
+        <div style={{
+          margin: '14px auto', maxWidth: 720, padding: '14px 18px', borderRadius: 12,
+          background: 'linear-gradient(135deg, rgba(251,191,36,0.10), rgba(245,158,11,0.05))',
+          border: '1px solid rgba(251,191,36,0.35)',
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+        }}>
+          <div style={{ fontSize: 28 }}>🎁</div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
+              VOTRE CODE PROMO PERSONNEL
+            </div>
+            <div style={{
+              fontFamily: 'monospace', fontSize: 18, fontWeight: 900,
+              color: '#fff', letterSpacing: 2, wordBreak: 'break-all',
+            }}>
+              {user.promo_code}
+            </div>
+            <div style={{ fontSize: 11, color: '#fcd34d', marginTop: 4 }}>
+              Partagez-le : <b>20 % de remise</b> pour le filleul, <b>20 % de durée</b> en bonus pour vous.
+              {user.bonus_minutes_earned > 0 && (
+                <span style={{ display: 'block', marginTop: 2, color: '#86efac' }}>
+                  ✨ Bonus déjà gagné : {Math.floor(user.bonus_minutes_earned / 60)} h {user.bonus_minutes_earned % 60} min
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => { try { navigator.clipboard.writeText(user.promo_code); } catch {} }}
+            className="btn btn-ghost btn-sm"
+          >
+            📋 Copier
+          </button>
         </div>
       )}
       {!user?.is_admin && user?.status === 'pending' && (

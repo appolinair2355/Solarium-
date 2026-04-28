@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -3058,6 +3058,71 @@ function AdminPanel() {
   // Duration inputs per user: { userId: { val, unit } }
   const [durInputs, setDurInputs] = useState({});
 
+  // ── Paiements en attente ───────────────────────────────────────────
+  const [pendingPayments, setPendingPayments] = useState([]);
+  const [paymentScreenshot, setPaymentScreenshot] = useState(null); // { id, image, ai }
+  const [paymentBusy, setPaymentBusy] = useState(null);
+
+  const loadPendingPayments = useCallback(async () => {
+    try {
+      const r = await fetch('/api/payments/admin/pending', { credentials: 'include' });
+      if (r.ok) setPendingPayments(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadPendingPayments();
+    const i = setInterval(loadPendingPayments, 30000);
+    return () => clearInterval(i);
+  }, [loadPendingPayments]);
+
+  const viewPaymentScreenshot = async (id) => {
+    try {
+      const r = await fetch(`/api/payments/admin/${id}/screenshot`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        setPaymentScreenshot({ id, image: d.image_base64, ai: d.ai_analysis });
+      }
+    } catch {}
+  };
+
+  const approvePayment = async (id) => {
+    if (!confirm(`Approuver ce paiement et activer l'abonnement de l'utilisateur ?`)) return;
+    setPaymentBusy(id);
+    try {
+      const r = await fetch(`/api/payments/admin/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      alert('✅ ' + d.message + (d.referrer_bonus_minutes ? `\n🎁 Parrain crédité de ${d.referrer_bonus_minutes} min.` : ''));
+      loadPendingPayments();
+      setPaymentScreenshot(null);
+    } catch (e) { alert('Erreur : ' + e.message); }
+    finally { setPaymentBusy(null); }
+  };
+
+  const rejectPayment = async (id) => {
+    const note = prompt('Raison du rejet (optionnel) :', '');
+    if (note === null) return;
+    setPaymentBusy(id);
+    try {
+      const r = await fetch(`/api/payments/admin/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ note }),
+      });
+      if (!r.ok) throw new Error('Erreur');
+      loadPendingPayments();
+      setPaymentScreenshot(null);
+    } catch (e) { alert('Erreur : ' + e.message); }
+    finally { setPaymentBusy(null); }
+  };
+
   // Inline name editing
   const [nameEdit, setNameEdit] = useState({}); // { userId: { first_name, last_name } }
 
@@ -3370,7 +3435,13 @@ function AdminPanel() {
   const [stratStats,     setStratStats]     = useState([]); // wins/losses per strategy
 
   // ── Annonces planifiées Telegram ─────────────────────────────────
-  const ANN_BLANK = { name: '', bot_token: '', channel_id: '', text: '', media_type: '', media_url: '', schedule_type: 'interval', interval_hours: 1, times_input: '' };
+  const ANN_BLANK = {
+    name: '', bot_token: '', channel_id: '', text: '',
+    media_type: '', media_url: '', media_data: '', media_filename: '',
+    schedule_type: 'interval', interval_hours: 1, times_input: ''
+  };
+  const annFormRef = useRef(null);
+  const [annExpandedId, setAnnExpandedId] = useState(null); // affichage texte complet
   const [announcements,    setAnnouncements]    = useState([]);
   const [annForm,          setAnnForm]          = useState(ANN_BLANK);
   const [annSaving,        setAnnSaving]        = useState(false);
@@ -4808,6 +4879,7 @@ function AdminPanel() {
               ]
             : [
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
+            { id: 'paiements',      icon: '💳', label: 'Paiements',      badge: pendingPayments.length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -5554,6 +5626,181 @@ function AdminPanel() {
 
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
+
+        {/* ── TAB : PAIEMENTS ── */}
+        {adminTab === 'paiements' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', marginBottom: 14, borderRadius: 12,
+              background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(255,255,255,0.08)',
+            }}>
+              <div>
+                <div style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
+                  💳 PAIEMENTS EN ATTENTE
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
+                  Validez ou rejetez les demandes de paiement après vérification.
+                </div>
+              </div>
+              <button onClick={loadPendingPayments} className="btn btn-ghost btn-sm">
+                🔄 Actualiser
+              </button>
+            </div>
+
+            {pendingPayments.length === 0 ? (
+              <div style={{
+                padding: 40, textAlign: 'center', borderRadius: 12,
+                background: 'rgba(15,23,42,0.4)', border: '1px dashed rgba(255,255,255,0.1)',
+                color: '#64748b', fontSize: 14,
+              }}>
+                ✨ Aucun paiement en attente.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {pendingPayments.map(p => {
+                  const statusInfo = {
+                    awaiting_screenshot: { color: '#fbbf24', label: '📤 En attente capture' },
+                    ai_validated: { color: '#22c55e', label: '🤖 IA OK — accès 2 h' },
+                    pending_admin: { color: '#3b82f6', label: '⏳ À vérifier' },
+                  }[p.status] || { color: '#94a3b8', label: p.status };
+                  return (
+                    <div key={p.id} style={{
+                      padding: 16, borderRadius: 12,
+                      background: 'rgba(15,23,42,0.7)',
+                      border: `1px solid ${p.status === 'ai_validated' ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 240 }}>
+                          <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>
+                            #{p.id} · {p.username || `user_${p.user_id}`}
+                            <span style={{
+                              marginLeft: 10, padding: '2px 8px', borderRadius: 6,
+                              fontSize: 10, fontWeight: 800,
+                              background: p.account_type === 'pro'
+                                ? 'rgba(168,85,247,0.2)'
+                                : p.account_type === 'premium'
+                                  ? 'rgba(251,191,36,0.2)'
+                                  : 'rgba(59,130,246,0.2)',
+                              color: p.account_type === 'pro'
+                                ? '#c084fc'
+                                : p.account_type === 'premium'
+                                  ? '#fcd34d'
+                                  : '#93c5fd',
+                            }}>
+                              {p.account_type === 'pro' ? '💎 PRO' : p.account_type === 'premium' ? '⭐ PREMIUM' : '👤 SIMPLE'}
+                            </span>
+                          </div>
+                          <div style={{ color: '#cbd5e1', fontSize: 13, marginTop: 4 }}>
+                            Plan : <b>{p.plan_label}</b> · Montant : <b>{p.amount_usd} $</b>
+                            {p.discount_applied && (
+                              <span style={{ marginLeft: 8, color: '#86efac', fontSize: 11 }}>
+                                🎁 -20% parrainage
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                            Demandé le {new Date(p.created_at).toLocaleString('fr-FR')}
+                            {p.email && <> · {p.email}</>}
+                          </div>
+                          <div style={{ marginTop: 8 }}>
+                            <span style={{
+                              display: 'inline-block', padding: '3px 10px', borderRadius: 100,
+                              background: `${statusInfo.color}22`, color: statusInfo.color,
+                              fontSize: 11, fontWeight: 700,
+                            }}>{statusInfo.label}</span>
+                            {p.ai_analysis?.confidence !== undefined && (
+                              <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 11 }}>
+                                IA : {p.ai_analysis.confidence}% — {p.ai_analysis.reason || ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                          {p.has_screenshot && (
+                            <button onClick={() => viewPaymentScreenshot(p.id)} className="btn btn-ghost btn-sm">
+                              👁 Voir capture
+                            </button>
+                          )}
+                          <button
+                            onClick={() => approvePayment(p.id)}
+                            disabled={paymentBusy === p.id}
+                            className="btn btn-sm"
+                            style={{ background: '#22c55e', color: '#fff' }}
+                          >
+                            ✅ Approuver
+                          </button>
+                          <button
+                            onClick={() => rejectPayment(p.id)}
+                            disabled={paymentBusy === p.id}
+                            className="btn btn-danger btn-sm"
+                          >
+                            ❌ Rejeter
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {paymentScreenshot && (
+              <div
+                onClick={() => setPaymentScreenshot(null)}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 10000,
+                  background: 'rgba(0,0,0,0.85)', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', padding: 20,
+                }}
+              >
+                <div onClick={e => e.stopPropagation()} style={{
+                  maxWidth: 800, width: '100%', maxHeight: '90vh', overflow: 'auto',
+                  background: '#0f172a', borderRadius: 14, padding: 18,
+                  border: '1px solid rgba(255,255,255,0.12)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <h3 style={{ color: '#fff', margin: 0 }}>Capture de paiement #{paymentScreenshot.id}</h3>
+                    <button onClick={() => setPaymentScreenshot(null)} className="btn btn-ghost btn-sm">✕</button>
+                  </div>
+                  {paymentScreenshot.ai && (
+                    <div style={{
+                      padding: 10, borderRadius: 8, marginBottom: 12,
+                      background: 'rgba(59,130,246,0.08)', color: '#93c5fd', fontSize: 12,
+                    }}>
+                      <b>🤖 Analyse IA :</b>{' '}
+                      {paymentScreenshot.ai.is_payment_screenshot ? '✅ Capture valide' : '⚠️ Capture suspecte'}
+                      {paymentScreenshot.ai.confidence !== undefined && ` (${paymentScreenshot.ai.confidence}%)`}
+                      {paymentScreenshot.ai.amount_detected && ` · Montant détecté : ${paymentScreenshot.ai.amount_detected}`}
+                      {paymentScreenshot.ai.reason && <div style={{ marginTop: 4 }}>{paymentScreenshot.ai.reason}</div>}
+                    </div>
+                  )}
+                  <img
+                    src={`data:image/jpeg;base64,${paymentScreenshot.image}`}
+                    alt="Capture"
+                    style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '0 auto' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 14 }}>
+                    <button
+                      onClick={() => approvePayment(paymentScreenshot.id)}
+                      className="btn btn-sm"
+                      style={{ background: '#22c55e', color: '#fff' }}
+                    >
+                      ✅ Approuver
+                    </button>
+                    <button
+                      onClick={() => rejectPayment(paymentScreenshot.id)}
+                      className="btn btn-danger btn-sm"
+                    >
+                      ❌ Rejeter
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
@@ -6453,8 +6700,6 @@ function AdminPanel() {
                         : `✓ ${stratForm.mirror_pairs.length} paire(s) active(s) — seules ces combinaisons seront surveillées.`}
                     </div>
                   </div>
-                )}
-
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
@@ -8484,8 +8729,42 @@ function AdminPanel() {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: 6, whiteSpace: 'pre-wrap' }}>
-                    {ann.text.length > 120 ? ann.text.slice(0, 120) + '…' : ann.text}
+                  {/* Aperçu du média (image / vidéo) */}
+                  {ann.media_type && (ann.media_data || ann.media_url) && (
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                      {ann.media_type === 'image' ? (
+                        <img
+                          src={ann.media_data ? `data:image/*;base64,${ann.media_data}` : ann.media_url}
+                          alt="Aperçu"
+                          style={{ width: 110, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid rgba(251,191,36,0.3)' }}
+                        />
+                      ) : (
+                        <video
+                          src={ann.media_data ? `data:video/mp4;base64,${ann.media_data}` : ann.media_url}
+                          style={{ width: 110, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid rgba(251,191,36,0.3)', background: '#000' }}
+                          muted
+                        />
+                      )}
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                        <div><b style={{ color: '#fbbf24' }}>{ann.media_type === 'image' ? '🖼️ Image' : '🎬 Vidéo'} attachée</b></div>
+                        {ann.media_filename && <div style={{ marginTop: 2 }}>📄 {ann.media_filename}</div>}
+                        {ann.media_url && !ann.media_data && <div style={{ marginTop: 2, wordBreak: 'break-all', maxWidth: 280 }}>🔗 {ann.media_url.slice(0, 50)}…</div>}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 6, whiteSpace: 'pre-wrap' }}>
+                    {annExpandedId === ann.id || ann.text.length <= 200
+                      ? ann.text
+                      : ann.text.slice(0, 200) + '…'}
+                    {ann.text.length > 200 && (
+                      <button
+                        type="button"
+                        onClick={() => setAnnExpandedId(annExpandedId === ann.id ? null : ann.id)}
+                        style={{ display: 'block', marginTop: 6, padding: '3px 10px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'rgba(125,211,252,0.12)', color: '#7dd3fc' }}>
+                        {annExpandedId === ann.id ? '▲ Réduire' : `▼ Voir tout (${ann.text.length} caractères)`}
+                      </button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
                     <button
@@ -8534,10 +8813,15 @@ function AdminPanel() {
                         });
                         setAnnOpen(true);
                         setAnnMsg('');
-                        setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+                        // Défile vers le formulaire (et non vers le bas de page)
+                        setTimeout(() => {
+                          if (annFormRef.current) {
+                            annFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }
+                        }, 80);
                       }}
-                      style={{ padding: '5px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.15)', color: '#c4b5fd' }}>
-                      ✏️ Modifier
+                      style={{ padding: '5px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
+                      ✏️ Modifier cette annonce
                     </button>
                     <button
                       onClick={async () => {
@@ -8583,7 +8867,7 @@ function AdminPanel() {
           </button>
 
           {annOpen && (
-            <form onSubmit={async e => {
+            <form ref={annFormRef} onSubmit={async e => {
               e.preventDefault();
               setAnnSaving(true); setAnnMsg('');
               try {
@@ -8626,6 +8910,61 @@ function AdminPanel() {
               setAnnSaving(false);
             }}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+              {/* ── BANDEAU MODE ÉDITION (visible uniquement en modification) ── */}
+              {annEditingId && (() => {
+                const editingAnn = announcements.find(a => a.id === annEditingId);
+                return (
+                  <div style={{
+                    gridColumn: '1 / -1',
+                    padding: '14px 18px', borderRadius: 12,
+                    background: 'linear-gradient(135deg, rgba(168,85,247,0.18), rgba(251,191,36,0.12))',
+                    border: '2px solid rgba(168,85,247,0.5)',
+                    display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
+                  }}>
+                    <div style={{ fontSize: 28 }}>✏️</div>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ color: '#e9d5ff', fontWeight: 800, fontSize: 14, letterSpacing: 0.3 }}>
+                        MODIFICATION DE L'ANNONCE #{annEditingId}
+                      </div>
+                      <div style={{ color: '#c4b5fd', fontSize: 12, marginTop: 3 }}>
+                        Vous modifiez : <b>« {annForm.name || editingAnn?.name || '—'} »</b>.
+                        Vos changements <b>remplaceront</b> l'annonce existante (pas de doublon).
+                      </div>
+                    </div>
+                    {/* Aperçu du média actuel */}
+                    {annForm.media_type && (annForm.media_data || annForm.media_url) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        {annForm.media_type === 'image' ? (
+                          <img
+                            src={annForm.media_data ? `data:image/*;base64,${annForm.media_data}` : annForm.media_url}
+                            alt="Média actuel"
+                            style={{ width: 90, height: 70, objectFit: 'cover', borderRadius: 8, border: '2px solid rgba(168,85,247,0.4)' }}
+                          />
+                        ) : (
+                          <video
+                            src={annForm.media_data ? `data:video/mp4;base64,${annForm.media_data}` : annForm.media_url}
+                            style={{ width: 90, height: 70, objectFit: 'cover', borderRadius: 8, border: '2px solid rgba(168,85,247,0.4)', background: '#000' }}
+                            muted
+                          />
+                        )}
+                        <div style={{ fontSize: 10, color: '#a78bfa', fontWeight: 700 }}>
+                          {annForm.media_type === 'image' ? '🖼️ Image actuelle' : '🎬 Vidéo actuelle'}
+                        </div>
+                      </div>
+                    )}
+                    <button type="button"
+                      onClick={() => {
+                        setAnnEditingId(null);
+                        setAnnForm(ANN_BLANK);
+                        setAnnMsg('');
+                      }}
+                      style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#fca5a5' }}>
+                      ✕ Annuler la modification
+                    </button>
+                  </div>
+                );
+              })()}
 
               {/* Nom de l'annonce */}
               <div style={{ gridColumn: '1 / -1' }}>
@@ -8718,16 +9057,35 @@ function AdminPanel() {
                       }}
                       style={{ width: '100%', padding: 8, background: '#1e1b2e', border: '1px dashed rgba(168,85,247,0.4)', borderRadius: 8, color: '#fff', fontSize: 12, boxSizing: 'border-box' }}
                     />
-                    {annForm.media_filename && annForm.media_data && (
-                      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: 12, color: '#86efac', fontWeight: 700 }}>
-                          ✓ {annForm.media_filename} ({Math.round(annForm.media_data.length * 0.75 / 1024)} Ko)
-                        </span>
-                        <button type="button"
-                          onClick={() => setAnnForm(p => ({ ...p, media_data: '', media_filename: '' }))}
-                          style={{ padding: '3px 8px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'rgba(239,68,68,0.15)', color: '#fca5a5' }}>
-                          ✕ Retirer
-                        </button>
+                    {annForm.media_data && (
+                      <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                          {annForm.media_type === 'image' ? (
+                            <img
+                              src={`data:image/*;base64,${annForm.media_data}`}
+                              alt="Aperçu"
+                              style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)' }}
+                            />
+                          ) : (
+                            <video
+                              src={`data:video/mp4;base64,${annForm.media_data}`}
+                              controls
+                              style={{ width: 160, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)', background: '#000' }}
+                              muted
+                            />
+                          )}
+                          <div style={{ flex: 1, fontSize: 12, color: '#86efac' }}>
+                            <div style={{ fontWeight: 700 }}>✓ {annForm.media_filename || 'Fichier prêt'}</div>
+                            <div style={{ marginTop: 3, color: '#94a3b8' }}>
+                              ≈ {Math.round(annForm.media_data.length * 0.75 / 1024)} Ko
+                            </div>
+                            <button type="button"
+                              onClick={() => setAnnForm(p => ({ ...p, media_data: '', media_filename: '' }))}
+                              style={{ marginTop: 6, padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'rgba(239,68,68,0.18)', color: '#fca5a5' }}>
+                              ✕ Retirer le fichier
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                     <div style={{ fontSize: 10, color: '#64748b', marginTop: 6, lineHeight: 1.4 }}>

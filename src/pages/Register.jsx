@@ -6,9 +6,14 @@ import TalkingMascot from '../components/TalkingMascot';
 
 export default function Register() {
   const { register } = useAuth();
-  const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' });
+  const [form, setForm] = useState({
+    username: '', email: '', password: '', confirm: '',
+    account_type: 'simple', promo_code: '',
+  });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [generatedPromoCode, setGeneratedPromoCode] = useState('');
+  const [referrerApplied, setReferrerApplied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [mascotDone, setMascotDone] = useState(false);
@@ -16,16 +21,11 @@ export default function Register() {
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  // Progress bar animation while loading
   useEffect(() => {
     if (loading) {
       setProgress(8);
       progressTimer.current = setInterval(() => {
-        setProgress(p => {
-          if (p >= 92) return p;
-          // ease towards 92
-          return p + Math.max(1, (92 - p) * 0.06);
-        });
+        setProgress(p => p >= 92 ? p : p + Math.max(1, (92 - p) * 0.06));
       }, 110);
     } else {
       if (progressTimer.current) clearInterval(progressTimer.current);
@@ -40,9 +40,23 @@ export default function Register() {
     if (form.password.length < 6) return setError('Mot de passe trop court (6 caractères minimum)');
     setLoading(true);
     try {
-      await register(form.username, form.email, form.password);
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          username: form.username,
+          email: form.email,
+          password: form.password,
+          account_type: form.account_type,
+          promo_code: form.promo_code.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur d'inscription");
       setProgress(100);
-      // small delay so the user sees the bar fill
+      setGeneratedPromoCode(data.promo_code || '');
+      setReferrerApplied(!!data.referrer_applied);
       await new Promise(r => setTimeout(r, 450));
       setSuccess(true);
     } catch (err) {
@@ -53,15 +67,22 @@ export default function Register() {
     }
   };
 
-  // ── SUCCESS SCREEN with talking mascot ──
+  const copyCode = () => {
+    if (!generatedPromoCode) return;
+    try { navigator.clipboard.writeText(generatedPromoCode); } catch {}
+  };
+
+  // ── SUCCESS SCREEN ──
   if (success) {
     const username = form.username || 'cher utilisateur';
     const lines = [
       `Bienvenue ${username} !`,
-      `Vous êtes maintenant inscrit dans Prediction Baccara Pro.`,
-      `Veuillez patienter, SOSSOU Kouamé va analyser votre demande et confirmer votre compte très rapidement.`,
-      `Pas d'inquiétude, votre accès aux prédictions arrive bientôt. Restez avec nous !`,
-      `À tout de suite sur votre tableau de bord. Bonne chance !`,
+      `Votre compte ${form.account_type === 'premium' ? 'PREMIUM' : form.account_type === 'pro' ? 'PRO' : 'SIMPLE'} est créé.`,
+      `Voici votre code promotionnel personnel : ${generatedPromoCode || 'généré'}.`,
+      `Partagez-le : si quelqu'un l'utilise lors de son 1er paiement, il a 20 % de réduction et vous gagnez 20 % de sa durée d'abonnement !`,
+      referrerApplied
+        ? `Bonne nouvelle : votre code parrain a bien été appliqué — vous aurez 20 % de réduction sur votre 1er paiement.`
+        : `Vous pourrez aussi acheter un abonnement après validation de votre compte.`,
     ];
     return (
       <div className="auth-page mascot-page">
@@ -81,6 +102,39 @@ export default function Register() {
             <h2 style={{ marginTop: 14, fontSize: '1.45rem' }}>Bienvenue à bord !</h2>
           </div>
 
+          {generatedPromoCode && (
+            <div style={{
+              margin: '10px 0 18px',
+              padding: '14px 16px', borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(251,191,36,0.12), rgba(245,158,11,0.08))',
+              border: '2px solid rgba(251,191,36,0.45)',
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', letterSpacing: 1, marginBottom: 6 }}>
+                🎁 VOTRE CODE PROMO PERSONNEL
+              </div>
+              <div style={{
+                fontFamily: 'monospace', fontSize: 22, fontWeight: 900,
+                color: '#fff', letterSpacing: 2, wordBreak: 'break-all',
+                padding: '8px 4px',
+              }}>
+                {generatedPromoCode}
+              </div>
+              <button
+                type="button"
+                onClick={copyCode}
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: 6, fontSize: 11 }}
+              >
+                📋 Copier le code
+              </button>
+              <div style={{ fontSize: 11, color: '#fcd34d', marginTop: 8, lineHeight: 1.4 }}>
+                Partagez ce code à vos amis. Lors de leur 1er paiement,<br />
+                ils ont <b>20 % de remise</b> et vous gagnez <b>20 %</b> de leur durée.
+              </div>
+            </div>
+          )}
+
           <TalkingMascot
             lines={lines}
             primaryColor="#fbbf24"
@@ -89,7 +143,7 @@ export default function Register() {
           />
 
           <div className="alert alert-info" style={{ marginTop: 22 }}>
-            📬 Vous recevrez l'accès dès que SOSSOU Kouamé valide votre compte.
+            📬 Vous pourrez vous connecter et acheter un abonnement (1 j / 1 sem / 2 sem / 1 mois) depuis votre espace.
           </div>
 
           <Link to="/connexion" className="btn btn-gold btn-auth" style={{ marginTop: 4 }}>
@@ -134,6 +188,46 @@ export default function Register() {
           </div>
 
           <div className="form-group">
+            <label className="form-label">Type de compte</label>
+            <div className="input-wrap">
+              <span className="input-icon">🎯</span>
+              <select
+                className="form-input has-icon"
+                value={form.account_type}
+                onChange={set('account_type')}
+                style={{ cursor: 'pointer' }}
+              >
+                <option value="simple">👤 Compte Simple — tarif de base</option>
+                <option value="premium">⭐ Compte Premium — +10 % (fonctions avancées)</option>
+                <option value="pro">💎 Compte Pro — +20 % (toutes les fonctions Pro)</option>
+              </select>
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+              Choix définitif. Tarif 1 jour : Simple <b>2 $</b> · Premium <b>2,20 $</b> · Pro <b>2,40 $</b>.
+              L'administrateur valide simplement votre paiement.
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Code promotionnel <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnel)</span></label>
+            <div className="input-wrap">
+              <span className="input-icon">🎁</span>
+              <input
+                className="form-input has-icon"
+                type="text"
+                placeholder="Code d'un parrain (laissez vide si vous n'en avez pas)"
+                value={form.promo_code}
+                onChange={e => setForm(f => ({ ...f, promo_code: e.target.value.toUpperCase() }))}
+                style={{ fontFamily: 'monospace', letterSpacing: 1 }}
+                maxLength={24}
+              />
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+              Avec un code valide, vous obtenez <b style={{ color: '#fbbf24' }}>20 % de réduction</b> sur votre 1er paiement.
+            </div>
+          </div>
+
+          <div className="form-group">
             <label className="form-label">Mot de passe</label>
             <PasswordInput
               value={form.password}
@@ -169,7 +263,7 @@ export default function Register() {
               <div className="register-progress-bar" style={{ width: `${progress}%` }} />
               <div className="register-progress-text">
                 {progress < 30 && '🔐 Création de votre compte...'}
-                {progress >= 30 && progress < 60 && '📝 Enregistrement des informations...'}
+                {progress >= 30 && progress < 60 && '📝 Génération de votre code promo...'}
                 {progress >= 60 && progress < 90 && '📡 Envoi à l\'administrateur...'}
                 {progress >= 90 && '✅ Presque terminé !'}
               </div>
