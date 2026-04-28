@@ -576,4 +576,102 @@ router.post('/bot-precheck', requireSuperAdmin, async (req, res) => {
   }
 });
 
-module.exports = { router, callAI };
+// ── Vision : analyse d'une capture d'écran (image base64) ──────────────────
+// Utilise Gemini 1.5 Flash (multimodal, gratuit). Pas besoin du provider
+// par défaut — on lit directement la clé Gemini en DB si elle existe.
+async function callGeminiVision(base64Image, mimeType, prompt) {
+  // Récupère la clé Gemini : soit dans ai_config (si provider=gemini),
+  // soit dans une clé dédiée 'gemini_vision_key'.
+  let key = null;
+  try {
+    const raw = await db.getSetting('ai_config');
+    if (raw) {
+      const cfg = JSON.parse(raw);
+      if (cfg.provider === 'gemini' && cfg.key) key = cfg.key;
+    }
+  } catch {}
+  if (!key) {
+    try {
+      const fallback = await db.getSetting('gemini_vision_key');
+      if (fallback) key = fallback;
+    } catch {}
+  }
+  if (!key) throw new Error('Aucune clé Gemini configurée — l\'admin doit configurer Gemini dans Configuration IA');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+  const body = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType || 'image/jpeg', data: base64Image } },
+      ],
+    }],
+    generationConfig: { maxOutputTokens: 512, temperature: 0.1 },
+  };
+
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const bodyStr = JSON.stringify(body);
+    const opts = {
+      hostname: urlObj.hostname,
+      port: 443,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
+    };
+    const req = https.request(opts, (resp) => {
+      let data = '';
+      resp.on('data', c => data += c);
+      resp.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (resp.statusCode >= 400) {
+            return reject(new Error(`Gemini Vision ${resp.statusCode}: ${(json.error?.message || JSON.stringify(json)).slice(0, 300)}`));
+          }
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          resolve(text);
+        } catch (e) { reject(new Error('Réponse Vision invalide : ' + data.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(60_000, () => { req.destroy(); reject(new Error('Timeout Vision (60s)')); });
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function analyzePaymentScreenshot(base64Image, mimeType, expectedAmountUsd) {
+  const prompt = `Tu es un agent qui valide des captures d'écran de paiement (WhatsApp / Mobile Money / virement / capture de transfert).
+On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après, avec ce format:
+{
+  "is_payment_screenshot": true|false,
+  "confidence": 0-100,
+  "amount_detected": "montant lisible dans l'image ou null",
+  "currency_detected": "USD|EUR|XOF|FCFA|null",
+  "recipient_visible": "nom/numéro destinataire ou null",
+  "looks_legit": true|false,
+  "reason": "courte phrase en français expliquant la décision"
+}
+Critères pour is_payment_screenshot=true :
+- L'image montre clairement une transaction financière (transfert envoyé, reçu de paiement, conversation WhatsApp avec montant et confirmation)
+- Un montant et/ou un destinataire est visible
+- Pas une simple photo, pas un meme, pas un screenshot d'interface non-financière
+
+Montant attendu (à titre indicatif) : ${expectedAmountUsd} USD. Tolère les conversions vers d'autres devises (FCFA ~600 par USD).
+Réponds UNIQUEMENT le JSON.`;
+
+  const raw = await callGeminiVision(base64Image, mimeType, prompt);
+  // Extraire le premier bloc JSON
+  let parsed = null;
+  try {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) parsed = JSON.parse(m[0]);
+  } catch {}
+  if (!parsed) {
+    return { is_payment_screenshot: false, confidence: 0, reason: 'Réponse IA non analysable', raw: raw.slice(0, 200) };
+  }
+  return parsed;
+}
+
+module.exports = { router, callAI, callGeminiVision, analyzePaymentScreenshot };

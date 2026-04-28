@@ -26,6 +26,46 @@ let _gameOneHandled = false;
 
 const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
 
+// ── Pool factory avec gestion d'erreurs robuste ──────────────────────
+function _createPool(url) {
+  const pool = new Pool({
+    connectionString: url,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 12000,
+    idleTimeoutMillis: 30000,         // ferme les connexions idles avant que Render ne les coupe
+    max: 2,                            // peu de connexions simultanées sur Render free
+    keepAlive: true,                   // évite les déconnexions silencieuses
+    statement_timeout: 20000,
+  });
+  // Capture les erreurs de connexion idle pour empêcher le crash du process
+  pool.on('error', (err) => {
+    console.warn('[RenderSync] ⚠️ Pool error (ignoré):', err.message);
+  });
+  return pool;
+}
+
+// ── Wrapper avec retry automatique (reconnect si "Connection terminated") ──
+async function _query(sql, params, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (!renderPool) throw new Error('Pool non initialisé');
+    try {
+      return await renderPool.query(sql, params);
+    } catch (e) {
+      const msg = (e && e.message) || '';
+      const transient = /Connection terminated|ECONNRESET|read ECONNRESET|server closed the connection|terminat/i.test(msg);
+      if (transient && attempt < retries) {
+        console.warn(`[RenderSync] 🔁 Retry ${attempt + 1}/${retries} — ${msg}`);
+        // Recrée le pool si la connexion a été perdue
+        try { await renderPool.end(); } catch {}
+        renderPool = _createPool(currentUrl);
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function loadRenderUrl() {
   try {
     let url = await db.getSetting('render_db_url');
@@ -38,12 +78,7 @@ async function loadRenderUrl() {
       if (url.trim() !== currentUrl) {
         if (renderPool) { try { await renderPool.end(); } catch {} }
         currentUrl = url.trim();
-        renderPool = new Pool({
-          connectionString: currentUrl,
-          ssl: { rejectUnauthorized: false },
-          connectionTimeoutMillis: 8000,
-          max: 3,
-        });
+        renderPool = _createPool(currentUrl);
         await initRenderDb();
         await _pullFromExternal();
         await _pushAllToExternal();
@@ -59,8 +94,7 @@ async function loadRenderUrl() {
     }
   } catch (e) {
     console.error('[RenderSync] Erreur chargement URL:', e.message);
-    renderPool = null;
-    currentUrl = null;
+    // Ne pas détruire le pool — on tentera à la prochaine sync
   }
 }
 
@@ -69,7 +103,7 @@ async function loadRenderUrl() {
 async function initRenderDb() {
   if (!renderPool) return;
   try {
-    await renderPool.query(`
+    await _query(`
       CREATE TABLE IF NOT EXISTS predictions_export (
         id             SERIAL PRIMARY KEY,
         strategy       TEXT,
@@ -128,11 +162,23 @@ async function initRenderDb() {
     ];
     for (const [table, col] of alterCols) {
       try {
-        await renderPool.query(
+        await _query(
           `ALTER TABLE ${table} ALTER COLUMN ${col} TYPE TEXT`
         );
       } catch {}
     }
+
+    // ── Ajout des colonnes liées au système d'abonnement / parrainage ──
+    const addCols = [
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'simple'`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS promo_code TEXT`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS referrer_user_id INTEGER`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE users_export ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0`,
+    ];
+    for (const sql of addCols) { try { await _query(sql); } catch {} }
 
     console.log('[RenderSync] Tables initialisées');
   } catch (e) {
@@ -146,7 +192,7 @@ async function _pullFromExternal() {
   if (!renderPool) return;
   try {
     // 1. Importer les utilisateurs
-    const usersRes = await renderPool.query('SELECT * FROM users_export');
+    const usersRes = await _query('SELECT * FROM users_export');
     for (const u of usersRes.rows) {
       try {
         await db.pool.query(`
@@ -167,7 +213,7 @@ async function _pullFromExternal() {
     if (usersRes.rows.length) console.log(`[RenderSync] ← ${usersRes.rows.length} utilisateur(s) importé(s)`);
 
     // 2. Importer les stratégies
-    const stratRes = await renderPool.query('SELECT data FROM strategies_export LIMIT 1');
+    const stratRes = await _query('SELECT data FROM strategies_export LIMIT 1');
     if (stratRes.rows.length && stratRes.rows[0].data) {
       const existing = await db.getSetting('custom_strategies');
       if (!existing || existing === '[]') {
@@ -177,7 +223,7 @@ async function _pullFromExternal() {
     }
 
     // 3. Importer les settings clés
-    const settingsRes = await renderPool.query('SELECT key, value FROM settings_export');
+    const settingsRes = await _query('SELECT key, value FROM settings_export');
     const PROTECTED_KEYS = ['custom_strategies', 'render_db_url'];
     for (const row of settingsRes.rows) {
       if (PROTECTED_KEYS.includes(row.key)) continue;
@@ -190,7 +236,7 @@ async function _pullFromExternal() {
 
     // 4. Importer les canaux Telegram
     try {
-      const tgRes = await renderPool.query('SELECT * FROM telegram_channels_export');
+      const tgRes = await _query('SELECT * FROM telegram_channels_export');
       for (const ch of tgRes.rows) {
         try { await db.upsertTelegramConfig({ channel_id: ch.channel_id, channel_name: ch.channel_name || ch.channel_id }); } catch {}
       }
@@ -244,7 +290,7 @@ async function syncAllUsers() {
 async function syncUser(u) {
   if (!renderPool || !u) return;
   try {
-    await renderPool.query(`
+    await _query(`
       INSERT INTO users_export
         (id, username, email, first_name, last_name, is_admin, is_approved,
          subscription_expires_at, subscription_duration_minutes, created_at, synced_at)
@@ -276,7 +322,7 @@ async function syncStrategies() {
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed) ? parsed : [parsed];
     for (const s of list) {
-      await renderPool.query(`
+      await _query(`
         INSERT INTO strategies_export (id, data, synced_at)
         VALUES ($1,$2,NOW())
         ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
@@ -317,7 +363,7 @@ async function syncSetting(key, value) {
 
 async function _upsertSetting(key, value) {
   try {
-    await renderPool.query(`
+    await _query(`
       INSERT INTO settings_export (key, value, synced_at)
       VALUES ($1,$2,NOW())
       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, synced_at=NOW()
@@ -351,7 +397,7 @@ async function syncTelegramChannel(ch) {
 async function syncDeleteTelegramChannel(channelId) {
   if (!renderPool || !channelId) return;
   try {
-    await renderPool.query(
+    await _query(
       `DELETE FROM telegram_channels_export WHERE channel_id = $1`,
       [String(channelId)]
     );
@@ -362,7 +408,7 @@ async function syncDeleteTelegramChannel(channelId) {
 
 async function _upsertTelegramChannel(ch) {
   try {
-    await renderPool.query(`
+    await _query(`
       INSERT INTO telegram_channels_export (channel_id, channel_name, enabled, synced_at)
       VALUES ($1, $2, $3, NOW())
       ON CONFLICT (channel_id) DO UPDATE SET
@@ -380,7 +426,7 @@ async function _upsertTelegramChannel(ch) {
 async function syncVerifiedPrediction(pred) {
   if (!renderPool) return;
   try {
-    await renderPool.query(`
+    await _query(`
       INSERT INTO predictions_export
         (strategy, game_number, predicted_suit, status, rattrapage,
          player_cards, banker_cards, resolved_at, created_at)
@@ -416,7 +462,7 @@ async function handleGameOne(gameNumber) {
   _gameOneHandled = true;
   if (!renderPool) return;
   try {
-    const r = await renderPool.query('DELETE FROM predictions_export');
+    const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
   } catch (e) {
     console.error('[RenderSync] Erreur reset jeu #1:', e.message);
@@ -448,7 +494,7 @@ async function testConnection(url) {
 async function getRenderStats() {
   if (!renderPool) return null;
   try {
-    const r = await renderPool.query(`
+    const r = await _query(`
       SELECT
         COUNT(*) FILTER (WHERE status='gagne') AS wins,
         COUNT(*) FILTER (WHERE status='perdu')  AS losses,
@@ -467,7 +513,7 @@ function isConnected() { return !!renderPool; }
 async function clearExternalPredictions() {
   if (!renderPool) return 0;
   try {
-    const r = await renderPool.query('DELETE FROM predictions_export');
+    const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🧹 ${r.rowCount} prédiction(s) effacée(s) de la base Render externe`);
     return r.rowCount;
   } catch (e) {

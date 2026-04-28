@@ -17,7 +17,18 @@ A real-time Baccarat prediction system for 1xBet. It includes a prediction engin
 - `db.js` — Data access layer (PostgreSQL or JSON)
 - `jsondb.js` — Local JSON database implementation
 - `auth.js`, `admin.js`, `predictions.js`, `games.js` — API route handlers
+- `payment-route.js` — Subscription plans, screenshot upload, Gemini AI validation, admin approval
+- `ai-route.js` — Gemini AI orchestration (text + Vision)
 - `telegram-route.js`, `telegram-service.js` — Telegram bot integration
+
+## Subscription / Promo Code System (April 2026)
+
+- **Account types**: `simple` (default 4 channels) or `premium` (channels + advanced) — chosen at signup, confirmed by admin on first payment.
+- **Auto-generated promo codes**: every user gets a unique 18-char code (3 FR letters + 3 digits + HHMM + 2 specials + 2 letters + DDMM).
+- **Referral**: when a new user enters a parent's promo code, they get **20% off** their first paid plan, and the parent earns **20% of the plan's duration** as bonus subscription time (one-time per referee).
+- **Plans**: 1 day = $2, 1 week = $12, 2 weeks = $20, 1 month = $40.
+- **Payment flow**: expired user → /paiement → choose plan → opens WhatsApp `wa.me/2290195501564` with prefilled message → upload screenshot → Gemini Vision analyzes (instant 2h temp access if valid) → admin manually approves/rejects (extends subscription, assigns channels per `account_type`).
+- DB additions: `users.account_type`, `users.promo_code` (UNIQUE), `users.referrer_user_id`, `users.referral_bonus_used`, `users.bonus_minutes_earned`; new table `payment_requests`.
 - `bilan.js` — Daily stats/reporting
 - `src/` — React frontend source
 - `dist/` — Pre-built frontend (served by Express)

@@ -52,6 +52,34 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 2;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS plain_password TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'simple';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_code TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_user_id INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0;
+      CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS payment_requests (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        plan_id TEXT NOT NULL,
+        plan_label TEXT,
+        amount_usd NUMERIC(10,2) NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        screenshot_data TEXT,
+        ai_analysis JSONB,
+        ai_temp_access_until TIMESTAMPTZ,
+        status TEXT DEFAULT 'awaiting_screenshot',
+        admin_note TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        referrer_bonus_minutes INTEGER DEFAULT 0,
+        discount_applied BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS payment_requests_user_idx ON payment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS payment_requests_status_idx ON payment_requests(status);
 
       CREATE TABLE IF NOT EXISTS predictions (
         id SERIAL PRIMARY KEY,
@@ -257,8 +285,8 @@ async function getProUsers() {
 async function createUser(data) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
          last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
@@ -268,7 +296,8 @@ async function createUser(data) {
        RETURNING *`,
       [data.username, data.email || null, data.password_hash, data.first_name || null, data.last_name || null,
        data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
-       data.subscription_duration_minutes || null, data.plain_password || null]
+       data.subscription_duration_minutes || null, data.plain_password || null,
+       data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null]
     );
     return r.rows[0];
   }
@@ -954,9 +983,87 @@ async function getDeployLogs(limit = 20) {
   return r.rows;
 }
 
+// ── PROMO CODES & PAYMENT REQUESTS ──────────────────────────────────
+
+async function getUserByPromoCode(code) {
+  if (!code) return null;
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT * FROM users WHERE promo_code = $1 LIMIT 1', [code.trim().toUpperCase()]);
+    return r.rows[0] || null;
+  }
+  const all = jsondb.getAllUsers();
+  return all.find(u => (u.promo_code || '').toUpperCase() === code.trim().toUpperCase()) || null;
+}
+
+async function isPromoCodeTaken(code) {
+  const u = await getUserByPromoCode(code);
+  return !!u;
+}
+
+async function createPaymentRequest(data) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const r = await pgPool.query(
+    `INSERT INTO payment_requests (user_id, plan_id, plan_label, amount_usd, duration_minutes, status, discount_applied)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [data.user_id, data.plan_id, data.plan_label, data.amount_usd, data.duration_minutes,
+     data.status || 'awaiting_screenshot', data.discount_applied || false]
+  );
+  return r.rows[0];
+}
+
+async function updatePaymentRequest(id, updates) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const sets = ['updated_at = NOW()'];
+  const vals = []; let i = 1;
+  for (const [k, v] of Object.entries(updates)) {
+    if (k === 'ai_analysis' && typeof v !== 'string') {
+      sets.push(`${k} = $${i++}::jsonb`);
+      vals.push(JSON.stringify(v));
+    } else {
+      sets.push(`${k} = $${i++}`);
+      vals.push(v);
+    }
+  }
+  vals.push(id);
+  const r = await pgPool.query(`UPDATE payment_requests SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+  return r.rows[0] || null;
+}
+
+async function getPaymentRequest(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM payment_requests WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+async function getUserPaymentRequests(userId, limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    'SELECT id, plan_id, plan_label, amount_usd, duration_minutes, status, ai_temp_access_until, created_at, admin_validated_at FROM payment_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [userId, limit]
+  );
+  return r.rows;
+}
+
+async function getPendingPaymentRequests() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT pr.*, u.username, u.email, u.account_type, u.promo_code, u.referrer_user_id,
+            ref.username AS referrer_username, ref.promo_code AS referrer_promo_code
+     FROM payment_requests pr
+     JOIN users u ON u.id = pr.user_id
+     LEFT JOIN users ref ON ref.id = u.referrer_user_id
+     WHERE pr.status IN ('ai_validated', 'awaiting_screenshot', 'pending_admin')
+     ORDER BY pr.created_at DESC LIMIT 200`
+  );
+  return r.rows;
+}
+
 module.exports = {
   pool, USE_PG, initDB,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
+  getUserByPromoCode, isPromoCodeTaken,
+  createPaymentRequest, updatePaymentRequest, getPaymentRequest,
+  getUserPaymentRequests, getPendingPaymentRequests,
   createUser, updateUser, deleteUser,
   getPredictions, createPrediction, updatePrediction,
   getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime, expireAllEnCours,

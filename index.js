@@ -20,6 +20,7 @@ const botHost           = require('./bot-host');
 const systemLogsRoutes  = require('./system-logs-route');
 const { router: aiRoutes } = require('./ai-route');
 const comptages         = require('./comptages');
+const paymentRoutes     = require('./payment-route');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -93,6 +94,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', mode: USE_PG ? 'po
 app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin/comptages', comptages.router);
+app.use('/api/payments', paymentRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
