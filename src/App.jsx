@@ -1,18 +1,116 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense, Component } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
-const Home          = lazy(() => import('./pages/Home'));
-const Login         = lazy(() => import('./pages/Login'));
-const Register      = lazy(() => import('./pages/Register'));
-const StrategySelect = lazy(() => import('./pages/StrategySelect'));
-const Dashboard     = lazy(() => import('./pages/Dashboard'));
-const Admin         = lazy(() => import('./pages/Admin'));
-const TelegramFeed  = lazy(() => import('./pages/TelegramFeed'));
-const Programmation = lazy(() => import('./pages/Programmation'));
-const SystemLogs    = lazy(() => import('./pages/SystemLogs'));
-const Comptages     = lazy(() => import('./pages/Comptages'));
-const Payment       = lazy(() => import('./pages/Payment'));
+// ── Chargement paresseux + retry anti-page-noire ────────────────────────────
+// Quand on redéploie, les anciens fichiers /assets/Admin-XXXX.js (gardés en
+// cache navigateur) n'existent plus → 404 → React lazy() rejette → page noire.
+// On retry une fois après un court délai, puis on déclenche un rechargement
+// "propre" (paramètre cache-busting) si le chunk est toujours introuvable.
+function lazyWithRetry(factory) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (err) {
+      const msg = String(err?.message || '');
+      const isChunkError =
+        err?.name === 'ChunkLoadError' ||
+        /Loading chunk|Loading CSS chunk|Failed to fetch dynamically imported module|Importing a module script failed|dynamically imported module/i.test(msg);
+      if (isChunkError && typeof window !== 'undefined') {
+        const KEY = '__chunk_reload_ts';
+        const last = parseInt(sessionStorage.getItem(KEY) || '0', 10);
+        const now = Date.now();
+        // Évite la boucle de rechargement (max 1 reload par 30 s)
+        if (now - last > 30000) {
+          sessionStorage.setItem(KEY, String(now));
+          const url = new URL(window.location.href);
+          url.searchParams.set('_v', String(now));
+          window.location.replace(url.toString());
+          // Renvoie un composant vide pendant le rechargement
+          return { default: () => null };
+        }
+      }
+      throw err;
+    }
+  });
+}
+
+const Home          = lazyWithRetry(() => import('./pages/Home'));
+const Login         = lazyWithRetry(() => import('./pages/Login'));
+const Register      = lazyWithRetry(() => import('./pages/Register'));
+const StrategySelect = lazyWithRetry(() => import('./pages/StrategySelect'));
+const Dashboard     = lazyWithRetry(() => import('./pages/Dashboard'));
+const Admin         = lazyWithRetry(() => import('./pages/Admin'));
+const TelegramFeed  = lazyWithRetry(() => import('./pages/TelegramFeed'));
+const Programmation = lazyWithRetry(() => import('./pages/Programmation'));
+const SystemLogs    = lazyWithRetry(() => import('./pages/SystemLogs'));
+const Comptages     = lazyWithRetry(() => import('./pages/Comptages'));
+const Payment       = lazyWithRetry(() => import('./pages/Payment'));
+
+// ── Error boundary : attrape les erreurs de chargement de chunk ─────────────
+// Affiche un écran de récupération (avec bouton "Recharger") au lieu d'une page
+// noire, et tente un rechargement automatique pour les erreurs de chunk.
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    const msg = String(error?.message || '');
+    const isChunkError =
+      error?.name === 'ChunkLoadError' ||
+      /Loading chunk|Loading CSS chunk|Failed to fetch dynamically imported module|Importing a module script failed|dynamically imported module/i.test(msg);
+    if (isChunkError && typeof window !== 'undefined') {
+      const KEY = '__chunk_reload_ts';
+      const last = parseInt(sessionStorage.getItem(KEY) || '0', 10);
+      const now = Date.now();
+      if (now - last > 30000) {
+        sessionStorage.setItem(KEY, String(now));
+        setTimeout(() => {
+          const url = new URL(window.location.href);
+          url.searchParams.set('_v', String(now));
+          window.location.replace(url.toString());
+        }, 200);
+      }
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{
+          minHeight: '100vh', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', padding: 24,
+          background: '#0b0b14', color: '#e2e8f0', textAlign: 'center', gap: 16,
+        }}>
+          <div style={{ fontSize: 48 }}>🔄</div>
+          <h2 style={{ margin: 0, color: '#fbbf24' }}>Mise à jour en cours…</h2>
+          <p style={{ margin: 0, maxWidth: 420, color: '#94a3b8' }}>
+            Une nouvelle version de l'application est disponible.
+            Cliquez sur le bouton ci-dessous pour la charger.
+          </p>
+          <button
+            onClick={() => {
+              try { sessionStorage.removeItem('__chunk_reload_ts'); } catch {}
+              const url = new URL(window.location.href);
+              url.searchParams.set('_v', String(Date.now()));
+              window.location.replace(url.toString());
+            }}
+            style={{
+              padding: '12px 28px', borderRadius: 10, border: 'none',
+              cursor: 'pointer', fontSize: 15, fontWeight: 700,
+              background: 'linear-gradient(135deg,#92400e,#fbbf24)', color: '#fff',
+            }}>
+            🔁 Recharger l'application
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function PageLoader() {
   return (
@@ -60,6 +158,7 @@ function PublicRoute({ children }) {
 export default function App() {
   useUiStyles();
   return (
+    <AppErrorBoundary>
     <AuthProvider>
       <BrowserRouter>
         <Suspense fallback={<PageLoader />}>
@@ -81,5 +180,6 @@ export default function App() {
         </Suspense>
       </BrowserRouter>
     </AuthProvider>
+    </AppErrorBoundary>
   );
 }
