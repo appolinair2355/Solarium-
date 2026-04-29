@@ -1859,6 +1859,7 @@ router.post('/user-messages/:id/reply', requireSuperAdmin, async (req, res) => {
     const msg = messages.find(m => m.id === id);
     if (!msg) return res.status(404).json({ error: 'Message non trouvé' });
     msg.admin_reply = { text: String(text).trim().slice(0, 1000), date: new Date().toISOString() };
+    msg.replied_at = msg.admin_reply.date;
     msg.read = true;
     await db.setSetting('user_messages', JSON.stringify(messages));
     res.json({ ok: true });
@@ -2423,7 +2424,7 @@ router.get('/project-backup/zip-render', requireAdmin, (req, res) => {
     });
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-render-${date}.zip`;
+    const filename = `appomain-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 

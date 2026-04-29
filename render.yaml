@@ -9,9 +9,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 5000
+        value: 10000
+      - key: FORCE_PG_URL
+        value: postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a/sossou
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou
       - key: SESSION_SECRET
         generateValue: true
     healthCheckPath: /
