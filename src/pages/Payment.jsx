@@ -70,8 +70,8 @@ export default function Payment() {
       if (!res.ok) throw new Error(data.error || 'Erreur lors de la création');
       setRequest({ ...data.request, whatsapp_link: data.whatsapp_link });
       setPhase('whatsapp_sent');
-      // Ouvre WhatsApp dans un nouvel onglet
-      window.open(data.whatsapp_link, '_blank', 'noopener,noreferrer');
+      // ⚠ Ne PAS ouvrir WhatsApp automatiquement — l'utilisateur choisit lui-même
+      // entre les boutons « Ouvrir WhatsApp » et « Soumettre ma capture ».
     } catch (e) {
       setError(e.message);
       setSelectedPlan(null);
@@ -336,14 +336,17 @@ export default function Payment() {
                 border: '1px solid rgba(37,211,102,0.3)', borderRadius: 12, marginBottom: 18,
               }}>
                 <div style={{ color: '#86efac', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
-                  💬 WhatsApp s'est ouvert avec votre message pré-rempli
+                  💬 Choisissez comment vous souhaitez payer
                 </div>
                 <ol style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
-                  <li>Envoyez le message au support (<b>{whatsapp.number}</b>)</li>
-                  <li>Le support vous renvoie le lien de paiement</li>
+                  <li>Cliquez sur <b>« Ouvrir WhatsApp »</b> pour contacter le support (<b>{whatsapp.number}</b>)</li>
+                  <li>Le support vous envoie le lien de paiement</li>
                   <li>Effectuez le paiement et prenez une <b>capture d'écran</b></li>
-                  <li>Envoyez la capture dans le panneau « Validation » ci-dessous</li>
+                  <li>Cliquez ensuite sur <b>« Soumettre ma capture »</b> ci-dessous pour validation automatique</li>
                 </ol>
+                <div style={{ marginTop: 12, padding: 10, background: 'rgba(251,191,36,0.08)', border: '1px dashed rgba(251,191,36,0.4)', borderRadius: 8, fontSize: 12, color: '#fcd34d' }}>
+                  ℹ️ <b>Aucune ouverture automatique</b> — vous gardez le contrôle. Si vous avez déjà payé, allez directement à l'étape « Validation ».
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -359,8 +362,21 @@ export default function Payment() {
                     fontWeight: 700, textDecoration: 'none',
                   }}
                 >
-                  💬 Rouvrir WhatsApp ({whatsapp.number})
+                  💬 Ouvrir WhatsApp ({whatsapp.number})
                 </a>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    background: 'linear-gradient(135deg, #fbbf24, #f59e0b)',
+                    color: '#1f2937', padding: '10px 18px', borderRadius: 100,
+                    fontWeight: 700, border: 'none', cursor: 'pointer',
+                  }}
+                >
+                  📸 Soumettre ma capture
+                </button>
                 <button onClick={goBackToPlan} className="btn btn-ghost btn-sm">
                   ← Changer de plan
                 </button>

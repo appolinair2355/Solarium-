@@ -4953,8 +4953,9 @@ function AdminPanel() {
         {/* ── TAB : UTILISATEURS ── */}
         {adminTab === 'utilisateurs' && <>
 
-        {/* ── COMPTES PREMIUM (super admin uniquement) ── */}
-        {isSuperAdmin && <div className="tg-admin-card" style={{ borderColor: 'rgba(250,204,21,0.4)' }}>
+        {/* ── COMPTES PREMIUM — Désactivé : les comptes premium sont désormais
+              créés directement par l'utilisateur lors de l'inscription. ── */}
+        {false && isSuperAdmin && <div className="tg-admin-card" style={{ borderColor: 'rgba(250,204,21,0.4)' }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">⭐</span>
             <div style={{ flex: 1 }}>
