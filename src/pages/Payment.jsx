@@ -308,154 +308,151 @@ export default function Payment() {
           </>
         )}
 
-        {/* ═══════ PHASE 2 : WhatsApp envoyé — Retour + "Valider mon paiement" ═══════ */}
-        {phase === 'whatsapp_sent' && request && (
-          <div style={{
-            maxWidth: 700, margin: '0 auto',
-            background: 'rgba(15,23,42,0.7)', borderRadius: 16,
-            border: '1px solid rgba(37,211,102,0.3)', padding: 26,
-          }}>
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ color: '#25D366', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-                ÉTAPE 1 / 3 — PAIEMENT WHATSAPP
-              </div>
-              <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
-                Plan « {request.plan_label} » — {request.amount_usd} $
-                {request.discount_applied && (
-                  <span style={{ marginLeft: 10, fontSize: 13, color: '#86efac', fontWeight: 600 }}>
-                    🎁 -{referral.discount_percent}% appliqué
-                  </span>
-                )}
-              </h2>
-            </div>
+        {/* ═══════ PHASES 2 & 3 COMBINÉES : Paiement (haut) + Validation (bas) ═══════ */}
+        {(phase === 'whatsapp_sent' || phase === 'screenshot') && request && (
+          <div style={{ maxWidth: 700, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+            {/* ──────── PANNEAU 1 : PAIEMENT WHATSAPP ──────── */}
             <div style={{
-              padding: 18, background: 'rgba(37,211,102,0.08)',
-              border: '1px solid rgba(37,211,102,0.3)', borderRadius: 12, marginBottom: 22,
+              background: 'rgba(15,23,42,0.7)', borderRadius: 16,
+              border: '1px solid rgba(37,211,102,0.3)', padding: 26,
             }}>
-              <div style={{ color: '#86efac', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
-                💬 WhatsApp s'est ouvert avec votre message pré-rempli
-              </div>
-              <ol style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
-                <li>Envoyez le message au support (<b>{whatsapp.number}</b>)</li>
-                <li>Le support vous renvoie le lien de paiement</li>
-                <li>Effectuez le paiement et prenez une <b>capture d'écran</b></li>
-                <li>Revenez ici puis cliquez <b>« Valider mon paiement »</b></li>
-              </ol>
-            </div>
-
-            <a
-              href={request.whatsapp_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                background: 'linear-gradient(135deg, #25D366, #128C7E)',
-                color: '#fff', padding: '12px 22px', borderRadius: 100,
-                fontWeight: 700, textDecoration: 'none', marginBottom: 24,
-              }}
-            >
-              💬 Rouvrir WhatsApp ({whatsapp.number})
-            </a>
-
-            <div style={{
-              display: 'flex', gap: 12, justifyContent: 'space-between',
-              flexWrap: 'wrap', alignItems: 'center',
-            }}>
-              <button onClick={goBackToPlan} className="btn btn-ghost">
-                ← Revenir au choix du plan
-              </button>
-              <button
-                onClick={() => setPhase('screenshot')}
-                className="btn btn-gold"
-                style={{
-                  minWidth: 240, padding: '14px 24px', fontSize: 15,
-                  boxShadow: '0 0 18px rgba(251,191,36,0.35)',
-                }}
-              >
-                ✅ Valider mon paiement
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══════ PHASE 3 : Upload de la capture ═══════ */}
-        {phase === 'screenshot' && request && (
-          <div style={{
-            maxWidth: 700, margin: '0 auto',
-            background: 'rgba(15,23,42,0.7)', borderRadius: 16,
-            border: '1px solid rgba(255,255,255,0.08)', padding: 26,
-          }}>
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-                ÉTAPE 2 / 3 — CAPTURE D'ÉCRAN DU PAIEMENT
-              </div>
-              <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
-                Envoyez la preuve de votre paiement
-              </h2>
-              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
-                Notre IA va vérifier le <b>montant</b>, la <b>devise</b>, la <b>date</b>,
-                la <b>référence</b> et l'<b>identifiant</b> de la transaction.
-              </p>
-            </div>
-
-            {imagePreview ? (
               <div style={{ marginBottom: 18 }}>
-                <img
-                  src={imagePreview}
-                  alt="Aperçu"
-                  style={{
-                    maxWidth: '100%', maxHeight: 360, borderRadius: 12,
-                    border: '2px solid rgba(251,191,36,0.4)', display: 'block', margin: '0 auto',
-                  }}
-                />
-                <div style={{ textAlign: 'center', marginTop: 10 }}>
-                  <button
-                    onClick={() => { setImagePreview(null); setImageBase64(null); setImageMime(null); }}
-                    className="btn btn-ghost btn-sm"
-                  >
-                    🗑 Changer l'image
-                  </button>
+                <div style={{ color: '#25D366', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
+                  ÉTAPE 1 / 2 — PAIEMENT WHATSAPP
                 </div>
+                <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
+                  Plan « {request.plan_label} » — {request.amount_usd} $
+                  {request.discount_applied && (
+                    <span style={{ marginLeft: 10, fontSize: 13, color: '#86efac', fontWeight: 600 }}>
+                      🎁 -{referral.discount_percent}% appliqué
+                    </span>
+                  )}
+                </h2>
               </div>
-            ) : (
-              <label
-                style={{
-                  display: 'block', padding: '40px 20px', borderRadius: 12,
-                  border: '2px dashed rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.04)',
-                  textAlign: 'center', cursor: 'pointer', marginBottom: 18,
-                }}
-              >
-                <div style={{ fontSize: 42, marginBottom: 8 }}>📤</div>
-                <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>
-                  Cliquez pour envoyer la capture d'écran
-                </div>
-                <div style={{ color: '#94a3b8', fontSize: 12 }}>
-                  JPG, PNG — 6 Mo max
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleFile(e.target.files?.[0])}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            )}
 
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <button onClick={() => setPhase('whatsapp_sent')} className="btn btn-ghost btn-sm" disabled={uploading}>
-                ← Précédent
-              </button>
+              <div style={{
+                padding: 16, background: 'rgba(37,211,102,0.08)',
+                border: '1px solid rgba(37,211,102,0.3)', borderRadius: 12, marginBottom: 18,
+              }}>
+                <div style={{ color: '#86efac', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
+                  💬 WhatsApp s'est ouvert avec votre message pré-rempli
+                </div>
+                <ol style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+                  <li>Envoyez le message au support (<b>{whatsapp.number}</b>)</li>
+                  <li>Le support vous renvoie le lien de paiement</li>
+                  <li>Effectuez le paiement et prenez une <b>capture d'écran</b></li>
+                  <li>Envoyez la capture dans le panneau « Validation » ci-dessous</li>
+                </ol>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <a
+                  href={request.whatsapp_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    background: 'linear-gradient(135deg, #25D366, #128C7E)',
+                    color: '#fff', padding: '10px 18px', borderRadius: 100,
+                    fontWeight: 700, textDecoration: 'none',
+                  }}
+                >
+                  💬 Rouvrir WhatsApp ({whatsapp.number})
+                </a>
+                <button onClick={goBackToPlan} className="btn btn-ghost btn-sm">
+                  ← Changer de plan
+                </button>
+              </div>
+            </div>
+
+            {/* ──────── PANNEAU 2 : VALIDATION (CAPTURE D'ÉCRAN) ──────── */}
+            <div style={{
+              background: 'rgba(15,23,42,0.7)', borderRadius: 16,
+              border: '2px solid rgba(251,191,36,0.4)', padding: 26,
+              boxShadow: '0 0 18px rgba(251,191,36,0.15)',
+            }}>
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
+                  ÉTAPE 2 / 2 — VALIDATION : CAPTURE D'ÉCRAN
+                </div>
+                <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
+                  Après paiement réussi, envoyez la preuve ici
+                </h2>
+                <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
+                  Notre IA analysera la capture (<b>montant</b>, <b>devise</b>, <b>date</b>, <b>référence</b>).
+                  Si validée, vous obtenez <b>2 h d'accès immédiat</b> en attendant la confirmation finale de l'administrateur.
+                </p>
+              </div>
+
+              {imagePreview ? (
+                <div style={{ marginBottom: 18 }}>
+                  <img
+                    src={imagePreview}
+                    alt="Aperçu"
+                    style={{
+                      maxWidth: '100%', maxHeight: 360, borderRadius: 12,
+                      border: '2px solid rgba(251,191,36,0.4)', display: 'block', margin: '0 auto',
+                    }}
+                  />
+                  <div style={{ textAlign: 'center', marginTop: 10 }}>
+                    <button
+                      onClick={() => { setImagePreview(null); setImageBase64(null); setImageMime(null); }}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      🗑 Changer l'image
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  style={{
+                    display: 'block', padding: '40px 20px', borderRadius: 12,
+                    border: '2px dashed rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.04)',
+                    textAlign: 'center', cursor: 'pointer', marginBottom: 18,
+                  }}
+                >
+                  <div style={{ fontSize: 42, marginBottom: 8 }}>📤</div>
+                  <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>
+                    Cliquez pour envoyer la capture d'écran
+                  </div>
+                  <div style={{ color: '#94a3b8', fontSize: 12 }}>
+                    JPG, PNG — 6 Mo max
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              )}
+
               <button
                 onClick={submitScreenshot}
                 disabled={!imageBase64 || uploading}
                 className="btn btn-gold"
-                style={{ minWidth: 220 }}
+                style={{
+                  width: '100%', padding: '14px 24px', fontSize: 15,
+                  boxShadow: '0 0 18px rgba(251,191,36,0.35)',
+                }}
               >
-                {uploading ? <><span className="btn-spinner" /> Envoi...</> : '🤖 Vérifier avec l\'IA'}
+                {uploading
+                  ? <><span className="btn-spinner" /> Envoi à l'IA et à l'administrateur…</>
+                  : '🤖 Envoyer la capture (IA + Administrateur)'}
               </button>
+
+              <div style={{
+                marginTop: 14, padding: 12, borderRadius: 10,
+                background: 'rgba(59,130,246,0.08)',
+                border: '1px solid rgba(59,130,246,0.25)',
+                color: '#93c5fd', fontSize: 12, lineHeight: 1.6, textAlign: 'center',
+              }}>
+                ℹ️ La capture sera envoyée à l'administrateur pour confirmation.
+                Si l'IA la valide, vous aurez accès pendant <b>2 h</b> en attendant l'accord final.
+              </div>
             </div>
           </div>
         )}
