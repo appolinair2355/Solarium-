@@ -91,20 +91,35 @@ class AppErrorBoundary extends Component {
             Une nouvelle version de l'application est disponible.
             Cliquez sur le bouton ci-dessous pour la charger.
           </p>
-          <button
-            onClick={() => {
-              try { sessionStorage.removeItem('__chunk_reload_ts'); } catch {}
-              const url = new URL(window.location.href);
-              url.searchParams.set('_v', String(Date.now()));
-              window.location.replace(url.toString());
-            }}
-            style={{
-              padding: '12px 28px', borderRadius: 10, border: 'none',
-              cursor: 'pointer', fontSize: 15, fontWeight: 700,
-              background: 'linear-gradient(135deg,#92400e,#fbbf24)', color: '#fff',
-            }}>
-            🔁 Recharger l'application
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button
+              onClick={() => {
+                try { sessionStorage.removeItem('__chunk_reload_ts'); } catch {}
+                const url = new URL(window.location.href);
+                url.searchParams.set('_v', String(Date.now()));
+                window.location.replace(url.toString());
+              }}
+              style={{
+                padding: '12px 28px', borderRadius: 10, border: 'none',
+                cursor: 'pointer', fontSize: 15, fontWeight: 700,
+                background: 'linear-gradient(135deg,#92400e,#fbbf24)', color: '#fff',
+              }}>
+              🔁 Recharger l'application
+            </button>
+            <button
+              onClick={() => {
+                try { sessionStorage.clear(); localStorage.clear(); } catch {}
+                window.location.replace('/');
+              }}
+              style={{
+                padding: '12px 28px', borderRadius: 10,
+                border: '1px solid rgba(148,163,184,0.3)',
+                cursor: 'pointer', fontSize: 15, fontWeight: 700,
+                background: 'transparent', color: '#cbd5e1',
+              }}>
+              🏠 Retour à l'accueil
+            </button>
+          </div>
         </div>
       );
     }
