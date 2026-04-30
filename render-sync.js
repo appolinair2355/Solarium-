@@ -22,6 +22,41 @@ let renderPool = null;
 let currentUrl = null;
 let _gameOneHandled = false;
 
+// ── Circuit-breaker ──────────────────────────────────────────────────
+// Sur Render free, la base externe peut s'endormir et générer en boucle
+// "Connection terminated unexpectedly" / ECONNRESET. On suspend les écritures
+// pendant un cooldown après plusieurs échecs consécutifs, puis on retente.
+let _consecFailures   = 0;
+let _circuitOpenUntil = 0;       // timestamp ms ; 0 = circuit fermé (sync OK)
+const FAIL_THRESHOLD     = 4;    // après N échecs ⇒ ouvre le circuit
+const COOLDOWN_MS        = 60_000; // 1 min de pause à chaque ouverture
+const COOLDOWN_MAX_MS    = 5 * 60_000; // plafond du backoff
+let _circuitOpens = 0;           // nb d'ouvertures consécutives (pour backoff)
+let _lastCircuitLog = 0;         // throttle des logs "circuit ouvert"
+
+function _circuitIsOpen() {
+  return Date.now() < _circuitOpenUntil;
+}
+
+function _onSuccess() {
+  if (_consecFailures > 0 || _circuitOpens > 0) {
+    console.log('[RenderSync] ✅ Connexion rétablie — circuit refermé');
+  }
+  _consecFailures = 0;
+  _circuitOpens   = 0;
+  _circuitOpenUntil = 0;
+}
+
+function _onFailure(msg) {
+  _consecFailures += 1;
+  if (_consecFailures >= FAIL_THRESHOLD && !_circuitIsOpen()) {
+    _circuitOpens += 1;
+    const wait = Math.min(COOLDOWN_MS * Math.pow(2, _circuitOpens - 1), COOLDOWN_MAX_MS);
+    _circuitOpenUntil = Date.now() + wait;
+    console.warn(`[RenderSync] 🛑 Base externe instable (${_consecFailures} échecs consécutifs) — pause ${Math.round(wait / 1000)}s`);
+  }
+}
+
 // ── Connexion ────────────────────────────────────────────────────────
 
 const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
@@ -45,22 +80,41 @@ function _createPool(url) {
 }
 
 // ── Wrapper avec retry automatique (reconnect si "Connection terminated") ──
+// + circuit-breaker pour ne pas spammer les logs quand la base externe est down.
 async function _query(sql, params, retries = 2) {
+  if (_circuitIsOpen()) {
+    // Throttle : ne logge "circuit ouvert" qu'une fois par 30 s
+    const now = Date.now();
+    if (now - _lastCircuitLog > 30_000) {
+      const remaining = Math.max(0, Math.round((_circuitOpenUntil - now) / 1000));
+      console.log(`[RenderSync] ⏸  sync suspendue — reprise dans ${remaining}s`);
+      _lastCircuitLog = now;
+    }
+    const e = new Error('RenderSync: circuit ouvert (base externe injoignable)');
+    e.code = 'CIRCUIT_OPEN';
+    throw e;
+  }
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (!renderPool) throw new Error('Pool non initialisé');
     try {
-      return await renderPool.query(sql, params);
+      const r = await renderPool.query(sql, params);
+      _onSuccess();
+      return r;
     } catch (e) {
       const msg = (e && e.message) || '';
       const transient = /Connection terminated|ECONNRESET|read ECONNRESET|server closed the connection|terminat/i.test(msg);
       if (transient && attempt < retries) {
-        console.warn(`[RenderSync] 🔁 Retry ${attempt + 1}/${retries} — ${msg}`);
+        // Logs réduits : silencieux après le 1ᵉʳ échec consécutif (déjà bruyant)
+        if (_consecFailures < 1) {
+          console.warn(`[RenderSync] 🔁 Retry ${attempt + 1}/${retries} — ${msg}`);
+        }
         // Recrée le pool si la connexion a été perdue
         try { await renderPool.end(); } catch {}
         renderPool = _createPool(currentUrl);
         await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
         continue;
       }
+      _onFailure(msg);
       throw e;
     }
   }
@@ -93,7 +147,7 @@ async function loadRenderUrl() {
       }
     }
   } catch (e) {
-    console.error('[RenderSync] Erreur chargement URL:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur chargement URL:', e.message);
     // Ne pas détruire le pool — on tentera à la prochaine sync
   }
 }
@@ -182,7 +236,7 @@ async function initRenderDb() {
 
     console.log('[RenderSync] Tables initialisées');
   } catch (e) {
-    console.error('[RenderSync] Erreur init tables:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur init tables:', e.message);
   }
 }
 
@@ -244,7 +298,7 @@ async function _pullFromExternal() {
     } catch {}
 
   } catch (e) {
-    console.error('[RenderSync] Erreur extraction externe:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur extraction externe:', e.message);
   }
 }
 
@@ -270,7 +324,7 @@ async function _pushVerifiedPredictions() {
     }
     console.log(`[RenderSync] → ${r.rows.length} prédiction(s) poussée(s)`);
   } catch (e) {
-    console.error('[RenderSync] Erreur push prédictions:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur push prédictions:', e.message);
   }
 }
 
@@ -283,7 +337,7 @@ async function syncAllUsers() {
     for (const u of users) await syncUser(u);
     if (users.length) console.log(`[RenderSync] → ${users.length} utilisateur(s) synchronisé(s)`);
   } catch (e) {
-    console.error('[RenderSync] Erreur sync utilisateurs:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync utilisateurs:', e.message);
   }
 }
 
@@ -308,7 +362,7 @@ async function syncUser(u) {
         u.subscription_expires_at || null, u.subscription_duration_minutes || null,
         u.created_at || new Date().toISOString()]);
   } catch (e) {
-    console.error('[RenderSync] Erreur sync user:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync user:', e.message);
   }
 }
 
@@ -330,7 +384,7 @@ async function syncStrategies() {
     }
     console.log(`[RenderSync] → ${list.length} stratégie(s) synchronisée(s)`);
   } catch (e) {
-    console.error('[RenderSync] Erreur sync stratégies:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync stratégies:', e.message);
   }
 }
 
@@ -351,7 +405,7 @@ async function syncAllSettings() {
       if (val !== null) await _upsertSetting(key, val);
     }
   } catch (e) {
-    console.error('[RenderSync] Erreur sync settings:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync settings:', e.message);
   }
 }
 
@@ -369,7 +423,7 @@ async function _upsertSetting(key, value) {
       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, synced_at=NOW()
     `, [key, value]);
   } catch (e) {
-    console.error(`[RenderSync] Erreur upsert setting ${key}:`, e.message);
+    if (e.code !== "CIRCUIT_OPEN") console.error(`[RenderSync] Erreur upsert setting ${key}:`, e.message);
   }
 }
 
@@ -385,7 +439,7 @@ async function syncTelegramChannels() {
     }
     console.log(`[RenderSync] → ${channels.length} canal(aux) Telegram synchronisé(s)`);
   } catch (e) {
-    console.error('[RenderSync] Erreur sync canaux Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync canaux Telegram:', e.message);
   }
 }
 
@@ -402,7 +456,7 @@ async function syncDeleteTelegramChannel(channelId) {
       [String(channelId)]
     );
   } catch (e) {
-    console.error('[RenderSync] Erreur suppression canal Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur suppression canal Telegram:', e.message);
   }
 }
 
@@ -417,7 +471,7 @@ async function _upsertTelegramChannel(ch) {
         synced_at    = NOW()
     `, [String(ch.channel_id), ch.channel_name || ch.channel_id, ch.enabled !== false]);
   } catch (e) {
-    console.error('[RenderSync] Erreur upsert canal Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur upsert canal Telegram:', e.message);
   }
 }
 
@@ -450,7 +504,7 @@ async function syncVerifiedPrediction(pred) {
       pred.created_at   || new Date().toISOString(),
     ]);
   } catch (e) {
-    console.error('[RenderSync] Erreur sync prédiction:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync prédiction:', e.message);
   }
 }
 
@@ -465,7 +519,7 @@ async function handleGameOne(gameNumber) {
     const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
   } catch (e) {
-    console.error('[RenderSync] Erreur reset jeu #1:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur reset jeu #1:', e.message);
     _gameOneHandled = false;
   }
 }
@@ -517,7 +571,7 @@ async function clearExternalPredictions() {
     console.log(`[RenderSync] 🧹 ${r.rowCount} prédiction(s) effacée(s) de la base Render externe`);
     return r.rowCount;
   } catch (e) {
-    console.error('[RenderSync] Erreur clearExternalPredictions:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur clearExternalPredictions:', e.message);
     return 0;
   }
 }

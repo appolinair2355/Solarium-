@@ -3644,6 +3644,139 @@ router.post('/pro-config/reload', requireProOrAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ════════════════════════════════════════════════════════════════════
+// STRATÉGIES PRO — gestion globale des cibles Telegram (panneau admin)
+// Permet à l'admin d'afficher TOUTES les stratégies Pro (S5001-S5100)
+// dans l'onglet Telegram et de configurer un bot_token + channel_id
+// par stratégie, exactement comme pour les stratégies "simples".
+// ════════════════════════════════════════════════════════════════════
+
+// GET : liste enrichie de TOUTES les stratégies Pro (admin uniquement)
+//       avec leurs cibles Telegram actuelles.
+router.get('/pro-strategies-tg', requireAdmin, async (req, res) => {
+  try {
+    const list = await getProStrategiesList();
+    const strategies = [];
+    for (const s of list) {
+      const metaRaw = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
+      const meta = metaRaw ? JSON.parse(metaRaw) : {};
+      const info = meta.strategy_info || {};
+      let owner_username = null;
+      if (meta.owner_user_id || s.owner_user_id) {
+        try {
+          const u = await db.getUser(meta.owner_user_id || s.owner_user_id);
+          owner_username = u?.username || null;
+        } catch {}
+      }
+      strategies.push({
+        id: s.id,
+        owner_user_id: meta.owner_user_id || s.owner_user_id || null,
+        owner_username,
+        filename: meta.filename || s.filename || '',
+        strategy_name: meta.strategy_name || s.strategy_name || `Stratégie S${s.id}`,
+        engine_type: meta.engine_type || s.engine_type || null,
+        engine_loaded: meta.engine_loaded ?? true,
+        hand: info.hand || 'joueur',
+        decalage: info.decalage ?? null,
+        max_rattrapage: info.max_rattrapage ?? 2,
+        tg_targets: Array.isArray(meta.tg_targets) ? meta.tg_targets : [],
+        // Repli sur la config "globale" du propriétaire si la stratégie n'a
+        // pas de cible dédiée (utile pour l'affichage dans l'UI).
+        owner_default_telegram: null,
+      });
+    }
+    // Charger les configs Telegram Pro globales par owner (repli)
+    const ownerCfgRows = await db.pool.query(
+      `SELECT key, value FROM settings WHERE key LIKE 'pro_telegram_config_%'`
+    );
+    const ownerCfgs = {};
+    for (const r of ownerCfgRows.rows) {
+      try {
+        const oid = r.key.replace('pro_telegram_config_', '');
+        ownerCfgs[oid] = JSON.parse(r.value);
+      } catch {}
+    }
+    for (const s of strategies) {
+      const cfg = s.owner_user_id != null ? ownerCfgs[String(s.owner_user_id)] : null;
+      if (cfg && (cfg.bot_token || cfg.channel_id)) {
+        s.owner_default_telegram = {
+          bot_token_preview: cfg.bot_token ? cfg.bot_token.slice(0, 12) + '…' : null,
+          channel_id: cfg.channel_id || null,
+        };
+      }
+    }
+    res.json({ strategies });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT : mettre à jour les cibles Telegram d'UNE stratégie Pro (admin only)
+//       Body : { tg_targets: [{ bot_token, channel_id, format }] }
+router.put('/pro-strategies/:id/tg-targets', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID invalide' });
+    const list = await getProStrategiesList();
+    const found = list.find(s => s.id === id);
+    if (!found) return res.status(404).json({ error: 'Stratégie introuvable' });
+
+    const raw = req.body && req.body.tg_targets;
+    if (!Array.isArray(raw)) return res.status(400).json({ error: 'tg_targets doit être un tableau' });
+
+    const targets = raw
+      .map(t => {
+        if (!t || typeof t !== 'object') return null;
+        const bot_token  = String(t.bot_token  || '').trim();
+        const channel_id = String(t.channel_id || '').trim();
+        if (!bot_token && !channel_id) return null;
+        const fmt = parseInt(t.format);
+        return {
+          bot_token,
+          channel_id,
+          format: Number.isFinite(fmt) ? fmt : 1,
+        };
+      })
+      .filter(Boolean);
+
+    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+    const meta = metaRaw ? JSON.parse(metaRaw) : { id };
+    meta.tg_targets = targets;
+    meta.updated_at = new Date().toISOString();
+    await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(meta));
+
+    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+    console.log(`[Pro S${id}] 🛰  ${targets.length} cible(s) Telegram enregistrée(s) par admin`);
+    res.json({ ok: true, id, tg_targets: targets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST : envoyer un message de test sur la 1ʳᵉ cible Telegram d'une stratégie Pro
+router.post('/pro-strategies/:id/tg-test', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+    const meta = metaRaw ? JSON.parse(metaRaw) : null;
+    const target = (meta?.tg_targets || []).find(t => t.bot_token && t.channel_id);
+    if (!target) return res.status(400).json({ error: 'Aucune cible Telegram complète configurée pour cette stratégie' });
+    const text = `🧪 Test cible Telegram — Stratégie Pro S${id} "${meta?.strategy_name || ''}"`;
+    const tgRes = await fetch(`https://api.telegram.org/bot${target.bot_token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: target.channel_id, text }),
+    });
+    const data = await tgRes.json().catch(() => ({}));
+    if (!tgRes.ok || data.ok === false) {
+      return res.status(502).json({ ok: false, error: data.description || `HTTP ${tgRes.status}` });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════
 // FORMATS DE MESSAGE PERSONNALISÉS (custom_tg_formats)
 // Stockés en DB, nombre illimité, référençables par tg_format > 18
@@ -3729,7 +3862,9 @@ router.post('/live-broadcast/targets/:id/test', requireAdmin, async (req, res) =
 // ─────────────────────────────────────────────────────────────────────────────
 const cartesStore = require('./cartes-store');
 
-router.get('/cartes', requireAdmin, async (req, res) => {
+// Ouvert aux comptes Pro et Admin pour que les stratégies Pro puissent
+// inspecter les cartes depuis l'interface "Gestionnaire des cartes".
+router.get('/cartes', requireProOrAdmin, async (req, res) => {
   try {
     const filters = {
       date:        req.query.date       || null,
@@ -3747,7 +3882,7 @@ router.get('/cartes', requireAdmin, async (req, res) => {
   }
 });
 
-router.get('/cartes/stats', requireAdmin, async (req, res) => {
+router.get('/cartes/stats', requireProOrAdmin, async (req, res) => {
   try {
     const stats = await cartesStore.statsGlobal();
     res.json({ stats });
@@ -3756,7 +3891,29 @@ router.get('/cartes/stats', requireAdmin, async (req, res) => {
   }
 });
 
-router.get('/cartes/:gn', requireAdmin, async (req, res) => {
+// Ping santé de la base `les_cartes` (Render externe). Permet à l'UI
+// d'afficher un indicateur clair si la base est inaccessible (free tier
+// Render endormie, DNS, etc.) — utile quand les stratégies Pro semblent
+// "incapables de prédire".
+router.get('/cartes/health', requireProOrAdmin, async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const stats = await cartesStore.statsGlobal();
+    const ms = Date.now() - t0;
+    res.json({
+      ok: true,
+      latency_ms: ms,
+      total_games: stats ? Number(stats.total) : 0,
+      gn_min: stats?.gn_min ?? null,
+      gn_max: stats?.gn_max ?? null,
+      checked_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message, latency_ms: Date.now() - t0 });
+  }
+});
+
+router.get('/cartes/:gn', requireProOrAdmin, async (req, res) => {
   try {
     const row = await cartesStore.byGameNumber(req.params.gn);
     if (!row) return res.status(404).json({ error: 'introuvable' });

@@ -656,6 +656,73 @@ function AdminPanel() {
   const [tgSaveModal, setTgSaveModal]     = useState(null); // modal de confirmation post-save
   const [stratChSaving, setStratChSaving] = useState(false);
 
+  // ── Stratégies Pro (S5001-S5100) — onglet Telegram admin ─────────────
+  const [proStratsTg, setProStratsTg]   = useState([]); // [{id, owner_username, strategy_name, tg_targets:[]}, ...]
+  const [proStratsTgLoading, setProStratsTgLoading] = useState(false);
+  const [proStratTgForm, setProStratTgForm] = useState({}); // { [proId]: { bot_token, channel_id, tg_format } }
+  const [proStratTgSaving, setProStratTgSaving] = useState({}); // { [proId]: bool }
+  const [proStratTgOpen, setProStratTgOpen] = useState(null);   // id de stratégie Pro ouverte pour édition
+
+  const loadProStratsTg = useCallback(async () => {
+    try {
+      setProStratsTgLoading(true);
+      const r = await fetch('/api/admin/pro-strategies-tg', { credentials: 'include' });
+      if (!r.ok) { setProStratsTg([]); return; }
+      const d = await r.json();
+      setProStratsTg(Array.isArray(d.strategies) ? d.strategies : []);
+    } catch { setProStratsTg([]); }
+    finally { setProStratsTgLoading(false); }
+  }, []);
+
+  const saveProStratTgTarget = async (id) => {
+    const f = proStratTgForm[id] || { bot_token: '', channel_id: '', tg_format: null };
+    const bot = (f.bot_token || '').trim();
+    const ch  = (f.channel_id || '').trim();
+    if (!bot || !ch) { alert('Renseignez le bot_token ET le channel_id'); return; }
+    try {
+      setProStratTgSaving(p => ({ ...p, [id]: true }));
+      const cur  = proStratsTg.find(s => s.id === id);
+      const keep = (cur?.tg_targets || []).filter(t => t.channel_id !== ch);
+      const tg_targets = [...keep, { bot_token: bot, channel_id: ch, format: f.tg_format ? parseInt(f.tg_format) : 1 }];
+      const r = await fetch(`/api/admin/pro-strategies/${id}/tg-targets`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tg_targets }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setProStratTgForm(p => ({ ...p, [id]: { bot_token: '', channel_id: '', tg_format: null } }));
+      await loadProStratsTg();
+    } catch (e) { alert('❌ ' + e.message); }
+    finally { setProStratTgSaving(p => ({ ...p, [id]: false })); }
+  };
+
+  const removeProStratTgTarget = async (id, channelId) => {
+    if (!confirm(`Supprimer la cible ${channelId} de la stratégie Pro S${id} ?`)) return;
+    try {
+      const cur  = proStratsTg.find(s => s.id === id);
+      const tg_targets = (cur?.tg_targets || []).filter(t => t.channel_id !== channelId);
+      const r = await fetch(`/api/admin/pro-strategies/${id}/tg-targets`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tg_targets }),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
+      await loadProStratsTg();
+    } catch (e) { alert('❌ ' + e.message); }
+  };
+
+  const testProStratTg = async (id) => {
+    try {
+      const r = await fetch(`/api/admin/pro-strategies/${id}/tg-test`, {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || 'Erreur');
+      alert('✅ Message de test envoyé');
+    } catch (e) { alert('❌ ' + e.message); }
+  };
+
   // Sous-formulaire d'annonce planifiée (par canal : C1/C2/C3/DC ou stratID)
   const ANN_SUB_BLANK = { open: false, text: '', schedule_type: 'interval', interval_hours: 1, times_input: '', media_type: '', media_url: '' };
   const [annSubForms, setAnnSubForms] = useState({});
@@ -1430,7 +1497,7 @@ function AdminPanel() {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadProStratsTg(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadProStratsTg]);
 
   // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir, carte_3_vers_2, carte_2_vers_3
   useEffect(() => {
@@ -2494,6 +2561,197 @@ function AdminPanel() {
             </div>
           );
         })()}
+
+        {/* ════════════════════════════════════════════════
+            ── STRATÉGIES PRO (S5001-S5100) — config Telegram ──
+            Visible uniquement dans l'onglet Telegram, comme demandé,
+            pour pouvoir configurer les bot_token + channel_id par
+            stratégie Pro exactement comme les stratégies simples.
+        ════════════════════════════════════════════════ */}
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.45)', marginTop: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔷</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Stratégies Pro — cibles Telegram</h2>
+              <p className="tg-admin-sub">
+                Toutes les stratégies Pro importées (S5001 à S5100) tous propriétaires confondus. Configurez ici un <strong>bot_token</strong> et un <strong>channel_id</strong> dédiés à chaque stratégie. À défaut, la stratégie envoie sur la <em>config Telegram du propriétaire</em>.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={loadProStratsTg}
+              disabled={proStratsTgLoading}
+              style={{ marginLeft: 8 }}
+            >
+              {proStratsTgLoading ? '⏳ …' : '🔄 Recharger'}
+            </button>
+            <span className="tg-badge-connected" style={{ marginLeft: 8 }}>{proStratsTg.length} pro</span>
+          </div>
+
+          {proStratsTg.length === 0 && !proStratsTgLoading && (
+            <div style={{ padding: '20px 4px', color: '#64748b', textAlign: 'center', fontSize: 13 }}>
+              Aucune stratégie Pro importée pour le moment. Demandez à un compte Pro d'en charger une depuis sa Config Pro.
+            </div>
+          )}
+
+          {proStratsTg.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+              {proStratsTg.map(p => {
+                const targets = p.tg_targets || [];
+                const open = proStratTgOpen === p.id;
+                const f = proStratTgForm[p.id] || { bot_token: '', channel_id: '', tg_format: null };
+                return (
+                  <div key={p.id} style={{
+                    background: 'rgba(99,102,241,0.06)',
+                    border: '1px solid rgba(99,102,241,0.25)',
+                    borderRadius: 10, padding: '12px 16px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 22 }}>🔷</div>
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 15 }}>{p.strategy_name}</span>
+                          <span style={{ fontSize: 11, color: '#818cf8', fontWeight: 700 }}>S{p.id}</span>
+                          {p.engine_type && (
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>
+                              {p.engine_type}
+                            </span>
+                          )}
+                          <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+                            background: p.hand === 'banquier' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+                            color: p.hand === 'banquier' ? '#f87171' : '#4ade80',
+                          }}>
+                            {p.hand === 'banquier' ? '🎮 Banquier' : '🤖 Joueur'}
+                          </span>
+                          {targets.length > 0 ? (
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
+                              background: 'rgba(34,158,217,0.18)', color: '#229ed9', border: '1px solid rgba(34,158,217,0.4)',
+                            }} title={targets.map(t => t.channel_id).join(', ')}>
+                              ✈️ {targets.length} cible{targets.length > 1 ? 's' : ''} dédiée{targets.length > 1 ? 's' : ''}
+                            </span>
+                          ) : p.owner_default_telegram ? (
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
+                              background: 'rgba(168,85,247,0.15)', color: '#a78bfa', border: '1px solid rgba(168,85,247,0.35)',
+                            }} title={`Hérite de Config Pro de ${p.owner_username || `uid=${p.owner_user_id}`}`}>
+                              🪪 Config Pro propriétaire
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700,
+                              background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)',
+                            }}>⚠️ Aucun canal — n'envoie rien</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+                          {p.filename}
+                          {p.owner_username && <> · 👤 <span style={{ color: '#cbd5e1' }}>{p.owner_username}</span></>}
+                          {p.decalage != null && <> · décalage +{p.decalage}</>}
+                          <> · R{p.max_rattrapage}</>
+                        </div>
+                        {targets.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                            {targets.map(t => (
+                              <span key={`${t.channel_id}_${t.bot_token?.slice(0,6)}`} style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                fontSize: 11, padding: '3px 8px', borderRadius: 6,
+                                background: 'rgba(34,158,217,0.1)', color: '#7dd3fc',
+                                border: '1px solid rgba(34,158,217,0.3)',
+                              }}>
+                                ✈️ {t.channel_id} · fmt {t.format ?? 1}
+                                <button
+                                  type="button"
+                                  onClick={() => removeProStratTgTarget(p.id, t.channel_id)}
+                                  title="Retirer cette cible"
+                                  style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, padding: 0 }}
+                                >✕</button>
+                              </span>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => testProStratTg(p.id)}
+                              style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.1)', color: '#4ade80', cursor: 'pointer', fontWeight: 600 }}
+                            >🧪 Tester l'envoi</button>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => setProStratTgOpen(open ? null : p.id)}
+                          style={{
+                            fontSize: 12, padding: '6px 12px', borderRadius: 6,
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            background: open ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.08)',
+                            color: '#a5b4fc', cursor: 'pointer', fontWeight: 700,
+                          }}
+                        >
+                          {open ? '▾ Fermer' : '✈️ Ajouter une cible'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {open && (
+                      <div style={{
+                        marginTop: 12, padding: 12, borderRadius: 8,
+                        background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(99,102,241,0.25)',
+                      }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Bot token</label>
+                            <input
+                              type="text"
+                              value={f.bot_token}
+                              onChange={e => setProStratTgForm(p2 => ({ ...p2, [p.id]: { ...f, bot_token: e.target.value } }))}
+                              placeholder="123456:ABCdef..."
+                              style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Channel ID</label>
+                            <input
+                              type="text"
+                              value={f.channel_id}
+                              onChange={e => setProStratTgForm(p2 => ({ ...p2, [p.id]: { ...f, channel_id: e.target.value } }))}
+                              placeholder="-100123456..."
+                              style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Format (1-10)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="10"
+                              value={f.tg_format ?? ''}
+                              onChange={e => setProStratTgForm(p2 => ({ ...p2, [p.id]: { ...f, tg_format: e.target.value } }))}
+                              placeholder="1"
+                              style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            onClick={() => setProStratTgOpen(null)}
+                            style={{ fontSize: 12, padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
+                          >Annuler</button>
+                          <button
+                            type="button"
+                            onClick={() => saveProStratTgTarget(p.id)}
+                            disabled={!!proStratTgSaving[p.id]}
+                            style={{ fontSize: 12, padding: '7px 14px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                          >
+                            {proStratTgSaving[p.id] ? '⏳ Enregistrement…' : '💾 Enregistrer la cible'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         </>}
 
