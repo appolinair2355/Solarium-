@@ -3544,6 +3544,9 @@ router.post('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
       catch (e) { engineError = e.message; console.error('[Pro] Erreur rechargement moteur:', e.message); }
     }
 
+    // Synchroniser cette stratégie Pro vers la base externe (Render)
+    renderSync.syncProStrategy(meta, content).catch(() => {});
+
     res.json({ ok: true, id: entryId, owner_user_id: entryOwnerId, isUpdate, meta, warnings: analysis.warnings, engine_error: engineError || undefined });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3599,16 +3602,36 @@ router.delete('/pro-strategy-file/:id', requireProOrAdmin, async (req, res) => {
     if (!req.session.isAdmin && found.owner_user_id !== req.session.userId) {
       return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
     }
+    const stratKey = `S${id}`;
+
+    // 1. Retirer de la liste globale (et rafraîchir pro_strategy_ids)
     list = list.filter(s => s.id !== id);
     await saveProStrategiesList(list);
-    await db.setSetting(`pro_strategy_${id}_content`, '');
-    await db.setSetting(`pro_strategy_${id}_meta`, '');
+
+    // 2. Effacer RÉELLEMENT les rangées settings (pas juste set value='')
+    await db.deleteSetting(`pro_strategy_${id}_content`).catch(() => {});
+    await db.deleteSetting(`pro_strategy_${id}_meta`).catch(() => {});
+
+    // 3. Supprimer toutes les prédictions liées à cette stratégie
     try {
-      const removed = await db.deleteStrategyPredictions(`S${id}`).catch(() => 0);
+      const removed = await db.deleteStrategyPredictions(stratKey).catch(() => 0);
       if (removed) console.log(`[Pro S${id}] ${removed} prédiction(s) supprimée(s) avec la stratégie`);
     } catch {}
+
+    // 4. Supprimer les références Telegram (mappings prediction↔message_id) et annuler les pending
+    try { await db.deleteTgMsgIdsForStrategy(stratKey); } catch {}
+    try {
+      const { cancelStrategyMessages } = require('./telegram-service');
+      await cancelStrategyMessages(stratKey);
+    } catch {}
+
+    // 5. Recharger le moteur pour purger la stratégie de la mémoire
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    console.log(`[Pro S${id}][uid=${found.owner_user_id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée`);
+
+    // 6. Supprimer aussi de la base externe (Render)
+    renderSync.syncDeleteStrategy(id).catch(() => {});
+
+    console.log(`[Pro S${id}][uid=${found.owner_user_id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée (DB local + DB Render + prédictions + messages TG)`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3619,19 +3642,27 @@ router.delete('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
     const ownerId = effectiveOwnerId(req);
     const fullList = await getProStrategiesList();
     const toDelete = fullList.filter(s => s.owner_user_id === ownerId);
+    const { cancelStrategyMessages } = require('./telegram-service');
     for (const s of toDelete) {
-      await db.setSetting(`pro_strategy_${s.id}_content`, '');
-      await db.setSetting(`pro_strategy_${s.id}_meta`, '');
-      try { await db.deleteStrategyPredictions(`S${s.id}`); } catch {}
+      const stratKey = `S${s.id}`;
+      // Effacer pour de bon les settings (au lieu de set value='')
+      await db.deleteSetting(`pro_strategy_${s.id}_content`).catch(() => {});
+      await db.deleteSetting(`pro_strategy_${s.id}_meta`).catch(() => {});
+      try { await db.deleteStrategyPredictions(stratKey); } catch {}
+      try { await db.deleteTgMsgIdsForStrategy(stratKey); } catch {}
+      try { await cancelStrategyMessages(stratKey); } catch {}
+      // Supprimer de la base externe
+      renderSync.syncDeleteStrategy(s.id).catch(() => {});
     }
     const remaining = fullList.filter(s => s.owner_user_id !== ownerId);
     await saveProStrategiesList(remaining);
     // Legacy cleanup uniquement si on supprime tout en mode admin (no remaining)
     if (!remaining.length && req.session.isAdmin) {
-      await db.setSetting('pro_strategy_file_meta', '');
-      await db.setSetting('pro_strategy_file_content', '');
+      await db.deleteSetting('pro_strategy_file_meta').catch(() => {});
+      await db.deleteSetting('pro_strategy_file_content').catch(() => {});
     }
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+    console.log(`[Pro][uid=${ownerId}] 🗑 ${toDelete.length} stratégie(s) Pro supprimée(s) (DB local + DB Render + prédictions + messages TG)`);
     res.json({ ok: true, deleted: toDelete.length, owner_user_id: ownerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3746,6 +3777,10 @@ router.put('/pro-strategies/:id/tg-targets', requireAdmin, async (req, res) => {
     await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(meta));
 
     try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
+
+    // Resynchroniser cette stratégie Pro vers la base externe (Render)
+    renderSync.syncProStrategy(meta).catch(() => {});
+
     console.log(`[Pro S${id}] 🛰  ${targets.length} cible(s) Telegram enregistrée(s) par admin`);
     res.json({ ok: true, id, tg_targets: targets });
   } catch (e) {

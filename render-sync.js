@@ -372,19 +372,91 @@ async function syncStrategies() {
   if (!renderPool) return;
   try {
     const raw = await db.getSetting('custom_strategies');
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed) ? parsed : [parsed];
-    for (const s of list) {
-      await _query(`
-        INSERT INTO strategies_export (id, data, synced_at)
-        VALUES ($1,$2,NOW())
-        ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
-      `, [s.id, JSON.stringify(s)]);
+    let count = 0;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      for (const s of list) {
+        await _query(`
+          INSERT INTO strategies_export (id, data, synced_at)
+          VALUES ($1,$2,NOW())
+          ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
+        `, [s.id, JSON.stringify(s)]);
+      }
+      count = list.length;
     }
-    console.log(`[RenderSync] → ${list.length} stratégie(s) synchronisée(s)`);
+    // Sync également les stratégies Pro (S5001-S5100) dans la même table
+    const proCount = await syncProStrategies();
+    if (count + proCount > 0) {
+      console.log(`[RenderSync] → ${count} stratégie(s) custom + ${proCount} stratégie(s) Pro synchronisée(s)`);
+    }
   } catch (e) {
     if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync stratégies:', e.message);
+  }
+}
+
+// ── Sync stratégies Pro (S5001-S5100) ────────────────────────────────
+// Pousse meta + contenu de chaque stratégie Pro vers strategies_export.
+// Le payload `data` contient {kind:'pro', meta, content} pour distinguer
+// les stratégies Pro des stratégies custom dans la base externe.
+async function syncProStrategies() {
+  if (!renderPool) return 0;
+  try {
+    const raw = await db.getSetting('pro_strategies_list').catch(() => null);
+    if (!raw) return 0;
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list) || !list.length) return 0;
+    let synced = 0;
+    for (const s of list) {
+      try {
+        const metaRaw = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
+        const meta = metaRaw ? JSON.parse(metaRaw) : { ...s };
+        const content = await db.getSetting(`pro_strategy_${s.id}_content`).catch(() => null);
+        const payload = { kind: 'pro', meta, content: content || '' };
+        await _query(`
+          INSERT INTO strategies_export (id, data, synced_at)
+          VALUES ($1,$2,NOW())
+          ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
+        `, [s.id, JSON.stringify(payload)]);
+        synced++;
+      } catch (e) {
+        if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur sync Pro S${s.id}:`, e.message);
+      }
+    }
+    return synced;
+  } catch (e) {
+    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync stratégies Pro:', e.message);
+    return 0;
+  }
+}
+
+// Pousse UNE stratégie Pro (appelé après création/modification/changement de cibles TG)
+async function syncProStrategy(meta, content = null) {
+  if (!renderPool || !meta || !meta.id) return;
+  try {
+    let body = content;
+    if (body === null) {
+      body = await db.getSetting(`pro_strategy_${meta.id}_content`).catch(() => null);
+    }
+    const payload = { kind: 'pro', meta, content: body || '' };
+    await _query(`
+      INSERT INTO strategies_export (id, data, synced_at)
+      VALUES ($1,$2,NOW())
+      ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
+    `, [meta.id, JSON.stringify(payload)]);
+  } catch (e) {
+    if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur sync Pro S${meta.id}:`, e.message);
+  }
+}
+
+// Supprime UNE stratégie de la base externe (custom OU Pro — même table)
+async function syncDeleteStrategy(id) {
+  if (!renderPool || !id) return;
+  try {
+    const r = await _query(`DELETE FROM strategies_export WHERE id = $1`, [parseInt(id)]);
+    if (r.rowCount) console.log(`[RenderSync] 🗑 Stratégie #${id} supprimée de la base externe`);
+  } catch (e) {
+    if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur suppression stratégie #${id}:`, e.message);
   }
 }
 
@@ -582,6 +654,9 @@ module.exports = {
   syncUser,
   syncAllUsers,
   syncStrategies,
+  syncProStrategies,
+  syncProStrategy,
+  syncDeleteStrategy,
   syncSetting,
   syncAllSettings,
   syncTelegramChannels,

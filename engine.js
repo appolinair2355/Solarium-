@@ -965,6 +965,60 @@ class Engine {
       const mod = cfg._scriptModule;
       if (!mod || typeof mod.processGame !== 'function') return null;
       if (!state.scriptState) state.scriptState = mod.initState ? mod.initState() : {};
+
+      // ── Pré-chargement de la base `cartes_jeu` pour les scripts JS ──
+      // De nombreux scripts attendent `state.dbData[N]` (clé = numéro de jeu)
+      // pour lire des jeux passés sans faire d'appel async. On garnit donc
+      // automatiquement state.scriptState.dbData à partir de cartes_jeu :
+      //   • au premier appel : on charge un snapshot des 500 derniers jeux,
+      //   • à chaque appel  : on ajoute le jeu courant si absent.
+      // Ceci permet aux scripts utilisant `state.dbData[zk]` (style « judo »)
+      // de prédire dès le départ, sans devoir attendre N jeux live.
+      if (!state.scriptState.dbData || typeof state.scriptState.dbData !== 'object') {
+        state.scriptState.dbData = {};
+      }
+      if (!state.scriptState._dbDataLoaded) {
+        state.scriptState._dbDataLoaded = true;
+        try {
+          const recent = await cartesStore.listRecent(500);
+          for (const row of recent) {
+            const pSuits = [row.p1_s, row.p2_s, row.p3_s].filter(s => s != null);
+            const bSuits2 = [row.b1_s, row.b2_s, row.b3_s].filter(s => s != null);
+            const pCards = [
+              row.p1_r != null ? { R: row.p1_r, S: row.p1_s } : null,
+              row.p2_r != null ? { R: row.p2_r, S: row.p2_s } : null,
+              row.p3_r != null ? { R: row.p3_r, S: row.p3_s } : null,
+            ].filter(Boolean);
+            const bCards = [
+              row.b1_r != null ? { R: row.b1_r, S: row.b1_s } : null,
+              row.b2_r != null ? { R: row.b2_r, S: row.b2_s } : null,
+              row.b3_r != null ? { R: row.b3_r, S: row.b3_s } : null,
+            ].filter(Boolean);
+            state.scriptState.dbData[row.game_number] = {
+              gameNumber: row.game_number,
+              playerSuits: pSuits,
+              bankerSuits: bSuits2,
+              playerCards: pCards,
+              bankerCards: bCards,
+              winner: row.winner || null,
+              dist: row.dist || null,
+            };
+          }
+        } catch (e) {
+          // Ne bloque pas la stratégie si la lecture échoue
+          this._pushProLog(cfg.id, 'log', `[engine] préchargement dbData impossible : ${e.message}`);
+        }
+      }
+      // Toujours indexer le jeu courant dans dbData (utile pour les jeux récents)
+      if (gn != null && Array.isArray(suits) && suits.length > 0) {
+        state.scriptState.dbData[gn] = {
+          gameNumber: gn,
+          playerSuits: suits.slice(),
+          bankerSuits: (bSuits || []).slice(),
+          winner: winner || null,
+        };
+      }
+
       // Contexte runtime passé en 6e argument : { live: { gameNumber }, cartes }
       const liveGn = this.liveGameCards?.gameNumber || null;
       const ctx = {
