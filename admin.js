@@ -358,15 +358,21 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes'];
+
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
 
-  {
+  if (!NO_THRESHOLD_MODES.includes(mode)) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3'].includes(mode)) return 'Mode invalide';
-  if (mode !== 'distribution' && !isCarteAuto) {
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes'];
+  if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
+  // Modes "cartes auto" : pas de mappings requis
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes'];
+  if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
     for (const s of SUITS) {
@@ -460,7 +466,15 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     const isComb      = strategy_type === 'combinaison';
     const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
-    const normalizedMappings = (isComb || isRelance || isCarteAuto) ? null : normalizeMappings(mappings);
+    const isLecturePassee   = mode === 'lecture_passee';
+    const isIntelligent     = mode === 'intelligent_cartes';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent) ? null : normalizeMappings(mappings);
+    // Helpers pour normaliser les niveaux R en tableau (multi-select)
+    const normLevels = (v) => {
+      if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
+      if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
+      return [];
+    };
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
@@ -473,21 +487,42 @@ router.post('/strategies', requireAdmin, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
-              strategy_id:     String(r.strategy_id),
-              losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
-              rattrapage_level: r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
-              rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-              combo_level:      r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
-              combo_count:      Math.max(1, parseInt(r.combo_count) || 1),
-              range_from:       r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
-              range_count:      Math.max(1, parseInt(r.range_count) || 1),
-              interval_min:     r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
-              interval_max:     r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
-              interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
-            })) : [] }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:     String(r.strategy_id),
+                losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level: rLevels.length === 1 ? rLevels[0] : null, // legacy
+                rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:    cLevels.length ? cLevels : null,
+                combo_level:     cLevels.length === 1 ? cLevels[0] : null, // legacy
+                combo_count:     Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:      r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:     Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:    r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:    r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:  Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
+        : isLecturePassee
+        ? { threshold: 1, mode, mappings: null,
+            carte_p:     Math.max(1, parseInt(req.body.carte_p) || 2),
+            carte_h:     Math.max(1, parseInt(req.body.carte_h) || 32),
+            carte_ecart: Math.max(1, parseInt(req.body.carte_ecart) || 1),
+            carte_position: Math.max(1, Math.min(3, parseInt(req.body.carte_position) || 1)),
+            carte_source_hand: ['joueur','banquier'].includes(req.body.carte_source_hand) ? req.body.carte_source_hand : 'joueur' }
+        : isIntelligent
+        ? { threshold: 1, mode, mappings: null,
+            intelligent_window:    Math.max(20, Math.min(2000, parseInt(req.body.intelligent_window) || 300)),
+            intelligent_pattern:   Math.max(1, Math.min(8, parseInt(req.body.intelligent_pattern) || 3)),
+            intelligent_min_count: Math.max(1, Math.min(50, parseInt(req.body.intelligent_min_count) || 3)),
+            intelligent_categories: Array.isArray(req.body.intelligent_categories)
+              ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
+              : ['suit'] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -530,7 +565,14 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const isComb      = strategy_type === 'combinaison';
     const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
-    const normalizedMappings = (isComb || isRelance || isCarteAuto) ? null : normalizeMappings(mappings);
+    const isLecturePassee   = mode === 'lecture_passee';
+    const isIntelligent     = mode === 'intelligent_cartes';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent) ? null : normalizeMappings(mappings);
+    const normLevels = (v) => {
+      if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
+      if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
+      return [];
+    };
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
@@ -541,21 +583,42 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
-              strategy_id:      String(r.strategy_id),
-              losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
-              rattrapage_level:  r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
-              rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
-              combo_level:       r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
-              combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
-              range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
-              range_count:       Math.max(1, parseInt(r.range_count) || 1),
-              interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
-              interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
-              interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
-            })) : [] }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:      String(r.strategy_id),
+                losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level:  rLevels.length === 1 ? rLevels[0] : null,
+                rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:      cLevels.length ? cLevels : null,
+                combo_level:       cLevels.length === 1 ? cLevels[0] : null,
+                combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:       Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
+        : isLecturePassee
+        ? { threshold: 1, mode, mappings: null,
+            carte_p:     Math.max(1, parseInt(req.body.carte_p) || 2),
+            carte_h:     Math.max(1, parseInt(req.body.carte_h) || 32),
+            carte_ecart: Math.max(1, parseInt(req.body.carte_ecart) || 1),
+            carte_position: Math.max(1, Math.min(3, parseInt(req.body.carte_position) || 1)),
+            carte_source_hand: ['joueur','banquier'].includes(req.body.carte_source_hand) ? req.body.carte_source_hand : 'joueur' }
+        : isIntelligent
+        ? { threshold: 1, mode, mappings: null,
+            intelligent_window:    Math.max(20, Math.min(2000, parseInt(req.body.intelligent_window) || 300)),
+            intelligent_pattern:   Math.max(1, Math.min(8, parseInt(req.body.intelligent_pattern) || 3)),
+            intelligent_min_count: Math.max(1, Math.min(50, parseInt(req.body.intelligent_min_count) || 3)),
+            intelligent_categories: Array.isArray(req.body.intelligent_categories)
+              ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
+              : ['suit'] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -1115,7 +1178,7 @@ async function applyUpdateBlock(type, data) {
           threshold: parseInt(item.threshold), prediction_offset: Math.max(1, parseInt(item.prediction_offset) || 1),
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(11, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, parseInt(item.tg_format) || 1) : null,
         };
         result.detail = (result.detail || '') + `\n• Mise à jour: "${item.name.trim()}"`;
       } else {
@@ -1141,7 +1204,7 @@ async function applyUpdateBlock(type, data) {
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           loss_type: ['sec', 'rattrapage', 'martingale'].includes(item.loss_type) ? item.loss_type : 'rattrapage',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(11, parseInt(item.tg_format) || 1)) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, parseInt(item.tg_format) || 1) : null,
         });
         result.detail = (result.detail || '') + `\n• Créée: "${item.name.trim()}"`;
       }

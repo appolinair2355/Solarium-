@@ -142,11 +142,13 @@ function parseRawData(data) {
   for (const champ of baccaratSport.L || []) {
     for (const game of champ.G || []) {
       if (!game.DI) continue;
+      const gn = parseInt(game.DI);
+      if (!Number.isFinite(gn) || gn <= 0) continue; // ignore les DI non-numériques
       const sc  = game.SC || {};
       const scS = sc.S  || [];
       const { player, banker } = parseCards(scS);
       results.push({
-        game_number:  parseInt(game.DI),
+        game_number:  gn,
         player_cards: player, banker_cards: banker,
         winner:       parseWinner(scS),
         is_finished:  isGameFinished(game, scS),
@@ -186,7 +188,10 @@ async function requireActiveSub(req, res, next) {
     if (!u.subscription_expires_at || new Date(u.subscription_expires_at) <= new Date())
       return res.status(403).json({ error: 'Abonnement expiré', code: 'EXPIRED' });
     next();
-  } catch { return res.status(500).json({ error: 'Erreur serveur' }); }
+  } catch (e) {
+    console.warn('[requireActiveSub] erreur:', e?.message || e);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
 }
 
 router.get('/absences', requireActiveSub, (req, res) => {

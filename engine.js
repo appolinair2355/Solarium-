@@ -279,15 +279,19 @@ class Engine {
           this.lossStreaks[stratId] = 0;
         }
 
-        // Condition C : combo perte+Rn
-        const cLevel = rule.combo_level != null ? parseInt(rule.combo_level) : null;
-        const cCount = parseInt(rule.combo_count) || 1;
-        if (!fired && cLevel !== null) {
-          const cur = (this.comboCounters[stratId] || {})[cLevel] || 0;
-          if (cur >= cCount) {
-            fired = true;
-            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${cLevel} ×${cur} (seuil ×${cCount}) → ${relanceId} #${gn + 1}`);
-            this.comboCounters[stratId][cLevel] = 0;
+        // Condition C : combo perte+Rn (multi-niveaux supporté)
+        const cLevelsRaw_loss = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
+        const cLevels_loss    = cLevelsRaw_loss.map(n => parseInt(n)).filter(n => n >= 1);
+        const cCount_loss     = parseInt(rule.combo_count) || 1;
+        if (!fired && cLevels_loss.length) {
+          for (const lv of cLevels_loss) {
+            const cur = (this.comboCounters[stratId] || {})[lv] || 0;
+            if (cur >= cCount_loss) {
+              fired = true;
+              console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${lv} ×${cur} (seuil ×${cCount_loss}) → ${relanceId} #${gn + 1}`);
+              this.comboCounters[stratId][lv] = 0;
+              break;
+            }
           }
         }
 
@@ -331,23 +335,25 @@ class Engine {
         const relanceId = `S${rid}`;
         let fired = false;
 
-        // Condition B : rattrapages consécutifs
-        const rLevel = rule.rattrapage_level != null ? parseInt(rule.rattrapage_level) : null;
-        const rCount = parseInt(rule.rattrapage_count) || 1;
-        if (!fired && rLevel !== null && rLevel === R && rStreak >= rCount) {
+        // Condition B : rattrapages consécutifs (multi-niveaux supporté)
+        const rLevelsRaw = Array.isArray(rule.rattrapage_levels) ? rule.rattrapage_levels : (rule.rattrapage_level != null ? [rule.rattrapage_level] : []);
+        const rLevels    = rLevelsRaw.map(n => parseInt(n)).filter(n => n >= 1);
+        const rCount     = parseInt(rule.rattrapage_count) || 1;
+        if (!fired && rLevels.includes(R) && rStreak >= rCount) {
           fired = true;
-          console.log(`[Relance] "${rcfg.name}" → ${stratId} R${R} consécutif ×${rStreak} (seuil ×${rCount}) → ${relanceId} #${gn + 1}`);
+          console.log(`[Relance] "${rcfg.name}" → ${stratId} R${R} consécutif ×${rStreak} (seuil ×${rCount}, niveaux=[${rLevels.join(',')}]) → ${relanceId} #${gn + 1}`);
           this.rattrapStreaks[stratId][R] = 0;
         }
 
-        // Condition C : combo perte+Rn
-        const cLevel = rule.combo_level != null ? parseInt(rule.combo_level) : null;
-        const cCount = parseInt(rule.combo_count) || 1;
-        if (!fired && cLevel !== null && cLevel === R) {
+        // Condition C : combo perte+Rn (multi-niveaux supporté)
+        const cLevelsRaw_r = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
+        const cLevels_r    = cLevelsRaw_r.map(n => parseInt(n)).filter(n => n >= 1);
+        const cCount_r     = parseInt(rule.combo_count) || 1;
+        if (!fired && cLevels_r.includes(R)) {
           const cur = (this.comboCounters[stratId] || {})[R] || 0;
-          if (cur >= cCount) {
+          if (cur >= cCount_r) {
             fired = true;
-            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${R} ×${cur} (seuil ×${cCount}) → ${relanceId} #${gn + 1}`);
+            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${R} ×${cur} (seuil ×${cCount_r}, niveaux=[${cLevels_r.join(',')}]) → ${relanceId} #${gn + 1}`);
             this.comboCounters[stratId][R] = 0;
           }
         }
@@ -400,10 +406,18 @@ class Engine {
         const entry = { id: srcId, name: srcName };
         if (rule.losses_threshold != null)
           entry.A = { cur: this.lossStreaks[srcId] || 0, thr: parseInt(rule.losses_threshold) };
-        if (rule.rattrapage_level != null)
-          entry.B = { cur: (this.rattrapStreaks[srcId] || {})[parseInt(rule.rattrapage_level)] || 0, thr: parseInt(rule.rattrapage_count) || 1, lvl: parseInt(rule.rattrapage_level) };
-        if (rule.combo_level != null)
-          entry.C = { cur: (this.comboCounters[srcId] || {})[parseInt(rule.combo_level)] || 0, thr: parseInt(rule.combo_count) || 1, lvl: parseInt(rule.combo_level) };
+        const rLvls = Array.isArray(rule.rattrapage_levels) ? rule.rattrapage_levels : (rule.rattrapage_level != null ? [rule.rattrapage_level] : []);
+        if (rLvls.length) {
+          const lvls = rLvls.map(n => parseInt(n));
+          const maxCur = Math.max(...lvls.map(lv => (this.rattrapStreaks[srcId] || {})[lv] || 0));
+          entry.B = { cur: maxCur, thr: parseInt(rule.rattrapage_count) || 1, lvl: lvls.length === 1 ? lvls[0] : null, lvls };
+        }
+        const cLvls = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
+        if (cLvls.length) {
+          const lvls = cLvls.map(n => parseInt(n));
+          const maxCur = Math.max(...lvls.map(lv => (this.comboCounters[srcId] || {})[lv] || 0));
+          entry.C = { cur: maxCur, thr: parseInt(rule.combo_count) || 1, lvl: lvls.length === 1 ? lvls[0] : null, lvls };
+        }
         if (rule.range_from != null)
           entry.D = { cur: this.relanceCondCounters[`${relanceId}_${srcId}_D`] || 0, thr: parseInt(rule.range_count) || 1, from: parseInt(rule.range_from) };
         if (rule.interval_min != null)
@@ -1971,9 +1985,13 @@ class Engine {
       if (!(await this._isOwnerActive(cfg))) { console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
       // Envoi Telegram : token custom si configuré, sinon bot global + routage par stratégie
       if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-        await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(() => {});
+        await sendCustomAndStore(tg_targets, channelId, next, ps, stratTgOpts).catch(e => {
+          console.warn(`[${channelId}] ⚠️ Telegram custom échec (jeu #${next}) : ${e?.message || e}`);
+        });
       } else {
-        await sendToStrategyChannels(channelId, next, ps, stratTgOpts).catch(() => {});
+        await sendToStrategyChannels(channelId, next, ps, stratTgOpts).catch(e => {
+          console.warn(`[${channelId}] ⚠️ Telegram routage échec (jeu #${next}) : ${e?.message || e}`);
+        });
       }
     };
 
@@ -2313,6 +2331,127 @@ class Engine {
         console.log(`[${channelId}] [Abs Victoire] Égalité — reset des 2 compteurs`);
       }
 
+    } else if (mode === 'lecture_passee') {
+      // ── MODE LECTURE DES JEUX PASSÉS ─────────────────────────────────────
+      // Quand le live arrive sur le jeu N, on prédit pour le jeu (N+p)
+      // le costume de la carte #position (1, 2 ou 3) de la main choisie au
+      // jeu zk = (N+p) - h, lu depuis la 2ème base de données (cartes_jeu).
+      // Paramètres : carte_p (avance), carte_h (recul), carte_ecart (gap),
+      // carte_position (1-3), carte_source_hand ('joueur'|'banquier').
+      // ─────────────────────────────────────────────────────────────────────
+      const p        = Math.max(1, parseInt(cfg.carte_p) || 2);
+      const h        = Math.max(1, parseInt(cfg.carte_h) || 32);
+      const ecart    = Math.max(1, parseInt(cfg.carte_ecart) || 1);
+      const position = Math.max(1, Math.min(3, parseInt(cfg.carte_position) || 1));
+      const sourceHand = cfg.carte_source_hand === 'banquier' ? 'banker' : 'player';
+      const sourceLabel = sourceHand === 'banker' ? '🏦 Banquier' : '👤 Joueur';
+
+      const go = gn + p;
+      const zk = go - h;
+      if (zk <= 0) return; // pas assez d'historique
+
+      // Application de l'écart : ne prédire qu'une fois tous les `ecart` jeux
+      const lastGo = state._lastLecturePassee || 0;
+      if (lastGo > 0 && (go - lastGo) < ecart) {
+        console.log(`[${channelId}] [LecturePassée] gap (live=${gn} go=${go}, dernier=${lastGo}, écart=${ecart}) — skip`);
+        return;
+      }
+
+      try {
+        const row = await cartesStore.byGameNumber(zk);
+        if (!row) {
+          console.log(`[${channelId}] [LecturePassée] zk=${zk} ${sourceLabel} pos=${position} — jeu introuvable dans cartes_jeu`);
+          return;
+        }
+        const prefix = sourceHand === 'banker' ? 'b' : 'p';
+        const targetRank = row[`${prefix}${position}_r`];
+        const targetSuit = row[`${prefix}${position}_s`];
+        if (!targetSuit || !ALL_SUITS.includes(targetSuit)) {
+          console.log(`[${channelId}] [LecturePassée] zk=${zk} ${sourceLabel} pos=${position} — costume invalide (${targetSuit})`);
+          return;
+        }
+        state._lastLecturePassee = go;
+        console.log(`[${channelId}] [LecturePassée] live=${gn} → go=${go} ← zk=${zk} ${sourceLabel} carte#${position}=${targetRank}${targetSuit} → prédit ${targetSuit}`);
+        await emitPrediction(go, targetSuit, targetSuit);
+      } catch (e) {
+        console.warn(`[${channelId}] [LecturePassée] échec lecture zk=${zk}: ${e.message}`);
+      }
+
+    } else if (mode === 'intelligent_cartes') {
+      // ── MODE INTELLIGENT CARTES ──────────────────────────────────────────
+      // Lit la 2ème base (cartes_jeu) sur une fenêtre de N jeux et calcule
+      // pour la main choisie quel costume apparaît le plus souvent à
+      // (jeu+offset) après la séquence des `pattern` derniers jeux.
+      // Si la confiance dépasse `min_count`, prédit ce costume.
+      // ─────────────────────────────────────────────────────────────────────
+      const window     = Math.max(20, Math.min(2000, parseInt(cfg.intelligent_window) || 300));
+      const patternLen = Math.max(1, Math.min(8, parseInt(cfg.intelligent_pattern) || 3));
+      const minCount   = Math.max(1, Math.min(50, parseInt(cfg.intelligent_min_count) || 3));
+      const handIsBank = cfg.hand === 'banquier';
+      const handLabel  = handIsBank ? '🏦 Banquier' : '👤 Joueur';
+      const offset     = Math.max(1, parseInt(cfg.prediction_offset) || 1);
+
+      try {
+        const rows = await cartesStore.listRecent(window + patternLen + offset + 5);
+        if (!rows || rows.length < patternLen + offset + 1) {
+          console.log(`[${channelId}] [Intelligent] historique insuffisant (${rows?.length || 0} lignes)`);
+          return;
+        }
+        rows.sort((a, b) => (a.game_number || 0) - (b.game_number || 0));
+        const suitOf = (row) => handIsBank ? row.b1_s : row.p1_s;
+
+        // Pattern courant : `patternLen` derniers jeux (les plus récents) — exclure le live en cours
+        const past = rows.filter(r => (r.game_number || 0) <= gn);
+        if (past.length < patternLen + 1) {
+          console.log(`[${channelId}] [Intelligent] pas assez d'historique passé (${past.length}/${patternLen + 1})`);
+          return;
+        }
+        const recentSlice = past.slice(-patternLen).map(suitOf);
+        if (recentSlice.some(s => !s || !ALL_SUITS.includes(s))) {
+          console.log(`[${channelId}] [Intelligent] pattern courant incomplet`);
+          return;
+        }
+        const currentKey = recentSlice.join('');
+
+        // Recherche de motifs identiques dans l'historique → quel costume au offset suivant ?
+        const counts = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+        let total = 0;
+        for (let i = 0; i + patternLen + offset - 1 < past.length; i++) {
+          // Exclure le pattern courant lui-même (les `patternLen+offset` derniers jeux)
+          if (i + patternLen + offset >= past.length) break;
+          const slice = past.slice(i, i + patternLen).map(suitOf);
+          if (slice.some(s => !s)) continue;
+          if (slice.join('') !== currentKey) continue;
+          const futureSuit = suitOf(past[i + patternLen + offset - 1]);
+          if (!futureSuit || !counts.hasOwnProperty(futureSuit)) continue;
+          counts[futureSuit]++;
+          total++;
+        }
+
+        if (total < minCount) {
+          console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" → seulement ${total} occurrences (min ${minCount})`);
+          return;
+        }
+        let best = null, bestCount = 0;
+        for (const [s, c] of Object.entries(counts)) {
+          if (c > bestCount) { best = s; bestCount = c; }
+        }
+        if (!best || bestCount < minCount) {
+          console.log(`[${channelId}] [Intelligent] meilleur=${best} ${bestCount} < min ${minCount}`);
+          return;
+        }
+        // Anti-spam : ne pas redéclencher pour le même go
+        const goN = gn + offset;
+        if (state._lastIntelligentGo === goN) return;
+        state._lastIntelligentGo = goN;
+
+        const conf = total > 0 ? Math.round((bestCount / total) * 100) : 0;
+        console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" (${total} occ.) → ${best} (${bestCount}, ${conf}%) → jeu #${goN}`);
+        await emitPrediction(goN, best, best);
+      } catch (e) {
+        console.warn(`[${channelId}] [Intelligent] échec: ${e.message}`);
+      }
+
     } else if (mode === 'abs_3_vers_2' || mode === 'abs_3_vers_3') {
       // ── MODE ABSENCE DE 3 CARTES → PRÉDIT 2 OU 3 CARTES ─────────────────
       // Compte les jeux consécutifs à 2 cartes (absences de 3 cartes).
@@ -2635,9 +2774,12 @@ class Engine {
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
         // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
-        try { require('./comptages').onFinishedGame(game); } catch {}
+        try { require('./comptages').onFinishedGame(game); }
+        catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }
         // Enregistrement des cartes dans la base séparée `les_cartes`
-        cartesStore.recordGame(game).catch(() => {});
+        cartesStore.recordGame(game).catch(e => {
+          console.warn(`[CartesStore] échec recordGame(#${game.game_number}) : ${e?.message || e}`);
+        });
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
         if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
       }

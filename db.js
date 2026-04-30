@@ -444,13 +444,17 @@ async function expireStaleByGame(threshold, maxR) {
 
 // Expire les prédictions en_cours créées il y a plus de N minutes (déblocage temporel)
 async function expireStaleByTime(minutesOld = 22) {
+  // Sécurité : valeur numérique stricte (évite NaN/injection dans l'INTERVAL SQL)
+  const mins = Math.max(1, parseInt(minutesOld) || 22);
   if (USE_PG) {
     const r = await pgPool.query(
       `UPDATE predictions SET status='expire', resolved_at=NOW()
-       WHERE status='en_cours' AND created_at < NOW() - INTERVAL '${parseInt(minutesOld)} minutes'`
+       WHERE status='en_cours' AND created_at < NOW() - ($1 || ' minutes')::interval`,
+      [String(mins)]
     );
     return r.rowCount;
   }
+  minutesOld = mins;
   // JSON fallback: expire les prédictions en_cours créées avant le seuil
   const cutoff = Date.now() - minutesOld * 60 * 1000;
   let count = 0;
