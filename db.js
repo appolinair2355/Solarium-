@@ -1,10 +1,13 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE — HARDCODÉE ──────────────────────
+// L'URL est intentionnellement écrite EN DUR ici (pas dans une variable
+// d'environnement Render). Pour changer de DB, modifier cette ligne et
+// redéployer.  L'URL externe (.render.com) fonctionne depuis n'importe où.
 const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
-// Priorité : FORCE_PG_URL > DATABASE_URL (Replit local) > DEFAULT_PG_URL (Render externe)
-const DB_URL = process.env.FORCE_PG_URL || process.env.DATABASE_URL || DEFAULT_PG_URL;
-const USE_PG = !!DB_URL;
+const DB_URL = DEFAULT_PG_URL;
+const USE_PG = true;
 
 let pgPool = null;
 if (USE_PG) {

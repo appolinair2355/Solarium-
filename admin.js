@@ -3724,4 +3724,98 @@ router.post('/live-broadcast/targets/:id/test', requireAdmin, async (req, res) =
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Gestionnaire des cartes joueur/banquier (DB séparée `les_cartes`)
+// ─────────────────────────────────────────────────────────────────────────────
+const cartesStore = require('./cartes-store');
+
+router.get('/cartes', requireAdmin, async (req, res) => {
+  try {
+    const filters = {
+      date:        req.query.date       || null,
+      winner:      req.query.winner     || null,
+      dist:        req.query.dist       || null,
+      gameNumber:  req.query.gameNumber || null,
+      fromGn:      req.query.fromGn     || null,
+      toGn:        req.query.toGn       || null,
+    };
+    const limit = Math.min(1000, parseInt(req.query.limit) || 100);
+    const rows = await cartesStore.listRecent(limit, filters);
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/cartes/stats', requireAdmin, async (req, res) => {
+  try {
+    const stats = await cartesStore.statsGlobal();
+    res.json({ stats });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/cartes/:gn', requireAdmin, async (req, res) => {
+  try {
+    const row = await cartesStore.byGameNumber(req.params.gn);
+    if (!row) return res.status(404).json({ error: 'introuvable' });
+    res.json({ row });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Liste agrégée des canaux Telegram configurés dans Config Pro
+// (api_token + channel_id) pour pouvoir leur envoyer des prédictions.
+// Permet à l'admin de voir d'un coup d'œil quels canaux sont actifs.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/pro-telegram-channels', requireAdmin, async (req, res) => {
+  try {
+    const r = await db.pool.query(
+      `SELECT key, value FROM settings
+       WHERE key LIKE 'pro_telegram_config_%'
+          OR (key LIKE 'pro_strategy_%' AND key LIKE '%_meta')`
+    );
+    const list = [];
+    for (const s of r.rows) {
+      if (s.key.startsWith('pro_telegram_config_')) {
+        try {
+          const cfg = JSON.parse(s.value);
+          const ownerId = s.key.replace('pro_telegram_config_', '');
+          list.push({
+            kind: 'config_pro',
+            owner_id: ownerId,
+            bot_token_preview: cfg.bot_token ? cfg.bot_token.slice(0, 12) + '…' : null,
+            channel_id: cfg.channel_id || null,
+            configured: !!(cfg.bot_token && cfg.channel_id),
+          });
+        } catch {}
+      } else if (s.key.startsWith('pro_strategy_') && s.key.endsWith('_meta')) {
+        try {
+          const meta = JSON.parse(s.value);
+          const tg = Array.isArray(meta.tg_targets) ? meta.tg_targets : [];
+          for (const t of tg) {
+            if (t.bot_token || t.channel_id) {
+              list.push({
+                kind: 'pro_strategy',
+                strategy_key: s.key,
+                strategy_name: meta.name || null,
+                bot_token_preview: t.bot_token ? t.bot_token.slice(0, 12) + '…' : null,
+                channel_id: t.channel_id || null,
+                format: t.format ?? null,
+                configured: !!(t.bot_token && t.channel_id),
+              });
+            }
+          }
+        } catch {}
+      }
+    }
+    res.json({ channels: list });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

@@ -12,6 +12,7 @@ const {
   loadMaxRattrapage,
 } = require('./telegram-service');
 const renderSync = require('./render-sync');
+const cartesStore = require('./cartes-store');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
 const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
@@ -652,11 +653,17 @@ class Engine {
     let scriptModule;
     try {
       const moduleObj = { exports: {} };
+      // ── API d'accès à la base `les_cartes` exposée comme variable globale `cartes` ──
+      // Le script peut faire : await cartes.getCard(zk, 'player', 1)
+      // Le numéro EN LIVE est rafraîchi à chaque appel via processGame(... , ctx).
+      const cartesGlobal = cartesStore.buildCartesAPI({ liveGameNumber: null });
       const sandbox = {
         module: moduleObj, exports: moduleObj.exports,
         console: { log: (...a) => console.log('[Pro JS]', ...a), error: (...a) => console.error('[Pro JS]', ...a), warn: (...a) => console.warn('[Pro JS]', ...a) },
         setTimeout, clearTimeout, setInterval, clearInterval,
         Math, JSON, Date, parseInt, parseFloat, isNaN, isFinite, Array, Object, String, Number, Boolean, RegExp,
+        Promise,
+        cartes: cartesGlobal, // accès direct à la base les_cartes
         require: (m) => { if (['path','crypto','fs'].includes(m)) throw new Error(`Module "${m}" non autorisé dans les stratégies Pro`); return require(m); },
       };
       vm.createContext(sandbox);
@@ -801,7 +808,24 @@ class Engine {
     if (!result || !result.suit) return;
     if (!ALL_SUITS.includes(result.suit)) { console.warn(`[${channelId}] Costume invalide retourné: ${result.suit}`); return; }
 
-    const targetGn = gn + Math.max(1, parseInt(result.decalage || cfg.decalage || 1));
+    // ── Calcul du numéro CIBLE ──────────────────────────────────────────────
+    // Deux modes sont supportés :
+    //   1) decalage (défaut)  →  target = gn + decalage
+    //   2) proche  (live-based) →  target = liveGameNumber + p
+    // Le mode "proche" est utile quand la stratégie veut prédire un numéro
+    // proche du jeu EN LIVE actuel (ex. zk = go - h, nlv = go + h).
+    let targetGn;
+    let modeApplied;
+    if (result.mode === 'proche') {
+      const liveGn = this.liveGameCards?.gameNumber || gn;
+      const p = Math.max(1, parseInt(result.p) || 1);
+      targetGn = liveGn + p;
+      modeApplied = `proche(p=${p}, live=${liveGn})`;
+    } else {
+      const dec = Math.max(1, parseInt(result.decalage || cfg.decalage || 1));
+      targetGn = gn + dec;
+      modeApplied = `decalage(${dec})`;
+    }
     const ps = result.suit;
 
     // Garde 10 min
@@ -813,14 +837,16 @@ class Engine {
         strategy: channelId, game_number: targetGn, predicted_suit: ps, triggered_by: ps,
         hand: cfg.hand || 'joueur',
         prediction_type: cfg.type || 'script_js',
-        decalage_applied: Math.max(1, parseInt(result.decalage || cfg.decalage || 1)),
+        decalage_applied: result.mode === 'proche'
+          ? 0
+          : Math.max(1, parseInt(result.decalage || cfg.decalage || 1)),
         confidence: result.confidence !== undefined ? parseInt(result.confidence) : 100,
         source_file: cfg.source_file || null,
         display_name: cfg.name || null,
-        extra_data: result.meta ? result.meta : {},
+        extra_data: Object.assign({ mode: result.mode || 'decalage', p: result.p ?? null }, result.meta || {}),
       });
       if (inserted) {
-        console.log(`[${channelId}] Script prédit #${targetGn} ${SUIT_DISPLAY[ps]||ps} (${cfg.type}, hand=${cfg.hand||'joueur'}, fmt=${cfg.tg_format ?? 'global'})`);
+        console.log(`[${channelId}] Script prédit #${targetGn} ${SUIT_DISPLAY[ps]||ps} (${cfg.type}, hand=${cfg.hand||'joueur'}, fmt=${cfg.tg_format ?? 'global'}, ${modeApplied})`);
       } else {
         console.warn(`[${channelId}] Prédiction #${targetGn} déjà existante — doublon ignoré`);
       }
@@ -840,7 +866,11 @@ class Engine {
     }
   }
 
-  // ── Normalisation d'un retour de stratégie vers { suit, decalage?, confidence?, meta? }
+  // ── Normalisation d'un retour de stratégie vers { suit, decalage?, mode?, p?, confidence?, meta? }
+  // Modes supportés :
+  //   • mode='decalage' (défaut) : target = gn (déclencheur) + decalage
+  //   • mode='proche'            : target = liveGameNumber + p   (proche du live)
+  // Alias acceptés : `proche_de: <p>` équivaut à `mode:'proche', p:<p>`
   _normalizeStrategyResult(r) {
     if (r === null || r === undefined) return null;
     if (typeof r === 'string') return ['♠','♥','♦','♣'].includes(r) ? { suit: r } : null;
@@ -849,9 +879,15 @@ class Engine {
     if (!suit && Array.isArray(r.suits) && r.suits.length) suit = r.suits[0];
     if (!suit) return null;
     if (!['♠','♥','♦','♣'].includes(suit)) return null;
+    // Détection du mode "proche de"
+    let mode = (r.mode || '').toString().toLowerCase();
+    let p    = r.p !== undefined ? r.p : (r.proche_de !== undefined ? r.proche_de : undefined);
+    if (mode !== 'proche' && r.proche_de !== undefined) mode = 'proche';
     return {
       suit,
       decalage:   r.decalage !== undefined ? r.decalage : undefined,
+      mode:       mode || undefined,
+      p:          p   !== undefined ? p   : undefined,
       confidence: r.confidence !== undefined ? r.confidence : undefined,
       meta:       r.meta || undefined,
     };
@@ -929,8 +965,19 @@ class Engine {
       const mod = cfg._scriptModule;
       if (!mod || typeof mod.processGame !== 'function') return null;
       if (!state.scriptState) state.scriptState = mod.initState ? mod.initState() : {};
+      // Contexte runtime passé en 6e argument : { live: { gameNumber }, cartes }
+      const liveGn = this.liveGameCards?.gameNumber || null;
+      const ctx = {
+        live: {
+          gameNumber: liveGn,
+          phase: this.liveGameCards?.phase || null,
+          playerCards: this.liveGameCards?.playerCards || [],
+          bankerCards: this.liveGameCards?.bankerCards || [],
+        },
+        cartes: cartesStore.buildCartesAPI({ liveGameNumber: liveGn }),
+      };
       const raw = await this._runWithProLogCapture(cfg.id, () => Promise.resolve(
-        mod.processGame(gn, suits || [], bSuits || [], winner, state.scriptState)
+        mod.processGame(gn, suits || [], bSuits || [], winner, state.scriptState, ctx)
       ));
       const norm = this._normalizeStrategyResult(raw);
       // Trace automatique : on garde une trace de chaque appel, même quand la stratégie ne prédit rien
@@ -955,12 +1002,31 @@ class Engine {
   async _callPyStrategy(cfg, gn, suits, bSuits, winner, state) {
     const { spawnSync } = require('child_process');
     if (!state.scriptState) state.scriptState = {};
+    // ── Pré-chargement de la base `les_cartes` pour les scripts Python ──
+    // On ne peut pas exposer une API async à un sous-process synchrone,
+    // donc on fournit en input un instantané utile :
+    //   • cartes_recent  : 50 derniers jeux enregistrés
+    //   • live           : numéro live courant (ou null)
+    const liveGn = this.liveGameCards?.gameNumber || null;
+    let cartesRecent = [];
+    let cartesNear   = [];
+    try { cartesRecent = await cartesStore.listRecent(50); } catch {}
+    try {
+      if (liveGn != null) {
+        // Plage par défaut : 50 jeux en arrière depuis le live (suffisant pour
+        // la plupart des stratégies "proche de"). Le script peut filtrer.
+        cartesNear = await cartesStore.listRecent(50, { fromGn: liveGn - 50, toGn: liveGn });
+      }
+    } catch {}
     const input = JSON.stringify({
       game_number: gn,
       player_suits: suits || [],
       banker_suits: bSuits || [],
       winner: winner || null,
       state: state.scriptState,
+      live: { game_number: liveGn },
+      cartes_recent: cartesRecent,
+      cartes_near:   cartesNear,
     });
     try {
       const proc = spawnSync('python3', [cfg._scriptPath], {
@@ -2516,6 +2582,8 @@ class Engine {
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
         // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
         try { require('./comptages').onFinishedGame(game); } catch {}
+        // Enregistrement des cartes dans la base séparée `les_cartes`
+        cartesStore.recordGame(game).catch(() => {});
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
         if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
       }

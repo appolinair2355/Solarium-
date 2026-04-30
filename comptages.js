@@ -217,11 +217,31 @@ function buildContext(game) {
   const nb = bCards.length;
   const ps = handScore(pCards);
   const bs = handScore(bCards);
-  const winner = game.winner || null;
+  // ── Détection robuste du gagnant ──
+  // Si le champ `winner` est manquant, on le déduit des scores. C'est ce qui
+  // corrigeait le bug « les matchs nuls ne sont pas comptés » : certaines
+  // sources renvoient `winner=null` mais ps===bs.
+  let rawWinner = (game.winner || '').toString().trim();
+  const winnerLc = rawWinner.toLowerCase();
+  let winner = null;
+  if (winnerLc === 'tie' || winnerLc === 't' || winnerLc === 'égalité' || winnerLc === 'egalite' || winnerLc === 'match nul') winner = 'Tie';
+  else if (winnerLc === 'player' || winnerLc === 'p' || winnerLc === 'joueur') winner = 'Player';
+  else if (winnerLc === 'banker' || winnerLc === 'b' || winnerLc === 'banquier') winner = 'Banker';
+  // Dérivation par score si winner absent ET les deux camps ont au moins 2 cartes
+  if (!winner && ps !== null && bs !== null && np >= 2 && nb >= 2) {
+    if (ps === bs) winner = 'Tie';
+    else if (ps > bs) winner = 'Player';
+    else winner = 'Banker';
+  }
+  // Filet de sécurité supplémentaire pour le Tie : si les scores sont strictement
+  // égaux et que les 2 mains sont jouées, on FORCE Tie même si l'API a annoncé
+  // autre chose (parfois une erreur de transcription).
+  if (ps !== null && bs !== null && np >= 2 && nb >= 2 && ps === bs) winner = 'Tie';
+
   let winnerScore = null;
   if (winner === 'Player') winnerScore = ps;
   else if (winner === 'Banker') winnerScore = bs;
-  else if (winner === 'Tie') winnerScore = ps; // ps === bs en théorie
+  else if (winner === 'Tie') winnerScore = ps; // ps === bs garanti
   const suitsP = new Set(suitsOf(pCards));
   const suitsB = new Set(suitsOf(bCards));
   const suits  = new Set([...suitsP, ...suitsB]);
