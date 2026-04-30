@@ -261,6 +261,275 @@ function TgDirectChat() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Gestionnaire des cartes joueur/banquier
+// Lit la base SÉPARÉE `les_cartes` via /api/admin/cartes
+// ─────────────────────────────────────────────────────────────────────────────
+function CartesPanel() {
+  const [rows, setRows]       = React.useState([]);
+  const [stats, setStats]     = React.useState(null);
+  const [channels, setChannels] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr]         = React.useState('');
+  const [filters, setFilters] = React.useState({ date: '', winner: '', dist: '', gameNumber: '' });
+
+  const load = React.useCallback(async () => {
+    setLoading(true); setErr('');
+    try {
+      const qs = new URLSearchParams();
+      Object.entries(filters).forEach(([k, v]) => { if (v) qs.set(k, v); });
+      qs.set('limit', '200');
+      const [rRows, rStats, rChan] = await Promise.all([
+        fetch(`/api/admin/cartes?${qs.toString()}`, { credentials: 'include' }),
+        fetch('/api/admin/cartes/stats', { credentials: 'include' }),
+        fetch('/api/admin/pro-telegram-channels', { credentials: 'include' }),
+      ]);
+      const dRows  = await rRows.json();
+      const dStats = await rStats.json();
+      const dChan  = await rChan.json();
+      if (!rRows.ok) throw new Error(dRows.error || 'Erreur chargement');
+      setRows(dRows.rows || []);
+      setStats(dStats.stats || null);
+      setChannels(dChan.channels || []);
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  }, [filters]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const cardCell = (r, s) => {
+    if (!r && !s) return '—';
+    return `${r ?? '?'}${s ?? ''}`;
+  };
+  const renderBool = (v) => v === true ? '✓' : v === false ? '·' : '—';
+
+  const StatCard = ({ label, value, accent='#fbbf24' }) => (
+    <div style={{ background: 'rgba(15,23,42,0.6)', border: `1px solid ${accent}33`, borderRadius: 8, padding: '8px 12px', minWidth: 90 }}>
+      <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: accent }}>{value ?? 0}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: '0 8px' }}>
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ color: '#fbbf24', fontSize: 18, margin: '0 0 4px 0' }}>🎴 Gestionnaire des cartes joueur/banquier</h2>
+        <div style={{ fontSize: 12, color: '#94a3b8' }}>
+          Base de données dédiée <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>les_cartes</code> —
+          chaque jeu terminé enregistre date, numéro, cartes 1/2/3 J&B et toutes les catégories dérivées.
+        </div>
+      </div>
+
+      {/* Statistiques globales par catégorie */}
+      {stats && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: '#fbbf24', marginBottom: 6, fontWeight: 700 }}>Catégories — totaux</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <StatCard label="Total" value={stats.total} accent="#fbbf24" />
+            <StatCard label="Joueur" value={stats.win_p} accent="#60a5fa" />
+            <StatCard label="Banquier" value={stats.win_b} accent="#f87171" />
+            <StatCard label="Match nul" value={stats.win_tie} accent="#a78bfa" />
+            <StatCard label="2/2" value={stats.d22} />
+            <StatCard label="2/3" value={stats.d23} />
+            <StatCard label="3/2" value={stats.d32} />
+            <StatCard label="3/3" value={stats.d33} />
+            <StatCard label="J 2k" value={stats.p_2k} />
+            <StatCard label="J 3k" value={stats.p_3k} />
+            <StatCard label="B 2k" value={stats.b_2k} />
+            <StatCard label="B 3k" value={stats.b_3k} />
+            <StatCard label="J ≥7" value={stats.p_high} accent="#34d399" />
+            <StatCard label="J ≤4" value={stats.p_low}  accent="#fb923c" />
+            <StatCard label="B ≥7" value={stats.b_high} accent="#34d399" />
+            <StatCard label="B ≤4" value={stats.b_low}  accent="#fb923c" />
+            <StatCard label="Pair gagnant" value={stats.w_pair} />
+            <StatCard label="Imp. gagnant" value={stats.w_imp} />
+            <StatCard label="J pair" value={stats.p_pair} />
+            <StatCard label="J impair" value={stats.p_imp} />
+            <StatCard label="B pair" value={stats.b_pair} />
+            <StatCard label="B impair" value={stats.b_imp} />
+          </div>
+          <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+            Plage : #{stats.gn_min ?? '—'} → #{stats.gn_max ?? '—'}
+          </div>
+        </div>
+      )}
+
+      {/* Filtres */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, padding: 10, background: 'rgba(15,23,42,0.4)', borderRadius: 8 }}>
+        <input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })}
+          style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 6, fontSize: 12 }} />
+        <select value={filters.winner} onChange={(e) => setFilters({ ...filters, winner: e.target.value })}
+          style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 6, fontSize: 12 }}>
+          <option value="">Gagnant (tous)</option>
+          <option value="Player">Joueur</option>
+          <option value="Banker">Banquier</option>
+          <option value="Tie">Match nul</option>
+        </select>
+        <select value={filters.dist} onChange={(e) => setFilters({ ...filters, dist: e.target.value })}
+          style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 6, fontSize: 12 }}>
+          <option value="">Distribution (toutes)</option>
+          <option value="2/2">2/2</option>
+          <option value="2/3">2/3</option>
+          <option value="3/2">3/2</option>
+          <option value="3/3">3/3</option>
+        </select>
+        <input type="number" placeholder="N° jeu" value={filters.gameNumber} onChange={(e) => setFilters({ ...filters, gameNumber: e.target.value })}
+          style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 6, fontSize: 12, width: 110 }} />
+        <button onClick={load} disabled={loading}
+          style={{ padding: '6px 12px', background: '#fbbf24', border: 'none', color: '#0f172a', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          {loading ? '…' : '🔄 Rafraîchir'}
+        </button>
+        <button onClick={() => setFilters({ date: '', winner: '', dist: '', gameNumber: '' })}
+          style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+          Effacer
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ padding: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: 6, color: '#fecaca', fontSize: 12, marginBottom: 10 }}>
+          ⚠️ {err}
+          <div style={{ marginTop: 4, color: '#94a3b8' }}>
+            Vérifiez que la variable <code>LES_CARTES_DATABASE_URL</code> est bien définie sur Render.
+          </div>
+        </div>
+      )}
+
+      {/* Tableau */}
+      <div style={{ overflowX: 'auto', background: 'rgba(15,23,42,0.6)', borderRadius: 8 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ background: 'rgba(251,191,36,0.08)', color: '#fbbf24' }}>
+              <th style={th}>Date</th>
+              <th style={th}>N°</th>
+              <th style={th}>P1</th><th style={th}>P2</th><th style={th}>P3</th>
+              <th style={th}>B1</th><th style={th}>B2</th><th style={th}>B3</th>
+              <th style={th}>Gagnant</th>
+              <th style={th}>P/B</th>
+              <th style={th}>Dist</th>
+              <th style={th}>J≥7</th><th style={th}>J≤4</th>
+              <th style={th}>B≥7</th><th style={th}>B≤4</th>
+              <th style={th}>W pair</th><th style={th}>J pair</th><th style={th}>B pair</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && !loading && (
+              <tr><td colSpan={18} style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>
+                Aucun enregistrement {filters.date || filters.winner || filters.gameNumber ? 'pour ces filtres' : '— attendez la fin du prochain jeu'}
+              </td></tr>
+            )}
+            {rows.map((r) => (
+              <tr key={r.game_number} style={{ borderTop: '1px solid #1e293b' }}>
+                <td style={td}>{r.date ? String(r.date).slice(0, 10) : '—'}</td>
+                <td style={{ ...td, fontWeight: 700, color: '#fbbf24' }}>#{r.game_number}</td>
+                <td style={td}>{cardCell(r.p1_r, r.p1_s)}</td>
+                <td style={td}>{cardCell(r.p2_r, r.p2_s)}</td>
+                <td style={td}>{cardCell(r.p3_r, r.p3_s)}</td>
+                <td style={td}>{cardCell(r.b1_r, r.b1_s)}</td>
+                <td style={td}>{cardCell(r.b2_r, r.b2_s)}</td>
+                <td style={td}>{cardCell(r.b3_r, r.b3_s)}</td>
+                <td style={{ ...td, color: r.winner === 'Player' ? '#60a5fa' : r.winner === 'Banker' ? '#f87171' : '#a78bfa' }}>
+                  {r.winner === 'Player' ? 'J' : r.winner === 'Banker' ? 'B' : r.winner === 'Tie' ? 'Nul' : '—'}
+                </td>
+                <td style={td}>{r.p_score ?? '—'}/{r.b_score ?? '—'}</td>
+                <td style={td}>{r.dist || '—'}</td>
+                <td style={td}>{renderBool(r.p_high)}</td>
+                <td style={td}>{renderBool(r.p_low)}</td>
+                <td style={td}>{renderBool(r.b_high)}</td>
+                <td style={td}>{renderBool(r.b_low)}</td>
+                <td style={td}>{renderBool(r.winner_pair)}</td>
+                <td style={td}>{renderBool(r.p_pair)}</td>
+                <td style={td}>{renderBool(r.b_pair)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Canaux Telegram Pro configurés */}
+      <div style={{ marginTop: 24 }}>
+        <h3 style={{ color: '#818cf8', fontSize: 14, margin: '0 0 8px 0' }}>📡 Canaux Telegram Config Pro (api_token + channel_id)</h3>
+        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
+          Liste des canaux configurés dans Config Pro et dans les stratégies Pro — utilisés pour envoyer les prédictions.
+        </div>
+        <div style={{ background: 'rgba(15,23,42,0.6)', borderRadius: 8, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: 'rgba(99,102,241,0.08)', color: '#818cf8' }}>
+                <th style={th}>Type</th>
+                <th style={th}>Source</th>
+                <th style={th}>API Token (preview)</th>
+                <th style={th}>Channel ID</th>
+                <th style={th}>Format</th>
+                <th style={th}>État</th>
+              </tr>
+            </thead>
+            <tbody>
+              {channels.length === 0 && (
+                <tr><td colSpan={6} style={{ padding: 14, textAlign: 'center', color: '#64748b' }}>
+                  Aucun canal Pro configuré
+                </td></tr>
+              )}
+              {channels.map((c, i) => (
+                <tr key={i} style={{ borderTop: '1px solid #1e293b' }}>
+                  <td style={td}>{c.kind === 'config_pro' ? 'Config Pro' : 'Stratégie'}</td>
+                  <td style={td}>{c.strategy_name || (c.owner_id ? `User #${c.owner_id}` : '—')}</td>
+                  <td style={{ ...td, fontFamily: 'monospace' }}>{c.bot_token_preview || '—'}</td>
+                  <td style={{ ...td, fontFamily: 'monospace' }}>{c.channel_id || '—'}</td>
+                  <td style={td}>{c.format ?? '—'}</td>
+                  <td style={td}>
+                    <span style={{ color: c.configured ? '#34d399' : '#fbbf24' }}>
+                      {c.configured ? '✓ OK' : '⚠ incomplet'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Documentation pour les scripts Pro */}
+      <div style={{ marginTop: 24, padding: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8 }}>
+        <h3 style={{ color: '#818cf8', fontSize: 13, margin: '0 0 6px 0' }}>📘 Comment utiliser cette base dans les stratégies Pro (JS / Python)</h3>
+        <div style={{ fontSize: 11, color: '#cbd5e1', lineHeight: 1.6 }}>
+          <strong style={{ color: '#fbbf24' }}>JavaScript</strong> — l'objet <code>cartes</code> est exposé globalement, et un <code>ctx</code> est passé en 6e argument à <code>processGame</code> :
+          <pre style={preStyle}>{`async function processGame(gn, pSuits, bSuits, winner, state, ctx) {
+  const live = ctx.live.gameNumber;        // numéro EN LIVE
+  const h    = 34;                         // recul à appliquer
+  const p    = 2;                          // proche de ±p
+  const go   = live + p;                   // numéro à prédire
+  const zk   = ctx.cartes.zk(go, h);       // = go - h (numéro source)
+  const card = await ctx.cartes.getCard(zk, 'player', 1);
+  if (!card) return null;
+  return { suit: card.S, mode: 'proche', p: p };
+}`}</pre>
+          <strong style={{ color: '#fbbf24' }}>Python</strong> — chaque appel reçoit en stdin :
+          <pre style={preStyle}>{`{
+  "game_number": 468,
+  "player_suits": ["♠","♦"], "banker_suits": ["♥"],
+  "winner": "Banker", "state": {...},
+  "live":          { "game_number": 89 },
+  "cartes_recent": [ /* 50 derniers jeux */ ],
+  "cartes_near":   [ /* jeux proches du live */ ]
+}`}</pre>
+          Pour activer le mode <strong>proche de</strong> dans la réponse :
+          <pre style={preStyle}>{`# return:
+{ "result": { "suit": "♦", "mode": "proche", "p": 2 } }
+# ou:
+{ "result": { "suit": "♦", "proche_de": 2 } }`}</pre>
+          <div style={{ color: '#94a3b8', marginTop: 4 }}>
+            Différence avec <code>decalage</code> : <code>decalage</code> calcule la cible à partir du DÉCLENCHEUR
+            (target = gn + decalage). <code>proche</code> calcule à partir du jeu EN LIVE (target = live + p).
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+const th = { padding: '8px 6px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3 };
+const td = { padding: '6px', color: '#cbd5e1' };
+const preStyle = { background: '#0f172a', padding: 8, borderRadius: 6, color: '#e2e8f0', fontSize: 10, overflowX: 'auto', margin: '4px 0' };
+
 function ComptagesPanel() {
   const [data, setData]       = React.useState(null);
   const [loading, setLoading] = React.useState(true);
@@ -4907,6 +5176,7 @@ function AdminPanel() {
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
             { id: 'comptages',      icon: '📈', label: 'Comptages' },
+            { id: 'cartes',         icon: '🎴', label: 'Gestionnaire des cartes' },
             ...(canSeeSystem ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
@@ -5636,6 +5906,9 @@ function AdminPanel() {
 
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
+
+        {/* ── TAB : GESTIONNAIRE DES CARTES ── */}
+        {adminTab === 'cartes' && <CartesPanel />}
 
         {/* ── TAB : PAIEMENTS ── */}
         {adminTab === 'paiements' && (
