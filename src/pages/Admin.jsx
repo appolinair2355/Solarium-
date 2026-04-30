@@ -3570,7 +3570,12 @@ function AdminPanel() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [] };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
+    // Mode lecture_passee (lecture de jeux passés depuis cartes_jeu)
+    carte_p: 2, carte_h: 32, carte_ecart: 1, carte_position: 1, carte_source_hand: 'joueur',
+    // Mode intelligent_cartes (analyse de patterns dans cartes_jeu)
+    intelligent_window: 300, intelligent_pattern: 3, intelligent_min_count: 3, intelligent_categories: ['suit'],
+  };
 
   // 6 paires possibles pour le mode taux_miroir
   const MIRROR_PAIRS = [
@@ -3820,7 +3825,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -4469,7 +4474,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [] });
     setStratOpen(true);
   };
 
@@ -4486,7 +4491,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -6518,16 +6523,14 @@ function AdminPanel() {
                             />
                           </div>
                           <div>
-                            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Format (1-10)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max="10"
+                            <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>📋 Format de prédiction</label>
+                            <select
                               value={f.tg_format ?? ''}
                               onChange={e => setProStratTgForm(p2 => ({ ...p2, [p.id]: { ...f, tg_format: e.target.value } }))}
-                              placeholder="1"
-                              style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
-                            />
+                              style={{ width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.3)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
+                            >
+                              {TG_FORMATS.map(fmt => <option key={fmt.value} value={fmt.value}>{fmt.label}</option>)}
+                            </select>
                           </div>
                         </div>
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -6923,49 +6926,98 @@ function AdminPanel() {
                                   )}
                                 </div>
 
-                                {/* ── Condition B : Rattrapages consécutifs ── */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: rLevel != null ? 'rgba(129,140,248,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${rLevel != null ? 'rgba(129,140,248,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <CondToggle active={rLevel != null} color="#818cf8"
-                                      onClick={() => updateRule({ rattrapage_level: rLevel != null ? null : 3, rattrapage_count: 1 })} />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: rLevel != null ? '#818cf8' : '#475569' }}>Rattrapage consécutif</span>
-                                    {rLevel != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{rCount}× R{rLevel} de suite → relance</span>}
-                                  </div>
-                                  {rLevel != null && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {/* ── Condition B : Rattrapages consécutifs (multi-niveaux) ── */}
+                                {(() => {
+                                  // Backward-compat : tableau prioritaire, sinon fallback au champ legacy
+                                  const rLvls = Array.isArray(rule?.rattrapage_levels)
+                                    ? rule.rattrapage_levels
+                                    : (rLevel != null ? [rLevel] : []);
+                                  const condBOn = rLvls.length > 0;
+                                  const toggleLevel = (n) => {
+                                    const cur = rLvls.includes(n) ? rLvls.filter(x => x !== n) : [...rLvls, n].sort((a,b) => a-b);
+                                    updateRule({ rattrapage_levels: cur, rattrapage_level: cur.length === 1 ? cur[0] : null });
+                                  };
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: condBOn ? 'rgba(129,140,248,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${condBOn ? 'rgba(129,140,248,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveau :</span>
-                                        <BtnLevel value={rLevel} color="#818cf8" onChange={n => updateRule({ rattrapage_level: n })} />
+                                        <CondToggle active={condBOn} color="#818cf8"
+                                          onClick={() => updateRule({ rattrapage_levels: condBOn ? null : [3], rattrapage_level: condBOn ? null : 3, rattrapage_count: 1 })} />
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: condBOn ? '#818cf8' : '#475569' }}>Rattrapage consécutif</span>
+                                        {condBOn && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{rCount}× R{rLvls.join('/')} de suite → relance</span>}
                                       </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
-                                        <BtnCount value={rCount} color="#818cf8" onChange={n => updateRule({ rattrapage_count: n })} />
-                                      </div>
+                                      {condBOn && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveaux :</span>
+                                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                              {[1,2,3,4,5,6,7,8,9,10].map(n => {
+                                                const active = rLvls.includes(n);
+                                                return (
+                                                  <button key={n} type="button" onClick={() => toggleLevel(n)}
+                                                    style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
+                                                      border: active ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
+                                                      background: active ? 'rgba(129,140,248,0.25)' : 'rgba(255,255,255,0.03)',
+                                                      color: active ? '#818cf8' : '#6b7280' }}>R{n}</button>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                          <div style={{ fontSize: 9, color: '#64748b', fontStyle: 'italic', paddingLeft: 58 }}>Cliquez plusieurs niveaux pour déclencher si l'un d'eux atteint le seuil.</div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
+                                            <BtnCount value={rCount} color="#818cf8" onChange={n => updateRule({ rattrapage_count: n })} />
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
+                                  );
+                                })()}
 
-                                {/* ── Condition C : Perte + Rattrapage (combo) ── */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: cLevel != null ? 'rgba(52,211,153,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${cLevel != null ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <CondToggle active={cLevel != null} color="#34d399"
-                                      onClick={() => updateRule({ combo_level: cLevel != null ? null : 3, combo_count: 1 })} />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: cLevel != null ? '#34d399' : '#475569' }}>Perte + Rattrapage</span>
-                                    {cLevel != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{cCount} événement{cCount > 1 ? 's' : ''} (perte ou R{cLevel}) → relance</span>}
-                                  </div>
-                                  {cLevel != null && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {/* ── Condition C : Perte + Rattrapage (combo, multi-niveaux) ── */}
+                                {(() => {
+                                  const cLvls = Array.isArray(rule?.combo_levels)
+                                    ? rule.combo_levels
+                                    : (cLevel != null ? [cLevel] : []);
+                                  const condCOn = cLvls.length > 0;
+                                  const toggleCLevel = (n) => {
+                                    const cur = cLvls.includes(n) ? cLvls.filter(x => x !== n) : [...cLvls, n].sort((a,b) => a-b);
+                                    updateRule({ combo_levels: cur, combo_level: cur.length === 1 ? cur[0] : null });
+                                  };
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: condCOn ? 'rgba(52,211,153,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${condCOn ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveau R :</span>
-                                        <BtnLevel value={cLevel} color="#34d399" onChange={n => updateRule({ combo_level: n })} />
+                                        <CondToggle active={condCOn} color="#34d399"
+                                          onClick={() => updateRule({ combo_levels: condCOn ? null : [3], combo_level: condCOn ? null : 3, combo_count: 1 })} />
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: condCOn ? '#34d399' : '#475569' }}>Perte + Rattrapage</span>
+                                        {condCOn && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{cCount} événement{cCount > 1 ? 's' : ''} (perte ou R{cLvls.join('/')}) → relance</span>}
                                       </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
-                                        <BtnCount value={cCount} color="#34d399" onChange={n => updateRule({ combo_count: n })} />
-                                      </div>
+                                      {condCOn && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 60 }}>Niveaux R :</span>
+                                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                              {[1,2,3,4,5,6,7,8,9,10].map(n => {
+                                                const active = cLvls.includes(n);
+                                                return (
+                                                  <button key={n} type="button" onClick={() => toggleCLevel(n)}
+                                                    style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
+                                                      border: active ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
+                                                      background: active ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.03)',
+                                                      color: active ? '#34d399' : '#6b7280' }}>R{n}</button>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                          <div style={{ fontSize: 9, color: '#64748b', fontStyle: 'italic', paddingLeft: 68 }}>Multi-sélection : déclenche dès que (perte) ou (R parmi sélection) atteint le seuil.</div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 60 }}>Fois :</span>
+                                            <BtnCount value={cCount} color="#34d399" onChange={n => updateRule({ combo_count: n })} />
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
+                                  );
+                                })()}
 
                                 {/* ── Condition D : À partir de tel rattrapage ── */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: rFrom != null ? 'rgba(251,191,36,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${rFrom != null ? 'rgba(251,191,36,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
@@ -7088,9 +7140,116 @@ function AdminPanel() {
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="compteur_adverse">🔄 Compteur Adverse</option>
                     <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
+                    <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
+                    <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
+                  {stratForm.mode === 'lecture_passee' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📖 Mode Lecture des jeux passés</div>
+                      <div>Quand le live arrive sur le jeu <code style={{ background: 'rgba(34,197,94,0.18)', padding: '1px 5px', borderRadius: 4 }}>N</code>, on prédit pour le jeu <strong>go = N+p</strong> le costume de la carte <strong>#position</strong> de la main choisie au jeu <strong>zk = go−h</strong> (lu depuis la 2ème base <em>cartes_jeu</em>).</div>
+                      <div style={{ marginTop: 6 }}>Ex. <code>p=2 · h=32 · position=1 · main=Joueur</code> · live=91 → prédit pour go=93 le costume de la carte #1 du Joueur au jeu zk=61.</div>
+                      <div style={{ marginTop: 6 }}>L'<strong>écart</strong> impose un nombre minimum de jeux entre deux prédictions consécutives. Le <strong>max_rattrapage</strong> et les <strong>exceptions</strong> standards s'appliquent normalement.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'intelligent_cartes' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', fontSize: 12, color: '#d8b4fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🧠 Mode Intelligent Cartes</div>
+                      <div>Lit la 2ème base <em>cartes_jeu</em> sur une <strong>fenêtre</strong> de N jeux passés. Pour la main choisie, calcule le costume qui apparaît le plus souvent à <strong>(jeu+offset)</strong> après chaque séquence des <strong>pattern</strong> derniers jeux identique à la séquence courante.</div>
+                      <div style={{ marginTop: 6 }}>Si le motif <strong>♦♣♠</strong> est suivi <em>min_count</em> fois ou plus par <strong>♣</strong> dans l'historique, le moteur prédit ♣ pour le prochain jeu.</div>
+                      <div style={{ marginTop: 6 }}>Plus la fenêtre est grande, plus les corrélations sont fiables. Augmentez <em>min_count</em> pour réduire les faux signaux.</div>
+                    </div>
+                  )}
+
+                  {/* ── Champs spécifiques mode lecture_passee ── */}
+                  {stratForm.mode === 'lecture_passee' && (
+                    <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#86efac', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>📖 Paramètres de lecture</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>p (avance) — go = live + p</label>
+                          <input type="number" min="1" max="50" value={stratForm.carte_p}
+                            onChange={e => setStratForm(prev => ({ ...prev, carte_p: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>h (recul) — zk = go − h</label>
+                          <input type="number" min="1" max="500" value={stratForm.carte_h}
+                            onChange={e => setStratForm(prev => ({ ...prev, carte_h: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>écart (min jeux entre prédictions)</label>
+                          <input type="number" min="1" max="100" value={stratForm.carte_ecart}
+                            onChange={e => setStratForm(prev => ({ ...prev, carte_ecart: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Main source (lecture)</label>
+                          <select value={stratForm.carte_source_hand}
+                            onChange={e => setStratForm(prev => ({ ...prev, carte_source_hand: e.target.value }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                            <option value="joueur">👤 Joueur</option>
+                            <option value="banquier">🏦 Banquier</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Position de la carte (1-3)</label>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {[1,2,3].map(n => {
+                              const active = stratForm.carte_position === n;
+                              return (
+                                <button key={n} type="button"
+                                  onClick={() => setStratForm(prev => ({ ...prev, carte_position: n }))}
+                                  style={{ flex: 1, padding: '7px 0', borderRadius: 7, fontWeight: 800, fontSize: 13,
+                                    border: active ? '2px solid #22c55e' : '1px solid rgba(34,197,94,0.25)',
+                                    background: active ? 'rgba(34,197,94,0.25)' : 'rgba(34,197,94,0.05)',
+                                    color: active ? '#86efac' : '#64748b', cursor: 'pointer' }}>
+                                  Carte #{n}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(34,197,94,0.1)', borderRadius: 7, fontSize: 11, color: '#86efac', lineHeight: 1.6 }}>
+                        💡 <strong>Déclencheur</strong> : quand le live atteint le numéro N, prédiction pour <strong>go = N + {stratForm.carte_p}</strong> (lit la carte #{stratForm.carte_position} du {stratForm.carte_source_hand === 'banquier' ? 'Banquier' : 'Joueur'} au jeu zk = go − {stratForm.carte_h}).
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Champs spécifiques mode intelligent_cartes ── */}
+                  {stratForm.mode === 'intelligent_cartes' && (
+                    <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#d8b4fe', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🧠 Paramètres d'analyse</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Fenêtre d'analyse (jeux)</label>
+                          <input type="number" min="20" max="2000" value={stratForm.intelligent_window}
+                            onChange={e => setStratForm(prev => ({ ...prev, intelligent_window: Math.max(20, Math.min(2000, parseInt(e.target.value) || 300)) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Longueur du motif (1-8)</label>
+                          <input type="number" min="1" max="8" value={stratForm.intelligent_pattern}
+                            onChange={e => setStratForm(prev => ({ ...prev, intelligent_pattern: Math.max(1, Math.min(8, parseInt(e.target.value) || 3)) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Confiance min. (occurrences)</label>
+                          <input type="number" min="1" max="50" value={stratForm.intelligent_min_count}
+                            onChange={e => setStratForm(prev => ({ ...prev, intelligent_min_count: Math.max(1, Math.min(50, parseInt(e.target.value) || 3)) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(168,85,247,0.1)', borderRadius: 7, fontSize: 11, color: '#d8b4fe', lineHeight: 1.6 }}>
+                        💡 Analyse les <strong>{stratForm.intelligent_window}</strong> derniers jeux. Pour chaque motif de <strong>{stratForm.intelligent_pattern}</strong> jeux égal au motif courant, compte le costume qui suit. Prédit si confiance ≥ <strong>{stratForm.intelligent_min_count}</strong> occurrences. La <strong>main</strong> et l'<strong>offset</strong> sont configurés en Section 2.
+                      </div>
+                    </div>
+                  )}
                   {stratForm.mode === 'absence_victoire' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
                       🏆 <strong>Absence Victoire</strong> — fonctionne exactement comme Absence → Apparition mais sur les résultats :<br/>
@@ -7162,8 +7321,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance et aleatoire */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee et intelligent_cartes */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -7555,7 +7714,7 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -7563,7 +7722,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -7584,7 +7743,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
