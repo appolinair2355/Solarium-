@@ -93,10 +93,20 @@ function primeVoice() {
   } catch {}
 }
 
-function speakPrediction(pred, gender) {
+function getVoiceVolume() {
+  try {
+    const v = parseFloat(localStorage.getItem('voiceVolume'));
+    if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
+  } catch {}
+  return 1.0;
+}
+
+function speakPrediction(pred, gender, volumeOverride) {
   if (gender === 'off') return;
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
   try {
+    // Réveille la synthèse au cas où elle serait suspendue (Chrome, Safari mobile…)
+    try { if (window.speechSynthesis.paused) window.speechSynthesis.resume(); } catch {}
     window.speechSynthesis.cancel();
     const numWords = numberToFrenchWords(pred.game_number);
     const suit = suitToFrench(pred.predicted_suit);
@@ -106,11 +116,17 @@ function speakPrediction(pred, gender) {
     u.lang = 'fr-FR';
     u.rate = 0.95;
     u.pitch = gender === 'male' ? 0.85 : 1.15;
-    u.volume = 1;
+    const vol = (typeof volumeOverride === 'number') ? volumeOverride : getVoiceVolume();
+    u.volume = Math.max(0, Math.min(1, vol));
     const v = pickFrenchVoice(gender);
     if (v) u.voice = v;
     // Petit délai pour laisser le cancel() prendre effet sur certains navigateurs
-    setTimeout(() => { try { window.speechSynthesis.speak(u); } catch {} }, 60);
+    setTimeout(() => {
+      try {
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        window.speechSynthesis.speak(u);
+      } catch {}
+    }, 60);
   } catch {}
 }
 
@@ -305,11 +321,17 @@ export default function Dashboard() {
     const s = localStorage.getItem('voiceGender');
     return s || 'female';
   });
+  const [voiceVolume, setVoiceVolume] = useState(() => {
+    const v = parseFloat(localStorage.getItem('voiceVolume'));
+    return (Number.isFinite(v) && v >= 0 && v <= 1) ? v : 1.0;
+  });
 
   const gamesRef    = useRef(null);
   const knownPredIds = useRef(new Set());
   const voiceGenderRef = useRef(voiceGender);
+  const voiceVolumeRef = useRef(voiceVolume);
   useEffect(() => { voiceGenderRef.current = voiceGender; }, [voiceGender]);
+  useEffect(() => { voiceVolumeRef.current = voiceVolume; }, [voiceVolume]);
 
   // Précharge la liste des voix + débloque la synthèse vocale au 1ᵉʳ geste utilisateur
   // (les navigateurs bloquent speechSynthesis avant toute interaction)
@@ -436,7 +458,7 @@ export default function Dashboard() {
   }, [aleatDashPanel?.history?.map(h => h.game_number + h.status).join(','), aleatDashPanel?.stratId]); // eslint-disable-line
 
   const announcePrediction = useCallback((pred) => {
-    speakPrediction(pred, voiceGenderRef.current);
+    speakPrediction(pred, voiceGenderRef.current, voiceVolumeRef.current);
   }, []);
 
   useEffect(() => {
@@ -648,9 +670,10 @@ export default function Dashboard() {
                     onClick={() => {
                       setVoiceGender(opt.value);
                       localStorage.setItem('voiceGender', opt.value);
-                      setShowVoiceSettings(false);
+                      // Débloque la synthèse vocale (geste utilisateur) puis lit un test
+                      primeVoice();
                       if (opt.value !== 'off') {
-                        speakPrediction({ game_number: '0', predicted_suit: '♥' }, opt.value);
+                        speakPrediction({ game_number: '0', predicted_suit: '♥' }, opt.value, voiceVolumeRef.current);
                       }
                     }}
                     style={{
@@ -663,6 +686,46 @@ export default function Dashboard() {
                     {opt.label}
                   </button>
                 ))}
+                {/* ── Curseur de volume ── */}
+                <div style={{ borderTop: '1px solid #1e293b', marginTop: 8, paddingTop: 8 }}>
+                  <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.08em', padding: '0 6px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>VOLUME</span>
+                    <span style={{ color: '#fbbf24' }}>{Math.round(voiceVolume * 100)}%</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 6px' }}>
+                    <span style={{ fontSize: 12 }}>🔈</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={voiceVolume}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setVoiceVolume(v);
+                        try { localStorage.setItem('voiceVolume', String(v)); } catch {}
+                      }}
+                      onMouseUp={() => {
+                        primeVoice();
+                        if (voiceGender !== 'off') {
+                          speakPrediction({ game_number: '0', predicted_suit: '♥' }, voiceGender, voiceVolumeRef.current);
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        primeVoice();
+                        if (voiceGender !== 'off') {
+                          speakPrediction({ game_number: '0', predicted_suit: '♥' }, voiceGender, voiceVolumeRef.current);
+                        }
+                      }}
+                      style={{ flex: 1, accentColor: '#fbbf24', cursor: 'pointer' }}
+                      title="Volume de la voix d'annonce"
+                    />
+                    <span style={{ fontSize: 14 }}>🔊</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#64748b', padding: '6px 6px 0', lineHeight: 1.3 }}>
+                    Astuce : si vous n'entendez rien, vérifiez aussi le volume de votre appareil et rechargez la page après création de compte.
+                  </div>
+                </div>
               </div>
             )}
           </div>
