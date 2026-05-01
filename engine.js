@@ -2351,8 +2351,9 @@ class Engine {
       if (zk <= 0) return; // pas assez d'historique
 
       // Application de l'écart : ne prédire qu'une fois tous les `ecart` jeux
+      // Guard go > lastGo : si go <= lastGo (ex: après reset jeu #1), on laisse passer sans skip
       const lastGo = state._lastLecturePassee || 0;
-      if (lastGo > 0 && (go - lastGo) < ecart) {
+      if (lastGo > 0 && go > lastGo && (go - lastGo) < ecart) {
         console.log(`[${channelId}] [LecturePassée] gap (live=${gn} go=${go}, dernier=${lastGo}, écart=${ecart}) — skip`);
         return;
       }
@@ -2392,16 +2393,19 @@ class Engine {
       const offset     = Math.max(1, parseInt(cfg.prediction_offset) || 1);
 
       try {
-        const rows = await cartesStore.listRecent(window + patternLen + offset + 5);
+        // Filtre toGn : ne récupère que les jeux enregistrés AVANT le jeu live (game_number <= gn-1)
+        // CRITIQUE : sans ce filtre, listRecent() peut retourner des jeux de sessions précédentes
+        // avec des numéros > gn, ce qui donne past.length=0 et empêche toute prédiction.
+        const rows = await cartesStore.listRecent(window + patternLen + offset + 5, { toGn: gn - 1 });
         if (!rows || rows.length < patternLen + offset + 1) {
-          console.log(`[${channelId}] [Intelligent] historique insuffisant (${rows?.length || 0} lignes)`);
+          console.log(`[${channelId}] [Intelligent] historique insuffisant (${rows?.length || 0} lignes pour gn<=${gn - 1})`);
           return;
         }
         rows.sort((a, b) => (a.game_number || 0) - (b.game_number || 0));
         const suitOf = (row) => handIsBank ? row.b1_s : row.p1_s;
 
         // Pattern courant : `patternLen` derniers jeux (les plus récents) — exclure le live en cours
-        const past = rows.filter(r => (r.game_number || 0) <= gn);
+        const past = rows; // déjà filtré par toGn: gn-1
         if (past.length < patternLen + 1) {
           console.log(`[${channelId}] [Intelligent] pas assez d'historique passé (${past.length}/${patternLen + 1})`);
           return;
@@ -2934,6 +2938,11 @@ class Engine {
       state.history           = [];
       state.lastOutcomes      = [];
       state.liveTriggeredGame = null;
+      state.predHistory       = [];
+      // Réinitialise les gardes anti-doublon des modes lecture_passee et intelligent_cartes
+      // CRITIQUE : sans ce reset, après le jeu #1, go < _lastLecturePassee (ancien) → skip permanent
+      delete state._lastLecturePassee;
+      delete state._lastIntelligentGo;
       if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
       if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
       // Reset complet de l'état interne des scripts Pro (stock de prédictions à zéro)
