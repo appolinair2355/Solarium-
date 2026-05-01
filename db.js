@@ -1,13 +1,9 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
-// ─── URL DE LA BASE DE DONNÉES PRINCIPALE — HARDCODÉE ──────────────────────
-// L'URL est intentionnellement écrite EN DUR ici (pas dans une variable
-// d'environnement Render). Pour changer de DB, modifier cette ligne et
-// redéployer.  L'URL externe (.render.com) fonctionne depuis n'importe où.
-const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
-const DB_URL = DEFAULT_PG_URL;
-const USE_PG = true;
+require('dotenv').config();
+const DB_URL = process.env.DATABASE_URL || null;
+const USE_PG = !!DB_URL;
 
 let pgPool = null;
 if (USE_PG) {
@@ -61,6 +57,9 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
       CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
@@ -267,7 +266,7 @@ async function getUserByUsername(username) {
 async function getAllUsers() {
   if (USE_PG) {
     const r = await pgPool.query(
-      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, subscription_expires_at, subscription_duration_minutes, created_at, allowed_modes, last_seen, is_banned, plain_password FROM users ORDER BY created_at DESC'
     );
     return r.rows;
   }
@@ -1068,9 +1067,43 @@ async function getPendingPaymentRequests() {
   return r.rows;
 }
 
+async function updateLastSeen(userId) {
+  try {
+    if (USE_PG) {
+      await pgPool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [userId]);
+    } else {
+      jsondb.updateUser(userId, { last_seen: new Date().toISOString() });
+    }
+  } catch {}
+}
+
+async function banInactiveUsers(hoursThreshold = 48) {
+  const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE users SET is_banned = TRUE, is_approved = FALSE
+       WHERE is_admin = FALSE AND is_banned = FALSE AND is_approved = TRUE
+         AND last_seen IS NOT NULL AND last_seen < $1
+       RETURNING id, username, last_seen`,
+      [cutoff.toISOString()]
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  const banned = [];
+  for (const u of all) {
+    if (!u.is_admin && !u.is_banned && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
+      jsondb.updateUser(u.id, { is_banned: true, is_approved: false });
+      banned.push(u);
+    }
+  }
+  return banned;
+}
+
 module.exports = {
   pool, USE_PG, initDB,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
+  updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,
   createPaymentRequest, updatePaymentRequest, getPaymentRequest,
   getUserPaymentRequests, getPendingPaymentRequests,

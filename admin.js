@@ -191,6 +191,85 @@ router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
+// ── Utilisateurs en ligne ───────────────────────────────────────────────────
+router.get('/online-users', requireAdmin, async (req, res) => {
+  try {
+    const users = await db.getAllUsers();
+    const now = Date.now();
+    const ONLINE_MS   = 5 * 60 * 1000;  // en ligne si vu il y a < 5 min
+    const ACTIVE_MS   = 30 * 60 * 1000; // actif si vu il y a < 30 min
+    const result = users
+      .filter(u => !u.is_admin)
+      .map(u => {
+        const lastMs = u.last_seen ? new Date(u.last_seen).getTime() : null;
+        const diff   = lastMs ? now - lastMs : null;
+        const status = !lastMs ? 'jamais'
+          : diff < ONLINE_MS  ? 'en_ligne'
+          : diff < ACTIVE_MS  ? 'actif'
+          : 'hors_ligne';
+        return {
+          id: u.id,
+          username: u.username,
+          first_name: u.first_name,
+          last_name: u.last_name,
+          is_pro: u.is_pro,
+          is_approved: u.is_approved,
+          is_banned: u.is_banned,
+          subscription_expires_at: u.subscription_expires_at,
+          allowed_modes: u.allowed_modes,
+          last_seen: u.last_seen,
+          status,
+          diff_minutes: diff !== null ? Math.floor(diff / 60000) : null,
+        };
+      })
+      .sort((a, b) => {
+        const order = { en_ligne: 0, actif: 1, hors_ligne: 2, jamais: 3 };
+        return (order[a.status] ?? 3) - (order[b.status] ?? 3);
+      });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── Allowed modes per user ──────────────────────────────────────────────────
+router.get('/users/:id/allowed-modes', requireAdmin, async (req, res) => {
+  try {
+    const u = await db.getUser(parseInt(req.params.id));
+    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    res.json({ allowed_modes: u.allowed_modes || null });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.put('/users/:id/allowed-modes', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { allowed_modes } = req.body;
+    const modesJson = allowed_modes === null ? null : (Array.isArray(allowed_modes) ? JSON.stringify(allowed_modes) : null);
+    const u = await db.updateUser(id, { allowed_modes: modesJson });
+    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    res.json({ ok: true, allowed_modes: u.allowed_modes });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// Endpoint pour l'utilisateur courant : obtenir ses modes autorisés
+router.get('/my-allowed-modes', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (req.session.isAdmin) return res.json({ allowed_modes: null }); // admin = accès total
+  try {
+    const u = await db.getUser(req.session.userId);
+    if (!u) return res.status(401).json({ error: 'Utilisateur non trouvé' });
+    res.json({ allowed_modes: u.allowed_modes || null });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── Débloquer un utilisateur banni ─────────────────────────────────────────
+router.post('/users/:id/unban', requireSuperAdmin, async (req, res) => {
+  try {
+    const u = await db.updateUser(parseInt(req.params.id), { is_banned: false });
+    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    res.json({ ok: true, message: 'Utilisateur débanni' });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
 router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const [users, predictions] = await Promise.all([db.getUserStats(), db.getPredictionStats()]);

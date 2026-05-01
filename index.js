@@ -6,7 +6,7 @@ const path     = require('path');
 const fs       = require('fs');
 const compression = require('compression');
 
-const { initDB, USE_PG, pool, upsertProjectFile, createDeployLog, updateDeployLog } = require('./db');
+const { initDB, USE_PG, pool, upsertProjectFile, createDeployLog, updateDeployLog, updateLastSeen, banInactiveUsers } = require('./db');
 const authRoutes        = require('./auth');
 const adminRoutes       = require('./admin');
 const predictionsRoutes = require('./predictions');
@@ -75,6 +75,7 @@ async function blockExpired(req, res, next) {
   try {
     const u = await dbForExpiry.getUser(req.session.userId);
     if (!u) return res.status(401).json({ error: 'Session invalide' });
+    if (u.is_banned) return res.status(403).json({ error: 'Compte suspendu pour inactivité. Contactez l\'administrateur.', status: 'banned' });
     if (!u.is_approved) return res.status(403).json({ error: 'Compte en attente de validation', status: 'pending' });
     if (!u.subscription_expires_at || new Date(u.subscription_expires_at) <= new Date()) {
       return res.status(403).json({ error: 'Abonnement expiré. Contactez l\'administrateur.', status: 'expired' });
@@ -83,7 +84,22 @@ async function blockExpired(req, res, next) {
   } catch { next(); }
 }
 
+// ── Middleware : mettre à jour last_seen toutes les 5 min par utilisateur ──
+const _lastSeenCache = {};
+function trackLastSeen(req, res, next) {
+  const uid = req.session?.userId;
+  if (uid) {
+    const now = Date.now();
+    if (!_lastSeenCache[uid] || now - _lastSeenCache[uid] > 5 * 60 * 1000) {
+      _lastSeenCache[uid] = now;
+      updateLastSeen(uid).catch(() => {});
+    }
+  }
+  next();
+}
+
 // ── Routes API ─────────────────────────────────────────────────────
+app.use(trackLastSeen);
 app.use('/api/auth',        authRoutes);
 app.use('/api/admin',       blockExpired, adminRoutes);
 app.use('/api/predictions', blockExpired, predictionsRoutes);
@@ -434,6 +450,21 @@ async function initBackgroundServices() {
   // Première exécution après 20 min puis toutes les 20 min
   setInterval(runMemoryCleanup, CLEANUP_INTERVAL_MS);
   console.log(`[Cleanup] ⏱ Nettoyage automatique actif — toutes les 20 min`);
+
+  // ── Auto-ban après 48h d'inactivité (vérifié toutes les heures) ──────────
+  async function runAutoBan() {
+    try {
+      const banned = await banInactiveUsers(48);
+      if (banned.length > 0) {
+        console.log(`[AutoBan] 🚫 ${banned.length} compte(s) banni(s) pour inactivité > 48h: ${banned.map(u => u.username).join(', ')}`);
+      }
+    } catch (e) {
+      console.error('[AutoBan] Erreur:', e.message);
+    }
+  }
+  setInterval(runAutoBan, 60 * 60 * 1000); // Toutes les heures
+  setTimeout(runAutoBan, 5 * 60 * 1000);   // Première vérification après 5 min
+  console.log(`[AutoBan] ⏱ Auto-ban inactivité 48h actif`);
 }
 
 main().catch(err => {
