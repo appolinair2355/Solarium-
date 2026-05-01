@@ -3590,6 +3590,11 @@ function AdminPanel() {
   const [strategies, setStrategies] = useState([]);
   const [proStrategies, setProStrategies] = useState([]); // stratégies Pro chargées (S5001+)
 
+  // ── Panneau effacement données d'une stratégie ─────────────────────────────
+  const [clearStratId, setClearStratId] = useState('');
+  const [clearStratBusy, setClearStratBusy] = useState(false);
+  const [clearStratMsg, setClearStratMsg] = useState(null); // { ok, text }
+
   // ── Stratégies Pro (S5001-S5100) — onglet Telegram admin ─────────────
   const [proStratsTg, setProStratsTg]   = useState([]); // [{id, owner_username, strategy_name, tg_targets:[]}, ...]
   const [proStratsTgLoading, setProStratsTgLoading] = useState(false);
@@ -8276,6 +8281,87 @@ function AdminPanel() {
         </>}
 
         {/* ── EFFACEMENT MANUEL DES PRÉDICTIONS ── */}
+        {/* ── EFFACER DONNÉES D'UNE STRATÉGIE SPÉCIFIQUE ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.45)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🗑️</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Effacer les données d'une stratégie</h2>
+              <p className="tg-admin-sub">
+                Supprime toutes les <strong style={{ color: '#c084fc' }}>prédictions</strong> et messages Telegram liés à <em>une seule stratégie</em> choisie — libère ses verrous en mémoire.<br/>
+                <span style={{ color: '#6b7280', fontSize: 11 }}>Fonctionne pour les stratégies par défaut (C1, C2, C3, DC), les stratégies personnalisées (S1-S16) et les stratégies Pro (S5001+). Les configurations sont conservées.</span>
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, display: 'block', marginBottom: 5 }}>Stratégie à vider</label>
+              <select
+                value={clearStratId}
+                onChange={e => { setClearStratId(e.target.value); setClearStratMsg(null); }}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(168,85,247,0.4)', background: '#0f172a', color: '#e2e8f0', fontSize: 13 }}
+              >
+                <option value="">-- Choisir une stratégie --</option>
+                <optgroup label="Stratégies par défaut">
+                  {[['C1','♠ Pique Noir (C1)'],['C2','♥ Cœur Rouge (C2)'],['C3','♦ Carreau Doré (C3)'],['DC','♣ Double Canal (DC)']].map(([v,l])=>
+                    <option key={v} value={v}>{l}</option>
+                  )}
+                </optgroup>
+                {strategies.length > 0 && (
+                  <optgroup label="Stratégies personnalisées">
+                    {strategies.map(s => <option key={s.id} value={String(s.id)}>S{s.id} — {s.name}</option>)}
+                  </optgroup>
+                )}
+                {proStrategies.length > 0 && (
+                  <optgroup label="Stratégies Pro (S5001+)">
+                    {proStrategies.map(s => <option key={s.id} value={String(s.id)}>S{s.id} — {s.strategy_name || s.name || s.filename}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            <button
+              disabled={!clearStratId || clearStratBusy}
+              onClick={async () => {
+                if (!clearStratId) return;
+                const label = clearStratId;
+                if (!confirm(`🗑️ Effacer TOUTES les données de prédiction pour la stratégie ${label} ?\n\n✓ Prédictions (gagnées, perdues, en attente)\n✓ Messages Telegram liés\n✓ Déblocage des verrous mémoire\n\nLa configuration de la stratégie est conservée.\n\nConfirmer ?`)) return;
+                setClearStratBusy(true);
+                setClearStratMsg(null);
+                try {
+                  const r = await fetch(`/api/admin/strategies/${clearStratId}/data`, { method: 'DELETE', credentials: 'include' });
+                  const d = await r.json();
+                  if (r.ok && d.ok) {
+                    setClearStratMsg({ ok: true, text: `✅ ${d.deleted} prédiction(s) supprimée(s) pour ${d.strategy}.` });
+                  } else {
+                    setClearStratMsg({ ok: false, text: '❌ ' + (d.error || 'Erreur inconnue') });
+                  }
+                } catch (e) {
+                  setClearStratMsg({ ok: false, text: '❌ Erreur réseau : ' + e.message });
+                } finally { setClearStratBusy(false); }
+              }}
+              style={{
+                padding: '9px 22px', borderRadius: 8, border: 'none',
+                background: clearStratId && !clearStratBusy ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : '#1e293b',
+                color: clearStratId && !clearStratBusy ? '#fff' : '#475569',
+                fontWeight: 700, fontSize: 13, cursor: clearStratId && !clearStratBusy ? 'pointer' : 'default',
+                transition: 'all .15s', whiteSpace: 'nowrap',
+              }}
+            >
+              {clearStratBusy ? '⏳ Suppression…' : '🗑️ Effacer les données'}
+            </button>
+          </div>
+          {clearStratMsg && (
+            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              background: clearStratMsg.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+              color: clearStratMsg.ok ? '#4ade80' : '#f87171',
+              border: `1px solid ${clearStratMsg.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            }}>
+              {clearStratMsg.text}
+            </div>
+          )}
+        </div>)}
+
         {adminTab === 'systeme' && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,146,60,0.5)', marginBottom: 20 }}>
           <div className="tg-admin-header">

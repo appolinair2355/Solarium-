@@ -55,15 +55,23 @@ function numberToFrenchWords(n) {
   return String(n);
 }
 
-// Normalise n'importe quelle représentation de couleur vers Pique/Cœur/Carreau/Trèfle
+// Normalise n'importe quelle représentation de couleur vers une lecture TTS claire
 function suitToFrench(s) {
   if (!s) return '';
-  const str = String(s);
+  const str = String(s).trim();
+  // Symboles unicode
   if (str.includes('♠')) return 'Pique';
-  if (str.includes('♥') || str.includes('❤')) return 'Cœur';
+  if (str.includes('♥') || str.includes('❤')) return 'Coeur';
   if (str.includes('♦')) return 'Carreau';
-  if (str.includes('♣')) return 'Trèfle';
-  const m = { 'P': 'Pique', 'H': 'Cœur', 'C': 'Cœur', 'D': 'Carreau', 'T': 'Trèfle' };
+  if (str.includes('♣')) return 'Trefle';
+  // Valeurs spéciales des modes victoire/cartes
+  if (str === 'WIN_P' || str === 'WIN_PLAYER') return 'Joueur gagne';
+  if (str === 'WIN_B' || str === 'WIN_BANKER') return 'Banquier gagne';
+  if (str === 'deux' || str === '2') return 'deux cartes';
+  if (str === 'trois' || str === '3') return 'trois cartes';
+  if (str === 'distrib') return 'distribution';
+  // Lettres initiales
+  const m = { 'P': 'Pique', 'H': 'Coeur', 'C': 'Coeur', 'D': 'Carreau', 'T': 'Trefle' };
   return m[str.toUpperCase()[0]] || str;
 }
 
@@ -110,7 +118,7 @@ function speakPrediction(pred, gender, volumeOverride) {
     window.speechSynthesis.cancel();
     const numWords = numberToFrenchWords(pred.game_number);
     const suit = suitToFrench(pred.predicted_suit);
-    const text = `Numéro ${numWords}, recevra une carte enseigne ${suit}.`;
+    const text = `Jeu numero ${numWords}. Prediction: ${suit}.`;
     if (typeof console !== 'undefined') console.log('[Voix] →', text);
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
