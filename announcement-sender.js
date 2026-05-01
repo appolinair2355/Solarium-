@@ -23,6 +23,13 @@ function guessMime(filename, fallback) {
   return map[ext] || fallback;
 }
 
+// ── Signature ajoutée automatiquement à chaque annonce ──────────────────────
+const ANNOUNCEMENT_SIGNATURE = `\n\n✨〰️〰️〰️〰️〰️〰️〰️〰️〰️✨\n🏆 <b>Développeur</b> : <b>Sossou Kouamé</b> 🎯\n💎 Prédictions Baccarat Pro\n📲 Pour plus d'informations contactez-moi :\n👉🏻 <a href="https://t.me/Kouamappoloak">t.me/Kouamappoloak</a>\n✨〰️〰️〰️〰️〰️〰️〰️〰️〰️✨`;
+
+function withSignature(text) {
+  return (text || '') + ANNOUNCEMENT_SIGNATURE;
+}
+
 async function sendAnnouncement(ann) {
   const BASE = `https://api.telegram.org/bot${ann.bot_token}`;
   const chatId = ann.channel_id;
@@ -35,7 +42,7 @@ async function sendAnnouncement(ann) {
 
     const form = new FormData();
     form.append('chat_id', String(chatId));
-    form.append('caption', ann.text || '');
+    form.append('caption', withSignature(ann.text));
     form.append('parse_mode', 'HTML');
     const fieldName = ann.media_type === 'video' ? 'video' : 'photo';
     form.append(fieldName, buf, { filename, contentType: mime });
@@ -51,16 +58,16 @@ async function sendAnnouncement(ann) {
 
   // ── Cas 2 : URL distante ──
   if (ann.media_type === 'image' && ann.media_url) {
-    await axios.post(`${BASE}/sendPhoto`, { chat_id: chatId, photo: ann.media_url, caption: ann.text, parse_mode: 'HTML' });
+    await axios.post(`${BASE}/sendPhoto`, { chat_id: chatId, photo: ann.media_url, caption: withSignature(ann.text), parse_mode: 'HTML' });
     return;
   }
   if (ann.media_type === 'video' && ann.media_url) {
-    await axios.post(`${BASE}/sendVideo`, { chat_id: chatId, video: ann.media_url, caption: ann.text, parse_mode: 'HTML' });
+    await axios.post(`${BASE}/sendVideo`, { chat_id: chatId, video: ann.media_url, caption: withSignature(ann.text), parse_mode: 'HTML' });
     return;
   }
 
   // ── Cas 3 : texte uniquement ──
-  await axios.post(`${BASE}/sendMessage`, { chat_id: chatId, text: ann.text, parse_mode: 'HTML' });
+  await axios.post(`${BASE}/sendMessage`, { chat_id: chatId, text: withSignature(ann.text), parse_mode: 'HTML' });
 }
 
 module.exports = { sendAnnouncement };

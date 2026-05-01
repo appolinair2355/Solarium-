@@ -705,6 +705,9 @@ class Engine {
       scriptModule = Object.assign({}, base, { processGame: entryFn, _entryFn: entryName });
     }
 
+    // Exceptions : lues depuis le module JS (scriptModule.exceptions) ou depuis la méta admin
+    const _jsExceptions = Array.isArray(scriptModule.exceptions) ? scriptModule.exceptions
+      : Array.isArray(fileMeta.exceptions) ? fileMeta.exceptions : [];
     const cfg = {
       id: proNumId, name: scriptModule.name || fileMeta.filename || 'Stratégie JS Pro',
       is_pro: true, type: 'script_js',
@@ -716,6 +719,7 @@ class Engine {
       source_file: fileMeta.filename || null,
       tg_targets: tgTargets,
       enabled: scriptModule.enabled !== false,
+      exceptions: _jsExceptions,
       _scriptModule: scriptModule,
     };
 
@@ -775,6 +779,7 @@ class Engine {
       source_file: fileMeta.filename || null,
       tg_targets: tgTargets,
       enabled: true,
+      exceptions: Array.isArray(fileMeta.exceptions) ? fileMeta.exceptions : [],
       _scriptPath: tmpPath,
     };
 
@@ -841,6 +846,12 @@ class Engine {
       modeApplied = `decalage(${dec})`;
     }
     const ps = result.suit;
+
+    // Vérification des exceptions (si définies dans la config Pro JS/Py)
+    if (this._checkExceptions(cfg.exceptions, ps, ps, state, {})) {
+      console.log(`[${channelId}] Prédiction #${targetGn} ${SUIT_DISPLAY[ps]||ps} bloquée par exception`);
+      return;
+    }
 
     // Garde 10 min
     if (!(await canEmitNewPrediction(channelId))) return;
@@ -2373,6 +2384,8 @@ class Engine {
         }
         state._lastLecturePassee = go;
         console.log(`[${channelId}] [LecturePassée] live=${gn} → go=${go} ← zk=${zk} ${sourceLabel} carte#${position}=${targetRank}${targetSuit} → prédit ${targetSuit}`);
+        // Vérification des exceptions avant d'émettre
+        if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
         await emitPrediction(go, targetSuit, targetSuit);
       } catch (e) {
         console.warn(`[${channelId}] [LecturePassée] échec lecture zk=${zk}: ${e.message}`);
@@ -2451,6 +2464,8 @@ class Engine {
 
         const conf = total > 0 ? Math.round((bestCount / total) * 100) : 0;
         console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" (${total} occ.) → ${best} (${bestCount}, ${conf}%) → jeu #${goN}`);
+        // Vérification des exceptions avant d'émettre
+        if (this._checkExceptions(exceptions, best, best, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
         await emitPrediction(goN, best, best);
       } catch (e) {
         console.warn(`[${channelId}] [Intelligent] échec: ${e.message}`);
@@ -2618,6 +2633,13 @@ class Engine {
         if (!shouldTrigger) continue;
 
         const ps = resolveLivePs(suit);
+
+        // Vérification des exceptions avant déclenchement live
+        if (this._checkExceptions(config.exceptions, ps, suit, entry, {})) {
+          console.log(`[${channelId}] ⚡ Live: prédiction ${SUIT_DISPLAY[ps]||ps} bloquée par exception (déclencheur ${suit})`);
+          continue;
+        }
+
         entry.liveTriggeredGame = gn;
         console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, count=${entry.counts[suit]}, seuil≥${B}) → prédiction immédiate ${ps} #${next}`);
 

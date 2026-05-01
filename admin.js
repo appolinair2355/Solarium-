@@ -4022,55 +4022,112 @@ router.get('/cartes/:gn', requireProOrAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Liste agrégée des canaux Telegram configurés dans Config Pro
-// (api_token + channel_id) pour pouvoir leur envoyer des prédictions.
-// Permet à l'admin de voir d'un coup d'œil quels canaux sont actifs.
-// ─────────────────────────────────────────────────────────────────────────────
+// Liste des stratégies Pro (S5001+) avec leurs cibles Telegram dédiées.
+// Format attendu par le frontend : { strategies: [{ id, strategy_name, engine_type, hand,
+//   owner_username, filename, decalage, max_rattrapage, tg_targets:[], owner_default_telegram }] }
 router.get('/pro-telegram-channels', requireAdmin, async (req, res) => {
   try {
-    const r = await db.pool.query(
-      `SELECT key, value FROM settings
-       WHERE key LIKE 'pro_telegram_config_%'
-          OR (key LIKE 'pro_strategy_%' AND key LIKE '%_meta')`
-    );
-    const list = [];
-    for (const s of r.rows) {
-      if (s.key.startsWith('pro_telegram_config_')) {
-        try {
-          const cfg = JSON.parse(s.value);
-          const ownerId = s.key.replace('pro_telegram_config_', '');
-          list.push({
-            kind: 'config_pro',
-            owner_id: ownerId,
-            bot_token_preview: cfg.bot_token ? cfg.bot_token.slice(0, 12) + '…' : null,
-            channel_id: cfg.channel_id || null,
-            configured: !!(cfg.bot_token && cfg.channel_id),
-          });
-        } catch {}
-      } else if (s.key.startsWith('pro_strategy_') && s.key.endsWith('_meta')) {
-        try {
-          const meta = JSON.parse(s.value);
-          const tg = Array.isArray(meta.tg_targets) ? meta.tg_targets : [];
-          for (const t of tg) {
-            if (t.bot_token || t.channel_id) {
-              list.push({
-                kind: 'pro_strategy',
-                strategy_key: s.key,
-                strategy_name: meta.name || null,
-                bot_token_preview: t.bot_token ? t.bot_token.slice(0, 12) + '…' : null,
-                channel_id: t.channel_id || null,
-                format: t.format ?? null,
-                configured: !!(t.bot_token && t.channel_id),
-              });
-            }
-          }
-        } catch {}
+    const rawList = await db.getSetting('pro_strategies_list').catch(() => null);
+    const allStrats = rawList ? JSON.parse(rawList) : [];
+    const users = await db.getAllUsers().catch(() => []);
+    const userMap = {};
+    for (const u of users) userMap[u.id] = u;
+
+    const strategies = await Promise.all(allStrats.map(async (s) => {
+      const rawM = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
+      const meta = rawM ? JSON.parse(rawM) : {};
+      const info = meta.strategy_info || {};
+      const owner = userMap[s.owner_user_id] || userMap[meta.owner_user_id] || null;
+
+      // Config Telegram du propriétaire (config-pro)
+      let ownerDefaultTelegram = null;
+      if (owner) {
+        const rawCfg = await db.getSetting(`pro_telegram_config_${owner.id}`).catch(() => null);
+        if (rawCfg) {
+          const cfg = JSON.parse(rawCfg);
+          if (cfg.bot_token && cfg.channel_id) ownerDefaultTelegram = { channel_id: cfg.channel_id };
+        }
       }
-    }
-    res.json({ channels: list });
+      return {
+        id:                 s.id,
+        strategy_name:      meta.strategy_name || meta.name || s.strategy_name || `Stratégie S${s.id}`,
+        filename:           meta.filename || s.filename || '',
+        engine_type:        meta.engine_type || s.engine_type || null,
+        hand:               info.hand || meta.hand || 'joueur',
+        decalage:           info.decalage ?? meta.decalage ?? null,
+        max_rattrapage:     info.max_rattrapage ?? meta.max_rattrapage ?? 2,
+        owner_username:     owner ? (owner.username || owner.email) : null,
+        owner_user_id:      s.owner_user_id || meta.owner_user_id || null,
+        tg_targets:         Array.isArray(meta.tg_targets) ? meta.tg_targets : [],
+        owner_default_telegram: ownerDefaultTelegram,
+      };
+    }));
+    res.json({ strategies });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Sauvegarde des cibles Telegram d'une stratégie Pro ─────────────────────
+router.put('/pro-strategies/:id/tg-targets', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id || id < 5001) return res.status(400).json({ error: 'ID Pro invalide (doit être ≥ 5001)' });
+    const tg_targets = Array.isArray(req.body.tg_targets)
+      ? req.body.tg_targets.filter(t => t.bot_token && t.channel_id)
+          .map(t => ({ bot_token: t.bot_token.trim(), channel_id: t.channel_id.trim(), format: parseInt(t.format) || 1 }))
+      : [];
+    const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+    if (!rawM) return res.status(404).json({ error: `Stratégie Pro S${id} introuvable` });
+    const meta = JSON.parse(rawM);
+    meta.tg_targets = tg_targets;
+    await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(meta));
+    console.log(`[Admin] Pro S${id} tg_targets mis à jour: ${tg_targets.length} cible(s)`);
+    res.json({ ok: true, tg_targets });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Test d'envoi Telegram pour une stratégie Pro ───────────────────────────
+router.post('/pro-strategies/:id/tg-test', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+    if (!rawM) return res.status(404).json({ error: `Stratégie Pro S${id} introuvable` });
+    const meta  = JSON.parse(rawM);
+    const targets = Array.isArray(meta.tg_targets) ? meta.tg_targets : [];
+    if (targets.length === 0) return res.status(400).json({ error: 'Aucune cible Telegram configurée' });
+    const axios = require('axios');
+    const errors = [];
+    for (const t of targets) {
+      try {
+        await axios.post(`https://api.telegram.org/bot${t.bot_token}/sendMessage`, {
+          chat_id: t.channel_id,
+          text: `🧪 Test Baccarat Pro — Stratégie S${id} (${meta.strategy_name || meta.name || 'sans nom'}) — OK`,
+          parse_mode: 'HTML',
+        });
+      } catch (e) { errors.push(t.channel_id + ': ' + (e?.response?.data?.description || e.message)); }
+    }
+    if (errors.length) return res.status(502).json({ ok: false, error: errors.join(' | ') });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Effacement des données de prédiction d'une stratégie spécifique ────────
+// Efface: predictions + tg_pred_messages pour cette stratégie
+// Libère: pending en mémoire moteur
+// NE touche PAS aux configs, canaux, stratégies elles-mêmes.
+router.delete('/strategies/:id/data', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // id peut être 'C1','C2','C3','DC' (intégrées) ou un entier (custom Sn ou pro S5001+)
+    const stratKey = /^\d+$/.test(id) ? `S${id}` : id.toUpperCase();
+    const deleted = await db.deleteStrategyPredictions(stratKey);
+    await db.deleteTgMsgIdsForStrategy(stratKey).catch(() => {});
+    const eng = require('./engine');
+    if (eng && eng.clearStrategyPending) eng.clearStrategyPending(stratKey);
+    console.log(`[Admin] Données effacées pour ${stratKey} — ${deleted} prédiction(s) supprimée(s)`);
+    res.json({ ok: true, strategy: stratKey, deleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;
