@@ -24,6 +24,7 @@ function publicUser(u) {
     profile_photo: u.profile_photo || null,
     allowed_channels: u.allowed_channels || null,
     show_counter_channels: u.show_counter_channels || null,
+    language: u.language || 'fr',
   };
 }
 
@@ -65,7 +66,7 @@ async function generateUniquePromoCode(now = new Date()) {
 }
 
 router.post('/register', async (req, res) => {
-  const { username, email, password, account_type, promo_code, profile_photo } = req.body;
+  const { username, email, password, account_type, promo_code, profile_photo, language } = req.body;
   if (!username || !email || !password)
     return res.status(400).json({ error: 'Tous les champs sont requis' });
   if (password.length < 6)
@@ -102,6 +103,9 @@ router.post('/register', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const newPromoCode = await generateUniquePromoCode(new Date());
 
+    const ALLOWED_LANGS = ['fr','en','es','de','ar','ru','pt','it'];
+    const userLang = ALLOWED_LANGS.includes(language) ? language : 'fr';
+
     const user = await db.createUser({
       username: username.trim(),
       email: email.trim().toLowerCase(),
@@ -111,6 +115,7 @@ router.post('/register', async (req, res) => {
       promo_code: newPromoCode,
       referrer_user_id: referrerUserId,
       profile_photo: profilePhoto,
+      language: userLang,
     });
 
     res.json({

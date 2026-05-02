@@ -387,20 +387,34 @@ async function syncUser(u) {
     await _query(`
       INSERT INTO users_export
         (id, username, email, first_name, last_name, is_admin, is_approved,
-         subscription_expires_at, subscription_duration_minutes, created_at, synced_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+         subscription_expires_at, subscription_duration_minutes, created_at,
+         account_type, is_premium, is_pro, promo_code,
+         referrer_user_id, referral_bonus_used, bonus_minutes_earned, synced_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
       ON CONFLICT (id) DO UPDATE SET
-        email                        = EXCLUDED.email,
-        first_name                   = EXCLUDED.first_name,
-        last_name                    = EXCLUDED.last_name,
-        is_approved                  = EXCLUDED.is_approved,
-        subscription_expires_at      = EXCLUDED.subscription_expires_at,
-        subscription_duration_minutes= EXCLUDED.subscription_duration_minutes,
-        synced_at                    = NOW()
-    `, [u.id, u.username, u.email || null, u.first_name || null, u.last_name || null,
-        u.is_admin || false, u.is_approved || false,
-        u.subscription_expires_at || null, u.subscription_duration_minutes || null,
-        u.created_at || new Date().toISOString()]);
+        email                         = EXCLUDED.email,
+        first_name                    = EXCLUDED.first_name,
+        last_name                     = EXCLUDED.last_name,
+        is_approved                   = EXCLUDED.is_approved,
+        subscription_expires_at       = EXCLUDED.subscription_expires_at,
+        subscription_duration_minutes = EXCLUDED.subscription_duration_minutes,
+        account_type                  = EXCLUDED.account_type,
+        is_premium                    = EXCLUDED.is_premium,
+        is_pro                        = EXCLUDED.is_pro,
+        promo_code                    = COALESCE(users_export.promo_code, EXCLUDED.promo_code),
+        referrer_user_id              = COALESCE(users_export.referrer_user_id, EXCLUDED.referrer_user_id),
+        referral_bonus_used           = EXCLUDED.referral_bonus_used,
+        bonus_minutes_earned          = EXCLUDED.bonus_minutes_earned,
+        synced_at                     = NOW()
+    `, [
+      u.id, u.username, u.email || null, u.first_name || null, u.last_name || null,
+      u.is_admin || false, u.is_approved || false,
+      u.subscription_expires_at || null, u.subscription_duration_minutes || null,
+      u.created_at || new Date().toISOString(),
+      u.account_type || 'simple', u.is_premium || false, u.is_pro || false,
+      u.promo_code || null, u.referrer_user_id || null,
+      u.referral_bonus_used || false, u.bonus_minutes_earned || 0,
+    ]);
   } catch (e) {
     if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync user:', e.message);
   }

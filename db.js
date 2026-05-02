@@ -27,10 +27,44 @@ if (USE_PG) {
   });
   pgPool.on('error', (err) => {
     console.error('[DB] Erreur pool inattendue:', err.message);
+    _notifyAdminDbError(err.message).catch(() => {});
   });
 }
 
 const jsondb = require('./jsondb');
+
+// ── Notification admin Telegram en cas de panne DB ───────────────────────────
+let _dbErrorNotifSent = 0;
+async function _notifyAdminDbError(errMsg) {
+  const now = Date.now();
+  if (now - _dbErrorNotifSent < 10 * 60 * 1000) return; // anti-spam : 1 notif / 10 min
+  _dbErrorNotifSent = now;
+  try {
+    const fetchFn = require('node-fetch');
+    const cfgRaw  = jsondb.getSetting ? jsondb.getSetting('bot_token') : null;
+    let token = process.env.BOT_TOKEN || null;
+    if (!token && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_token' LIMIT 1`);
+        token = r.rows[0]?.value || null;
+      } catch {}
+    }
+    let adminId = process.env.ADMIN_TG_ID || null;
+    if (!adminId && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_admin_tg_id' LIMIT 1`);
+        adminId = r.rows[0]?.value || null;
+      } catch {}
+    }
+    if (!token || !adminId) return;
+    const text = `⚠️ <b>ALERTE BASE DE DONNÉES</b>\n\nErreur PostgreSQL détectée :\n<code>${String(errMsg).slice(0, 300)}</code>\n\nLe système bascule en mode JSON local. Vérifiez la base de données ou fournissez un nouveau lien de connexion.\n\n⏰ ${new Date().toLocaleString('fr-FR')}`;
+    await fetchFn(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: adminId, text, parse_mode: 'HTML' }),
+    });
+  } catch {}
+}
 
 // ── Initialisation ─────────────────────────────────────────────────
 
@@ -70,6 +104,7 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_channels JSONB DEFAULT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS show_counter_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
       CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
@@ -206,6 +241,24 @@ async function initDB() {
         installed_at    TIMESTAMPTZ DEFAULT NOW(),
         finished_at     TIMESTAMPTZ
       );
+
+      CREATE TABLE IF NOT EXISTS strategy_purchases (
+        id                  SERIAL PRIMARY KEY,
+        user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        strategy_id         TEXT NOT NULL,
+        strategy_name       TEXT NOT NULL,
+        amount_usd          NUMERIC(10,2) DEFAULT 75,
+        status              TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data     TEXT,
+        admin_note          TEXT,
+        admin_validated_by  INTEGER,
+        admin_validated_at  TIMESTAMPTZ,
+        zip_data            TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_purchases_user_idx   ON strategy_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS strategy_purchases_status_idx ON strategy_purchases(status);
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
@@ -322,8 +375,8 @@ async function getProUsers() {
 async function createUser(data) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id, profile_photo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id, profile_photo, language)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
          last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
@@ -336,7 +389,7 @@ async function createUser(data) {
        data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
        data.subscription_duration_minutes || null, data.plain_password || null,
        data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null,
-       data.profile_photo || null]
+       data.profile_photo || null, data.language || 'fr']
     );
     return r.rows[0];
   }
@@ -375,8 +428,8 @@ async function banInactiveUsers(hoursThreshold = 48) {
   const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
   if (USE_PG) {
     const r = await pgPool.query(
-      `UPDATE users SET is_banned = TRUE, is_approved = FALSE
-       WHERE is_admin = FALSE AND is_banned = FALSE AND is_approved = TRUE
+      `DELETE FROM users
+       WHERE is_admin = FALSE AND is_approved = TRUE
          AND last_seen IS NOT NULL AND last_seen < $1
        RETURNING id, username, last_seen`,
       [cutoff.toISOString()]
@@ -384,14 +437,14 @@ async function banInactiveUsers(hoursThreshold = 48) {
     return r.rows;
   }
   const all = jsondb.getAllUsers();
-  const banned = [];
+  const deleted = [];
   for (const u of all) {
-    if (!u.is_admin && !u.is_banned && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
-      jsondb.updateUser(u.id, { is_banned: true, is_approved: false });
-      banned.push(u);
+    if (!u.is_admin && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
+      jsondb.deleteUser(u.id);
+      deleted.push(u);
     }
   }
-  return banned;
+  return deleted;
 }
 
 // ── PREDICTIONS ────────────────────────────────────────────────────

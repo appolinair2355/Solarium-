@@ -111,6 +111,8 @@ app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin/comptages', comptages.router);
 app.use('/api/payments', paymentRoutes);
+const shopRoutes = require('./shop');
+app.use('/api/shop', shopRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
@@ -192,7 +194,14 @@ app.get('/api/user/my-messages', async (req, res) => {
     const all = raw ? JSON.parse(raw) : [];
     const mine = all
       .filter(m => Number(m.userId) === Number(req.session.userId))
-      .map(m => ({ id: m.id, text: m.text, date: m.date, admin_reply: m.admin_reply || null }));
+      .map(m => ({
+        id: m.id,
+        text: m.text,
+        date: m.date,
+        admin_reply: m.admin_reply || null,
+        type: m.type || 'user',
+        from_system: m.from_system || false,
+      }));
     res.json(mine);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -451,20 +460,20 @@ async function initBackgroundServices() {
   setInterval(runMemoryCleanup, CLEANUP_INTERVAL_MS);
   console.log(`[Cleanup] ⏱ Nettoyage automatique actif — toutes les 20 min`);
 
-  // ── Auto-ban après 48h d'inactivité (vérifié toutes les heures) ──────────
+  // ── Auto-suppression après 48h d'inactivité (vérifié toutes les heures) ──
   async function runAutoBan() {
     try {
-      const banned = await banInactiveUsers(48);
-      if (banned.length > 0) {
-        console.log(`[AutoBan] 🚫 ${banned.length} compte(s) banni(s) pour inactivité > 48h: ${banned.map(u => u.username).join(', ')}`);
+      const deleted = await banInactiveUsers(48);
+      if (deleted.length > 0) {
+        console.log(`[AutoClean] 🗑 ${deleted.length} compte(s) supprimé(s) pour inactivité > 48h: ${deleted.map(u => u.username).join(', ')}`);
       }
     } catch (e) {
-      console.error('[AutoBan] Erreur:', e.message);
+      console.error('[AutoClean] Erreur:', e.message);
     }
   }
   setInterval(runAutoBan, 60 * 60 * 1000); // Toutes les heures
   setTimeout(runAutoBan, 5 * 60 * 1000);   // Première vérification après 5 min
-  console.log(`[AutoBan] ⏱ Auto-ban inactivité 48h actif`);
+  console.log(`[AutoClean] ⏱ Auto-suppression inactivité 48h actif`);
 }
 
 main().catch(err => {

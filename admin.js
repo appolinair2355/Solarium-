@@ -464,7 +464,7 @@ function validateStrategyBody(body) {
   }
 
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -473,10 +473,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -575,7 +575,8 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     const isIntelligent     = mode === 'intelligent_cartes';
     const isCarteValeur     = mode === 'carte_valeur';
     const isUnionEnseignes  = mode === 'union_enseignes';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes) ? null : normalizeMappings(mappings);
+    const isIntersection    = mode === 'intersection';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -636,6 +637,11 @@ router.post('/strategies', requireAdmin, async (req, res) => {
         ? { threshold: 1, mode: 'union_enseignes', mappings: null,
             multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
             union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
+        : isIntersection
+        ? { threshold: 1, mode: 'intersection', mappings: normalizedMappings,
+            inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
+            inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
+            inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -682,7 +688,8 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const isIntelligent     = mode === 'intelligent_cartes';
     const isCarteValeur     = mode === 'carte_valeur';
     const isUnionEnseignes  = mode === 'union_enseignes';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes) ? null : normalizeMappings(mappings);
+    const isIntersection    = mode === 'intersection';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -740,6 +747,11 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
         ? { threshold: 1, mode: 'union_enseignes', mappings: null,
             multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
             union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
+        : isIntersection
+        ? { threshold: 1, mode: 'intersection', mappings: normalizedMappings,
+            inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
+            inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
+            inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -761,7 +773,7 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/strategies/:id', requireAdmin, async (req, res) => {
+router.delete('/strategies/:id', requireSuperAdmin, async (req, res) => {
   try {
     const id   = parseInt(req.params.id);
     let list   = await getStrategies();
@@ -1165,7 +1177,7 @@ router.get('/users/:userId/visible', requireAdmin, async (req, res) => {
 
 router.post('/msg-format', requireAdmin, async (req, res) => {
   const id = parseInt(req.body.format_id);
-  if (!id || id < 1 || id > 10) return res.status(400).json({ error: "Format invalide (1–10)" });
+  if (!id || id < 1 || id > 25) return res.status(400).json({ error: "Format invalide (1–25)" });
   try {
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
@@ -1276,7 +1288,7 @@ async function applyUpdateBlock(type, data) {
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
-    if (!id || id < 1 || id > 10) { result.errors.push(`format_id invalide (1–10)`); return result; }
+    if (!id || id < 1 || id > 25) { result.errors.push(`format_id invalide (1–25)`); return result; }
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
     result.applied = 1;
@@ -2279,6 +2291,55 @@ router.post('/telegram-chat/send', requireAdmin, async (req, res) => {
       isBot: true,
       text: text.trim(),
       date: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Telegram Canal Direct — Envoi d'un média (image / vidéo / document) ──────
+// Accepte le fichier en base64 dans le JSON body (jusqu'à 50 MB).
+// file_data  : data-URL ou base64 brut
+// file_name  : nom du fichier (ex: photo.jpg)
+// file_type  : MIME type (image/jpeg, video/mp4, …)
+// caption    : légende optionnelle
+router.post('/telegram-chat/send-media', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('telegram_chat_config');
+    const cfg = raw ? JSON.parse(raw) : {};
+    if (!cfg.bot_token || !cfg.channel_id)
+      return res.status(400).json({ error: 'Bot non configuré' });
+
+    const { file_data, file_name, file_type, caption } = req.body;
+    if (!file_data) return res.status(400).json({ error: 'Fichier manquant' });
+
+    const base64Raw = file_data.includes(',') ? file_data.split(',')[1] : file_data;
+    const buffer    = Buffer.from(base64Raw, 'base64');
+    const mime      = file_type || 'application/octet-stream';
+    const fname     = file_name || 'file';
+
+    const TelegramBot = require('node-telegram-bot-api');
+    const bot = new TelegramBot(cfg.bot_token);
+    const opts = { caption: caption || undefined };
+    const fileOpts = { filename: fname, contentType: mime };
+
+    let result;
+    if (mime.startsWith('image/')) {
+      result = await bot.sendPhoto(cfg.channel_id, buffer, opts, fileOpts);
+    } else if (mime.startsWith('video/')) {
+      result = await bot.sendVideo(cfg.channel_id, buffer, opts, fileOpts);
+    } else {
+      result = await bot.sendDocument(cfg.channel_id, buffer, opts, fileOpts);
+    }
+
+    const preview = mime.startsWith('image/') ? '🖼 Image' : mime.startsWith('video/') ? '🎬 Vidéo' : '📎 Fichier';
+    _tgChat.messages.push({
+      id: result?.message_id || Date.now(),
+      from: 'Vous (admin)',
+      isBot: true,
+      text: caption ? `${preview} · ${caption}` : `${preview} · ${fname}`,
+      date: new Date().toISOString(),
+      isMedia: true,
+      mediaType: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'document',
     });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -4235,7 +4296,7 @@ router.post('/pro-strategies/:id/tg-test', requireAdmin, async (req, res) => {
 // Efface: predictions + tg_pred_messages pour cette stratégie
 // Libère: pending en mémoire moteur
 // NE touche PAS aux configs, canaux, stratégies elles-mêmes.
-router.delete('/strategies/:id/data', requireAdmin, async (req, res) => {
+router.delete('/strategies/:id/data', requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     // id peut être 'C1','C2','C3','DC' (intégrées) ou un entier (custom Sn ou pro S5001+)
@@ -4246,6 +4307,141 @@ router.delete('/strategies/:id/data', requireAdmin, async (req, res) => {
     if (eng && eng.clearStrategyPending) eng.clearStrategyPending(stratKey);
     console.log(`[Admin] Données effacées pour ${stratKey} — ${deleted} prédiction(s) supprimée(s)`);
     res.json({ ok: true, strategy: stratKey, deleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Gestion des achats de stratégies (admin) ────────────────────────────────
+
+router.get('/strategy-purchases', requireAdmin, async (req, res) => {
+  try {
+    const r = await db.pool.query(
+      `SELECT sp.*, u.username, u.email
+       FROM strategy_purchases sp
+       JOIN users u ON u.id = sp.user_id
+       ORDER BY sp.created_at DESC`
+    );
+    // Ne pas renvoyer screenshot_data ni zip_data dans la liste (trop lourd)
+    const rows = r.rows.map(({ screenshot_data, zip_data, ...rest }) => ({
+      ...rest,
+      has_screenshot: !!screenshot_data,
+      has_zip:        !!zip_data,
+    }));
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Voir la capture d'écran d'un achat
+router.get('/strategy-purchases/:id/screenshot', requireAdmin, async (req, res) => {
+  try {
+    const r = await db.pool.query(
+      'SELECT screenshot_data FROM strategy_purchases WHERE id=$1', [parseInt(req.params.id)]
+    );
+    if (!r.rows[0]?.screenshot_data) return res.status(404).json({ error: 'Pas de capture' });
+    res.json({ screenshot: r.rows[0].screenshot_data });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Valider un achat + générer le ZIP de déploiement
+const { generateStrategyZip } = require('./zip-generator');
+router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) => {
+  const purchaseId = parseInt(req.params.id);
+  try {
+    const pr = await db.pool.query('SELECT * FROM strategy_purchases WHERE id=$1', [purchaseId]);
+    const purchase = pr.rows[0];
+    if (!purchase) return res.status(404).json({ error: 'Achat introuvable' });
+
+    // Récupérer la stratégie
+    const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+    const strats    = rawStrats ? JSON.parse(rawStrats) : [];
+    const strat     = strats.find(s => String(s.id) === String(purchase.strategy_id));
+    if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
+
+    // Générer le ZIP via le module dédié
+    const zipBuf    = await generateStrategyZip(strat);
+    const zipBase64 = zipBuf.toString('base64');
+
+    // Valider l'achat + stocker le ZIP
+    await db.pool.query(
+      'UPDATE strategy_purchases SET status=\'validated\', zip_data=$1, admin_validated_by=$2, admin_validated_at=NOW(), updated_at=NOW() WHERE id=$3',
+      [zipBase64, req.session.userId, purchaseId]
+    );
+
+    // Notifier l'utilisateur via message système
+    try {
+      const raw      = await db.getSetting('user_messages').catch(() => null);
+      const messages = raw ? JSON.parse(raw) : [];
+      messages.unshift({
+        id:          Date.now(),
+        userId:      purchase.user_id,
+        username:    '__system__',
+        text:        '✅ Votre achat de la stratégie **' + purchase.strategy_name + '** a été validé ! Rendez-vous sur /boutique pour télécharger votre fichier ZIP.',
+        date:        new Date().toISOString(),
+        read:        false,
+        type:        'system',
+        from_system: true,
+      });
+      if (messages.length > 300) messages.splice(300);
+      await db.setSetting('user_messages', JSON.stringify(messages));
+    } catch {}
+
+    res.json({ ok: true, message: 'Achat validé et ZIP généré avec succès.' });
+  } catch (e) {
+    console.error('[validate-purchase]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Rejeter un achat
+router.post('/strategy-purchases/:id/reject', requireAdmin, async (req, res) => {
+  const { note } = req.body;
+  try {
+    const r = await db.pool.query(
+      "UPDATE strategy_purchases SET status='rejected', admin_note=$1, admin_validated_by=$2, admin_validated_at=NOW(), updated_at=NOW() WHERE id=$3 RETURNING *",
+      [note || '', req.session.userId, parseInt(req.params.id)]
+    );
+    const purchase = r.rows[0];
+    if (!purchase) return res.status(404).json({ error: 'Achat introuvable' });
+
+    // Notifier l'utilisateur
+    try {
+      const raw = await db.getSetting('user_messages').catch(() => null);
+      const messages = raw ? JSON.parse(raw) : [];
+      messages.unshift({
+        id:          Date.now(),
+        userId:      purchase.user_id,
+        username:    '__system__',
+        text:        '❌ Votre achat de la stratégie **' + purchase.strategy_name + '** a été refusé.' + (note ? ' Raison : ' + note : '') + ' Vous pouvez renvoyer une capture d\'écran valide.',
+        date:        new Date().toISOString(),
+        read:        false,
+        type:        'system',
+        from_system: true,
+      });
+      if (messages.length > 300) messages.splice(300);
+      await db.setSetting('user_messages', JSON.stringify(messages));
+    } catch {}
+
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Panneau de Vente / Vitrine Stratégies ───────────────────────────────────
+// Stocke la configuration promotionnelle de chaque stratégie custom.
+// Format DB : setting key = 'strategy_promo_config', value = JSON { [id]: { enabled, titre, ... } }
+router.get('/strategy-promo', requireAdmin, async (req, res) => {
+  try {
+    const raw = await db.getSetting('strategy_promo_config').catch(() => null);
+    res.json(raw ? JSON.parse(raw) : {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const raw = await db.getSetting('strategy_promo_config').catch(() => null);
+    const configs = raw ? JSON.parse(raw) : {};
+    configs[String(id)] = req.body;
+    await db.setSetting('strategy_promo_config', JSON.stringify(configs));
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

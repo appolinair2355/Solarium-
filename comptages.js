@@ -69,6 +69,13 @@ const CATEGORIES = [
   { key: 'pt_p_low',  group: '📊 Points',       label: 'Joueur < 4.5',   match: c => c.ps !== null && c.ps <= 4 },
   { key: 'pt_b_high', group: '📊 Points',       label: 'Banquier > 6.5', match: c => c.bs !== null && c.bs >= 7 },
   { key: 'pt_b_low',  group: '📊 Points',       label: 'Banquier < 4.5', match: c => c.bs !== null && c.bs <= 4 },
+
+  // Parité du score Joueur uniquement (indépendant du vainqueur)
+  { key: 'pt_p_pair', group: '⚖️ Parité Joueur', label: 'Joueur Pair',   match: c => c.ps !== null && c.ps % 2 === 0 },
+  { key: 'pt_p_imp',  group: '⚖️ Parité Joueur', label: 'Joueur Impair', match: c => c.ps !== null && c.ps % 2 === 1 },
+  // Parité du score Banquier uniquement
+  { key: 'pt_b_pair', group: '⚖️ Parité Banquier', label: 'Banquier Pair',   match: c => c.bs !== null && c.bs % 2 === 0 },
+  { key: 'pt_b_imp',  group: '⚖️ Parité Banquier', label: 'Banquier Impair', match: c => c.bs !== null && c.bs % 2 === 1 },
 ];
 
 // ── Score baccarat ─────────────────────────────────────────────────────────
@@ -833,6 +840,16 @@ async function init() {
   console.log('[Comptages] module initialisé');
 }
 
+// ── Lecture d'un streak pour le moteur de prédiction ───────────────────────
+// Retourne { cur, maxAll, maxPeriod } pour une clé de catégorie donnée.
+// Utilisé par le mode engine `comptages_ecart`.
+function getStreakState(key) {
+  ensureStreaks();
+  const s = state.streaks[key];
+  if (!s) return { cur: 0, maxAll: 0, maxPeriod: 0 };
+  return { cur: s.cur, maxAll: s.maxAll, maxPeriod: s.maxPeriod };
+}
+
 module.exports = {
   router,
   init,
@@ -840,6 +857,7 @@ module.exports = {
   onGameOneReset,
   runReport,
   buildSummary,
+  getStreakState,
   CATEGORIES,
   // tests / debug
   _state: state,

@@ -27,6 +27,7 @@
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "framer-motion": "^12.38.0",
+    "lucide-react": "^1.14.0",
     "memorystore": "^1.6.7",
     "node-fetch": "^2.7.0",
     "node-telegram-bot-api": "^0.67.0",

@@ -796,6 +796,85 @@ function buildTgMessage(formatId, {
       };
     }
 
+    // ── Format 19 : VIP Casino ────────────────────────────────────────────
+    case 19:
+      return {
+        text:
+          `╔══════════════════╗\n` +
+          `🎯 JEU #N${gameNumber} — ${emoji} ${name}\n` +
+          `🔰 Rattrapage max : +${maxR}\n` +
+          `╚══════════════════╝\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 20 : Flash Signal ──────────────────────────────────────────
+    case 20:
+      return {
+        text: `⚡ #N${gameNumber} ${emoji} +${maxR} ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 21 : Casino Royale ─────────────────────────────────────────
+    case 21:
+      return {
+        text:
+          `🃏 CASINO ROYALE — Jeu #N${gameNumber}\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `🎯 Signe : ${emoji} ${name}\n` +
+          `🏅 Dogon max : +${maxR}\n` +
+          `🔮 Résultat : ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 22 : Signal Pro (avec main) ───────────────────────────────
+    case 22: {
+      const handLabel22 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
+      const handEmoji22 = hand === 'banquier' ? '🏦' : '👤';
+      return {
+        text:
+          `🔔 SIGNAL BACCARA PRO\n` +
+          `${handEmoji22} Main : ${handLabel22}\n` +
+          `🎯 Signe : ${emoji} ${name}\n` +
+          `📌 Jeu #N${gameNumber} · +${maxR}\n` +
+          `➤ ${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 23 : Alert Pro ─────────────────────────────────────────────
+    case 23:
+      return {
+        text:
+          `🚨 ALERTE PRÉDICTION\n` +
+          `📍 Tour #N${gameNumber}\n` +
+          `🃏 Costume : ${emoji} ${name}\n` +
+          `🔁 Max dogon : +${maxR}\n` +
+          `📊 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 24 : Minimaliste Stars ─────────────────────────────────────
+    case 24:
+      return {
+        text:
+          `★ #N${gameNumber} · ${emoji} ${name} · +${maxR}\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 25 : Scoreboard Pro ────────────────────────────────────────
+    case 25:
+      return {
+        text:
+          `🏅 BACCARAT SCOREBOARD\n` +
+          `┌─────────────────────┐\n` +
+          `│ #N${gameNumber} │ ${emoji} ${name} │ +${maxR} │\n` +
+          `└─────────────────────┘\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {

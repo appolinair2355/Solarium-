@@ -21,6 +21,43 @@ const router  = express.Router();
 const db      = require('./db');
 const { analyzePaymentScreenshot } = require('./ai-route');
 
+// ── Helper : envoyer un message système dans la boîte d'un utilisateur ──
+async function sendSystemMessage(userId, text) {
+  try {
+    const raw = await db.getSetting('user_messages');
+    const messages = raw ? JSON.parse(raw) : [];
+    messages.unshift({
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      userId,
+      username: '__system__',
+      text,
+      date: new Date().toISOString(),
+      read: false,
+      type: 'system',
+      from_system: true,
+    });
+    if (messages.length > 300) messages.splice(300);
+    await db.setSetting('user_messages', JSON.stringify(messages));
+  } catch (e) {
+    console.warn('[sendSystemMessage] erreur:', e.message);
+  }
+}
+
+function fmtMinutes(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}min`;
+  if (h > 0) return `${h}h`;
+  return `${m}min`;
+}
+
+function fmtDate(d) {
+  return new Date(d).toLocaleDateString('fr-FR', {
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 // ── Plans d'abonnement (prix de base = compte SIMPLE) ──────────────
 const BASE_PLANS = {
   '1j':  { id: '1j',  label: '1 jour',     base_usd: 2,  duration_minutes: 24 * 60 },
@@ -345,13 +382,36 @@ router.post('/admin/:id/approve', requireAdmin, async (req, res) => {
         const refBase = ref.subscription_expires_at && new Date(ref.subscription_expires_at) > new Date()
           ? new Date(ref.subscription_expires_at) : new Date();
         const refExpiry = new Date(refBase.getTime() + referrerBonus * 60 * 1000);
+        const newTotalBonus = (ref.bonus_minutes_earned || 0) + referrerBonus;
+
         await db.updateUser(ref.id, {
           is_approved: true,
           subscription_expires_at: refExpiry.toISOString(),
           subscription_duration_minutes: (ref.subscription_duration_minutes || 0) + referrerBonus,
-          bonus_minutes_earned: (ref.bonus_minutes_earned || 0) + referrerBonus,
+          bonus_minutes_earned: newTotalBonus,
         });
-        console.log(`[Payment] 🎁 Parrain ${ref.username} crédité de ${referrerBonus} min grâce à ${user.username}`);
+
+        // ── Notification système dans la boîte du parrain ──────────────
+        const remainingMs = refExpiry - new Date();
+        const remainingMin = Math.max(0, Math.floor(remainingMs / 60000));
+        const notifText =
+`🎁 BONUS PARRAIN REÇU !
+
+Félicitations ! Votre filleul ${user.username} vient de souscrire à un abonnement (${pr.plan_label}).
+
+✅ +${fmtMinutes(referrerBonus)} ont été ajoutés à votre abonnement.
+
+📅 Votre abonnement expire désormais le :
+   ${fmtDate(refExpiry)}
+
+⏱️ Durée totale restante : ${fmtMinutes(remainingMin)}
+
+🏆 Total bonus parrain gagné à ce jour : ${fmtMinutes(newTotalBonus)}
+
+Continuez à partager votre code promo pour gagner encore plus de temps !`;
+
+        await sendSystemMessage(ref.id, notifText);
+        console.log(`[Payment] 🎁 Parrain ${ref.username} crédité de ${referrerBonus} min grâce à ${user.username} — notification envoyée`);
       }
       await db.updateUser(user.id, { referral_bonus_used: true });
     }

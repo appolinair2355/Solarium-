@@ -1239,7 +1239,7 @@ class Engine {
         continue;
       }
       // Stratégies JSON déclaratives standard
-      if (cfg.mode !== 'multi_strategy' && cfg.mode !== 'union_enseignes' && cfg.mode !== 'relance') {
+      if (cfg.mode !== 'multi_strategy' && cfg.mode !== 'union_enseignes' && cfg.mode !== 'relance' && cfg.mode !== 'intersection') {
         await this._processCustomStrategy(parseInt(id), state, cfg, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
@@ -1251,6 +1251,8 @@ class Engine {
         await this._processMultiStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
       } else if (m === 'union_enseignes') {
         await this._processUnionEnseignes(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
+      } else if (m === 'intersection') {
+        await this._processIntersection(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
     // Passe 3 : stratégies relance (résolution de pending uniquement — le déclenchement se fait via _onStratLoss)
@@ -1443,6 +1445,142 @@ class Engine {
       sendCustomAndStore(tgs, channelId, targetGame, ps, stratTgOpts).catch(() => {});
     } else {
       sendToStrategyChannels(channelId, targetGame, ps, stratTgOpts).catch(() => {});
+    }
+  }
+
+  async _processIntersection(id, state, cfg, gn, suits, bSuits, pCards, bCards, winner) {
+    // ── MODE INTERSECTION ─────────────────────────────────────────────────
+    // Surveille toutes les stratégies existantes de la MÊME main.
+    // Quand au moins `hi` stratégies prédisent le même résultat sur des
+    // numéros proches (écart ≤ inter_max_ecart) → émet sur le min jeu.
+    // ─────────────────────────────────────────────────────────────────────
+    if (!this.custom[id]) return;
+    const channelId  = `S${id}`;
+    const hand       = cfg.hand || 'joueur';
+    const handSuits  = hand === 'banquier' ? (bSuits || []) : suits;
+    const stratMaxR  = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+      ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
+
+    // ── Résoudre les pending en cours ──
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg) => {
+        state.lastOutcomes.push({ won, suit: ps });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        if (won) this._onStratWin(channelId, gn, ps);
+        else     this._onStratLoss(channelId, gn, ps);
+        this._updateBadPredBlocker(channelId, gn, state);
+      }, stratMaxR, stratTgOpts, null, null);
+    }
+    if (Object.keys(state.pending).length > 0) return;
+
+    const hi       = Math.max(2, parseInt(cfg.inter_hi) || 2);
+    const maxEcart = Math.max(0, parseInt(cfg.inter_max_ecart) || 2);
+    const category = cfg.inter_category || 'costume';
+
+    // ── Collecter les pending de toutes les autres stratégies custom de la même main ──
+    // Chaque entrée : { suit, gameNumber }
+    const candidates = [];
+
+    for (const [otherId, otherState] of Object.entries(this.custom)) {
+      if (parseInt(otherId) === id) continue;
+      const oCfg = otherState.config;
+      if (!oCfg?.enabled) continue;
+      if ((oCfg.hand || 'joueur') !== hand) continue;
+      // Filtrage par catégorie
+      if (!this._interMatchCategory(oCfg, category)) continue;
+
+      for (const [pgStr, info] of Object.entries(otherState.pending || {})) {
+        const pg = parseInt(pgStr);
+        if (pg < gn) continue; // prédiction expirée côté jeux passés
+        const suit = info.suit;
+        if (!suit || !ALL_SUITS.includes(suit)) continue;
+        candidates.push({ suit, gameNumber: pg });
+      }
+    }
+
+    if (candidates.length < hi) return;
+
+    // ── Regrouper par costume, trouver le groupe qui respecte hi + écart ──
+    const bySuit = {};
+    for (const c of candidates) {
+      if (!bySuit[c.suit]) bySuit[c.suit] = [];
+      bySuit[c.suit].push(c.gameNumber);
+    }
+
+    let chosenSuit = null;
+    let chosenGameNumber = null;
+
+    for (const [suit, gnums] of Object.entries(bySuit)) {
+      if (gnums.length < hi) continue;
+      gnums.sort((a, b) => a - b);
+      // Fenêtre glissante de taille hi pour trouver hi éléments consécutifs avec écart ≤ maxEcart
+      for (let i = 0; i <= gnums.length - hi; i++) {
+        const window = gnums.slice(i, i + hi);
+        const ecart  = window[window.length - 1] - window[0];
+        if (ecart <= maxEcart) {
+          chosenSuit       = suit;
+          chosenGameNumber = window[0]; // émettre sur le premier (plus petit)
+          break;
+        }
+      }
+      if (chosenSuit) break;
+    }
+
+    if (!chosenSuit || chosenGameNumber === null) return;
+
+    // ── Appliquer mappings si configurés ──
+    const rawMapping = cfg.mappings?.[chosenSuit];
+    const pool = Array.isArray(rawMapping)
+      ? rawMapping.filter(s => ALL_SUITS.includes(s))
+      : (ALL_SUITS.includes(rawMapping) ? [rawMapping] : [chosenSuit]);
+    const ps = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : chosenSuit;
+
+    // ── Vérifier exceptions ──
+    const exceptions = cfg.exceptions || [];
+    if (this._checkExceptions(exceptions, ps, chosenSuit, state, { pCards, bCards, hand })) return;
+
+    let inserted = false;
+    try {
+      inserted = await db.createPrediction({ strategy: channelId, game_number: chosenGameNumber, predicted_suit: ps, triggered_by: `intersection:${category}:hi${hi}` });
+      if (inserted) {
+        console.log(`[${channelId}] [Intersection] accord hi=${hi} sur ${SUIT_DISPLAY[chosenSuit]||chosenSuit} → jeu #${chosenGameNumber} → ${SUIT_DISPLAY[ps]||ps}`);
+      } else {
+        console.warn(`[${channelId}] [Intersection] Prédiction #${chosenGameNumber} déjà existante`);
+      }
+    } catch (e) { console.error(`[${channelId}] [Intersection] createPrediction error:`, e.message); }
+    state.pending[chosenGameNumber] = { suit: ps, rattrapage: 0, maxR: stratMaxR };
+    if (!inserted) return;
+
+    if (!(await this._isOwnerActive(cfg))) { console.log(`[${channelId}] ⛔ envoi Telegram bloqué (abonnement expiré)`); return; }
+    const tgs = Array.isArray(cfg.tg_targets) ? cfg.tg_targets.filter(t => t.bot_token && t.channel_id) : [];
+    if (tgs.length > 0) {
+      sendCustomAndStore(tgs, channelId, chosenGameNumber, ps, stratTgOpts).catch(() => {});
+    } else {
+      sendToStrategyChannels(channelId, chosenGameNumber, ps, stratTgOpts).catch(() => {});
+    }
+  }
+
+  // Vérifie si une stratégie correspond à une catégorie d'intersection
+  _interMatchCategory(oCfg, category) {
+    const mode = oCfg.mode || '';
+    switch (category) {
+      case 'costume':
+        // Modes basés sur les costumes (♠♥♦♣) — la plupart des modes standards
+        return !['victoire_adverse', 'absence_victoire', 'carte_valeur', 'intersection', 'multi_strategy', 'union_enseignes', 'relance', 'aleatoire', 'distribution'].includes(mode);
+      case 'victoire':
+        return mode === 'victoire_adverse' || mode === 'absence_victoire';
+      case '2_2':
+        // 2 cartes joueur + 2 cartes banquier
+        return mode === 'carte_2_vers_3' || mode === 'abs_3_vers_2';
+      case '2_3':
+        return mode === 'carte_2_vers_3';
+      case '3_2':
+        return mode === 'carte_3_vers_2' || mode === 'abs_3_vers_2';
+      case '3_3':
+        return mode === 'carte_3_vers_2' && oCfg.hand === 'banquier';
+      default:
+        return true;
     }
   }
 
@@ -1982,8 +2120,10 @@ class Engine {
 
         // ── 21. Prédictions consécutives du même costume ───────────────
         // Bloque si le même costume a été prédit N fois de suite.
-        // Libération automatique : dès qu'un autre costume est prédit,
-        // ou après 20 minutes d'attente.
+        // Libération automatique : 20 minutes après la DERNIÈRE prédiction
+        // consécutive du même costume (et non la première).
+        // FIX : utiliser newestTs (dernière entrée) évite la double-libération
+        // immédiate qui survenait avec oldestTs quand la fenêtre glissait.
         case 'consec_same_suit_pred': {
           const n = Math.max(1, parseInt(ex.value) || 3);
           const releaseMs = 20 * 60 * 1000;
@@ -1991,12 +2131,15 @@ class Engine {
           const recentN = state.predHistory.slice(-n);
           const allSame = recentN.every(p => p.suit === predictedSuit);
           if (allSame) {
-            const oldestTs = recentN[0].timestamp;
-            if (Date.now() - oldestTs >= releaseMs) {
-              console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} − libéré après 20 min`);
+            // Référence : timestamp de la PLUS RÉCENTE prédiction consécutive
+            const newestTs = recentN[recentN.length - 1].timestamp;
+            if (Date.now() - newestTs >= releaseMs) {
+              // Libération : purger le streak du costume bloqué pour repartir proprement
+              state.predHistory = state.predHistory.filter(p => p.suit !== predictedSuit);
+              console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} − libéré après 20 min d'inactivité, streak purgé`);
               break;
             }
-            console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} prédit ${n}x de suite → bloqué`);
+            console.log(`[Exception] consec_same_suit_pred(${n}): ${predictedSuit} prédit ${n}x de suite → bloqué (${Math.round((releaseMs - (Date.now() - newestTs)) / 60000)}min restantes)`);
             return true;
           }
           break;
@@ -2484,6 +2627,12 @@ class Engine {
           return;
         }
         console.log(`[${channelId}] [LecturePassée] live=${gn} → go=${go} ← zk=${zk} ${sourceLabel} carte#${position}=${targetRank}${targetSuit} → prédit ${targetSuit}`);
+        // Vérification de l'attente de rattrapage — ne pas consommer l'écart si bloqué
+        // Important : si une prédiction est en cours de rattrapage, on reporte sans marquer lastGo.
+        if (Object.keys(state.pending).length > 0) {
+          console.log(`[${channelId}] [LecturePassée] go=${go} − prédiction en attente (rattrapage?) → skip sans consommer l'écart`);
+          return;
+        }
         // Vérification des exceptions avant d'émettre — ne met à jour le gap QUE si la prédiction passe
         if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
         state._lastLecturePassee = go;
@@ -2733,6 +2882,61 @@ class Engine {
         }
       }
 
+    } else if (mode === 'comptages_ecart') {
+      // ── MODE COMPTAGES ÉCART ─────────────────────────────────────────────
+      // Surveille l'écart courant d'une catégorie du panneau Comptages.
+      // B est calculé dynamiquement à chaque jeu :
+      //   B = ceil((maxAll + 3 + maxPeriod) / 3), min 1
+      // Quand le streak courant (cur) atteint B → émet la prédiction.
+      // Pour les catégories costume (suit_p_* / suit_b_*), le costume absent
+      // est utilisé directement comme costume prédit.
+      // Pour les autres catégories, on utilise le mapping admin.
+      // ─────────────────────────────────────────────────────────────────────
+      const comptKey = cfg.comptages_key || '';
+      if (!comptKey) return;
+
+      let streakData;
+      try {
+        streakData = require('./comptages').getStreakState(comptKey);
+      } catch (e) {
+        console.warn(`[${channelId}] [ComptagesÉcart] comptages indisponible: ${e.message}`);
+        return;
+      }
+
+      const { cur, maxAll, maxPeriod } = streakData;
+      // B dynamique : arrondi au supérieur, minimum 1
+      const dynB = Math.max(1, Math.ceil((maxAll + 3 + maxPeriod) / 3));
+
+      console.log(`[${channelId}] [ComptagesÉcart] key=${comptKey} cur=${cur} maxAll=${maxAll} maxPeriod=${maxPeriod} → B=${dynB}`);
+
+      if (cur < dynB) return;
+
+      // Mapping clé de catégorie → costume automatique (pour catégories costume)
+      const CKEY_TO_SUIT = {
+        suit_p_heart: '♥', suit_b_heart: '♥',
+        suit_p_club:  '♣', suit_b_club:  '♣',
+        suit_p_spade: '♠', suit_b_spade: '♠',
+        suit_p_diamond: '♦', suit_b_diamond: '♦',
+      };
+      const autoSuit = CKEY_TO_SUIT[comptKey] || null;
+
+      // Costume déclencheur : auto-détecté ou premier costume de la main
+      const triggerSuit = autoSuit || ALL_SUITS[0];
+
+      // Appliquer les mappings admin ; si aucun mapping → auto-suit ou fallback
+      const rawMapping = cfg.mappings?.[triggerSuit];
+      const pool = Array.isArray(rawMapping)
+        ? rawMapping.filter(s => ALL_SUITS.includes(s))
+        : (ALL_SUITS.includes(rawMapping) ? [rawMapping] : (autoSuit ? [autoSuit] : []));
+
+      if (pool.length === 0) {
+        console.log(`[${channelId}] [ComptagesÉcart] aucun costume prédit pour clé=${comptKey} — vérifiez les mappings`);
+        return;
+      }
+
+      const ps = pool[Math.floor(Math.random() * pool.length)];
+      console.log(`[${channelId}] [ComptagesÉcart] cur(${cur}) >= B(${dynB}) → prédit ${SUIT_DISPLAY[ps] || ps}`);
+      await emitPrediction(gn + offset, ps, triggerSuit);
     }
   }
 
