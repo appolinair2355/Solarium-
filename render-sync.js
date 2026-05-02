@@ -129,6 +129,16 @@ async function loadRenderUrl() {
       console.log('[RenderSync] URL par défaut configurée automatiquement');
     }
     if (url && url.trim()) {
+      // ── Protection anti-boucle : si l'URL de sync == la DB principale, on désactive ──
+      // Sur Render, la DB principale ET la DB de sync sont souvent la même (sossou).
+      // Syncer une base avec elle-même écraserait les mots de passe avec '$imported$'.
+      const mainUrl = (db.MAIN_DB_URL || '').replace(/\/$/, '').trim();
+      const syncUrl = url.trim().replace(/\/$/, '');
+      if (syncUrl === mainUrl) {
+        console.log('[RenderSync] ⏭  DB sync = DB principale — sync désactivée (même base, boucle évitée)');
+        return;
+      }
+
       if (url.trim() !== currentUrl) {
         if (renderPool) { try { await renderPool.end(); } catch {} }
         currentUrl = url.trim();
@@ -245,10 +255,12 @@ async function initRenderDb() {
 async function _pullFromExternal() {
   if (!renderPool) return;
   try {
-    // 1. Importer les utilisateurs
+    // 1. Importer les utilisateurs (les comptes admin sont gérés par initDB, on les ignore ici)
     const usersRes = await _query('SELECT * FROM users_export');
     let usersImported = 0;
     for (const u of usersRes.rows) {
+      // Ne jamais écraser les comptes admin avec des données du DB de sync
+      if (u.is_admin) continue;
       try {
         await db.pool.query(`
           INSERT INTO users (id, username, email, first_name, last_name, is_admin, is_approved,
@@ -279,22 +291,26 @@ async function _pullFromExternal() {
     }
     if (usersImported) console.log(`[RenderSync] ← ${usersImported} utilisateur(s) importé(s)`);
 
-    // 2. Importer les stratégies
+    // 2. Importer les stratégies — fusion par ID (n'écrase pas les existantes)
     const stratRes = await _query('SELECT data FROM strategies_export ORDER BY id');
     if (stratRes.rows.length) {
-      const existing = await db.getSetting('custom_strategies');
-      if (!existing || existing === '[]') {
-        const customStrats = [];
-        for (const row of stratRes.rows) {
-          try {
-            const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-            if (parsed && parsed.kind !== 'pro') customStrats.push(parsed);
-          } catch {}
-        }
-        if (customStrats.length) {
-          await db.setSetting('custom_strategies', JSON.stringify(customStrats));
-          console.log(`[RenderSync] ← ${customStrats.length} stratégie(s) importée(s)`);
-        }
+      const existingRaw = await db.getSetting('custom_strategies');
+      const existingList = (existingRaw && existingRaw !== '[]') ? JSON.parse(existingRaw) : [];
+      const existingIds = new Set(existingList.map(s => s.id));
+      let added = 0;
+      for (const row of stratRes.rows) {
+        try {
+          const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          if (parsed && parsed.kind !== 'pro' && !existingIds.has(parsed.id)) {
+            existingList.push(parsed);
+            existingIds.add(parsed.id);
+            added++;
+          }
+        } catch {}
+      }
+      if (added > 0) {
+        await db.setSetting('custom_strategies', JSON.stringify(existingList));
+        console.log(`[RenderSync] ← ${added} stratégie(s) importée(s) (${existingList.length} total)`);
       }
     }
 
@@ -328,6 +344,8 @@ async function _pullFromExternal() {
 
 async function _pushAllToExternal() {
   if (!renderPool) return;
+  // Réinitialise les admins après le pull pour garantir leurs mots de passe
+  try { await db.reinitAdmins(); } catch {}
   await syncAllUsers();
   await syncStrategies();
   await syncAllSettings();

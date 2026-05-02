@@ -1,9 +1,17 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+
 require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || null;
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 const USE_PG = !!DB_URL;
+
+// Exporté pour que render-sync puisse détecter les boucles de sync
+const MAIN_DB_URL = DB_URL;
 
 let pgPool = null;
 if (USE_PG) {
@@ -103,7 +111,6 @@ async function initDB() {
       ALTER TABLE predictions ALTER COLUMN triggered_by TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN predicted_suit TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN strategy TYPE TEXT;
-      -- Colonnes étendues pour formats Pro et scripts
       ALTER TABLE predictions ADD COLUMN IF NOT EXISTS hand TEXT DEFAULT 'joueur';
       ALTER TABLE predictions ADD COLUMN IF NOT EXISTS prediction_type TEXT DEFAULT 'standard';
       ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence INTEGER DEFAULT 100;
@@ -244,6 +251,31 @@ async function initDB() {
   }
 }
 
+// Ré-initialise uniquement les mots de passe admin — appelé après chaque sync externe
+// pour garantir qu'aucune opération de sync ne corrompt les comptes admin.
+async function reinitAdmins() {
+  if (!USE_PG || !pgPool) return;
+  try {
+    const bcrypt = require('bcryptjs');
+    const h1 = await bcrypt.hash('arrow2025', 10);
+    const h2 = await bcrypt.hash('arrow2026', 10);
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,2)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
+      ['buzzinfluence', 'admin@baccarat.pro', h1]
+    );
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,1)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, email=EXCLUDED.email, is_admin=TRUE, is_approved=TRUE, admin_level=1`,
+      ['sossoukouam', 'sossoukouam@gmail.com', h2]
+    );
+  } catch (e) {
+    console.warn('[DB] Erreur reinitAdmins:', e.message);
+  }
+}
+
 const pool = pgPool;
 
 // ── USERS ──────────────────────────────────────────────────────────
@@ -327,6 +359,39 @@ async function deleteUser(id) {
   return jsondb.deleteUser(id);
 }
 
+async function updateLastSeen(userId) {
+  try {
+    if (USE_PG) {
+      await pgPool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [userId]);
+    } else {
+      jsondb.updateUser(userId, { last_seen: new Date().toISOString() });
+    }
+  } catch {}
+}
+
+async function banInactiveUsers(hoursThreshold = 48) {
+  const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE users SET is_banned = TRUE, is_approved = FALSE
+       WHERE is_admin = FALSE AND is_banned = FALSE AND is_approved = TRUE
+         AND last_seen IS NOT NULL AND last_seen < $1
+       RETURNING id, username, last_seen`,
+      [cutoff.toISOString()]
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  const banned = [];
+  for (const u of all) {
+    if (!u.is_admin && !u.is_banned && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
+      jsondb.updateUser(u.id, { is_banned: true, is_approved: false });
+      banned.push(u);
+    }
+  }
+  return banned;
+}
+
 // ── PREDICTIONS ────────────────────────────────────────────────────
 
 async function getPredictions(opts = {}) {
@@ -364,7 +429,7 @@ async function createPrediction(data) {
           data.display_name || null,
         ]
       );
-      return r.rowCount > 0; // true = nouveau, false = doublon (ON CONFLICT DO NOTHING)
+      return r.rowCount > 0;
     } catch (e) { console.error('createPrediction error:', e.message); return false; }
   }
   return jsondb.createPrediction(data);
@@ -410,9 +475,6 @@ async function getMaxResolvedGame() {
   return jsondb.getMaxResolvedGame();
 }
 
-// ── Reset total au passage à minuit (jeu #1 détecté) ───────────────────────
-// Expire TOUTES les prédictions en_cours de la journée précédente.
-// Appelé quand l'API retourne le jeu numéro 1 (nouveau jour).
 async function expireAllEnCours() {
   if (USE_PG) {
     const r = await pgPool.query(
@@ -441,9 +503,7 @@ async function expireStaleByGame(threshold, maxR) {
   return jsondb.expireStaleByGame(threshold, maxR);
 }
 
-// Expire les prédictions en_cours créées il y a plus de N minutes (déblocage temporel)
 async function expireStaleByTime(minutesOld = 22) {
-  // Sécurité : valeur numérique stricte (évite NaN/injection dans l'INTERVAL SQL)
   const mins = Math.max(1, parseInt(minutesOld) || 22);
   if (USE_PG) {
     const r = await pgPool.query(
@@ -454,7 +514,6 @@ async function expireStaleByTime(minutesOld = 22) {
     return r.rowCount;
   }
   minutesOld = mins;
-  // JSON fallback: expire les prédictions en_cours créées avant le seuil
   const cutoff = Date.now() - minutesOld * 60 * 1000;
   let count = 0;
   const preds = jsondb.getPredictions({ status: 'en_cours', limit: 500 });
@@ -546,7 +605,7 @@ async function setHiddenChannels(userId, channelIds) {
 
 // ── USER CHANNEL VISIBLE (opt-in) ─────────────────────────────────
 
-const _visibleStore = new Map(); // fallback JSON
+const _visibleStore = new Map();
 
 async function getVisibleChannels(userId) {
   if (USE_PG) {
@@ -601,7 +660,7 @@ async function getStrategyRoutes(strategy) {
        WHERE scr.strategy = $1`,
       [strategy]
     );
-    return r.rows; // [{id, tg_id, channel_name}]
+    return r.rows;
   }
   return [];
 }
@@ -614,7 +673,6 @@ async function getAllStrategyRoutes() {
        JOIN telegram_config tc ON tc.id = scr.channel_id
        ORDER BY scr.strategy`
     );
-    // Return as { strategy: [{id, tg_id, channel_name}] }
     const map = {};
     for (const row of r.rows) {
       if (!map[row.strategy]) map[row.strategy] = [];
@@ -640,7 +698,7 @@ async function setStrategyRoutes(strategy, channelDbIds) {
 
 // ── TG PRED MESSAGE IDS ────────────────────────────────────────────
 
-const _tgMsgStore = new Map(); // fallback JSON
+const _tgMsgStore = new Map();
 
 async function clearAllTgPredMessages() {
   if (USE_PG) {
@@ -682,6 +740,7 @@ async function getTgMsgIds(strategy, gameNumber, suit) {
 }
 
 // ── Custom TG Formats ─────────────────────────────────────────────────────
+
 async function getCustomFormats() {
   if (!USE_PG) return [];
   const r = await pgPool.query(`SELECT id, name, template, parse_mode, created_at FROM custom_tg_formats ORDER BY id`);
@@ -770,7 +829,6 @@ async function deleteStrategyPredictions(strategy) {
 
 async function deleteAllPredictions() {
   if (USE_PG) {
-    // Supprimer les messages TG orphelins en même temps
     await pgPool.query('DELETE FROM tg_pred_messages').catch(() => {});
     const r = await pgPool.query('DELETE FROM predictions');
     return r.rowCount;
@@ -781,9 +839,6 @@ async function deleteAllPredictions() {
   return count;
 }
 
-// ── Nettoyage automatique des anciens enregistrements résolus ──────
-// Supprime les prédictions résolues (gagne/perdu/expire) de plus de N jours.
-// Appelé périodiquement pour éviter l'accumulation en base.
 async function cleanupOldPredictions(daysOld = 3) {
   if (!USE_PG) return 0;
   try {
@@ -799,7 +854,6 @@ async function cleanupOldPredictions(daysOld = 3) {
   }
 }
 
-// Supprime les enregistrements 'expire' immédiatement (pour les resets manuels)
 async function deleteExpiredPredictions() {
   if (!USE_PG) return 0;
   try {
@@ -848,7 +902,6 @@ async function getUserStats() {
 // ── BILAN QUOTIDIEN ─────────────────────────────────────────────────
 
 async function getDailyBilanStats(dateStr) {
-  // dateStr = 'YYYY-MM-DD'
   if (USE_PG) {
     const r = await pgPool.query(
       `SELECT strategy, COALESCE(rattrapage,0)::int AS rattrapage, status, COUNT(*)::int AS count
@@ -861,7 +914,6 @@ async function getDailyBilanStats(dateStr) {
     );
     return r.rows;
   }
-  // JSON fallback
   const all = jsondb.getPredictions({});
   const start = new Date(dateStr);
   const end   = new Date(dateStr); end.setDate(end.getDate() + 1);
@@ -913,7 +965,6 @@ async function getAllProjectFiles() {
 }
 
 async function getProjectFileMeta() {
-  // Retourne seulement file_path + size_bytes + updated_at (sans content) pour comparaison rapide
   if (USE_PG) {
     const r = await pgPool.query('SELECT file_path, size_bytes, updated_at FROM project_files');
     const map = {};
@@ -1067,41 +1118,8 @@ async function getPendingPaymentRequests() {
   return r.rows;
 }
 
-async function updateLastSeen(userId) {
-  try {
-    if (USE_PG) {
-      await pgPool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [userId]);
-    } else {
-      jsondb.updateUser(userId, { last_seen: new Date().toISOString() });
-    }
-  } catch {}
-}
-
-async function banInactiveUsers(hoursThreshold = 48) {
-  const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
-  if (USE_PG) {
-    const r = await pgPool.query(
-      `UPDATE users SET is_banned = TRUE, is_approved = FALSE
-       WHERE is_admin = FALSE AND is_banned = FALSE AND is_approved = TRUE
-         AND last_seen IS NOT NULL AND last_seen < $1
-       RETURNING id, username, last_seen`,
-      [cutoff.toISOString()]
-    );
-    return r.rows;
-  }
-  const all = jsondb.getAllUsers();
-  const banned = [];
-  for (const u of all) {
-    if (!u.is_admin && !u.is_banned && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
-      jsondb.updateUser(u.id, { is_banned: true, is_approved: false });
-      banned.push(u);
-    }
-  }
-  return banned;
-}
-
 module.exports = {
-  pool, USE_PG, initDB,
+  pool, USE_PG, MAIN_DB_URL, initDB, reinitAdmins,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
   updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,

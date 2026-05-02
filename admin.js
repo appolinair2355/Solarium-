@@ -2130,34 +2130,32 @@ router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
 });
 
 // ── Reset complet (retour usine) ─────────────────────────────────────────────
+// RÈGLE ABSOLUE : n'efface JAMAIS users, custom_strategies, promo_code,
+// telegram_config, bot_token, tg_msg_format, strategy_channel_routes.
+// Seules les prédictions stockées + leurs messages TG sont supprimés.
 router.post('/factory-reset', requireSuperAdmin, async (req, res) => {
   try {
     const pool = db.getPool ? db.getPool() : db.pool;
-    await pool.query(`TRUNCATE predictions, tg_pred_messages, strategy_channel_routes, user_channel_hidden, user_channel_visible, user_strategy_visible RESTART IDENTITY CASCADE`);
-    await pool.query(`DELETE FROM telegram_config`);
-    const settingsToReset = [
-      'custom_strategies', 'loss_sequences', 'relance_rules',
-      'max_rattrapage', 'tg_msg_format', 'default_strategies_tg',
-      'tg_announcements', 'telegram_chat_config', 'engine_absences',
-      'broadcast_message',
-    ];
-    for (const key of settingsToReset) {
+    // 1. Prédictions uniquement (+ messages TG orphelins)
+    await pool.query(`DELETE FROM predictions`);
+    await pool.query(`DELETE FROM tg_pred_messages`);
+    // 2. Reset uniquement les compteurs de session (pas les configs permanentes)
+    const sessionKeys = ['engine_absences', 'bilan_last', 'broadcast_message'];
+    for (const key of sessionKeys) {
       await pool.query(`DELETE FROM settings WHERE key = $1`, [key]);
     }
+    // 3. Reset mémoire moteur (sans toucher aux stratégies chargées)
     const engine = require('./engine');
-    if (engine.instance) {
-      engine.instance.strategies = [];
-      engine.instance.relanceSequences = [];
-      engine.instance.relanceCondCounters = {};
-      engine.instance.predictions = {};
-      engine.instance.pendingPredictions = {};
-      if (engine.instance.counterState) {
-        engine.instance.counterState = { c1: {}, c2: {}, c3: {} };
-      }
+    if (engine.instance && engine.instance.fullReset) {
+      await engine.instance.fullReset().catch(() => {});
     }
     _tgChat.messages = [];
     _tgChat.offset = 0;
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      preserved: ['users', 'custom_strategies', 'promo_codes', 'telegram_config', 'bot_token', 'tg_msg_format', 'strategy_channel_routes'],
+      deleted: ['predictions', 'tg_pred_messages', 'engine_absences', 'bilan_last'],
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
