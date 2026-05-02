@@ -213,10 +213,14 @@ router.get('/online-users', requireAdmin, async (req, res) => {
           first_name: u.first_name,
           last_name: u.last_name,
           is_pro: u.is_pro,
+          is_premium: u.is_premium,
+          account_type: u.account_type || 'simple',
           is_approved: u.is_approved,
           is_banned: u.is_banned,
           subscription_expires_at: u.subscription_expires_at,
           allowed_modes: u.allowed_modes,
+          allowed_channels: u.allowed_channels,
+          show_counter_channels: u.show_counter_channels,
           last_seen: u.last_seen,
           status,
           diff_minutes: diff !== null ? Math.floor(diff / 60000) : null,
@@ -247,6 +251,28 @@ router.put('/users/:id/allowed-modes', requireAdmin, async (req, res) => {
     const u = await db.updateUser(id, { allowed_modes: modesJson });
     if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
     res.json({ ok: true, allowed_modes: u.allowed_modes });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.put('/users/:id/allowed-channels', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { allowed_channels } = req.body;
+    const val = allowed_channels === null ? null : (Array.isArray(allowed_channels) ? JSON.stringify(allowed_channels) : null);
+    const u = await db.updateUser(id, { allowed_channels: val });
+    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    res.json({ ok: true, allowed_channels: u.allowed_channels });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.put('/users/:id/show-counter-channels', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { show_counter_channels } = req.body;
+    const val = show_counter_channels === null ? null : (Array.isArray(show_counter_channels) ? JSON.stringify(show_counter_channels) : null);
+    const u = await db.updateUser(id, { show_counter_channels: val });
+    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    res.json({ ok: true, show_counter_channels: u.show_counter_channels });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

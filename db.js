@@ -68,6 +68,8 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS show_counter_channels JSONB DEFAULT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS payment_requests (
@@ -298,7 +300,7 @@ async function getUserByUsername(username) {
 async function getAllUsers() {
   if (USE_PG) {
     const r = await pgPool.query(
-      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, subscription_expires_at, subscription_duration_minutes, created_at, allowed_modes, last_seen, is_banned, plain_password FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, account_type, subscription_expires_at, subscription_duration_minutes, created_at, allowed_modes, allowed_channels, show_counter_channels, last_seen, is_banned, plain_password FROM users ORDER BY created_at DESC'
     );
     return r.rows;
   }
@@ -630,6 +632,13 @@ async function setVisibleChannels(userId, channelIds) {
 
 async function getVisibleStrategies(userId) {
   if (USE_PG) {
+    // Priorité : allowed_channels sur le compte (géré depuis le panneau en ligne)
+    const uRes = await pgPool.query('SELECT allowed_channels FROM users WHERE id=$1', [userId]);
+    const u = uRes.rows[0];
+    if (u && Array.isArray(u.allowed_channels) && u.allowed_channels.length > 0) {
+      return u.allowed_channels;
+    }
+    // Fallback : table user_strategy_visible (ancienne méthode)
     const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
     return r.rows.map(r => r.strategy_id);
   }

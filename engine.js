@@ -8,6 +8,7 @@ const {
   sendToStrategyChannels,
   sendCustomAndStore,
   editStoredMessages,
+  editRawStoredMessages,
   getCurrentMaxRattrapage,
   loadMaxRattrapage,
 } = require('./telegram-service');
@@ -2597,20 +2598,25 @@ class Engine {
     } else if (mode === 'carte_valeur') {
       // ── MODE CARTE VALEUR ────────────────────────────────────────────────
       // Suit le NOMBRE D'APPARITIONS de chaque VALEUR (A, K, Q, J, 10, 9, 8, 7, 6)
-      // dans la main configurée (joueur ou banquier) — CUMULATIF (pas de fenêtre glissante).
+      // dans la main configurée — CUMULATIF.
       // Réinitialise TOUS les compteurs dès que toutes les valeurs ont count > 0.
-      // Déclenche une alerte quand exactement UNE valeur a count = 0 (toutes les autres > 0).
-      // Pas de rattrapage, pas de décalage, pas de mappings — mode notification informatif.
+      //
+      // Comportement Telegram :
+      //   • 1ère détection d'une valeur manquante → envoie 1 message (début→fin)
+      //   • Jeux suivants même valeur toujours absente → ÉDITE ce message (maj fin)
+      //   • La valeur apparaît enfin → édite message avec ✅ final, remet à zéro
       // ─────────────────────────────────────────────────────────────────────
-      const CV_VALUES  = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6'];
+      const CV_VALUES   = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6'];
       const CV_RANK_MAP = { 0:'A', 1:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6' };
 
       if (!state._cvValueCounts) {
         state._cvValueCounts = {};
         for (const v of CV_VALUES) state._cvValueCounts[v] = 0;
+        state._cvCycleStartGame = null;
       }
+      if (state._cvActiveAlert === undefined) state._cvActiveAlert = null;
 
-      // Identifier les valeurs présentes dans la main choisie pour ce jeu
+      const handDisplay  = cfg.hand === 'banquier' ? 'Banquier' : 'Joueur';
       const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
       const appearedValues = new Set();
       for (const c of (handCardsNow || [])) {
@@ -2618,60 +2624,111 @@ class Engine {
         if (vName) appearedValues.add(vName);
       }
 
-      // Incrémenter les compteurs pour chaque valeur apparue
       for (const v of appearedValues) {
         state._cvValueCounts[v] = (state._cvValueCounts[v] || 0) + 1;
       }
 
-      // Vérifier si TOUTES les valeurs ont count > 0 → réinitialiser pour nouveau cycle
+      if (state._cvCycleStartGame === null || state._cvCycleStartGame === undefined) {
+        state._cvCycleStartGame = gn;
+      }
+
+      // Construit le texte brut du message Carte Valeur
+      const buildCvText = (missingValue, cycleStart, endGn, found = false) => {
+        const countsStr = CV_VALUES.map(v => `${v}:${state._cvValueCounts[v] || 0}`).join('  ');
+        if (found) {
+          return `🃏 Carte Valeur\n━━━━━━━━━━━━━━━━━━\n✅ Valeur trouvée : ${missingValue}\n👤 Main : ${handDisplay}\n📊 Compteurs :\n${countsStr}\n━━━━━━━━━━━━━━━━━━\n📌 Début du cycle : #${cycleStart}\n🏁 Trouvée au jeu  : #${endGn}`;
+        }
+        return `🃏 Carte Valeur\n━━━━━━━━━━━━━━━━━━\n🔍 Valeur manquante : ${missingValue}\n👤 Main : ${handDisplay}\n📊 Compteurs :\n${countsStr}\n━━━━━━━━━━━━━━━━━━\n📌 Début du cycle : #${cycleStart}\n🏁 Fin analysée   : #${endGn}`;
+      };
+
+      // Vérifier si TOUTES les valeurs ont count > 0 → cycle complet
       const allPresent = CV_VALUES.every(v => (state._cvValueCounts[v] || 0) > 0);
       if (allPresent) {
-        console.log(`[${channelId}] [CarteValeur] Cycle complet — toutes les valeurs vues → remise à zéro`);
+        // Si un message était actif → édition finale ✅ puis suppression des message_ids
+        if (state._cvActiveAlert) {
+          const alert = state._cvActiveAlert;
+          const finalText = buildCvText(alert.missingValue, alert.cycleStartGn, gn, true);
+          console.log(`[${channelId}] [CarteValeur] Valeur ${alert.missingValue} trouvée jeu #${gn} — édition finale msg#${alert.firstGn}`);
+          try {
+            await editRawStoredMessages(channelId, alert.firstGn, alert.missingValue, finalText);
+            await db.deleteTgMsgIds(channelId, alert.firstGn, alert.missingValue).catch(() => {});
+          } catch (e) { console.warn(`[${channelId}] CV edit final:`, e.message); }
+          state._cvActiveAlert = null;
+        }
+        console.log(`[${channelId}] [CarteValeur] Cycle complet (jeux #${state._cvCycleStartGame}→#${gn}) — toutes les valeurs vues → remise à zéro`);
         for (const v of CV_VALUES) state._cvValueCounts[v] = 0;
+        state._cvCycleStartGame = null;
+
       } else {
-        // Vérifier si exactement UNE valeur est absente (count = 0)
         const zeroValues = CV_VALUES.filter(v => (state._cvValueCounts[v] || 0) === 0);
         console.log(`[${channelId}] [CarteValeur] Counts: ${CV_VALUES.map(v => `${v}=${state._cvValueCounts[v]||0}`).join(' ')} | absentes=[${zeroValues.join(',')}]`);
 
-        if (zeroValues.length === 1 && Object.keys(state.pending).length === 0) {
-          const missingValue = zeroValues[0];
+        if (zeroValues.length === 1) {
+          const missingValue  = zeroValues[0];
+          const cycleStart    = state._cvCycleStartGame || gn;
 
-          if (!(await canEmitNewPrediction(channelId))) {
-            console.log(`[${channelId}] [CarteValeur] Bloqué — prédiction récente dans la fenêtre`);
-          } else if (!(await this._isOwnerActive(cfg))) {
-            console.log(`[${channelId}] [CarteValeur] Bloqué — abonnement expiré`);
-          } else {
-            const handDisplay = cfg.hand === 'banquier' ? 'Banquier' : 'Joueur';
-            // Template Telegram spécial — format carte valeur
-            const cvTemplate = `🃏 Carte Valeur\n━━━━━━━━━━━━━━━━━━\n🔍 Manque de la valeur : ${missingValue}\n👤 Main choisir : ${handDisplay}\n📊 Valeur absente du jeu:\n🎮 Au jeu: {game}`;
-            const cvTgOpts  = { ...stratTgOpts, tg_template: cvTemplate };
-
-            console.log(`[${channelId}] [CarteValeur] Alerte — valeur absente: ${missingValue} jeu #${gn}`);
-            let inserted = false;
+          if (state._cvActiveAlert && state._cvActiveAlert.missingValue === missingValue) {
+            // ── Même valeur toujours absente → on ÉDITE le message existant ──
+            const alert       = state._cvActiveAlert;
+            const updatedText = buildCvText(missingValue, alert.cycleStartGn, gn, false);
+            console.log(`[${channelId}] [CarteValeur] ${missingValue} toujours absent — édition msg#${alert.firstGn} fin→#${gn}`);
             try {
-              inserted = await db.createPrediction({ strategy: channelId, game_number: gn, predicted_suit: missingValue, triggered_by: missingValue });
-            } catch (e) { console.error(`[${channelId}] createPrediction carte_valeur:`, e.message); }
+              await editRawStoredMessages(channelId, alert.firstGn, missingValue, updatedText);
+            } catch (e) { console.warn(`[${channelId}] CV edit update:`, e.message); }
 
-            if (inserted) {
-              // Alerte informative → résolution immédiate comme 'gagne' (notification envoyée = succès)
+          } else {
+            // ── Nouvelle valeur manquante → envoyer un nouveau message ──
+            if (state._cvActiveAlert) {
+              // Clore l'alerte précédente
+              await db.deleteTgMsgIds(channelId, state._cvActiveAlert.firstGn, state._cvActiveAlert.missingValue).catch(() => {});
+              state._cvActiveAlert = null;
+            }
+
+            if (Object.keys(state.pending).length !== 0) {
+              console.log(`[${channelId}] [CarteValeur] Bloqué — prédictions en attente`);
+            } else if (!(await canEmitNewPrediction(channelId))) {
+              console.log(`[${channelId}] [CarteValeur] Bloqué — prédiction récente dans la fenêtre`);
+            } else if (!(await this._isOwnerActive(cfg))) {
+              console.log(`[${channelId}] [CarteValeur] Bloqué — abonnement expiré`);
+            } else {
+              const initialText = buildCvText(missingValue, cycleStart, gn, false);
+              const cvTgOpts    = { ...stratTgOpts, tg_template: initialText };
+
+              console.log(`[${channelId}] [CarteValeur] Alerte — valeur absente: ${missingValue} jeu #${gn}`);
+              let inserted = false;
               try {
-                await db.updatePrediction(
-                  { strategy: channelId, game_number: gn, predicted_suit: missingValue, status_filter: 'en_cours' },
-                  { status: 'gagne', rattrapage: 0, resolved_at: new Date().toISOString() }
-                );
-              } catch (e) { console.warn(`[${channelId}] updatePrediction carte_valeur:`, e.message); }
+                inserted = await db.createPrediction({ strategy: channelId, game_number: gn, predicted_suit: missingValue, triggered_by: missingValue });
+              } catch (e) { console.error(`[${channelId}] createPrediction carte_valeur:`, e.message); }
 
-              // Envoyer Telegram avec format spécial carte valeur
-              if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-                await sendCustomAndStore(tg_targets, channelId, gn, missingValue, cvTgOpts).catch(e => {
-                  console.warn(`[${channelId}] ⚠️ Telegram carte_valeur custom: ${e?.message || e}`);
-                });
-              } else {
-                await sendToStrategyChannels(channelId, gn, missingValue, cvTgOpts).catch(e => {
-                  console.warn(`[${channelId}] ⚠️ Telegram carte_valeur routage: ${e?.message || e}`);
-                });
+              if (inserted) {
+                try {
+                  await db.updatePrediction(
+                    { strategy: channelId, game_number: gn, predicted_suit: missingValue, status_filter: 'en_cours' },
+                    { status: 'gagne', rattrapage: 0, resolved_at: new Date().toISOString() }
+                  );
+                } catch (e) { console.warn(`[${channelId}] updatePrediction carte_valeur:`, e.message); }
+
+                if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+                  await sendCustomAndStore(tg_targets, channelId, gn, missingValue, cvTgOpts).catch(e => {
+                    console.warn(`[${channelId}] ⚠️ Telegram carte_valeur custom: ${e?.message || e}`);
+                  });
+                } else {
+                  await sendToStrategyChannels(channelId, gn, missingValue, cvTgOpts).catch(e => {
+                    console.warn(`[${channelId}] ⚠️ Telegram carte_valeur routage: ${e?.message || e}`);
+                  });
+                }
+
+                // Mémoriser l'alerte active pour les éditions futures
+                state._cvActiveAlert = { missingValue, firstGn: gn, cycleStartGn: cycleStart };
               }
             }
+          }
+
+        } else {
+          // Plus d'une valeur manquante — si alerte active, la clore proprement
+          if (state._cvActiveAlert) {
+            await db.deleteTgMsgIds(channelId, state._cvActiveAlert.firstGn, state._cvActiveAlert.missingValue).catch(() => {});
+            state._cvActiveAlert = null;
           }
         }
       }
@@ -3152,6 +3209,7 @@ class Engine {
       // Reset état interne mode carte_valeur
       if (state._cvValueCounts) {
         for (const v of ['A','K','Q','J','10','9','8','7','6']) state._cvValueCounts[v] = 0;
+        state._cvCycleStartGame = null;
       }
       delete state._cvWindow;
       delete state._cvSuitCounts;
@@ -3382,6 +3440,22 @@ class Engine {
               : `${absB}/${threshold} jeux sans victoire Banquier`,
           },
         ];
+      }
+
+      // Mode Carte Valeur → afficher les compteurs de valeurs (A, K, Q, J, 10, 9, 8, 7, 6)
+      if (mode === 'carte_valeur') {
+        const CV_VALUES = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6'];
+        const counts = entry._cvValueCounts || {};
+        return CV_VALUES.map(v => ({
+          suit: v,
+          display: v,
+          count: counts[v] || 0,
+          threshold: 0,
+          mode,
+          label: 'Carte Valeur',
+          isLive: false,
+          isCarteValeur: true,
+        }));
       }
 
       // Mode Victoire Adverse → afficher le compteur de victoires consécutives

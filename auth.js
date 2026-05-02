@@ -22,6 +22,8 @@ function publicUser(u) {
     status: getUserStatus(u),
     admin_level: u.admin_level || 2,
     profile_photo: u.profile_photo || null,
+    allowed_channels: u.allowed_channels || null,
+    show_counter_channels: u.show_counter_channels || null,
   };
 }
 

@@ -1105,6 +1105,44 @@ async function cancelStrategyMessages(strategyId) {
   return deleted;
 }
 
+// ── Édition brute d'un message Carte Valeur (texte pré-rendu, sans formatBuilder) ─
+// Utilisé pour mettre à jour le numéro de fin de cycle sans créer de nouveau message.
+// Ne supprime PAS les message_ids de la DB car on continue à éditer le même message.
+
+async function editRawStoredMessages(strategy, gameNumber, suit, rawText) {
+  let stored;
+  try {
+    stored = await db.getTgMsgIds(strategy, gameNumber, suit);
+  } catch (e) {
+    console.error('[TG CV Edit] getTgMsgIds error:', e.message);
+    stored = [];
+  }
+  if (!stored.length) {
+    console.warn(`[TG CV Edit] Aucun message_id pour ${strategy}/#${gameNumber}/${suit}`);
+    return;
+  }
+  for (const row of stored) {
+    const token = row.bot_token || TOKEN;
+    if (!token) { console.warn(`[TG CV Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
+    try {
+      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text: rawText };
+      const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        console.log(`[TG CV Edit] ${strategy} #${gameNumber}/${suit} → ${row.channel_tg_id} mis à jour`);
+      } else {
+        const err = await resp.text();
+        if (!err.includes('message is not modified')) {
+          console.error(`[TG CV Edit] editMessage ${row.channel_tg_id}: ${err.slice(0, 120)}`);
+        }
+      }
+    } catch (e) { console.error(`[TG CV Edit] Exception: ${e.message}`); }
+  }
+}
+
 // ── Alias de compatibilité ─────────────────────────────────────────
 
 const sendToGlobalChannelsAndStore  = sendToStrategyChannels;
@@ -1186,6 +1224,7 @@ module.exports = {
   sendPredictionToTelegram,
   sendPredictionToTargets,
   cancelStrategyMessages,
+  editRawStoredMessages,
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
 };
