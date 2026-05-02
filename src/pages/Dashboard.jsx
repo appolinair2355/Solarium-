@@ -59,19 +59,16 @@ function numberToFrenchWords(n) {
 function suitToFrench(s) {
   if (!s) return '';
   const str = String(s).trim();
-  // Symboles unicode
   if (str.includes('♠')) return 'Pique';
-  if (str.includes('♥') || str.includes('❤')) return 'Coeur';
+  if (str.includes('♥') || str.includes('❤')) return 'Cœur';
   if (str.includes('♦')) return 'Carreau';
-  if (str.includes('♣')) return 'Trefle';
-  // Valeurs spéciales des modes victoire/cartes
+  if (str.includes('♣')) return 'Trèfle';
   if (str === 'WIN_P' || str === 'WIN_PLAYER') return 'Joueur gagne';
   if (str === 'WIN_B' || str === 'WIN_BANKER') return 'Banquier gagne';
   if (str === 'deux' || str === '2') return 'deux cartes';
   if (str === 'trois' || str === '3') return 'trois cartes';
   if (str === 'distrib') return 'distribution';
-  // Lettres initiales
-  const m = { 'P': 'Pique', 'H': 'Coeur', 'C': 'Coeur', 'D': 'Carreau', 'T': 'Trefle' };
+  const m = { 'P': 'Pique', 'H': 'Cœur', 'C': 'Cœur', 'D': 'Carreau', 'T': 'Trèfle' };
   return m[str.toUpperCase()[0]] || str;
 }
 
@@ -117,8 +114,8 @@ function speakPrediction(pred, gender, volumeOverride) {
     try { if (window.speechSynthesis.paused) window.speechSynthesis.resume(); } catch {}
     window.speechSynthesis.cancel();
     const numWords = numberToFrenchWords(pred.game_number);
-    const suit = suitToFrench(pred.predicted_suit);
-    const text = `Jeu numero ${numWords}. Prediction: ${suit}.`;
+    const suit = suitToFrench(pred.suit_display || pred.predicted_suit);
+    const text = `Jeu numéro ${numWords}. Prédiction: ${suit}.`;
     if (typeof console !== 'undefined') console.log('[Voix] →', text);
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
@@ -476,12 +473,19 @@ export default function Dashboard() {
       const data = JSON.parse(e.data);
       setPredictions(data);
       // detect new en_cours predictions for current channel
+      // data is ordered by created_at DESC, so data[0] is the most recent
+      const hadKnown = knownPredIds.current.size > 0;
+      const newInChannel = [];
       data.forEach(p => {
-        if (p.strategy === channelId && p.status === 'en_cours' && !knownPredIds.current.has(p.id)) {
-          if (knownPredIds.current.size > 0) announcePrediction(p); // skip initial load
+        if (!knownPredIds.current.has(p.id)) {
           knownPredIds.current.add(p.id);
+          if (p.strategy === channelId && p.status === 'en_cours') {
+            newInChannel.push(p);
+          }
         }
       });
+      // only announce the most recent (index 0, DESC order) to match what is shown on screen
+      if (hadKnown && newInChannel.length > 0) announcePrediction(newInChannel[0]);
       // clean up resolved ids that are no longer en_cours
       const activeIds = new Set(data.filter(p => p.status === 'en_cours').map(p => p.id));
       knownPredIds.current = new Set([...knownPredIds.current].filter(id => activeIds.has(id) || data.some(p => p.id === id)));

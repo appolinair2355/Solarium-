@@ -3730,6 +3730,71 @@ function AdminPanel() {
   const [aiBotPrecheck,  setAiBotPrecheck]    = useState(null);
   const [aiBotChecking,  setAiBotChecking]    = useState(false);
 
+  // Utilisateurs en ligne
+  const [onlineUsers, setOnlineUsers]           = useState([]);
+  const [onlineLoading, setOnlineLoading]       = useState(false);
+  const [onlineRefresh, setOnlineRefresh]       = useState(0);
+  const [editingAllowedModes, setEditingAllowedModes] = useState(null); // userId
+  const [allowedModesEdit, setAllowedModesEdit] = useState([]); // array of modes
+  const [allowedModesSaving, setAllowedModesSaving] = useState(false);
+
+  const ALL_MODES_LIST = [
+    { value: 'manquants', label: 'Absences' },
+    { value: 'apparents', label: 'Apparitions' },
+    { value: 'absence_apparition', label: 'Absence → Apparition' },
+    { value: 'apparition_absence', label: 'Apparition → Absence' },
+    { value: 'taux_miroir', label: 'Taux Miroir' },
+    { value: 'compteur_adverse', label: 'Compteur Adverse' },
+    { value: 'victoire_adverse', label: 'Victoire Adverse' },
+    { value: 'multi_strategy', label: 'Multi-stratégie' },
+    { value: 'relance', label: 'Relance' },
+    { value: 'distribution', label: 'Distribution' },
+    { value: 'carte_3_vers_2', label: '3 cartes → 2 cartes' },
+    { value: 'carte_2_vers_3', label: '2 cartes → 3 cartes' },
+    { value: 'abs_3_vers_2', label: '3→2 Absence' },
+    { value: 'abs_3_vers_3', label: '3→3 Absence' },
+    { value: 'absence_victoire', label: 'Absence Victoire' },
+    { value: 'lecture_passee', label: '📖 Lecture jeux passés' },
+    { value: 'intelligent_cartes', label: '🧠 Intelligent Cartes' },
+    { value: 'union_enseignes', label: '🔗 Union Enseignes' },
+    { value: 'carte_valeur', label: '🃏 Carte Valeur' },
+  ];
+
+  useEffect(() => {
+    if (adminTab !== 'online-users') return;
+    setOnlineLoading(true);
+    fetch('/api/admin/online-users', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { setOnlineUsers(d); setOnlineLoading(false); })
+      .catch(() => setOnlineLoading(false));
+  }, [adminTab, onlineRefresh]);
+
+  const saveAllowedModes = async (userId) => {
+    setAllowedModesSaving(true);
+    try {
+      const r = await fetch(`/api/admin/users/${userId}/allowed-modes`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowed_modes: allowedModesEdit.length > 0 ? allowedModesEdit : null }),
+      });
+      if (r.ok) {
+        setOnlineUsers(prev => prev.map(u => u.id === userId ? { ...u, allowed_modes: allowedModesEdit.length > 0 ? allowedModesEdit : null } : u));
+        setEditingAllowedModes(null);
+      }
+    } finally { setAllowedModesSaving(false); }
+  };
+
+  const unbanUser = async (userId) => {
+    if (!confirm('Débannir cet utilisateur ?')) return;
+    try {
+      const r = await fetch(`/api/admin/users/${userId}/unban`, { method: 'POST', credentials: 'include' });
+      if (r.ok) {
+        setOnlineUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: false } : u));
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: false } : u));
+      }
+    } catch {}
+  };
+
   // Messages reçus des utilisateurs
   const [userMessages, setUserMessages]         = useState([]);
 
@@ -3830,7 +3895,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -4893,7 +4958,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.' };
 
   return (
     <>
@@ -5305,6 +5370,7 @@ function AdminPanel() {
               ]
             : [
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
+            { id: 'online-users',   icon: '🟢', label: 'En ligne',       badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
             { id: 'paiements',      icon: '💳', label: 'Paiements',      badge: pendingPayments.length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
@@ -6040,6 +6106,92 @@ function AdminPanel() {
         </>}
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
+
+        {/* ── TAB : UTILISATEURS EN LIGNE ── */}
+        {adminTab === 'online-users' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>🟢 Utilisateurs en ligne</h2>
+              <button onClick={() => setOnlineRefresh(v => v + 1)} style={{ padding: '6px 14px', background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 7, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>↻ Actualiser</button>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+              🟢 En ligne = vu il y a &lt; 5 min · 🟡 Actif = vu il y a &lt; 30 min · 🔴 Hors ligne = vu il y a ≥ 30 min
+            </div>
+            {onlineLoading ? (
+              <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Chargement…</div>
+            ) : onlineUsers.length === 0 ? (
+              <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Aucun utilisateur non-admin.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {onlineUsers.map(u => {
+                  const statusColor = u.status === 'en_ligne' ? '#22c55e' : u.status === 'actif' ? '#fbbf24' : u.status === 'hors_ligne' ? '#ef4444' : '#64748b';
+                  const statusDot   = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : u.status === 'hors_ligne' ? '🔴' : '⚪';
+                  const statusLabel = u.status === 'en_ligne' ? 'En ligne' : u.status === 'actif' ? 'Actif' : u.status === 'hors_ligne' ? 'Hors ligne' : 'Jamais connecté';
+                  const lastSeenStr = u.last_seen
+                    ? (u.diff_minutes !== null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '')
+                    : '—';
+                  const isEditingModes = editingAllowedModes === u.id;
+                  const modesForUser   = Array.isArray(u.allowed_modes) ? u.allowed_modes : [];
+                  const subExpired     = u.subscription_expires_at && new Date(u.subscription_expires_at) <= new Date();
+                  return (
+                    <div key={u.id} style={{ background: 'rgba(15,23,42,0.6)', border: `1px solid ${u.is_banned ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 18 }}>{statusDot}</span>
+                        <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 14 }}>{u.username}</span>
+                        {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                        <span style={{ fontSize: 11, color: statusColor, background: `${statusColor}20`, borderRadius: 5, padding: '2px 8px', fontWeight: 700 }}>{statusLabel}</span>
+                        {u.is_pro && <span style={{ fontSize: 10, color: '#818cf8', background: 'rgba(99,102,241,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>PRO</span>}
+                        {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>BANNI</span>}
+                        {subExpired && !u.is_banned && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>EXPIRÉ</span>}
+                        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                          Modes autorisés : {!u.allowed_modes ? <span style={{ color: '#22c55e' }}>Tous</span> : modesForUser.length === 0 ? <span style={{ color: '#ef4444' }}>Aucun</span> : <span style={{ color: '#fbbf24' }}>{modesForUser.join(', ')}</span>}
+                        </div>
+                        {u.is_banned && isSuperAdmin && (
+                          <button onClick={() => unbanUser(u.id)} style={{ padding: '4px 10px', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Débannir</button>
+                        )}
+                        <button onClick={() => {
+                          if (isEditingModes) { setEditingAllowedModes(null); return; }
+                          setEditingAllowedModes(u.id);
+                          setAllowedModesEdit(modesForUser.length > 0 ? [...modesForUser] : []);
+                        }} style={{ padding: '4px 10px', background: isEditingModes ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingModes ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingModes ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                          {isEditingModes ? '✕ Annuler' : '✏️ Modes'}
+                        </button>
+                      </div>
+                      {isEditingModes && (
+                        <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 8 }}>
+                          <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 8 }}>Modes de stratégie autorisés (laissez vide = tous)</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                            {ALL_MODES_LIST.map(m => {
+                              const active = allowedModesEdit.includes(m.value);
+                              return (
+                                <button key={m.value} type="button" onClick={() => setAllowedModesEdit(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])}
+                                  style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                    background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.05)',
+                                    border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                                    color: active ? '#fbbf24' : '#64748b' }}>
+                                  {m.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <button onClick={() => setAllowedModesEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                            <button onClick={() => saveAllowedModes(u.id)} disabled={allowedModesSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                              {allowedModesSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
@@ -7147,6 +7299,8 @@ function AdminPanel() {
                     <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
                     <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
+                    <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
+                    <option value="carte_valeur">🃏 Carte Valeur (fenêtre valeurs hautes)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
@@ -7164,6 +7318,22 @@ function AdminPanel() {
                       <div>Lit la 2ème base <em>cartes_jeu</em> sur une <strong>fenêtre</strong> de N jeux passés. Pour la main choisie, calcule le costume qui apparaît le plus souvent à <strong>(jeu+offset)</strong> après chaque séquence des <strong>pattern</strong> derniers jeux identique à la séquence courante.</div>
                       <div style={{ marginTop: 6 }}>Si le motif <strong>♦♣♠</strong> est suivi <em>min_count</em> fois ou plus par <strong>♣</strong> dans l'historique, le moteur prédit ♣ pour le prochain jeu.</div>
                       <div style={{ marginTop: 6 }}>Plus la fenêtre est grande, plus les corrélations sont fiables. Augmentez <em>min_count</em> pour réduire les faux signaux.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'union_enseignes' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🔗 Mode Union Enseignes</div>
+                      <div>Surveille les prédictions en cours de plusieurs stratégies sources. Quand au moins <strong>Seuil</strong> sources s'accordent sur le <strong>même costume</strong> → émet ce costume pour le prochain jeu.</div>
+                      <div style={{ marginTop: 6 }}>Contrairement à Multi-Stratégie (qui attend que toutes les sources se déclenchent simultanément), Union Enseignes se déclenche dès qu'un consensus de N sources est atteint, même à des moments différents.</div>
+                      <div style={{ marginTop: 6 }}>Configurez les <strong>stratégies sources</strong> ci-dessous et le <strong>seuil</strong> (nombre minimum de sources en accord).</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'carte_valeur' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Carte Valeur</div>
+                      <div>Sur une <strong>fenêtre glissante de Seuil jeux</strong>, compte combien de fois chaque costume (♠ ♥ ♦ ♣) apparaît parmi les cartes de valeur haute (A, K, Q, J, 10, 9, 8, 7, 6) de la main configurée.</div>
+                      <div style={{ marginTop: 6 }}>Quand <strong>exactement un costume</strong> a un compteur à zéro dans la fenêtre → prédit ce costume (via les mappings habituels).</div>
+                      <div style={{ marginTop: 6 }}>Configurez la <strong>main</strong> et le <strong>seuil</strong> (taille de la fenêtre). Les mappings permettent de transformer le costume absent en autre chose.</div>
                     </div>
                   )}
 
@@ -7378,6 +7548,41 @@ function AdminPanel() {
                     </div>
                   )}
                 </div>}
+
+                {/* ── Stratégies sources — MODE UNION ENSEIGNES ── */}
+                {stratForm.mode === 'union_enseignes' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#818cf8', marginBottom: 4 }}>🔗 Stratégies sources à surveiller</div>
+                    <div style={{ fontSize: 11, color: '#475569', marginBottom: 12 }}>Cochez les stratégies dont les prédictions en cours seront agrégées. Le <strong>Seuil B</strong> définit le nombre minimum de sources devant prédire le même costume pour déclencher.</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {[
+                        { id: 'C1', label: '♠ Pique Noir' },
+                        { id: 'C2', label: '♥ Cœur Rouge' },
+                        { id: 'C3', label: '♦ Carreau Doré' },
+                        { id: 'DC', label: '♣ Double Canal' },
+                        ...strategies.filter(s => s.mode !== 'union_enseignes').map(s => ({ id: `S${s.id}`, label: s.name })),
+                      ].map(({ id, label }) => {
+                        const checked = (stratForm.multi_source_ids || []).includes(id);
+                        return (
+                          <label key={id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '7px 10px', borderRadius: 8,
+                            background: checked ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.02)', border: `1px solid ${checked ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)'}` }}>
+                            <input type="checkbox" checked={checked} onChange={e => setStratForm(p => {
+                              const cur = p.multi_source_ids || [];
+                              return { ...p, multi_source_ids: e.target.checked ? [...cur, id] : cur.filter(x => x !== id) };
+                            })} style={{ accentColor: '#818cf8', width: 15, height: 15, cursor: 'pointer' }} />
+                            <span style={{ flex: 1, color: checked ? '#e2e8f0' : '#64748b', fontSize: 13 }}>{label}</span>
+                            <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace', background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 5 }}>{id}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {(stratForm.multi_source_ids || []).length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 11, color: '#818cf8' }}>
+                        ✓ {stratForm.multi_source_ids.length} source(s) · seuil = {stratForm.threshold} accord(s) minimum
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ── Paires fixes — MODE MIROIR UNIQUEMENT ── */}
                 {stratForm.mode === 'taux_miroir' && (

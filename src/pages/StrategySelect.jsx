@@ -52,6 +52,7 @@ export default function StrategySelect() {
   const [customStrategies, setCustomStrategies] = useState([]);
   const [proStrategies, setProStrategies] = useState([]);
   const [visibleStratIds, setVisibleStratIds] = useState(null); // null = loading
+  const [allowedModes, setAllowedModes] = useState(null); // null = all modes allowed
 
   useEffect(() => {
     fetch('/api/predictions/stats', { credentials: 'include' })
@@ -62,17 +63,28 @@ export default function StrategySelect() {
       fetch('/api/admin/strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : []),
       fetch('/api/admin/my-strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
       fetch('/api/admin/pro-strategies', { credentials: 'include' }).then(r => r.ok ? r.json() : { strategies: [] }),
-    ]).then(([allStrats, myStrats, proData]) => {
+      fetch('/api/admin/my-allowed-modes', { credentials: 'include' }).then(r => r.ok ? r.json() : { allowed_modes: null }),
+    ]).then(([allStrats, myStrats, proData, modesData]) => {
       setCustomStrategies(Array.isArray(allStrats) ? allStrats : []);
       setVisibleStratIds(new Set(myStrats.visible || []));
       setProStrategies(proData.strategies || []);
+      const modes = modesData.allowed_modes;
+      setAllowedModes(Array.isArray(modes) ? modes : null);
     }).catch(() => setVisibleStratIds(new Set()));
   }, []);
 
-  const canSeeStrategy = id => {
+  const isModeAllowed = (mode) => {
+    if (user?.is_admin) return true;
+    if (!allowedModes) return true; // null = all modes allowed
+    return allowedModes.includes(mode);
+  };
+
+  const canSeeStrategy = (id, mode) => {
     if (user?.is_admin) return true;
     if (visibleStratIds === null) return false; // still loading
-    return visibleStratIds.has(id);
+    if (!visibleStratIds.has(id)) return false;
+    if (mode && !isModeAllowed(mode)) return false;
+    return true;
   };
 
   const CUSTOM_COLORS = [
@@ -266,8 +278,8 @@ export default function StrategySelect() {
           </div>
         )}
         {(visibleStratIds !== null || user?.is_admin) && (() => {
-          const visChannels = CHANNELS.filter(ch => canSeeStrategy(ch.id));
-          const visCustom   = customStrategies.filter(s => canSeeStrategy(`S${s.id}`));
+          const visChannels = CHANNELS.filter(ch => canSeeStrategy(ch.id, null));
+          const visCustom   = customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode));
           if (!user?.is_admin && visChannels.length === 0 && visCustom.length === 0) {
             return (
               <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
@@ -279,7 +291,7 @@ export default function StrategySelect() {
           }
           return null;
         })()}
-        {(visibleStratIds !== null || user?.is_admin) && CHANNELS.filter(ch => canSeeStrategy(ch.id)).map((ch, i) => {
+        {(visibleStratIds !== null || user?.is_admin) && CHANNELS.filter(ch => canSeeStrategy(ch.id, null)).map((ch, i) => {
           const s = getStats(ch.id);
           const isSelected = selected === ch.id;
           return (
@@ -373,7 +385,7 @@ export default function StrategySelect() {
         })}
 
         {/* Stratégies personnalisées (S7, S8…) */}
-        {customStrategies.filter(s => canSeeStrategy(`S${s.id}`)).map((s, i) => {
+        {customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode)).map((s, i) => {
           const cid = `S${s.id}`;
           const { color, glow } = CUSTOM_COLORS[i % CUSTOM_COLORS.length];
           const st = getStats(cid);
