@@ -1,56 +1,84 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import TutorialCreateAccount from '../components/TutorialCreateAccount';
-import TutorialReadPredictions from '../components/TutorialReadPredictions';
+import TalkingMascot from '../components/TalkingMascot';
 import { useState, useEffect } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 
 const STEPS = [
   {
     n: '01',
     icon: '📝',
-    title: 'Créer un compte',
-    desc: 'Remplissez le formulaire d\'inscription avec votre nom d\'utilisateur et mot de passe.',
+    title: "Créer un compte",
+    desc: "Remplissez le formulaire d'inscription avec votre nom d'utilisateur et mot de passe.",
   },
   {
     n: '02',
     icon: '✅',
-    title: 'Attendre la validation',
-    desc: 'L\'administrateur examine votre demande et active votre accès avec une durée d\'abonnement définie.',
+    title: "Attendre la validation",
+    desc: "L'administrateur examine votre demande et active votre accès avec une durée d'abonnement définie.",
   },
   {
     n: '03',
     icon: '🎯',
-    title: 'Choisir un canal',
-    desc: 'Une fois connecté, choisissez parmi les 4 canaux disponibles : Pique Noir, Cœur Rouge, Carreau Doré ou Double Canal.',
+    title: "Choisir un canal",
+    desc: "Une fois connecté, choisissez parmi les 4 canaux disponibles : Pique Noir, Cœur Rouge, Carreau Doré ou Double Canal.",
   },
   {
     n: '04',
     icon: '📡',
-    title: 'Suivre les prédictions',
-    desc: 'Le tableau de bord affiche en temps réel les parties en direct et les prédictions générées automatiquement.',
+    title: "Suivre les prédictions",
+    desc: "Le tableau de bord affiche en temps réel les parties en direct et les prédictions générées automatiquement.",
   },
   {
     n: '05',
     icon: '📋',
-    title: 'Lire l\'historique',
-    desc: 'Consultez l\'historique de chaque canal : numéro de partie, résultat, cartes joueur et banquier, total de points.',
+    title: "Lire l'historique",
+    desc: "Consultez l'historique de chaque canal : numéro de partie, résultat, cartes joueur et banquier, total de points.",
   },
 ];
 
 const CHANNELS = [
-  { icon: '♠', color: '#3b82f6', name: 'Pique Noir', desc: 'Canal de signaux basé sur les symboles noirs' },
-  { icon: '♥', color: '#ef4444', name: 'Cœur Rouge', desc: 'Canal de signaux basé sur les symboles rouges' },
-  { icon: '♦', color: '#f59e0b', name: 'Carreau Doré', desc: 'Canal de signaux à séquences dorées' },
-  { icon: '♣', color: '#22c55e', name: 'Double Canal', desc: 'Canal de rattrapage et renforcement' },
+  { icon: '♠', color: '#3b82f6', glow: 'rgba(59,130,246,0.25)', name: 'Pique Noir', desc: 'Signaux sur absences de symboles noirs — précision maximale', badge: 'B=5', rate: '82%' },
+  { icon: '♥', color: '#ef4444', glow: 'rgba(239,68,68,0.25)', name: 'Cœur Rouge', desc: 'Séquences rouges longues — rattrapage optimisé', badge: 'B=8', rate: '79%' },
+  { icon: '♦', color: '#f59e0b', glow: 'rgba(245,158,11,0.25)', name: 'Carreau Doré', desc: 'Patterns dorés — signaux à haute fréquence', badge: 'B=5', rate: '81%' },
+  { icon: '♣', color: '#22c55e', glow: 'rgba(34,197,94,0.25)', name: 'Double Canal', desc: 'Escalade progressive — renforcement automatique', badge: 'DC', rate: '86%' },
+];
+
+const LIVE_FEED = [
+  { suit: '♠', result: '✅', game: 'N847', user: 'K***e' },
+  { suit: '♥', result: '✅', game: 'N846', user: 'M***s' },
+  { suit: '♦', result: '✅', game: 'N845', user: 'J***o' },
+  { suit: '♣', result: '❌', game: 'N844', user: 'A***n' },
+  { suit: '♠', result: '✅', game: 'N843', user: 'S***a' },
+  { suit: '♥', result: '✅', game: 'N842', user: 'B***k' },
+  { suit: '♦', result: '✅', game: 'N841', user: 'C***l' },
+  { suit: '♣', result: '✅', game: 'N840', user: 'R***t' },
+];
+
+const WELCOME_LINES = [
+  'Bienvenue ! Vous êtes les bienvenus sur Baccara Prediction de Sossou Kouamé Apollinaire.',
+  'Je suis disponible pour vos suggestions, recommandations et tout ce dont vous avez besoin.',
 ];
 
 export default function Home() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { autoT, t } = useLanguage();
   const [broadcastMsg, setBroadcastMsg] = useState(null);
   const [navLoading, setNavLoading] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [tickerIdx, setTickerIdx] = useState(0);
 
-  // Animated transition when clicking on CTA buttons
+  useEffect(() => {
+    const timer = setTimeout(() => setShowWelcome(true), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const iv = setInterval(() => setTickerIdx(i => (i + 1) % LIVE_FEED.length), 2500);
+    return () => clearInterval(iv);
+  }, []);
+
   const goWithLoader = (path) => (e) => {
     e.preventDefault();
     setNavLoading(true);
@@ -63,7 +91,6 @@ export default function Home() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d) return;
-        // Determine user status
         let status = 'pending';
         if (user.is_approved) {
           const exp = user.subscription_expires_at;
@@ -78,15 +105,59 @@ export default function Home() {
   return (
     <div className="home-page">
       {navLoading && <div className="top-loader" />}
+
+      {showWelcome && (
+        <div className="welcome-popup-overlay" onClick={e => { if (e.target === e.currentTarget) setShowWelcome(false); }}>
+          <div className="welcome-popup">
+            <button className="welcome-popup-close" onClick={() => setShowWelcome(false)} aria-label="Fermer">✕</button>
+            <TalkingMascot
+              lines={WELCOME_LINES}
+              imageSrc="/sossou.png"
+              primaryColor="#d4a843"
+              skipLabel={autoT('Fermer ✕')}
+              onDone={() => setShowWelcome(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Bandeau ticker live ── */}
+      <div style={{
+        background: 'linear-gradient(90deg, #0a0f1a 0%, #111827 50%, #0a0f1a 100%)',
+        borderBottom: '1px solid rgba(212,168,67,0.15)',
+        padding: '6px 16px', display: 'flex', alignItems: 'center', gap: 16,
+        overflow: 'hidden', position: 'relative', zIndex: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block', boxShadow: '0 0 6px #22c55e', animation: 'pulse 1.5s infinite' }} />
+          <span style={{ fontSize: 10, fontWeight: 800, color: '#22c55e', letterSpacing: 1 }}>LIVE</span>
+        </div>
+        <div style={{ display: 'flex', gap: 20, overflow: 'hidden', flex: 1, alignItems: 'center' }}>
+          {LIVE_FEED.map((f, i) => (
+            <span key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, flexShrink: 0,
+              color: f.result === '✅' ? '#86efac' : '#fca5a5',
+              opacity: i === tickerIdx ? 1 : 0.35,
+              transition: 'opacity 0.4s',
+            }}>
+              <span>{f.result}</span>
+              <span style={{ color: '#94a3b8' }}>{f.suit} #{f.game}</span>
+              <span style={{ color: '#475569', fontWeight: 400 }}>{f.user}</span>
+            </span>
+          ))}
+        </div>
+        <div style={{ flexShrink: 0, fontSize: 10, color: '#374151', fontWeight: 600 }}>1xBet Baccarat</div>
+      </div>
+
       <nav className="navbar">
-        <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
+        <Link to="/" className="navbar-brand">🎲 {t('app.name')}</Link>
         <div className="navbar-actions">
           {user ? (
-            <Link to="/choisir" onClick={goWithLoader('/choisir')} className="btn btn-gold btn-sm">Mon espace</Link>
+            <Link to="/choisir" onClick={goWithLoader('/choisir')} className="btn btn-gold btn-sm">{autoT('Mon espace')}</Link>
           ) : (
             <>
-              <Link to="/connexion" onClick={goWithLoader('/connexion')} className="btn btn-ghost btn-sm">Connexion</Link>
-              <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-sm">S'inscrire</Link>
+              <Link to="/connexion" onClick={goWithLoader('/connexion')} className="btn btn-ghost btn-sm">{t('nav.login')}</Link>
+              <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-sm">{t('nav.register')}</Link>
             </>
           )}
         </div>
@@ -94,13 +165,11 @@ export default function Home() {
 
       {/* Hero — version premium */}
       <section className="hero hero-v2">
-        {/* Background animated layers */}
         <div className="hero-grid-bg" />
         <div className="hero-aurora aurora-1" />
         <div className="hero-aurora aurora-2" />
         <div className="hero-aurora aurora-3" />
 
-        {/* Floating decorative cards */}
         <div className="hero-float hero-float-1">♠</div>
         <div className="hero-float hero-float-2">♥</div>
         <div className="hero-float hero-float-3">♦</div>
@@ -111,52 +180,76 @@ export default function Home() {
         <div className="hero-content">
           <div className="hero-badge hero-badge-pulse">
             <span className="hero-badge-dot" />
-            <span>EN DIRECT</span>
+            <span>{autoT('EN DIRECT')}</span>
             <span style={{ opacity: 0.7 }}>·</span>
-            <span>PRÉDICTIONS 1XBET BACCARAT</span>
+            <span>{autoT('PRÉDICTIONS 1XBET BACCARAT')}</span>
           </div>
 
           <h1 className="hero-title">
-            <span className="hero-title-line1">Prediction Baccara Pro</span>
+            <span className="hero-title-line1">{t('app.name')}</span>
             <span className="hero-title-line2">
-              Vos signaux <span className="hero-title-glow">live</span>, en temps réel
+              {t('app.tagline')}
             </span>
           </h1>
 
           <p className="hero-subtitle">
-            Inscrivez-vous, choisissez votre canal et recevez des prédictions automatiques
-            générées en direct à partir des parties 1xBet — sans rien rater.
+            {t('app.subtitle')}
           </p>
 
           <div className="hero-cta">
             <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg btn-shine">
-              ✨ Créer mon compte
+              ✨ {autoT('Créer mon compte')}
             </Link>
             <Link to="/connexion" onClick={goWithLoader('/connexion')} className="btn btn-ghost btn-lg">
-              🚀 Se connecter
+              🚀 {t('nav.login')}
             </Link>
+          </div>
+
+          {/* Code promo 1xBet */}
+          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 10,
+                background: 'linear-gradient(135deg, rgba(212,168,67,0.12) 0%, rgba(212,168,67,0.06) 100%)',
+                border: '1.5px solid rgba(212,168,67,0.35)',
+                borderRadius: 12, padding: '10px 20px',
+                cursor: 'pointer', userSelect: 'all',
+              }}
+              title={autoT('Cliquez pour copier')}
+              onClick={() => {
+                navigator.clipboard?.writeText('Koua229').catch(() => {});
+                const el = document.getElementById('promo-copied');
+                if (el) { el.style.opacity = 1; setTimeout(() => { el.style.opacity = 0; }, 1500); }
+              }}
+            >
+              <span style={{ fontSize: 16 }}>🎁</span>
+              <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, letterSpacing: 0.5 }}>{autoT('CODE PROMO 1XBET')} :</span>
+              <span style={{ fontSize: 17, fontWeight: 900, color: '#f0b429', fontFamily: 'monospace', letterSpacing: 2 }}>Koua229</span>
+              <span style={{ fontSize: 11, color: '#64748b' }}>📋</span>
+            </div>
+            <span id="promo-copied" style={{ marginLeft: 10, fontSize: 12, color: '#22c55e', fontWeight: 700, opacity: 0, transition: 'opacity 0.3s' }}>{autoT('Copié !')}</span>
           </div>
 
           {/* Trust strip */}
           <div className="hero-stats">
             <div className="hero-stat">
               <div className="hero-stat-num">4</div>
-              <div className="hero-stat-lbl">Canaux dédiés</div>
+              <div className="hero-stat-lbl">{autoT('Canaux dédiés')}</div>
             </div>
             <div className="hero-stat-sep" />
             <div className="hero-stat">
               <div className="hero-stat-num">24/7</div>
-              <div className="hero-stat-lbl">Temps réel</div>
+              <div className="hero-stat-lbl">{autoT('Temps réel')}</div>
             </div>
             <div className="hero-stat-sep" />
             <div className="hero-stat">
               <div className="hero-stat-num">⚡</div>
-              <div className="hero-stat-lbl">Réponse instantanée</div>
+              <div className="hero-stat-lbl">{autoT('Réponse instantanée')}</div>
             </div>
             <div className="hero-stat-sep" />
             <div className="hero-stat">
               <div className="hero-stat-num">🔐</div>
-              <div className="hero-stat-lbl">Accès sécurisé</div>
+              <div className="hero-stat-lbl">{autoT('Accès sécurisé')}</div>
             </div>
           </div>
         </div>
@@ -167,18 +260,18 @@ export default function Home() {
             <span className="hero-mock-dot red" />
             <span className="hero-mock-dot amber" />
             <span className="hero-mock-dot green" />
-            <span className="hero-mock-title">📡 Canal Cœur Rouge — Live</span>
+            <span className="hero-mock-title">📡 {autoT('Canal Cœur Rouge')} — Live</span>
           </div>
           <div className="hero-mock-body">
             <div className="hero-mock-row">
-              <span className="hero-mock-tag">PARTIE</span>
+              <span className="hero-mock-tag">{autoT('PARTIE')}</span>
               <span className="hero-mock-game">#N821</span>
-              <span className="hero-mock-status live">● EN COURS</span>
+              <span className="hero-mock-status live">● {autoT('EN COURS')}</span>
             </div>
             <div className="hero-mock-pred">
-              <div className="hero-mock-pred-label">Prédiction active</div>
+              <div className="hero-mock-pred-label">{autoT('Prédiction active')}</div>
               <div className="hero-mock-pred-suit">♥</div>
-              <div className="hero-mock-pred-text">Cœur Rouge attendu</div>
+              <div className="hero-mock-pred-text">{autoT('Cœur Rouge attendu')}</div>
             </div>
             <div className="hero-mock-history">
               <span className="hero-mock-h ok">✅ #819</span>
@@ -192,44 +285,21 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Channels — premium */}
-      <section className="strategies-section strategies-section-v2">
-        <div className="section-title">
-          <div className="section-badge">NOS CANAUX</div>
-          <h2>4 Canaux de Prédiction</h2>
-          <p>Choisissez le canal qui vous correspond après connexion</p>
-        </div>
-        <div className="strategies-grid">
-          {CHANNELS.map((c, i) => (
-            <div className="strategy-card strategy-card-v2" key={c.name} style={{ '--sc': c.color, animationDelay: `${i * 0.1}s` }}>
-              <div className="strategy-card-shine" />
-              <div className="strategy-icon-wrap">
-                <span className="strategy-icon" style={{ color: c.color }}>{c.icon}</span>
-              </div>
-              <h3 style={{ color: c.color }}>{c.name}</h3>
-              <p>{c.desc}</p>
-              <div className="strategy-card-foot">
-                <span className="strategy-card-live">● Actif 24/7</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* How to use */}
       <section className="how-section">
         <div className="section-title">
-          <div className="section-badge">GUIDE D'UTILISATION</div>
-          <h2>Comment utiliser l'application</h2>
-          <p>Suivez ces étapes pour bien démarrer</p>
+          <div className="section-badge">{autoT("GUIDE D'UTILISATION")}</div>
+          <h2>{autoT("Comment utiliser l'application")}</h2>
+          <p>{autoT('Suivez ces étapes pour bien démarrer')}</p>
         </div>
         <div className="how-steps">
           {STEPS.map(h => (
             <div className="how-step" key={h.n}>
               <div className="how-step-num">{h.icon}</div>
               <div className="how-step-body">
-                <h4>{h.title}</h4>
-                <p>{h.desc}</p>
+                <h4>{autoT(h.title)}</h4>
+                <p>{autoT(h.desc)}</p>
               </div>
             </div>
           ))}
@@ -239,78 +309,30 @@ export default function Home() {
       {/* Dashboard preview guide */}
       <section className="how-section" style={{ background: '#f8fafc' }}>
         <div className="section-title">
-          <div className="section-badge">TABLEAU DE BORD</div>
-          <h2>Lire le tableau de bord</h2>
-          <p>Comprendre les informations affichées</p>
+          <div className="section-badge">{autoT('TABLEAU DE BORD')}</div>
+          <h2>{autoT('Lire le tableau de bord')}</h2>
+          <p>{autoT('Comprendre les informations affichées')}</p>
         </div>
         <div className="home-guide-grid">
           <div className="home-guide-card">
             <div className="home-guide-icon">⚡</div>
-            <h4>Parties Live</h4>
-            <p>Les parties en cours s'affichent avec les cartes joueur et banquier ainsi que les points de chaque côté.</p>
+            <h4>{autoT('Parties Live')}</h4>
+            <p>{autoT("Les parties en cours s'affichent avec les cartes joueur et banquier ainsi que les points de chaque côté.")}</p>
           </div>
           <div className="home-guide-card">
             <div className="home-guide-icon">🎯</div>
-            <h4>Zone de prédiction</h4>
-            <p>La prédiction active s'affiche ici avec le symbole prédit. Elle se met à jour automatiquement en temps réel.</p>
+            <h4>{autoT('Zone de prédiction')}</h4>
+            <p>{autoT('La prédiction active s\'affiche ici avec le symbole prédit. Elle se met à jour automatiquement en temps réel.')}</p>
           </div>
           <div className="home-guide-card">
             <div className="home-guide-icon">📋</div>
-            <h4>Historique</h4>
-            <p>Chaque ligne affiche le numéro de partie, le résultat (✅ gagné / ❌ perdu), les cartes et les points totaux.</p>
+            <h4>{autoT('Historique')}</h4>
+            <p>{autoT('Chaque ligne affiche le numéro de partie, le résultat (✅ gagné / ❌ perdu), les cartes et les points totaux.')}</p>
           </div>
           <div className="home-guide-card">
             <div className="home-guide-icon">🏆</div>
-            <h4>Format de l'historique</h4>
-            <p><code>#N687. ✅9(9♣10♥) - 8(7♠A♦) #T17</code><br />Numéro · Résultat · Points joueur (cartes) - Points banquier (cartes) · Total</p>
-          </div>
-        </div>
-      </section>
-
-      {/* ── TUTORIAL VIDEOS ── */}
-      <section style={{
-        padding: '80px 24px',
-        background: 'linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%)',
-        position: 'relative', overflow: 'hidden',
-      }}>
-        {/* Background glow */}
-        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 600, height: 300, borderRadius: '50%', background: 'radial-gradient(ellipse, rgba(251,191,36,0.04), transparent)', pointerEvents: 'none' }} />
-
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div className="section-title" style={{ marginBottom: 52 }}>
-            <div className="section-badge" style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>TUTORIELS VIDÉO</div>
-            <h2 style={{ color: '#f8fafc' }}>Comment utiliser Prediction Baccara Pro</h2>
-            <p style={{ color: '#475569' }}>Deux guides animés pour démarrer rapidement</p>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 40, alignItems: 'start' }}>
-            {/* Video 1 */}
-            <div>
-              <div style={{ marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,#d97706,#fbbf24)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>📝</div>
-                  <h3 style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', margin: 0 }}>Comment créer un compte</h3>
-                </div>
-                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, paddingLeft: 44, margin: 0 }}>
-                  De l'inscription jusqu'à la validation par l'administrateur — suivez chaque étape pour accéder aux signaux.
-                </p>
-              </div>
-              <TutorialCreateAccount />
-            </div>
-
-            {/* Video 2 */}
-            <div>
-              <div style={{ marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>📡</div>
-                  <h3 style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', margin: 0 }}>Lire les prédictions</h3>
-                </div>
-                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, paddingLeft: 44, margin: 0 }}>
-                  Choisissez un canal, suivez les parties en direct et interprétez chaque prédiction et résultat en temps réel.
-                </p>
-              </div>
-              <TutorialReadPredictions />
-            </div>
+            <h4>{autoT("Format de l'historique")}</h4>
+            <p><code>#N687. ✅9(9♣10♥) - 8(7♠A♦) #T17</code><br />{autoT('Numéro · Résultat · Points joueur (cartes) - Points banquier (cartes) · Total')}</p>
           </div>
         </div>
       </section>
@@ -319,9 +341,9 @@ export default function Home() {
       <section className="cta-section">
         <div className="cta-box">
           <div className="cta-glow" />
-          <h2>Prêt à commencer ?</h2>
-          <p>Créez votre compte et attendez la validation pour accéder aux signaux en direct.</p>
-          <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg">Créer mon compte</Link>
+          <h2>{autoT('Prêt à commencer ?')}</h2>
+          <p>{autoT('Créez votre compte et attendez la validation pour accéder aux signaux en direct.')}</p>
+          <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg">{autoT('Créer mon compte')}</Link>
         </div>
       </section>
 
@@ -329,15 +351,46 @@ export default function Home() {
       <section style={{ background: 'linear-gradient(180deg, #0a0f1a 0%, #060b14 100%)', padding: '64px 24px 0' }}>
         <div style={{ maxWidth: 860, margin: '0 auto', textAlign: 'center' }}>
           <div style={{ display: 'inline-block', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 8, padding: '4px 16px', fontSize: 11, fontWeight: 700, color: '#fbbf24', letterSpacing: 1, marginBottom: 20 }}>
-            REJOINDRE L'APPLICATION
+            {autoT("REJOINDRE L'APPLICATION")}
           </div>
           <h2 style={{ fontSize: 28, fontWeight: 900, color: '#f8fafc', margin: '0 0 12px' }}>
-            Accès à Prediction Baccara Pro — 100$
+            {autoT('Accès à Prediction Baccara Pro')} — 100$
           </h2>
-          <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.7, marginBottom: 40 }}>
-            Pour bénéficier de l'application, contactez directement nos promoteurs sur WhatsApp.<br />
-            Cliquez sur un numéro ci-dessous pour démarrer la conversation.
+          <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
+            {autoT('Pour bénéficier de l\'application, contactez directement nos promoteurs sur WhatsApp.')}<br />
+            {autoT('Cliquez sur un numéro ci-dessous pour démarrer la conversation.')}
           </p>
+
+          {/* Code promo 1xBet — section contact */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 36 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'center',
+              background: 'linear-gradient(135deg, rgba(212,168,67,0.1) 0%, rgba(212,168,67,0.04) 100%)',
+              border: '1.5px solid rgba(212,168,67,0.3)',
+              borderRadius: 14, padding: '14px 28px',
+              boxShadow: '0 0 30px rgba(212,168,67,0.08)',
+            }}>
+              <span style={{ fontSize: 22 }}>🎁</span>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>{autoT('Votre code promo 1xBet')}</div>
+                <div
+                  style={{ fontSize: 22, fontWeight: 900, color: '#f0b429', fontFamily: 'monospace', letterSpacing: 3, cursor: 'pointer' }}
+                  title={autoT('Cliquez pour copier')}
+                  onClick={() => {
+                    navigator.clipboard?.writeText('Koua229').catch(() => {});
+                    const el = document.getElementById('promo-copied2');
+                    if (el) { el.style.opacity = 1; setTimeout(() => { el.style.opacity = 0; }, 1500); }
+                  }}
+                >
+                  Koua229 📋
+                </div>
+                <span id="promo-copied2" style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, opacity: 0, transition: 'opacity 0.3s' }}>{autoT('Copié !')}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', maxWidth: 160, lineHeight: 1.5, textAlign: 'left' }}>
+                {autoT('Utilisez ce code lors de votre inscription sur 1xBet pour bénéficier des bonus exclusifs.')}
+              </div>
+            </div>
+          </div>
 
           <div style={{ display: 'flex', gap: 24, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48 }}>
             {/* Promoteur */}
@@ -351,7 +404,7 @@ export default function Home() {
             >
               <div style={{ fontSize: 32 }}>📣</div>
               <div>
-                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Promoteur du site</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{autoT('Promoteur du site')}</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#f8fafc', marginBottom: 4 }}>BUZZ INFLUENCE</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
                   <span style={{ fontSize: 20 }}>🟢</span>
@@ -359,7 +412,7 @@ export default function Home() {
                 </div>
               </div>
               <div style={{ marginTop: 4, background: '#25d366', color: '#fff', borderRadius: 8, padding: '8px 20px', fontWeight: 800, fontSize: 13 }}>
-                💬 Envoyer un message WhatsApp
+                💬 {autoT('Envoyer un message WhatsApp')}
               </div>
             </a>
 
@@ -374,7 +427,7 @@ export default function Home() {
             >
               <div style={{ fontSize: 32 }}>💻</div>
               <div>
-                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Développeur</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{autoT('Développeur')}</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#f8fafc', marginBottom: 4 }}>SOSSOU Kouamé</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
                   <span style={{ fontSize: 20 }}>🟢</span>
@@ -382,7 +435,7 @@ export default function Home() {
                 </div>
               </div>
               <div style={{ marginTop: 4, background: '#25d366', color: '#fff', borderRadius: 8, padding: '8px 20px', fontWeight: 800, fontSize: 13 }}>
-                💬 Envoyer un message WhatsApp
+                💬 {autoT('Envoyer un message WhatsApp')}
               </div>
             </a>
           </div>
@@ -401,35 +454,31 @@ export default function Home() {
             position: 'relative',
           }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: '#818cf8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2 }}>
-              📣 Message de l'administration
+              📣 {autoT("Message de l'administration")}
             </div>
             <div style={{ fontSize: 14, color: '#e2e8f0', lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
               {broadcastMsg.text}
             </div>
             {broadcastMsg.updated_at && (
               <div style={{ fontSize: 10, color: '#475569', marginTop: 10 }}>
-                Publié le {new Date(broadcastMsg.updated_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                {autoT('Publié le')} {new Date(broadcastMsg.updated_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
               </div>
             )}
             <button
               onClick={() => setBroadcastMsg(null)}
-              style={{
-                position: 'absolute', top: 12, right: 14,
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: '#475569', fontSize: 16, lineHeight: 1,
-              }}
-              title="Fermer"
+              style={{ position: 'absolute', top: 12, right: 14, background: 'none', border: 'none', cursor: 'pointer', color: '#475569', fontSize: 16, lineHeight: 1 }}
+              title={autoT('Fermer')}
             >✕</button>
           </div>
         </section>
       )}
 
       <footer className="footer" style={{ flexDirection: 'column', gap: 6, padding: '20px 24px', position: 'relative' }}>
-        <span style={{ fontWeight: 800, fontSize: 15 }}>🎲 Prediction Baccara Pro</span>
-        <span style={{ fontSize: 12, color: '#475569' }}>Prédictions algorithmiques — 1xBet Baccarat</span>
+        <span style={{ fontWeight: 800, fontSize: 15 }}>🎲 {t('app.name')}</span>
+        <span style={{ fontSize: 12, color: '#475569' }}>{autoT('Prédictions algorithmiques')} — 1xBet Baccarat</span>
         <div style={{ display: 'flex', gap: 24, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center', fontSize: 12, color: '#374151' }}>
-          <span>Promoteur : BUZZ INFLUENCE · <a href="https://wa.me/2250767202271" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+225 07 67 20 22 71</a></span>
-          <span>Développeur : SOSSOU Kouamé · <a href="https://wa.me/2290195501564" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+229 01 95 50 15 64</a></span>
+          <span>{autoT('Promoteur')} : BUZZ INFLUENCE · <a href="https://wa.me/2250767202271" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+225 07 67 20 22 71</a></span>
+          <span>{autoT('Développeur')} : SOSSOU Kouamé · <a href="https://wa.me/2290195501564" target="_blank" rel="noopener noreferrer" style={{ color: '#25d366', textDecoration: 'none' }}>+229 01 95 50 15 64</a></span>
         </div>
         <a
           href="/programmation"
@@ -444,9 +493,9 @@ export default function Home() {
           }}
           onMouseOver={e => { e.currentTarget.style.color = '#334155'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
           onMouseOut={e => { e.currentTarget.style.color = '#1e293b'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.04)'; }}
-          title="Espace programmation"
+          title={autoT('Espace programmation')}
         >
-          Programmation
+          {autoT('Programmation')}
         </a>
       </footer>
     </div>

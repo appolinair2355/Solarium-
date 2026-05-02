@@ -78,8 +78,10 @@ function TgDirectChat() {
   const [savingCfg, setSavingCfg] = React.useState(false);
   const [cfgMsg, setCfgMsg]   = React.useState('');
   const [sendErr, setSendErr] = React.useState('');
-  const msgEndRef = React.useRef(null);
-  const inputRef  = React.useRef(null);
+  const [attachment, setAttachment] = React.useState(null); // { data, name, type, preview }
+  const msgEndRef  = React.useRef(null);
+  const inputRef   = React.useRef(null);
+  const fileInputRef = React.useRef(null);
 
   React.useEffect(() => {
     fetch('/api/admin/telegram-chat/config', { credentials: 'include' })
@@ -128,18 +130,46 @@ function TgDirectChat() {
     setConfigured(false); setMessages([]); setShowConfig(true);
   };
 
+  // Lit un fichier et le convertit en base64 + preview
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 49 * 1024 * 1024) { setSendErr('Fichier trop lourd (max 49 Mo)'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAttachment({ data: ev.target.result, name: file.name, type: file.type, size: file.size });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const clearAttachment = () => setAttachment(null);
+
   const sendMsg = async () => {
-    if (!draft.trim() || sending) return;
+    if ((!draft.trim() && !attachment) || sending) return;
     setSending(true); setSendErr('');
     try {
-      const r = await fetch('/api/admin/telegram-chat/send', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: draft }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setSendErr(d.error || 'Erreur envoi'); return; }
-      setDraft('');
+      // Si fichier joint → envoyer en tant que média
+      if (attachment) {
+        const r = await fetch('/api/admin/telegram-chat/send-media', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_data: attachment.data, file_name: attachment.name, file_type: attachment.type, caption: draft.trim() || undefined }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setSendErr(d.error || 'Erreur envoi média'); return; }
+        setDraft(''); setAttachment(null);
+      } else {
+        // Texte simple
+        const r = await fetch('/api/admin/telegram-chat/send', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: draft }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setSendErr(d.error || 'Erreur envoi'); return; }
+        setDraft('');
+      }
       inputRef.current?.focus();
     } catch (e) { setSendErr(e.message); }
     finally { setSending(false); }
@@ -149,6 +179,8 @@ function TgDirectChat() {
     const d = new Date(iso);
     return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   };
+
+  const fmtSize = (bytes) => bytes < 1024*1024 ? `${(bytes/1024).toFixed(0)} Ko` : `${(bytes/1024/1024).toFixed(1)} Mo`;
 
   return (
     <div style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -177,7 +209,7 @@ function TgDirectChat() {
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 12, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>⚙️ Configuration du bot</div>
           <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>
-            Le bot doit être <strong style={{color:'#e2e8f0'}}>administrateur</strong> du canal pour recevoir les messages.
+            Le bot doit être <strong style={{color:'#e2e8f0'}}>administrateur</strong> du canal pour envoyer des messages et des médias.
           </div>
           <div>
             <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5 }}>API TOKEN BOT</label>
@@ -203,8 +235,11 @@ function TgDirectChat() {
         </div>
       )}
 
+      {/* Input fichier caché */}
+      <input ref={fileInputRef} type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.zip" style={{ display: 'none' }} onChange={handleFileSelect} />
+
       {configured ? (
-        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 480 }}>
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 520 }}>
           <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#475569', fontSize: 13, marginTop: 40 }}>
@@ -223,8 +258,8 @@ function TgDirectChat() {
                   </div>
                   <div style={{
                     padding: '8px 12px', borderRadius: m.isBot ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
-                    background: m.isBot ? 'rgba(212,168,67,0.18)' : 'rgba(255,255,255,0.06)',
-                    border: `1px solid ${m.isBot ? 'rgba(212,168,67,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    background: m.isBot ? (m.isMedia ? 'rgba(99,102,241,0.18)' : 'rgba(212,168,67,0.18)') : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${m.isBot ? (m.isMedia ? 'rgba(99,102,241,0.3)' : 'rgba(212,168,67,0.3)') : 'rgba(255,255,255,0.08)'}`,
                     color: '#e2e8f0', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                   }}>
                     {m.text}
@@ -234,23 +269,48 @@ function TgDirectChat() {
             )}
             <div ref={msgEndRef} />
           </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', padding: 12, display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+
+          {/* Aperçu fichier joint */}
+          {attachment && (
+            <div style={{ margin: '0 12px', padding: '10px 14px', borderRadius: 10, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              {attachment.type.startsWith('image/') ? (
+                <img src={attachment.data} alt="preview" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+              ) : attachment.type.startsWith('video/') ? (
+                <div style={{ width: 56, height: 56, background: 'rgba(99,102,241,0.2)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>🎬</div>
+              ) : (
+                <div style={{ width: 56, height: 56, background: 'rgba(99,102,241,0.2)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>📎</div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>{fmtSize(attachment.size)} · {attachment.type}</div>
+              </div>
+              <button type="button" onClick={clearAttachment} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: 4, flexShrink: 0 }}>✕</button>
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            {/* Bouton pièce jointe */}
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              title="Joindre une image ou vidéo"
+              style={{ padding: '10px 13px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.4)', background: attachment ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.08)', color: '#818cf8', fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1, transition: 'background 0.18s' }}>
+              📎
+            </button>
             <textarea ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
-              placeholder="Écrire un message… (Entrée pour envoyer)"
+              placeholder={attachment ? 'Légende optionnelle…' : 'Écrire un message… (Entrée pour envoyer)'}
               rows={2}
               style={{ flex: 1, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', fontSize: 13, resize: 'none', fontFamily: 'inherit', lineHeight: 1.5, outline: 'none', boxSizing: 'border-box' }} />
-            <button type="button" onClick={sendMsg} disabled={!draft.trim() || sending}
-              style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: draft.trim() && !sending ? 'linear-gradient(135deg,#f0c060,#d4a843)' : 'rgba(255,255,255,0.08)', color: draft.trim() && !sending ? '#111' : '#475569', fontWeight: 700, fontSize: 14, cursor: !draft.trim() || sending ? 'not-allowed' : 'pointer', flexShrink: 0, minWidth: 52 }}>
+            <button type="button" onClick={sendMsg} disabled={(!draft.trim() && !attachment) || sending}
+              style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: (draft.trim() || attachment) && !sending ? 'linear-gradient(135deg,#f0c060,#d4a843)' : 'rgba(255,255,255,0.08)', color: (draft.trim() || attachment) && !sending ? '#111' : '#475569', fontWeight: 700, fontSize: 14, cursor: (!draft.trim() && !attachment) || sending ? 'not-allowed' : 'pointer', flexShrink: 0, minWidth: 52 }}>
               {sending ? '…' : '➤'}
             </button>
           </div>
-          {sendErr && <div style={{ padding: '6px 14px 10px', color: '#f87171', fontSize: 12 }}>❌ {sendErr}</div>}
+          {sendErr && <div style={{ padding: '4px 14px 10px', color: '#f87171', fontSize: 12 }}>❌ {sendErr}</div>}
         </div>
       ) : (
         <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 12, padding: 48, textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📨</div>
-          <div style={{ fontSize: 15, color: '#64748b', marginBottom: 16 }}>Configurez le bot Telegram pour voir les messages du canal en temps réel</div>
+          <div style={{ fontSize: 15, color: '#64748b', marginBottom: 16 }}>Configurez le bot Telegram pour envoyer des messages, images et vidéos directement depuis le panneau</div>
           <button type="button" onClick={() => setShowConfig(true)}
             style={{ padding: '9px 24px', borderRadius: 10, border: '1px solid rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             ⚙️ Configurer maintenant
@@ -3384,6 +3444,79 @@ function AdminPanel() {
   const [paymentScreenshot, setPaymentScreenshot] = useState(null); // { id, image, ai }
   const [paymentBusy, setPaymentBusy] = useState(null);
 
+  // ── Achats de Stratégies (admin) ──────────────────────────────────
+  const [stratPurchases, setStratPurchases]     = useState([]);
+  const [stratPurchLoading, setStratPurchLoading] = useState(false);
+  const [stratPurchScreen, setStratPurchScreen] = useState(null); // { id, screenshot }
+  const [stratPurchMsg, setStratPurchMsg]       = useState({});   // { [id]: { text, error } }
+  const [stratPurchNote, setStratPurchNote]     = useState({});   // { [id]: string }
+
+  const loadStratPurchases = useCallback(async () => {
+    setStratPurchLoading(true);
+    try {
+      const r = await fetch('/api/admin/strategy-purchases', { credentials: 'include' });
+      if (r.ok) setStratPurchases(await r.json());
+    } catch {} finally { setStratPurchLoading(false); }
+  }, []);
+
+  useEffect(() => { loadStratPurchases(); }, [loadStratPurchases]);
+
+  async function loadPurchaseScreen(id) {
+    try {
+      const r = await fetch(`/api/admin/strategy-purchases/${id}/screenshot`, { credentials: 'include' });
+      if (r.ok) { const d = await r.json(); setStratPurchScreen({ id, screenshot: d.screenshot }); }
+    } catch {}
+  }
+
+  async function validatePurchase(id) {
+    setStratPurchMsg(m => ({ ...m, [id]: { text: '⏳ Génération du ZIP…', error: false } }));
+    try {
+      const r = await fetch(`/api/admin/strategy-purchases/${id}/validate`, { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (r.ok) {
+        setStratPurchMsg(m => ({ ...m, [id]: { text: '✅ Validé — ZIP généré avec succès', error: false } }));
+        await loadStratPurchases();
+      } else {
+        setStratPurchMsg(m => ({ ...m, [id]: { text: `❌ ${d.error}`, error: true } }));
+      }
+    } catch (e) { setStratPurchMsg(m => ({ ...m, [id]: { text: `❌ Erreur réseau`, error: true } })); }
+    setTimeout(() => setStratPurchMsg(m => { const n = { ...m }; delete n[id]; return n; }), 6000);
+  }
+
+  async function rejectPurchase(id) {
+    const note = stratPurchNote[id] || '';
+    setStratPurchMsg(m => ({ ...m, [id]: { text: '⏳…', error: false } }));
+    try {
+      const r = await fetch(`/api/admin/strategy-purchases/${id}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      });
+      if (r.ok) {
+        setStratPurchMsg(m => ({ ...m, [id]: { text: '✅ Achat refusé', error: false } }));
+        await loadStratPurchases();
+      }
+    } catch {}
+    setTimeout(() => setStratPurchMsg(m => { const n = { ...m }; delete n[id]; return n; }), 4000);
+  }
+
+  // ── Vitrine / Panneau de Vente ─────────────────────────────────────
+  const BLANK_PROMO = { enabled: false, titre: '', tagline: '', badge: '🔥', plan_requis: 'standard', prix_texte: '', bullet1: '', bullet2: '', bullet3: '', cta: 'Souscrire maintenant' };
+  const [promoConfigs, setPromoConfigs] = useState({});
+  const [promoEditId, setPromoEditId] = useState('');
+  const [promoForm, setPromoForm] = useState(BLANK_PROMO);
+  const [promoMsg, setPromoMsg] = useState({ text: '', error: false });
+  const [promoSaving, setPromoSaving] = useState(false);
+
+  const loadPromoConfigs = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/strategy-promo', { credentials: 'include' });
+      if (r.ok) setPromoConfigs(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadPromoConfigs(); }, [loadPromoConfigs]);
+
   const loadPendingPayments = useCallback(async () => {
     try {
       const r = await fetch('/api/payments/admin/pending', { credentials: 'include' });
@@ -3576,6 +3709,10 @@ function AdminPanel() {
     carte_p: 2, carte_h: 32, carte_ecart: 1, carte_position: 1, carte_source_hand: 'joueur',
     // Mode intelligent_cartes (analyse de patterns dans cartes_jeu)
     intelligent_window: 300, intelligent_pattern: 3, intelligent_min_count: 3, intelligent_categories: ['suit'],
+    // Mode intersection
+    inter_category: 'costume', inter_hi: 2, inter_max_ecart: 1,
+    // Mode comptages_ecart
+    comptages_key: 'suit_p_heart',
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -3765,6 +3902,7 @@ function AdminPanel() {
     { value: 'intelligent_cartes', label: '🧠 Intelligent Cartes' },
     { value: 'union_enseignes', label: '🔗 Union Enseignes' },
     { value: 'carte_valeur', label: '🃏 Carte Valeur' },
+    { value: 'intersection', label: '🎯 Intersection' },
   ];
 
   useEffect(() => {
@@ -3871,7 +4009,7 @@ function AdminPanel() {
   const [stratChSaving, setStratChSaving] = useState(false);
 
   // Sous-formulaire d'annonce planifiée (par canal : C1/C2/C3/DC ou stratID)
-  const ANN_SUB_BLANK = { open: false, text: '', schedule_type: 'interval', interval_hours: 1, times_input: '', media_type: '', media_url: '' };
+  const ANN_SUB_BLANK = { open: false, text: '', schedule_type: 'interval', interval_hours: 1, times_input: '', media_type: '', media_url: '', media_data: '', media_filename: '' };
   const [annSubForms, setAnnSubForms] = useState({});
   const getAnnSub = (key) => annSubForms[key] || ANN_SUB_BLANK;
   const setAnnSub = (key, patch) => setAnnSubForms(p => ({ ...p, [key]: { ...(p[key] || ANN_SUB_BLANK), ...patch } }));
@@ -3884,7 +4022,9 @@ function AdminPanel() {
     media_type: '', media_url: '', media_data: '', media_filename: '',
     schedule_type: 'interval', interval_hours: 1, times_input: ''
   };
-  const annFormRef = useRef(null);
+  const annFormRef    = useRef(null);
+  const annSubFileRef = useRef(null);   // input file partagé pour les sous-annonces
+  const [annSubFileKey, setAnnSubFileKey] = React.useState(null); // clé du formulaire en cours d'upload
   const [annExpandedId, setAnnExpandedId] = useState(null); // affichage texte complet
   const [announcements,    setAnnouncements]    = useState([]);
   const [annForm,          setAnnForm]          = useState(ANN_BLANK);
@@ -3973,7 +4113,9 @@ function AdminPanel() {
         channel_id: channelId.trim(),
         text: annSub.text.trim(),
         media_type: annSub.media_type || null,
-        media_url: annSub.media_url?.trim() || null,
+        media_url: annSub.media_data ? null : (annSub.media_url?.trim() || null),
+        media_data: annSub.media_data || null,
+        media_filename: annSub.media_filename || null,
         schedule_type: annSub.schedule_type,
         interval_hours: annSub.schedule_type === 'interval' ? parseFloat(annSub.interval_hours) : null,
         times,
@@ -4581,7 +4723,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart' });
     setStratOpen(true);
   };
 
@@ -4598,7 +4740,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart' });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -4997,11 +5139,42 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart' };
 
   return (
     <>
     <div className="admin-page">
+
+      {/* Input fichier caché — sous-annonces par canal/stratégie */}
+      <input
+        ref={annSubFileRef}
+        type="file"
+        accept="image/*,video/*"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (!f || !annSubFileKey) return;
+          if (f.size > 49 * 1024 * 1024) {
+            alert('Fichier trop lourd (max 49 Mo)');
+            e.target.value = '';
+            return;
+          }
+          const key = annSubFileKey;
+          const mediaType = f.type.startsWith('video/') ? 'video' : 'image';
+          const reader = new FileReader();
+          reader.onload = ev => {
+            setAnnSub(key, {
+              media_data: ev.target.result,
+              media_filename: f.name,
+              media_type: mediaType,
+              media_url: '',
+            });
+            setAnnSubFileKey(null);
+          };
+          reader.readAsDataURL(f);
+          e.target.value = '';
+        }}
+      />
 
       {/* ── Modale succès Pro (import / mise à jour fichier) ───────────────── */}
       {proSavedModal && (
@@ -5411,6 +5584,7 @@ function AdminPanel() {
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
             { id: 'online-users',   icon: '🟢', label: 'En ligne',       badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
             { id: 'paiements',      icon: '💳', label: 'Paiements',      badge: pendingPayments.length || null },
+            { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -5421,7 +5595,6 @@ function AdminPanel() {
             { id: 'cartes',         icon: '🎴', label: 'Gestionnaire des cartes' },
             ...(canSeeSystem ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
-              { id: 'bots',         icon: '🤖', label: 'Bots',           badge: hostedBots.length > 0 ? hostedBots.length : null },
               { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
               { id: 'maj-db',       icon: '💾', label: 'Mise à jour DB' },
             ] : []),
@@ -5520,6 +5693,262 @@ function AdminPanel() {
             </button>
           </div>
         </div>}
+
+        {/* ── VITRINE / PANNEAU DE VENTE ── */}
+        <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
+          <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
+            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
+            <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
+          </div>
+          <div style={{ padding: '16px 20px' }}>
+            {/* Sélecteur de stratégie */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
+              <select
+                value={promoEditId}
+                onChange={e => {
+                  const id = e.target.value;
+                  setPromoEditId(id);
+                  if (id && promoConfigs[id]) setPromoForm({ ...BLANK_PROMO, ...promoConfigs[id] });
+                  else setPromoForm(BLANK_PROMO);
+                }}
+                style={{ flex: 1, maxWidth: 320, padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}
+              >
+                <option value="">— Choisir une stratégie —</option>
+                {strategies.map(s => (
+                  <option key={s.id} value={String(s.id)}>
+                    S{s.id} — {s.name} {promoConfigs[String(s.id)]?.enabled ? '✅' : ''}
+                  </option>
+                ))}
+              </select>
+              {promoEditId && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: promoForm.enabled ? '#22c55e' : '#64748b', fontWeight: 700 }}>
+                  <input type="checkbox" checked={!!promoForm.enabled}
+                    onChange={e => setPromoForm(p => ({ ...p, enabled: e.target.checked }))}
+                    style={{ accentColor: '#22c55e', width: 15, height: 15 }} />
+                  {promoForm.enabled ? 'Vente activée' : 'Vente désactivée'}
+                </label>
+              )}
+            </div>
+
+            {promoEditId && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {/* Colonne gauche — formulaire */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 }}>Configuration de la fiche</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Badge emoji</label>
+                      <select value={promoForm.badge} onChange={e => setPromoForm(p => ({ ...p, badge: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="🔥">🔥 Populaire</option>
+                        <option value="⭐">⭐ Nouveau</option>
+                        <option value="🏆">🏆 Premium</option>
+                        <option value="💎">💎 Exclusif</option>
+                        <option value="🚀">🚀 Puissant</option>
+                        <option value="🎯">🎯 Précis</option>
+                        <option value="🤖">🤖 Automatique</option>
+                        <option value="">∅ Aucun badge</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Plan requis</label>
+                      <select value={promoForm.plan_requis} onChange={e => setPromoForm(p => ({ ...p, plan_requis: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="standard">Standard</option>
+                        <option value="premium">Premium ⭐</option>
+                        <option value="pro">Pro 💼</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Titre de la stratégie</label>
+                    <input type="text" value={promoForm.titre} maxLength={60}
+                      onChange={e => setPromoForm(p => ({ ...p, titre: e.target.value }))}
+                      placeholder="Ex : Stratégie Comptages Paire Joueur"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Accroche (tagline)</label>
+                    <input type="text" value={promoForm.tagline} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, tagline: e.target.value }))}
+                      placeholder="Ex : Seuil dynamique basé sur les statistiques réelles"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 1</label>
+                    <input type="text" value={promoForm.bullet1} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet1: e.target.value }))}
+                      placeholder="Ex : Seuil B recalculé automatiquement à chaque tour"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 2</label>
+                    <input type="text" value={promoForm.bullet2} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet2: e.target.value }))}
+                      placeholder="Ex : Déclenché sur les absences longues détectées en live"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 3</label>
+                    <input type="text" value={promoForm.bullet3} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet3: e.target.value }))}
+                      placeholder="Ex : Compatible Telegram et prédictions temps réel"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Prix affiché</label>
+                      <input type="text" value={promoForm.prix_texte} maxLength={30}
+                        onChange={e => setPromoForm(p => ({ ...p, prix_texte: e.target.value }))}
+                        placeholder="Ex : 12$/semaine"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Texte du bouton</label>
+                      <input type="text" value={promoForm.cta} maxLength={40}
+                        onChange={e => setPromoForm(p => ({ ...p, cta: e.target.value }))}
+                        placeholder="Souscrire maintenant"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  {/* Bouton sauvegarder */}
+                  <button
+                    onClick={async () => {
+                      if (!promoEditId) return;
+                      setPromoSaving(true);
+                      try {
+                        const r = await fetch(`/api/admin/strategy-promo/${promoEditId}`, {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(promoForm),
+                        });
+                        if (r.ok) {
+                          await loadPromoConfigs();
+                          setPromoMsg({ text: `✅ Fiche de vente S${promoEditId} sauvegardée`, error: false });
+                        } else {
+                          setPromoMsg({ text: '❌ Erreur lors de la sauvegarde', error: true });
+                        }
+                      } catch {
+                        setPromoMsg({ text: '❌ Erreur réseau', error: true });
+                      } finally {
+                        setPromoSaving(false);
+                        setTimeout(() => setPromoMsg({ text: '', error: false }), 4000);
+                      }
+                    }}
+                    disabled={promoSaving}
+                    style={{ padding: '10px 0', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: promoSaving ? 'wait' : 'pointer',
+                      background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
+                      border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24', marginTop: 4 }}
+                  >
+                    {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
+                  </button>
+                  {promoMsg.text && (
+                    <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                      background: promoMsg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                      border: `1px solid ${promoMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                      color: promoMsg.error ? '#f87171' : '#86efac' }}>
+                      {promoMsg.text}
+                    </div>
+                  )}
+                </div>
+
+                {/* Colonne droite — aperçu carte */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Aperçu de la carte</div>
+                  <div style={{
+                    borderRadius: 16, overflow: 'hidden',
+                    background: 'linear-gradient(145deg, #0f172a, #1e293b)',
+                    border: promoForm.enabled ? '1.5px solid rgba(250,204,21,0.5)' : '1.5px solid rgba(100,116,139,0.3)',
+                    boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
+                    maxWidth: 340, position: 'relative',
+                  }}>
+                    {/* Badge */}
+                    {promoForm.badge && (
+                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
+                        background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
+                        color: '#fbbf24', padding: '3px 10px', borderRadius: 100, letterSpacing: 0.5 }}>
+                        {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
+                      </div>
+                    )}
+                    {/* Statut */}
+                    {!promoForm.enabled && (
+                      <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
+                        background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
+                        ● Désactivée
+                      </div>
+                    )}
+                    <div style={{ padding: '28px 20px 20px' }}>
+                      {/* ID + plan */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
+                          S{promoEditId}
+                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
+                          background: promoForm.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promoForm.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
+                          color: promoForm.plan_requis === 'pro' ? '#c084fc' : promoForm.plan_requis === 'premium' ? '#fbbf24' : '#22c55e' }}>
+                          {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
+                        </span>
+                      </div>
+                      {/* Titre */}
+                      <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
+                        {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
+                      </div>
+                      {/* Tagline */}
+                      {promoForm.tagline && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
+                      )}
+                      {/* Bullets */}
+                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
+                          <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
+                          <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
+                        </div>
+                      ))}
+                      {/* Prix + CTA */}
+                      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        {promoForm.prix_texte ? (
+                          <div>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>À PARTIR DE</div>
+                            <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{promoForm.prix_texte}</div>
+                          </div>
+                        ) : <div />}
+                        <button disabled style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12,
+                          background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', cursor: 'default',
+                          opacity: promoForm.enabled ? 1 : 0.4 }}>
+                          {promoForm.cta || 'Souscrire'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 10, color: '#475569', lineHeight: 1.6 }}>
+                    💡 Activez la fiche pour qu'elle soit visible. Partagez la capture ou intégrez ce contenu dans votre canal de promotion.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des fiches actives */}
+            {Object.keys(promoConfigs).some(k => promoConfigs[k]?.enabled) && (
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(250,204,21,0.15)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Fiches actives ({Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length})</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => (
+                    <button key={id} onClick={() => { setPromoEditId(id); setPromoForm({ ...BLANK_PROMO, ...cfg }); }}
+                      style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        background: promoEditId === id ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.07)',
+                        border: `1px solid rgba(250,204,21,${promoEditId === id ? 0.5 : 0.2})`, color: '#fbbf24' }}>
+                      {cfg.badge} S{id} — {cfg.titre || `Stratégie ${id}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ── USER TABLE ── */}
         <div className="admin-card">
@@ -6377,6 +6806,137 @@ function AdminPanel() {
         {/* ── TAB : GESTIONNAIRE DES CARTES ── */}
         {adminTab === 'cartes' && <CartesPanel />}
 
+        {/* ── TAB : ACHATS STRATÉGIES ── */}
+        {adminTab === 'achats' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <div>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fbbf24', margin: 0 }}>💰 Achats de Stratégies</h2>
+                <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0' }}>Validez les paiements et délivrez le fichier ZIP à l'acheteur</p>
+              </div>
+              <button onClick={loadStratPurchases} disabled={stratPurchLoading}
+                style={{ padding: '8px 16px', background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                {stratPurchLoading ? '⏳' : '↻ Actualiser'}
+              </button>
+            </div>
+
+            {/* Lien rapide vers la boutique */}
+            <div style={{ background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)', borderRadius: 10, padding: '10px 16px', marginBottom: 20, fontSize: 12, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span>🏪</span>
+              <span>La boutique est accessible par tous les utilisateurs sur <strong style={{ color: '#fbbf24' }}>/boutique</strong>. Activez les fiches de vente dans l'onglet <strong style={{ color: '#fbbf24' }}>Stratégies</strong> → Panneau de Vente.</span>
+            </div>
+
+            {stratPurchases.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '50px 0', color: '#475569' }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>💰</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>Aucun achat enregistré</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Les demandes d'achat apparaîtront ici quand des utilisateurs achèteront une stratégie.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {stratPurchases.map(p => {
+                  const statusMap = {
+                    awaiting_screenshot: { label: 'En attente de capture',    color: '#f59e0b', icon: '📸', bg: 'rgba(245,158,11,0.1)' },
+                    pending_admin:       { label: 'Capture reçue — À valider', color: '#818cf8', icon: '🔍', bg: 'rgba(129,140,248,0.1)' },
+                    validated:           { label: 'Validé ✓',                  color: '#22c55e', icon: '✅', bg: 'rgba(34,197,94,0.1)'  },
+                    rejected:            { label: 'Refusé',                    color: '#f87171', icon: '❌', bg: 'rgba(239,68,68,0.1)'  },
+                  };
+                  const st = statusMap[p.status] || { label: p.status, color: '#64748b', icon: '❓', bg: 'rgba(100,116,139,0.1)' };
+                  const msg = stratPurchMsg[p.id];
+
+                  return (
+                    <div key={p.id} style={{ background: 'rgba(15,23,42,0.9)', border: `1px solid rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':p.status==='pending_admin'?'129,140,248':'250,204,21'},0.3)`, borderRadius: 14, overflow: 'hidden' }}>
+                      {/* Header */}
+                      <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderBottom: '1px solid rgba(100,116,139,0.12)' }}>
+                        <div style={{ flex: 1, minWidth: 180 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 7px', borderRadius: 100 }}>#{p.id}</span>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: '#f1f5f9' }}>S{p.strategy_id} — {p.strategy_name}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>
+                            👤 <strong style={{ color: '#94a3b8' }}>{p.username}</strong>
+                            {p.email && <> · {p.email}</>}
+                            {' · '}{new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24' }}>{Number(p.amount_usd).toFixed(0)} $</div>
+                        <div style={{ padding: '4px 12px', borderRadius: 100, background: st.bg, border: `1px solid ${st.color}40`, fontSize: 12, fontWeight: 700, color: st.color, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span>{st.icon}</span><span>{st.label}</span>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      {p.status !== 'validated' && (
+                        <div style={{ padding: '12px 18px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                          {/* Voir la capture */}
+                          {p.has_screenshot && (
+                            <button onClick={() => {
+                              if (stratPurchScreen?.id === p.id) setStratPurchScreen(null);
+                              else loadPurchaseScreen(p.id);
+                            }}
+                              style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                background: stratPurchScreen?.id === p.id ? 'rgba(129,140,248,0.25)' : 'rgba(129,140,248,0.1)',
+                                border: '1px solid rgba(129,140,248,0.35)', color: '#818cf8' }}>
+                              {stratPurchScreen?.id === p.id ? '🔼 Masquer capture' : '🖼️ Voir capture'}
+                            </button>
+                          )}
+
+                          {/* Valider */}
+                          {p.status === 'pending_admin' && (
+                            <button onClick={() => validatePurchase(p.id)}
+                              style={{ padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(22,163,74,0.15))',
+                                border: '1px solid rgba(34,197,94,0.5)', color: '#22c55e' }}>
+                              ✅ Valider + Générer ZIP
+                            </button>
+                          )}
+
+                          {/* Note + Refuser */}
+                          <input type="text" placeholder="Note de refus (optionnelle)" value={stratPurchNote[p.id] || ''}
+                            onChange={e => setStratPurchNote(n => ({ ...n, [p.id]: e.target.value }))}
+                            style={{ flex: 1, minWidth: 160, padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: '#fff', fontSize: 12 }} />
+                          <button onClick={() => rejectPurchase(p.id)}
+                            style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171' }}>
+                            ❌ Refuser
+                          </button>
+
+                          {/* Message de retour */}
+                          {msg && (
+                            <div style={{ width: '100%', padding: '7px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                              background: msg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                              border: `1px solid ${msg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                              color: msg.error ? '#f87171' : '#86efac' }}>
+                              {msg.text}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Validé */}
+                      {p.status === 'validated' && (
+                        <div style={{ padding: '10px 18px', fontSize: 12, color: '#22c55e' }}>
+                          ✅ Validé le {new Date(p.admin_validated_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · ZIP disponible pour l'acheteur
+                          {stratPurchMsg[p.id] && <span style={{ marginLeft: 10, color: stratPurchMsg[p.id].error ? '#f87171' : '#86efac' }}>{stratPurchMsg[p.id].text}</span>}
+                        </div>
+                      )}
+
+                      {/* Aperçu capture */}
+                      {stratPurchScreen?.id === p.id && stratPurchScreen.screenshot && (
+                        <div style={{ padding: '0 18px 16px' }}>
+                          <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(129,140,248,0.3)', maxWidth: 480 }}>
+                            <img src={stratPurchScreen.screenshot} alt="capture paiement" style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: '#0f172a', display: 'block' }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── TAB : PAIEMENTS ── */}
         {adminTab === 'paiements' && (
           <div style={{ padding: '0 8px' }}>
@@ -6634,6 +7194,90 @@ function AdminPanel() {
               preview: `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n⌛ En cours de vérification...`,
               result:  `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n✅ 0️⃣GAGNÉ 🎯`,
               perdu:   `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n📌 Jeu #${G}\n━━━━━━━━━━━━━━━\n✅ Distribution : OUI\n❌ Non distribué`,
+            },
+            {
+              id: 12, label: '2/3 Cartes Standard', icon: '2️⃣',
+              preview: `2️⃣ PRÉDICTION — 2 CARTES JOUEUR\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━\n🎯 Joueur aura 2 cartes\n⌛ En cours de vérification...`,
+              result:  `2️⃣ PRÉDICTION — 2 CARTES JOUEUR\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━\n🎯 Joueur aura 2 cartes\n✅ ${RE[0]} Naturel confirmé 🎯`,
+              perdu:   `2️⃣ PRÉDICTION — 2 CARTES JOUEUR\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━\n🎯 Joueur aura 2 cartes\n❌ Pas de naturel sur ${maxRattrapage} jeux`,
+            },
+            {
+              id: 13, label: 'Victoire Pro', icon: '🏆',
+              preview: `🏆 PRÉDICTION VICTOIRE\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 BANQUIER va gagner\n🔰 Rattrapage : +${maxRattrapage}\n⌛ En cours de vérification...`,
+              result:  `🏆 PRÉDICTION VICTOIRE\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 BANQUIER va gagner\n🔰 Rattrapage : +${maxRattrapage}\n✅ ${RE[0]} GAGNÉ`,
+              perdu:   `🏆 PRÉDICTION VICTOIRE\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 BANQUIER va gagner\n🔰 Rattrapage : +${maxRattrapage}\n❌ Perdu après ${maxRattrapage} tentatives`,
+            },
+            {
+              id: 14, label: 'Victoire Compact', icon: '🏦',
+              preview: `🏦 Banquier gagne — Jeu #N${G}   +${maxRattrapage}\n⌛`,
+              result:  `🏦 Banquier gagne — Jeu #N${G}   +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🏦 Banquier gagne — Jeu #N${G}   +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 15, label: 'Match Nul Pro', icon: '🤝',
+              preview: `🤝 PRÉDICTION MATCH NUL\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n⚖️ Égalité — aucun gagnant\n🔰 Rattrapage : +${maxRattrapage}\n⌛ En cours de vérification...`,
+              result:  `🤝 PRÉDICTION MATCH NUL\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n⚖️ Égalité — aucun gagnant\n🔰 Rattrapage : +${maxRattrapage}\n✅ ${RE[0]} ÉGALITÉ CONFIRMÉE`,
+              perdu:   `🤝 PRÉDICTION MATCH NUL\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n⚖️ Égalité — aucun gagnant\n🔰 Rattrapage : +${maxRattrapage}\n❌ Pas d'égalité sur ${maxRattrapage} jeux`,
+            },
+            {
+              id: 16, label: 'Match Nul Compact', icon: '⚖️',
+              preview: `🤝 Match Nul · #N${G} · +${maxRattrapage}\n⌛`,
+              result:  `🤝 Match Nul · #N${G} · +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🤝 Match Nul · #N${G} · +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 17, label: '2+3 Cartes Pro', icon: '⚡',
+              preview: `⚡ PRÉDICTION 2+3 CARTES\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🃏 Un camp : 2 cartes — Autre : 3 cartes\n🔰 Rattrapage : +${maxRattrapage}\n⌛ En cours de vérification...`,
+              result:  `⚡ PRÉDICTION 2+3 CARTES\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🃏 Un camp : 2 cartes — Autre : 3 cartes\n🔰 Rattrapage : +${maxRattrapage}\n✅ ${RE[0]} JEU MIXTE CONFIRMÉ`,
+              perdu:   `⚡ PRÉDICTION 2+3 CARTES\n📌 Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🃏 Un camp : 2 cartes — Autre : 3 cartes\n🔰 Rattrapage : +${maxRattrapage}\n❌ Pas de jeu mixte sur ${maxRattrapage} jeux`,
+            },
+            {
+              id: 18, label: 'Cartes Style B', icon: '〖〗',
+              preview: `2️⃣ 2 CARTES (Naturel) — 👤 JOUEUR\n〖 Jeu #N${G} 〗〖 +${maxRattrapage} 〗\n⌛ Vérification...`,
+              result:  `2️⃣ 2 CARTES (Naturel) — 👤 JOUEUR\n〖 Jeu #N${G} 〗〖 +${maxRattrapage} 〗\n✅ ${RE[0]} Confirmé`,
+              perdu:   `2️⃣ 2 CARTES (Naturel) — 👤 JOUEUR\n〖 Jeu #N${G} 〗〖 +${maxRattrapage} 〗\n❌ Non confirmé`,
+            },
+            {
+              id: 19, label: 'VIP Casino', icon: '╔╝',
+              preview: `╔══════════════════╗\n🎯 JEU #N${G} — ♠️ Pique\n🔰 Rattrapage max : +${maxRattrapage}\n╚══════════════════╝\n⌛`,
+              result:  `╔══════════════════╗\n🎯 JEU #N${G} — ♠️ Pique\n🔰 Rattrapage max : +${maxRattrapage}\n╚══════════════════╝\n✅ ${RE[0]} GAGNÉ`,
+              perdu:   `╔══════════════════╗\n🎯 JEU #N${G} — ♠️ Pique\n🔰 Rattrapage max : +${maxRattrapage}\n╚══════════════════╝\n❌`,
+            },
+            {
+              id: 20, label: 'Flash Signal', icon: '⚡',
+              preview: `⚡ #N${G} ♠️ +${maxRattrapage} ⌛`,
+              result:  `⚡ #N${G} ♠️ +${maxRattrapage} ✅ ${RE[0]}`,
+              perdu:   `⚡ #N${G} ♠️ +${maxRattrapage} ❌`,
+            },
+            {
+              id: 21, label: 'Casino Royale', icon: '🃏',
+              preview: `🃏 CASINO ROYALE — Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 Signe : ♠️ Pique\n🏅 Dogon max : +${maxRattrapage}\n🔮 Résultat : ⌛`,
+              result:  `🃏 CASINO ROYALE — Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 Signe : ♠️ Pique\n🏅 Dogon max : +${maxRattrapage}\n🔮 Résultat : ✅ ${RE[0]} GAGNÉ`,
+              perdu:   `🃏 CASINO ROYALE — Jeu #N${G}\n━━━━━━━━━━━━━━━━━━\n🎯 Signe : ♠️ Pique\n🏅 Dogon max : +${maxRattrapage}\n🔮 Résultat : ❌`,
+            },
+            {
+              id: 22, label: 'Signal Pro', icon: '🔔',
+              preview: `🔔 SIGNAL BACCARA PRO\n👤 Main : JOUEUR\n🎯 Signe : ♠️ Pique\n📌 Jeu #N${G} · +${maxRattrapage}\n➤ ⌛`,
+              result:  `🔔 SIGNAL BACCARA PRO\n👤 Main : JOUEUR\n🎯 Signe : ♠️ Pique\n📌 Jeu #N${G} · +${maxRattrapage}\n➤ ✅ ${RE[0]} GAGNÉ`,
+              perdu:   `🔔 SIGNAL BACCARA PRO\n👤 Main : JOUEUR\n🎯 Signe : ♠️ Pique\n📌 Jeu #N${G} · +${maxRattrapage}\n➤ ❌`,
+            },
+            {
+              id: 23, label: 'Alert Pro', icon: '🚨',
+              preview: `🚨 ALERTE PRÉDICTION\n📍 Tour #N${G}\n🃏 Costume : ♠️ Pique\n🔁 Max dogon : +${maxRattrapage}\n📊 ⌛`,
+              result:  `🚨 ALERTE PRÉDICTION\n📍 Tour #N${G}\n🃏 Costume : ♠️ Pique\n🔁 Max dogon : +${maxRattrapage}\n📊 ✅ ${RE[0]}`,
+              perdu:   `🚨 ALERTE PRÉDICTION\n📍 Tour #N${G}\n🃏 Costume : ♠️ Pique\n🔁 Max dogon : +${maxRattrapage}\n📊 ❌`,
+            },
+            {
+              id: 24, label: 'Minimaliste Stars', icon: '★',
+              preview: `★ #N${G} · ♠️ Pique · +${maxRattrapage}\n⌛`,
+              result:  `★ #N${G} · ♠️ Pique · +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `★ #N${G} · ♠️ Pique · +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 25, label: 'Scoreboard Pro', icon: '🏅',
+              preview: `🏅 BACCARAT SCOREBOARD\n┌─────────────────────┐\n│ #N${G} │ ♠️ Pique │ +${maxRattrapage} │\n└─────────────────────┘\n⌛`,
+              result:  `🏅 BACCARAT SCOREBOARD\n┌─────────────────────┐\n│ #N${G} │ ♠️ Pique │ +${maxRattrapage} │\n└─────────────────────┘\n✅ ${RE[0]} GAGNÉ`,
+              perdu:   `🏅 BACCARAT SCOREBOARD\n┌─────────────────────┐\n│ #N${G} │ ♠️ Pique │ +${maxRattrapage} │\n└─────────────────────┘\n❌`,
             },
           ];
 
@@ -7479,6 +8123,8 @@ function AdminPanel() {
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
                     <option value="carte_valeur">🃏 Carte Valeur</option>
+                    <option value="comptages_ecart">📊 Comptages Écart (seuil dynamique)</option>
+                    <option value="intersection">🎯 Intersection (consensus stratégies)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
@@ -7513,6 +8159,23 @@ function AdminPanel() {
                       <div style={{ marginTop: 6 }}>Quand <strong>exactement une valeur</strong> n'a jamais été vue (compteur à 0) et que toutes les autres ont été vues → envoie une alerte : <em>"Manque de la valeur : X"</em>.</div>
                       <div style={{ marginTop: 6 }}>Quand <strong>toutes les valeurs</strong> ont été vues au moins une fois → les compteurs se <strong>réinitialisent</strong> pour un nouveau cycle.</div>
                       <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>⚠️ Pas de décalage, pas de rattrapage, pas de mappings — mode alerte informatif uniquement.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'comptages_ecart' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.25)', fontSize: 12, color: '#67e8f9', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📊 Mode Comptages Écart — Comment ça fonctionne ?</div>
+                      <div>Surveille l'<strong>écart courant</strong> (absence consécutive) d'une catégorie du panneau Comptages en temps réel.</div>
+                      <div style={{ marginTop: 6 }}>Le seuil B est calculé <strong>automatiquement</strong> à chaque jeu : <code style={{ background: 'rgba(34,211,238,0.12)', padding: '1px 5px', borderRadius: 4 }}>B = ⌈(maxAll + 3 + maxPériode) / 3⌉</code></div>
+                      <div style={{ marginTop: 6 }}>Quand l'écart courant atteint B → la prédiction est émise au décalage configuré.</div>
+                      <div style={{ marginTop: 6, color: '#22d3ee', fontWeight: 600 }}>Pour les catégories de costume (ex. ♥ Joueur), le costume prédit est auto-détecté. Pour les autres, configurez les mappings.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'intersection' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,113,133,0.08)', border: '1px solid rgba(251,113,133,0.25)', fontSize: 12, color: '#fda4af', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Intersection</div>
+                      <div>Surveille <strong>toutes les stratégies existantes</strong> de la même main. Quand au moins <strong>Hi stratégies</strong> prédisent le <strong>même résultat</strong> sur des numéros de jeux proches (écart ≤ Max Écart) → déclenche la prédiction sur le plus petit numéro.</div>
+                      <div style={{ marginTop: 6 }}>Ex. : Hi=2, écart=2, catégorie=costume · Alpha prédit #45 ♣ + Beta prédit #46 ♣ → écart=1 ≤ 2 → <strong>prédit #45 ♣</strong>.</div>
+                      <div style={{ marginTop: 6, color: '#fb7185', fontWeight: 600 }}>⚠️ La main configurée filtre les stratégies surveillées (seules celles de la même main sont prises en compte).</div>
                     </div>
                   )}
 
@@ -7675,8 +8338,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -7760,6 +8423,120 @@ function AdminPanel() {
                         ✓ {stratForm.multi_source_ids.length} source(s) · seuil = {stratForm.threshold} accord(s) minimum
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* ── Paramètres — MODE COMPTAGES ÉCART ── */}
+                {stratForm.mode === 'comptages_ecart' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.22)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#22d3ee', marginBottom: 12 }}>📊 Catégorie Comptages à surveiller</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Catégorie</label>
+                        <select value={stratForm.comptages_key || 'suit_p_heart'}
+                          onChange={e => setStratForm(p => ({ ...p, comptages_key: e.target.value }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                          <optgroup label="🎨 Costume Joueur">
+                            <option value="suit_p_heart">♥ Cœur — Joueur</option>
+                            <option value="suit_p_club">♣ Trèfle — Joueur</option>
+                            <option value="suit_p_spade">♠ Pique — Joueur</option>
+                            <option value="suit_p_diamond">♦ Carreau — Joueur</option>
+                          </optgroup>
+                          <optgroup label="🎨 Costume Banquier">
+                            <option value="suit_b_heart">♥ Cœur — Banquier</option>
+                            <option value="suit_b_club">♣ Trèfle — Banquier</option>
+                            <option value="suit_b_spade">♠ Pique — Banquier</option>
+                            <option value="suit_b_diamond">♦ Carreau — Banquier</option>
+                          </optgroup>
+                          <optgroup label="🏆 Victoire">
+                            <option value="win_player">Victoire Joueur</option>
+                            <option value="win_banker">Victoire Banquier</option>
+                            <option value="win_tie">Égalité</option>
+                          </optgroup>
+                          <optgroup label="📊 Points Joueur">
+                            <option value="pt_p_high">Joueur &gt; 6.5 (≥ 7)</option>
+                            <option value="pt_p_low">Joueur &lt; 4.5 (≤ 4)</option>
+                          </optgroup>
+                          <optgroup label="📊 Points Banquier">
+                            <option value="pt_b_high">Banquier &gt; 6.5 (≥ 7)</option>
+                            <option value="pt_b_low">Banquier &lt; 4.5 (≤ 4)</option>
+                          </optgroup>
+                          <optgroup label="🃎 Cartes Joueur">
+                            <option value="nbk_p2">2 cartes Joueur</option>
+                            <option value="nbk_p3">3 cartes Joueur</option>
+                          </optgroup>
+                          <optgroup label="🃎 Cartes Banquier">
+                            <option value="nbk_b2">2 cartes Banquier</option>
+                            <option value="nbk_b3">3 cartes Banquier</option>
+                          </optgroup>
+                          <optgroup label="🎴 Série de cartes">
+                            <option value="dist_2_2">2 cartes / 2 cartes</option>
+                            <option value="dist_2_3">2 cartes / 3 cartes</option>
+                            <option value="dist_3_2">3 cartes / 2 cartes</option>
+                            <option value="dist_3_3">3 cartes / 3 cartes</option>
+                          </optgroup>
+                          <optgroup label="⚖️ Parité Joueur (score du Joueur)">
+                            <option value="pt_p_pair">Joueur Pair</option>
+                            <option value="pt_p_imp">Joueur Impair</option>
+                          </optgroup>
+                          <optgroup label="⚖️ Parité Banquier (score du Banquier)">
+                            <option value="pt_b_pair">Banquier Pair</option>
+                            <option value="pt_b_imp">Banquier Impair</option>
+                          </optgroup>
+                          <optgroup label="⚖️ Parité Vainqueur (score du gagnant)">
+                            <option value="parite_pair">Vainqueur Pair</option>
+                            <option value="parite_imp">Vainqueur Impair</option>
+                          </optgroup>
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '10px 14px', borderRadius: 8, background: 'rgba(34,211,238,0.06)', border: '1px dashed rgba(34,211,238,0.2)', fontSize: 11, color: '#67e8f9', lineHeight: 1.9 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4, color: '#22d3ee' }}>Seuil B dynamique</div>
+                        <code style={{ background: 'rgba(34,211,238,0.1)', padding: '3px 8px', borderRadius: 4, display: 'inline-block', letterSpacing: 0.5 }}>B = ⌈(maxAll + 3 + maxPériode) / 3⌉</code>
+                        <div style={{ marginTop: 6, color: '#475569' }}>maxAll = écart max historique<br/>maxPériode = écart max heure H</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(34,211,238,0.07)', borderRadius: 7, fontSize: 10, color: '#67e8f9' }}>
+                      💡 Catégorie de <strong>costume</strong> → le costume absent est prédit automatiquement. Autre catégorie → configurez les <strong>mappings</strong> ci-dessous pour définir le costume à prédire.
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Paramètres — MODE INTERSECTION ── */}
+                {stratForm.mode === 'intersection' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(251,113,133,0.07)', border: '1px solid rgba(251,113,133,0.25)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#fb7185', marginBottom: 10 }}>🎯 Paramètres Intersection</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Catégorie surveillée</label>
+                        <select value={stratForm.inter_category || 'costume'}
+                          onChange={e => setStratForm(p => ({ ...p, inter_category: e.target.value }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(251,113,133,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                          <option value="costume">🎨 Costume (♠ ♥ ♦ ♣)</option>
+                          <option value="victoire">🏆 Victoire Joueur/Banquier</option>
+                          <option value="2_2">2️⃣ 2 cartes / 2 cartes</option>
+                          <option value="2_3">2️⃣3️⃣ 2 cartes / 3 cartes</option>
+                          <option value="3_2">3️⃣2️⃣ 3 cartes / 2 cartes</option>
+                          <option value="3_3">3️⃣ 3 cartes / 3 cartes</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Hi — accord minimum (stratégies)</label>
+                        <input type="number" min="2" max="20" value={stratForm.inter_hi ?? 2}
+                          onChange={e => setStratForm(p => ({ ...p, inter_hi: Math.max(2, parseInt(e.target.value) || 2) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(251,113,133,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Nombre min de strats. qui s'accordent</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Max Écart (numéros de jeu)</label>
+                        <input type="number" min="0" max="10" value={stratForm.inter_max_ecart ?? 1}
+                          onChange={e => setStratForm(p => ({ ...p, inter_max_ecart: Math.max(0, parseInt(e.target.value) || 0) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(251,113,133,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Écart max entre les numéros concordants</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(251,113,133,0.08)', borderRadius: 7, fontSize: 11, color: '#fda4af', lineHeight: 1.6 }}>
+                      💡 Résumé : surveille toutes les strats. (même main, catégorie <strong>{stratForm.inter_category || 'costume'}</strong>) · se déclenche si ≥<strong>{stratForm.inter_hi ?? 2}</strong> strats. prédisent le même résultat sur des jeux dont l'écart est ≤ <strong>{stratForm.inter_max_ecart ?? 2}</strong>
+                    </div>
                   </div>
                 )}
 
@@ -7850,7 +8627,7 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
@@ -9619,8 +10396,8 @@ function AdminPanel() {
         </div>
         )}
 
-        {/* ══════════════ ONGLET HÉBERGEMENT BOTS ══════════════ */}
-        {adminTab === 'bots' && (
+        {/* ══════════════ ANNONCES PLANIFIÉES (placeholder start) ══════════════ */}
+        {false && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.5)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">🤖</span>
@@ -9845,7 +10622,7 @@ function AdminPanel() {
         </div>)}
 
         {/* ── PRÉ-VÉRIFICATION IA DU BOT ── */}
-        {adminTab === 'bots' && (
+        {false && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.35)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">🔍</span>
@@ -10660,18 +11437,31 @@ function AdminPanel() {
                                       {annSub.media_type === 'video' && <div style={{ marginTop: 6, fontSize: 11, color: '#a78bfa', fontWeight: 700 }}>✓ Sélectionnée</div>}
                                     </div>
                                   </div>
-                                  {/* URL du média (si sélectionné) */}
+                                  {/* Upload direct ou URL */}
                                   {annSub.media_type && (
-                                    <div style={{ marginTop: 10 }}>
-                                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>
-                                        🔗 URL de {annSub.media_type === 'image' ? "l'image" : 'la vidéo'}
-                                      </label>
-                                      <input
-                                        value={annSub.media_url}
-                                        onChange={e => setAnnSub(ch.id, { media_url: e.target.value })}
-                                        placeholder={annSub.media_type === 'image' ? 'https://example.com/image.jpg' : 'https://example.com/video.mp4'}
-                                        style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: `1px solid ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.4)' : 'rgba(167,139,250,0.4)'}`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
-                                      />
+                                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      {/* Bouton upload */}
+                                      {!annSub.media_data && (
+                                        <button type="button"
+                                          onClick={() => { setAnnSubFileKey(ch.id); annSubFileRef.current && (annSubFileRef.current.accept = annSub.media_type === 'image' ? 'image/*' : 'video/*,image/*') && annSubFileRef.current.click() || annSubFileRef.current.click(); }}
+                                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 8, border: `1.5px dashed ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.5)' : 'rgba(167,139,250,0.5)'}`, background: 'rgba(255,255,255,0.03)', color: annSub.media_type === 'image' ? '#38bdf8' : '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', width: '100%', justifyContent: 'center' }}>
+                                          📁 {annSub.media_type === 'image' ? 'Choisir une image' : 'Choisir une vidéo'} (max 49 Mo)
+                                        </button>
+                                      )}
+                                      {/* Aperçu fichier sélectionné */}
+                                      {annSub.media_data && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                                          {annSub.media_type === 'image'
+                                            ? <img src={annSub.media_data} alt="preview" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                                            : <div style={{ width: 48, height: 48, background: 'rgba(167,139,250,0.2)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🎬</div>
+                                          }
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{annSub.media_filename || 'Fichier sélectionné'}</div>
+                                            <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Prêt à envoyer ✓</div>
+                                          </div>
+                                          <button type="button" onClick={() => setAnnSub(ch.id, { media_data: '', media_filename: '' })} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: 4, flexShrink: 0 }}>✕</button>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   {!annSub.media_type && (
@@ -10952,16 +11742,27 @@ function AdminPanel() {
                                     </div>
                                   </div>
                                   {annSub.media_type && (
-                                    <div style={{ marginTop: 10 }}>
-                                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 5 }}>
-                                        🔗 URL de {annSub.media_type === 'image' ? "l'image" : 'la vidéo'}
-                                      </label>
-                                      <input
-                                        value={annSub.media_url}
-                                        onChange={e => setAnnSub(annKey, { media_url: e.target.value })}
-                                        placeholder={annSub.media_type === 'image' ? 'https://example.com/image.jpg' : 'https://example.com/video.mp4'}
-                                        style={{ width: '100%', padding: '8px 10px', background: '#1e1b2e', border: `1px solid ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.4)' : 'rgba(167,139,250,0.4)'}`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box', fontFamily: 'monospace' }}
-                                      />
+                                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      {!annSub.media_data && (
+                                        <button type="button"
+                                          onClick={() => { setAnnSubFileKey(annKey); annSubFileRef.current && (annSubFileRef.current.accept = annSub.media_type === 'image' ? 'image/*' : 'video/*,image/*') && annSubFileRef.current.click() || annSubFileRef.current.click(); }}
+                                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 8, border: `1.5px dashed ${annSub.media_type === 'image' ? 'rgba(56,189,248,0.5)' : 'rgba(167,139,250,0.5)'}`, background: 'rgba(255,255,255,0.03)', color: annSub.media_type === 'image' ? '#38bdf8' : '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', width: '100%', justifyContent: 'center' }}>
+                                          📁 {annSub.media_type === 'image' ? 'Choisir une image' : 'Choisir une vidéo'} (max 49 Mo)
+                                        </button>
+                                      )}
+                                      {annSub.media_data && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                                          {annSub.media_type === 'image'
+                                            ? <img src={annSub.media_data} alt="preview" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                                            : <div style={{ width: 48, height: 48, background: 'rgba(167,139,250,0.2)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🎬</div>
+                                          }
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{annSub.media_filename || 'Fichier sélectionné'}</div>
+                                            <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Prêt à envoyer ✓</div>
+                                          </div>
+                                          <button type="button" onClick={() => setAnnSub(annKey, { media_data: '', media_filename: '' })} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: 4, flexShrink: 0 }}>✕</button>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   {!annSub.media_type && (

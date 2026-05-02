@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import PasswordInput from '../components/PasswordInput';
 import TalkingMascot from '../components/TalkingMascot';
 
@@ -21,12 +22,13 @@ function formatRemaining(expiresAt) {
 
 export default function Login() {
   const { login } = useAuth();
+  const { lang, setLang, t } = useLanguage();
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [welcome, setWelcome] = useState(null);  // {user, redirect}
+  const [welcome, setWelcome] = useState(null);
   const progressTimer = useRef(null);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -51,20 +53,19 @@ export default function Login() {
       const result = await login(form.username, form.password);
       setProgress(100);
       await new Promise(r => setTimeout(r, 350));
+
+      // Apply user's preferred language on login
+      if (result?.language) setLang(result.language);
+
       if (result?.redirect) {
         navigate(result.redirect, { replace: true });
         return;
       }
-      // Admin → direct
       if (result?.is_admin) {
         navigate('/admin', { replace: true });
         return;
       }
-      // Show welcome mascot before redirecting
-      setWelcome({
-        user: result,
-        redirect: '/choisir',
-      });
+      setWelcome({ user: result, redirect: '/choisir' });
     } catch (err) {
       setError(err.message);
       setProgress(0);
@@ -77,7 +78,7 @@ export default function Login() {
   if (welcome) {
     const u = welcome.user || {};
     const username = u.username || 'cher utilisateur';
-    const status = u.status; // 'active' | 'pending' | 'expired'
+    const status = u.status;
 
     let lines;
     let mascotChar = '🧑‍💼';
@@ -86,7 +87,7 @@ export default function Login() {
     if (status === 'active') {
       const remaining = formatRemaining(u.subscription_expires_at) || 'le temps restant à votre abonnement';
       lines = [
-        `Bonjour ${username}, votre compte est confirmé !`,
+        `${t('app.name')} — ${username}`,
         `Bienvenue dans Prediction Baccara Pro.`,
         `Vous avez accès aux prédictions pendant ${remaining}.`,
         `Pensez à regarder votre temps restant en haut de l'écran.`,
@@ -117,7 +118,6 @@ export default function Login() {
       <div className="auth-page mascot-page">
         <div className="auth-bg-orb orb1" />
         <div className="auth-bg-orb orb2" />
-
         <div className="auth-box mascot-box success-box">
           <div style={{ textAlign: 'center', marginBottom: 18 }}>
             <div style={{
@@ -129,28 +129,26 @@ export default function Login() {
               border: `1px solid ${mascotColor}40`,
               color: mascotColor, fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
             }}>
-              {status === 'active'  && <>✅ COMPTE CONFIRMÉ</>}
-              {status === 'pending' && <>⏳ EN ATTENTE</>}
-              {status === 'expired' && <>⏰ ABONNEMENT EXPIRÉ</>}
+              {status === 'active'  && <>✅ {t('status.active').toUpperCase()}</>}
+              {status === 'pending' && <>⏳ {t('status.pending').toUpperCase()}</>}
+              {status === 'expired' && <>⏰ {t('dash.subscription_expired').toUpperCase()}</>}
             </div>
             <h2 style={{ marginTop: 14, fontSize: '1.45rem' }}>
-              {status === 'active' ? `Bienvenue ${username} !` : `Bonjour ${username}`}
+              {status === 'active' ? `${t('auth.success.title')} ${username} !` : `Bonjour ${username}`}
             </h2>
           </div>
-
           <TalkingMascot
             lines={lines}
             primaryColor={mascotColor}
             character={mascotChar}
             onDone={() => navigate(welcome.redirect, { replace: true })}
           />
-
           <button
             className="btn btn-gold btn-auth"
             style={{ marginTop: 22 }}
             onClick={() => navigate(welcome.redirect, { replace: true })}
           >
-            Continuer vers mon espace ▶
+            {t('action.continue')}
           </button>
         </div>
       </div>
@@ -161,12 +159,11 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-bg-orb orb1" />
       <div className="auth-bg-orb orb2" />
-
       <div className="auth-box">
         <div className="auth-logo">
           <div className="auth-logo-icon">🎲</div>
-          <h1>Prediction Baccara Pro</h1>
-          <p>Connectez-vous à votre compte</p>
+          <h1>{t('app.name')}</h1>
+          <p>{t('auth.login.title')}</p>
         </div>
 
         {error && (
@@ -177,7 +174,7 @@ export default function Login() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Identifiant ou email</label>
+            <label className="form-label">{t('auth.field.identifier')}</label>
             <div className="input-wrap">
               <span className="input-icon">👤</span>
               <input
@@ -192,7 +189,7 @@ export default function Login() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Mot de passe</label>
+            <label className="form-label">{t('auth.field.password')}</label>
             <PasswordInput
               value={form.password}
               onChange={set('password')}
@@ -205,22 +202,22 @@ export default function Login() {
             <div className="register-progress">
               <div className="register-progress-bar" style={{ width: `${progress}%` }} />
               <div className="register-progress-text">
-                {progress < 50 && '🔐 Vérification de vos identifiants...'}
-                {progress >= 50 && progress < 90 && '📡 Connexion sécurisée en cours...'}
-                {progress >= 90 && '✅ Connexion établie !'}
+                {progress < 50 && t('loading.checking')}
+                {progress >= 50 && progress < 90 && t('loading.connecting')}
+                {progress >= 90 && t('loading.connected')}
               </div>
             </div>
           )}
 
           <button className="btn btn-gold btn-auth" type="submit" disabled={loading}>
-            {loading ? <><span className="btn-spinner" /> Connexion...</> : '🚀 Se connecter'}
+            {loading ? <><span className="btn-spinner" /> {t('auth.login.loading')}</> : t('auth.login.btn')}
           </button>
         </form>
 
-        <div className="auth-divider"><span>ou</span></div>
+        <div className="auth-divider"><span>{t('auth.or')}</span></div>
 
         <p className="auth-footer">
-          Pas encore de compte ? <Link to="/inscription">S'inscrire gratuitement</Link>
+          {t('auth.no_account')} <Link to="/inscription">{t('auth.register_free')}</Link>
         </p>
       </div>
     </div>

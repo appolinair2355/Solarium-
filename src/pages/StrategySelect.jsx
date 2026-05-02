@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import ContactAdminModal from '../components/ContactAdminModal';
 import Avatar from '../components/Avatar';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 const CHANNELS = [
   {
@@ -45,6 +47,7 @@ const CHANNELS = [
 
 export default function StrategySelect() {
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [stats, setStats] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -174,7 +177,8 @@ export default function StrategySelect() {
             </span>
           )}
           {!user?.is_admin && <ContactAdminModal />}
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
+          <LanguageSwitcher compact />
+          <button className="btn btn-danger btn-sm" onClick={handleLogout}>{t('nav.logout')}</button>
           <Avatar user={user} size={36} style={{ marginLeft: 6 }} />
         </div>
       </nav>
@@ -273,11 +277,9 @@ export default function StrategySelect() {
       })()}
 
       <div className="select-header">
-        <div className="select-header-badge">🎯 ACCÈS PRÉDICTIONS</div>
-        <h1 className="select-header-title">Choisissez votre canal</h1>
-        <p className="select-header-sub">
-          Faites défiler et sélectionnez le canal d'analyse<br />qui correspond à votre style de jeu
-        </p>
+        <div className="select-header-badge">🎯 {t('channel.available').toUpperCase()}</div>
+        <h1 className="select-header-title">{t('strategy.title')}</h1>
+        <p className="select-header-sub">{t('strategy.subtitle')}</p>
         <div className="select-scroll-hint">
           <span>↓</span> Faites défiler pour explorer
         </div>

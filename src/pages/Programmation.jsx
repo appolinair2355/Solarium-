@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 
 // ── Constantes visuelles ──────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ function FileTree({ nodes, onSelect, selected, depth = 0 }) {
 // ── Panneau Configuration API IA ──────────────────────────────────────────────
 
 function AiConfigPanel({ onClose }) {
+  const { autoT } = useLanguage();
   const [apis, setApis]             = useState([]);
   const [savedKeys, setSavedKeys]   = useState({});
   const [selectedApi, setSelectedApi] = useState(null);
@@ -167,14 +169,14 @@ function AiConfigPanel({ onClose }) {
         <div style={{ display:'flex', alignItems:'center', gap:14, padding:'20px 24px', background:'linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1))', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
           <div style={{ width:44, height:44, borderRadius:12, background:'linear-gradient(135deg,#6366f1,#a855f7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, flexShrink:0 }}>🤖</div>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:18, fontWeight:900, color:'#f8fafc' }}>Configuration API IA</div>
+            <div style={{ fontSize:18, fontWeight:900, color:'#f8fafc' }}>{autoT('Configuration API IA')}</div>
             <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>
               {activeApi ? (
-                <span>API active : <span style={{ color: activeApi.fallback ? '#10b981' : '#a5b4fc', fontWeight:700 }}>
+                <span>{autoT('API active :')} <span style={{ color: activeApi.fallback ? '#10b981' : '#a5b4fc', fontWeight:700 }}>
                   {activeApi.api?.icon} {activeApi.apiName}
-                  {activeApi.fallback && <span style={{ color:'#10b981' }}> — fallback automatique</span>}
+                  {activeApi.fallback && <span style={{ color:'#10b981' }}> — {autoT('fallback automatique')}</span>}
                 </span></span>
-              ) : 'Ajoutez et vérifiez vos clés d\'API pour les services IA gratuits'}
+              ) : autoT('Ajoutez et vérifiez vos clés d\'API pour les services IA gratuits')}
             </div>
           </div>
           <button onClick={onClose} style={{ width:34, height:34, borderRadius:8, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#94a3b8', cursor:'pointer', fontSize:16, display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
@@ -184,7 +186,7 @@ function AiConfigPanel({ onClose }) {
 
           {/* Colonne gauche — liste des APIs */}
           <div style={{ width:260, borderRight:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden', flexShrink:0 }}>
-            <div style={{ padding:'12px 16px 8px', fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1.2 }}>Services disponibles</div>
+            <div style={{ padding:'12px 16px 8px', fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1.2 }}>{autoT('Services disponibles')}</div>
             <div style={{ flex:1, overflowY:'auto', padding:'0 8px 12px' }}>
               {apis.map(api => {
                 const saved = savedKeys[api.id];
@@ -202,7 +204,7 @@ function AiConfigPanel({ onClose }) {
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:13, fontWeight:700, color:'#f8fafc' }}>{api.name}</div>
                       <div style={{ fontSize:10, fontWeight:600, color: isFallbackActive ? '#10b981' : saved ? '#4ade80' : '#475569' }}>
-                        {isFallbackActive ? '🔄 Actif — fallback' : saved ? '✓ Clé enregistrée' : api.noKeyRequired ? '🦙 Aucune clé requise' : api.badge}
+                        {isFallbackActive ? `🔄 ${autoT('Actif — fallback')}` : saved ? `✓ ${autoT('Clé enregistrée')}` : api.noKeyRequired ? `🦙 ${autoT('Aucune clé requise')}` : api.badge}
                       </div>
                     </div>
                     {isFallbackActive && <div style={{ width:8, height:8, borderRadius:'50%', background:'#10b981', flexShrink:0 }} />}
@@ -218,8 +220,8 @@ function AiConfigPanel({ onClose }) {
             {!selectedApi ? (
               <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, color:'#1e293b', paddingTop:60 }}>
                 <div style={{ fontSize:56 }}>🤖</div>
-                <div style={{ fontSize:16, fontWeight:700, color:'#334155' }}>Sélectionnez un service</div>
-                <div style={{ fontSize:13, color:'#475569', textAlign:'center', maxWidth:260 }}>Cliquez sur un service dans la liste de gauche pour configurer votre clé API</div>
+                <div style={{ fontSize:16, fontWeight:700, color:'#334155' }}>{autoT('Sélectionnez un service')}</div>
+                <div style={{ fontSize:13, color:'#475569', textAlign:'center', maxWidth:260 }}>{autoT('Cliquez sur un service dans la liste de gauche pour configurer votre clé API')}</div>
               </div>
             ) : (
               <>
@@ -235,14 +237,14 @@ function AiConfigPanel({ onClose }) {
                   </div>
                   <a href={selectedApi.site} target="_blank" rel="noopener noreferrer"
                     style={{ padding:'8px 14px', borderRadius:8, border:`1px solid ${selectedApi.color}40`, background:`${selectedApi.color}12`, color:selectedApi.color, textDecoration:'none', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
-                    🔗 Obtenir une clé
+                    🔗 {autoT('Obtenir une clé')}
                   </a>
                 </div>
 
                 {/* Infos modèles + rate limit */}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                   <div style={{ padding:'14px 16px', borderRadius:12, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                    <div style={{ fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>Modèles gratuits</div>
+                    <div style={{ fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>{autoT('Modèles gratuits')}</div>
                     {selectedApi.freeModels.slice(0,4).map(m => (
                       <div key={m} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
                         <div style={{ width:5, height:5, borderRadius:'50%', background:selectedApi.color, flexShrink:0 }} />
@@ -251,9 +253,9 @@ function AiConfigPanel({ onClose }) {
                     ))}
                   </div>
                   <div style={{ padding:'14px 16px', borderRadius:12, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                    <div style={{ fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>Limites du tier gratuit</div>
+                    <div style={{ fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>{autoT('Limites du tier gratuit')}</div>
                     <div style={{ fontSize:12, color:'#94a3b8', lineHeight:1.7 }}>{selectedApi.rateLimit}</div>
-                    <div style={{ marginTop:8, fontSize:11, color:'#475569' }}>Format clé : <span style={{ fontFamily:'monospace', color:'#64748b' }}>{selectedApi.keyFormat}</span></div>
+                    <div style={{ marginTop:8, fontSize:11, color:'#475569' }}>{autoT('Format clé :')} <span style={{ fontFamily:'monospace', color:'#64748b' }}>{selectedApi.keyFormat}</span></div>
                   </div>
                 </div>
 
@@ -262,17 +264,17 @@ function AiConfigPanel({ onClose }) {
                   <div style={{ padding:'16px 18px', borderRadius:12, background:'rgba(16,185,129,0.06)', border:'1px solid rgba(16,185,129,0.25)', display:'flex', alignItems:'center', gap:14 }}>
                     <span style={{ fontSize:26 }}>🦙</span>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:13, fontWeight:700, color:'#34d399' }}>Aucune clé API requise</div>
-                      <div style={{ fontSize:12, color:'#64748b', marginTop:3, lineHeight:1.5 }}>Ollama tourne directement sur ce serveur. La vérification se lance automatiquement à la sélection.</div>
+                      <div style={{ fontSize:13, fontWeight:700, color:'#34d399' }}>{autoT('Aucune clé API requise')}</div>
+                      <div style={{ fontSize:12, color:'#64748b', marginTop:3, lineHeight:1.5 }}>{autoT('Ollama tourne directement sur ce serveur. La vérification se lance automatiquement à la sélection.')}</div>
                     </div>
                     <button onClick={handleVerify} disabled={verifying}
                       style={{ padding:'10px 18px', borderRadius:9, border:'none', cursor:verifying?'not-allowed':'pointer', fontWeight:700, fontSize:13, background:verifying?'rgba(16,185,129,0.2)':'linear-gradient(135deg,#059669,#10b981)', color:verifying?'#34d399':'#fff', whiteSpace:'nowrap' }}>
-                      {verifying ? '⏳…' : '🔄 Re-tester'}
+                      {verifying ? '⏳…' : `🔄 ${autoT('Re-tester')}`}
                     </button>
                   </div>
                 ) : (
                   <div>
-                    <div style={{ fontSize:11, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>Clé API</div>
+                    <div style={{ fontSize:11, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>{autoT('Clé API')}</div>
                     <div style={{ display:'flex', gap:10 }}>
                       <input
                         type="password" value={key}
@@ -283,10 +285,10 @@ function AiConfigPanel({ onClose }) {
                       />
                       <button onClick={handleVerify} disabled={verifying || !key.trim()}
                         style={{ padding:'13px 20px', borderRadius:10, border:'none', cursor:(verifying||!key.trim())?'not-allowed':'pointer', fontWeight:700, fontSize:13, background:(verifying||!key.trim())?'rgba(99,102,241,0.2)':'linear-gradient(135deg,#4f46e5,#7c3aed)', color:(verifying||!key.trim())?'#6366f1':'#fff', whiteSpace:'nowrap', transition:'all 0.2s' }}>
-                        {verifying ? '⏳ Vérification…' : '🔍 Vérifier'}
+                        {verifying ? `⏳ ${autoT('Vérification…')}` : `🔍 ${autoT('Vérifier')}`}
                       </button>
                     </div>
-                    <div style={{ marginTop:6, fontSize:11, color:'#334155' }}>💡 La vérification est automatique au collage de la clé</div>
+                    <div style={{ marginTop:6, fontSize:11, color:'#334155' }}>💡 {autoT('La vérification est automatique au collage de la clé')}</div>
                   </div>
                 )}
 
@@ -298,7 +300,7 @@ function AiConfigPanel({ onClose }) {
                       <span style={{ fontSize:24 }}>{verifyResult.ok ? '✅' : '❌'}</span>
                       <div>
                         <div style={{ fontSize:15, fontWeight:800, color: verifyResult.ok ? '#4ade80' : '#f87171' }}>
-                          {verifyResult.ok ? `Clé valide — ${verifyResult.apiName}` : `Clé invalide — ${verifyResult.apiName}`}
+                          {verifyResult.ok ? `${autoT('Clé valide')} — ${verifyResult.apiName}` : `${autoT('Clé invalide')} — ${verifyResult.apiName}`}
                         </div>
                         {!verifyResult.ok && <div style={{ fontSize:12, color:'#f87171', marginTop:2 }}>{verifyResult.error}</div>}
                       </div>
@@ -306,7 +308,7 @@ function AiConfigPanel({ onClose }) {
                         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
                           <button onClick={handleSave} disabled={saving}
                             style={{ padding:'8px 18px', borderRadius:8, border:'none', cursor:saving?'not-allowed':'pointer', fontWeight:700, fontSize:12, background:'linear-gradient(135deg,#16a34a,#22c55e)', color:'#fff' }}>
-                            {saving ? '…' : '💾 Enregistrer la clé'}
+                            {saving ? '…' : `💾 ${autoT('Enregistrer la clé')}`}
                           </button>
                         </div>
                       )}
@@ -319,13 +321,13 @@ function AiConfigPanel({ onClose }) {
                         {verifyResult.models?.length > 0 && (
                           <div>
                             <div style={{ fontSize:10, fontWeight:800, color:'#475569', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>
-                              Modèles accessibles ({verifyResult.models.length}{verifyResult.info?.totalModels ? ` / ${verifyResult.info.totalModels}` : ''})
+                              {autoT('Modèles accessibles')} ({verifyResult.models.length}{verifyResult.info?.totalModels ? ` / ${verifyResult.info.totalModels}` : ''})
                             </div>
                             <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
                               {verifyResult.models.slice(0,10).map(m => (
                                 <span key={m} style={{ fontSize:11, padding:'3px 10px', borderRadius:20, background:`${selectedApi.color}18`, border:`1px solid ${selectedApi.color}30`, color:selectedApi.color, fontFamily:'monospace' }}>{m}</span>
                               ))}
-                              {verifyResult.models.length > 10 && <span style={{ fontSize:11, color:'#475569', padding:'3px 10px' }}>+{verifyResult.models.length-10} autres</span>}
+                              {verifyResult.models.length > 10 && <span style={{ fontSize:11, color:'#475569', padding:'3px 10px' }}>+{verifyResult.models.length-10} {autoT('autres')}</span>}
                             </div>
                           </div>
                         )}
@@ -346,14 +348,14 @@ function AiConfigPanel({ onClose }) {
                     {/* Instructions installation Ollama si non disponible */}
                     {!verifyResult.ok && verifyResult.installSteps && (
                       <div style={{ padding:'16px 20px', background:'rgba(255,255,255,0.02)', display:'flex', flexDirection:'column', gap:12 }}>
-                        <div style={{ fontSize:12, fontWeight:700, color:'#94a3b8' }}>Pour installer Ollama sur ce serveur, exécutez ces commandes dans l'éditeur :</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:'#94a3b8' }}>{autoT("Pour installer Ollama sur ce serveur, exécutez ces commandes dans l'éditeur :")}</div>
                         {verifyResult.installSteps.map((cmd, i) => (
                           <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
                             <span style={{ width:22, height:22, borderRadius:'50%', background:'rgba(16,185,129,0.15)', border:'1px solid rgba(16,185,129,0.3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800, color:'#10b981', flexShrink:0 }}>{i+1}</span>
                             <code style={{ flex:1, padding:'8px 12px', background:'#0a0f1e', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', fontSize:12, color:'#a5b4fc', fontFamily:'monospace' }}>{cmd}</code>
                           </div>
                         ))}
-                        <div style={{ fontSize:11, color:'#475569' }}>💡 Collez ces commandes dans l'onglet exécution de l'éditeur, ou via un terminal sur votre serveur.</div>
+                        <div style={{ fontSize:11, color:'#475569' }}>💡 {autoT("Collez ces commandes dans l'onglet exécution de l'éditeur, ou via un terminal sur votre serveur.")}</div>
                       </div>
                     )}
                   </div>
@@ -364,13 +366,13 @@ function AiConfigPanel({ onClose }) {
                   <div style={{ padding:'14px 18px', borderRadius:12, background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', gap:12 }}>
                     <span style={{ fontSize:18 }}>🔐</span>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:12, fontWeight:700, color:'#4ade80' }}>Clé enregistrée</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:'#4ade80' }}>{autoT('Clé enregistrée')}</div>
                       <div style={{ fontSize:11, color:'#475569', fontFamily:'monospace', marginTop:2 }}>{savedKeys[selectedApi.id].masked}</div>
-                      <div style={{ fontSize:10, color:'#334155', marginTop:2 }}>Sauvegardée le {new Date(savedKeys[selectedApi.id].savedAt).toLocaleString('fr-FR')}</div>
+                      <div style={{ fontSize:10, color:'#334155', marginTop:2 }}>{autoT('Sauvegardée le')} {new Date(savedKeys[selectedApi.id].savedAt).toLocaleString('fr-FR')}</div>
                     </div>
                     <button onClick={() => handleDelete(selectedApi.id)} disabled={deleting===selectedApi.id}
                       style={{ padding:'6px 12px', borderRadius:7, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)', color:'#f87171', cursor:'pointer', fontSize:11, fontWeight:700 }}>
-                      {deleting===selectedApi.id ? '…' : '🗑 Supprimer'}
+                      {deleting===selectedApi.id ? '…' : `🗑 ${autoT('Supprimer')}`}
                     </button>
                   </div>
                 )}
@@ -386,6 +388,7 @@ function AiConfigPanel({ onClose }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function Programmation() {
+  const { autoT } = useLanguage();
   const [auth, setAuth]           = useState(false);
   const [checking, setChecking]   = useState(true);
   const [email, setEmail]         = useState('');
@@ -656,8 +659,8 @@ export default function Programmation() {
       <div style={{ width:'100%', maxWidth:420, background:'rgba(15,23,42,0.95)', border:'1px solid rgba(59,130,246,0.25)', borderRadius:20, padding:'40px 36px', boxShadow:'0 24px 80px rgba(0,0,0,0.5)' }}>
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <div style={{ fontSize:48, marginBottom:12 }}>💻</div>
-          <h1 style={{ fontSize:22, fontWeight:900, color:'#f8fafc', margin:'0 0 6px', fontFamily:'sans-serif' }}>Espace Programmation</h1>
-          <p style={{ fontSize:13, color:'#64748b', margin:0, fontFamily:'sans-serif' }}>Accès restreint — identifiants requis</p>
+          <h1 style={{ fontSize:22, fontWeight:900, color:'#f8fafc', margin:'0 0 6px', fontFamily:'sans-serif' }}>{autoT('Espace Programmation')}</h1>
+          <p style={{ fontSize:13, color:'#64748b', margin:0, fontFamily:'sans-serif' }}>{autoT('Accès restreint — identifiants requis')}</p>
         </div>
         <form onSubmit={handleLogin} style={{ display:'flex', flexDirection:'column', gap:16, fontFamily:'sans-serif' }}>
           <div>
@@ -667,7 +670,7 @@ export default function Programmation() {
               onFocus={e=>e.target.style.borderColor='#3b82f6'} onBlur={e=>e.target.style.borderColor='rgba(59,130,246,0.25)'} />
           </div>
           <div>
-            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>Mot de passe</label>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>{autoT('Mot de passe')}</label>
             <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••"
               style={{ width:'100%', padding:'13px 16px', background:'#1e293b', border:'1.5px solid rgba(59,130,246,0.25)', borderRadius:10, color:'#f8fafc', fontSize:14, outline:'none', boxSizing:'border-box' }}
               onFocus={e=>e.target.style.borderColor='#3b82f6'} onBlur={e=>e.target.style.borderColor='rgba(59,130,246,0.25)'} />
@@ -675,11 +678,11 @@ export default function Programmation() {
           {loginErr && <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', color:'#f87171', fontSize:13, textAlign:'center' }}>{loginErr}</div>}
           <button type="submit" disabled={loginLoading}
             style={{ padding:'14px', borderRadius:10, border:'none', cursor:loginLoading?'not-allowed':'pointer', fontWeight:800, fontSize:14, background:loginLoading?'rgba(59,130,246,0.3)':'linear-gradient(135deg,#1d4ed8,#3b82f6)', color:'#fff', marginTop:4 }}>
-            {loginLoading ? 'Connexion…' : '🔓 Accéder'}
+            {loginLoading ? autoT('Connexion…') : `🔓 ${autoT('Accéder')}`}
           </button>
         </form>
         <div style={{ textAlign:'center', marginTop:24, fontFamily:'sans-serif' }}>
-          <a href="/" style={{ fontSize:12, color:'#475569', textDecoration:'none' }}>← Retour à l'accueil</a>
+          <a href="/" style={{ fontSize:12, color:'#475569', textDecoration:'none' }}>← {autoT("Retour à l'accueil")}</a>
         </div>
       </div>
     </div>
@@ -760,7 +763,7 @@ export default function Programmation() {
               {msg.noKey && pi === parts.length - 1 && (
                 <button onClick={()=>setShowAiPanel(true)}
                   style={{ display:'block', marginTop:10, padding:'7px 14px', borderRadius:8, border:'none', background:'linear-gradient(135deg,#4f46e5,#6366f1)', color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'sans-serif' }}>
-                  🤖 Configurer une clé API gratuite
+                  🤖 {autoT('Configurer une clé API gratuite')}
                 </button>
               )}
             </div>
@@ -786,11 +789,11 @@ export default function Programmation() {
       {/* Barre haute */}
       <div style={{ display:'flex', alignItems:'center', gap:12, padding:'0 18px', height:62, background:'#1e293b', borderBottom:'2px solid rgba(255,255,255,0.08)', flexShrink:0 }}>
         <span style={{ fontSize:24 }}>💻</span>
-        <span style={{ fontWeight:900, fontSize:16, color:'#f8fafc', whiteSpace:'nowrap' }}>Espace Programmation</span>
+        <span style={{ fontWeight:900, fontSize:16, color:'#f8fafc', whiteSpace:'nowrap' }}>{autoT('Espace Programmation')}</span>
 
         {/* Sélecteur de mode */}
         <div style={{ display:'flex', gap:3, background:'rgba(0,0,0,0.4)', borderRadius:10, padding:3, flexShrink:0 }}>
-          {[{id:'projet', label:'📁 Projet'}, {id:'horsprojet', label:'🚀 Hors Projet'}].map(m => (
+          {[{id:'projet', label:`📁 ${autoT('Projet')}`}, {id:'horsprojet', label:`🚀 ${autoT('Hors Projet')}`}].map(m => (
             <button key={m.id} onClick={()=>setMode(m.id)}
               style={{ padding:'8px 18px', borderRadius:8, border:'none', cursor:'pointer', fontSize:14, fontWeight:800, fontFamily:'sans-serif', transition:'all 0.15s',
                 background: mode===m.id ? (m.id==='horsprojet' ? 'linear-gradient(135deg,#7c3aed,#a855f7)' : 'linear-gradient(135deg,#1d4ed8,#3b82f6)') : 'transparent',
@@ -853,17 +856,17 @@ export default function Programmation() {
           {selPath && <>
             <button onClick={saveFile} disabled={saving||!isDirty}
               style={{ padding:'9px 20px', borderRadius:9, border:'none', cursor:(saving||!isDirty)?'not-allowed':'pointer', fontSize:14, fontWeight:800, background:isDirty?'linear-gradient(135deg,#16a34a,#22c55e)':'rgba(34,197,94,0.15)', color:isDirty?'#fff':'#4ade80', opacity:saving?0.6:1 }}>
-              {saving?'…':'💾 Enregistrer'}
+              {saving?'…':`💾 ${autoT('Enregistrer')}`}
             </button>
             <button onClick={runCode} disabled={running}
               style={{ padding:'9px 20px', borderRadius:9, border:'none', cursor:running?'not-allowed':'pointer', fontSize:14, fontWeight:800, background:running?'rgba(251,191,36,0.15)':'linear-gradient(135deg,#d97706,#fbbf24)', color:running?'#fbbf24':'#111', opacity:running?0.7:1 }}>
-              {running?'⏳ Exécution…':'▶ Exécuter'}
+              {running?`⏳ ${autoT('Exécution…')}`:`▶ ${autoT('Exécuter')}`}
             </button>
           </>}
 
           <button onClick={handleLogout}
             style={{ padding:'9px 16px', borderRadius:9, border:'2px solid rgba(239,68,68,0.35)', background:'rgba(239,68,68,0.1)', color:'#f87171', fontSize:14, cursor:'pointer', fontWeight:700 }}>
-            🚪 Déconnexion
+            🚪 {autoT('Déconnexion')}
           </button>
         </div>
       </div>
@@ -873,22 +876,22 @@ export default function Programmation() {
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
           <div style={{ background:'#1e293b', border:'1px solid rgba(251,191,36,0.3)', borderRadius:16, padding:'28px 32px', maxWidth:440, width:'90%', fontFamily:'sans-serif', boxShadow:'0 24px 80px rgba(0,0,0,0.6)' }}>
             <div style={{ fontSize:32, marginBottom:12, textAlign:'center' }}>⚠️</div>
-            <h3 style={{ color:'#f8fafc', margin:'0 0 10px', fontSize:16, fontWeight:800, textAlign:'center' }}>Confirmer l'installation dans le projet</h3>
+            <h3 style={{ color:'#f8fafc', margin:'0 0 10px', fontSize:16, fontWeight:800, textAlign:'center' }}>{autoT("Confirmer l'installation dans le projet")}</h3>
             <p style={{ color:'#94a3b8', fontSize:13, margin:'0 0 8px', lineHeight:1.6, textAlign:'center' }}>
-              Vous êtes sur le point d'enregistrer les modifications dans :<br />
+              {autoT("Vous êtes sur le point d'enregistrer les modifications dans :")}<br />
               <span style={{ color:'#fbbf24', fontFamily:'monospace', fontSize:12 }}>{selPath}</span>
             </p>
             <p style={{ color:'#64748b', fontSize:12, margin:'0 0 20px', textAlign:'center' }}>
-              Ce fichier sera <strong style={{ color:'#f87171' }}>remplacé dans la base de données</strong> et les changements seront actifs immédiatement.
+              {autoT('Ce fichier sera')} <strong style={{ color:'#f87171' }}>{autoT('remplacé dans la base de données')}</strong> {autoT('et les changements seront actifs immédiatement.')}
             </p>
             <div style={{ display:'flex', gap:10 }}>
               <button onClick={()=>setShowSaveConfirm(false)}
                 style={{ flex:1, padding:'10px', borderRadius:9, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#94a3b8', cursor:'pointer', fontSize:13, fontWeight:600 }}>
-                Annuler
+                {autoT('Annuler')}
               </button>
               <button onClick={confirmSave}
                 style={{ flex:1, padding:'10px', borderRadius:9, border:'none', background:'linear-gradient(135deg,#d97706,#f59e0b)', color:'#111', cursor:'pointer', fontSize:13, fontWeight:800 }}>
-                ✅ Oui, installer
+                ✅ {autoT('Oui, installer')}
               </button>
             </div>
           </div>
@@ -910,23 +913,23 @@ export default function Programmation() {
               <div style={{ maxWidth:800, margin:'0 auto' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:32 }}>
                   <div>
-                    <h2 style={{ margin:0, fontSize:22, fontWeight:900, color:'#f8fafc' }}>🚀 Espace Hors Projet</h2>
-                    <p style={{ margin:'6px 0 0', fontSize:13, color:'#64748b' }}>Créez et testez vos propres bots sans toucher au projet principal</p>
+                    <h2 style={{ margin:0, fontSize:22, fontWeight:900, color:'#f8fafc' }}>🚀 {autoT('Espace Hors Projet')}</h2>
+                    <p style={{ margin:'6px 0 0', fontSize:13, color:'#64748b' }}>{autoT('Créez et testez vos propres bots sans toucher au projet principal')}</p>
                   </div>
                   <button onClick={()=>{ setCurrentBot(null); setBotName(''); setBotDesc(''); setBotCode(''); setBotResult(null); setChatHistory([]); setBotStep('create'); }}
                     style={{ marginLeft:'auto', padding:'10px 20px', borderRadius:10, border:'none', background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
-                    + Créer un bot
+                    + {autoT('Créer un bot')}
                   </button>
                 </div>
 
                 {botList.length === 0 ? (
                   <div style={{ textAlign:'center', padding:'60px 20px' }}>
                     <div style={{ fontSize:64, marginBottom:16 }}>🤖</div>
-                    <div style={{ fontSize:18, fontWeight:700, color:'#334155', marginBottom:8 }}>Aucun bot créé</div>
-                    <div style={{ fontSize:14, color:'#1e293b', marginBottom:24 }}>Créez votre premier bot — l'IA le code pour vous !</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:'#334155', marginBottom:8 }}>{autoT('Aucun bot créé')}</div>
+                    <div style={{ fontSize:14, color:'#1e293b', marginBottom:24 }}>{autoT("Créez votre premier bot — l'IA le code pour vous !")}</div>
                     <button onClick={()=>{ setCurrentBot(null); setBotName(''); setBotDesc(''); setBotCode(''); setBotResult(null); setChatHistory([]); setBotStep('create'); }}
                       style={{ padding:'12px 28px', borderRadius:12, border:'none', background:'linear-gradient(135deg,#7c3aed,#a855f7)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' }}>
-                      🚀 Créer mon premier bot
+                      🚀 {autoT('Créer mon premier bot')}
                     </button>
                   </div>
                 ) : (
@@ -965,22 +968,22 @@ export default function Programmation() {
           {botStep === 'create' && (
             <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:32, overflowY:'auto' }}>
               <div style={{ width:'100%', maxWidth:560, fontFamily:'sans-serif' }}>
-                <button onClick={()=>setBotStep('list')} style={{ background:'none', border:'none', color:'#64748b', cursor:'pointer', fontSize:13, marginBottom:20, padding:0 }}>← Retour à la liste</button>
+                <button onClick={()=>setBotStep('list')} style={{ background:'none', border:'none', color:'#64748b', cursor:'pointer', fontSize:13, marginBottom:20, padding:0 }}>← {autoT('Retour à la liste')}</button>
                 <div style={{ textAlign:'center', marginBottom:28 }}>
                   <div style={{ fontSize:48, marginBottom:12 }}>🤖</div>
-                  <h2 style={{ margin:0, fontSize:20, fontWeight:900, color:'#f8fafc' }}>Quel bot voulez-vous créer ?</h2>
-                  <p style={{ margin:'8px 0 0', fontSize:13, color:'#64748b' }}>Décrivez votre bot en français — l'IA va le coder automatiquement</p>
+                  <h2 style={{ margin:0, fontSize:20, fontWeight:900, color:'#f8fafc' }}>{autoT('Quel bot voulez-vous créer ?')}</h2>
+                  <p style={{ margin:'8px 0 0', fontSize:13, color:'#64748b' }}>{autoT("Décrivez votre bot en français — l'IA va le coder automatiquement")}</p>
                 </div>
 
                 <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
                   <div>
-                    <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>Nom du bot</label>
+                    <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>{autoT('Nom du bot')}</label>
                     <input value={botName} onChange={e=>setBotName(e.target.value)} placeholder="Ex: Bot de prédiction Baccarat"
                       style={{ width:'100%', padding:'12px 16px', background:'#1e293b', border:'1.5px solid rgba(124,58,237,0.25)', borderRadius:10, color:'#f8fafc', fontSize:14, outline:'none', boxSizing:'border-box' }}
                       onFocus={e=>e.target.style.borderColor='#7c3aed'} onBlur={e=>e.target.style.borderColor='rgba(124,58,237,0.25)'} />
                   </div>
                   <div>
-                    <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>Description détaillée</label>
+                    <label style={{ display:'block', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>{autoT('Description détaillée')}</label>
                     <textarea value={botDesc} onChange={e=>setBotDesc(e.target.value)} rows={5}
                       placeholder="Décrivez en détail ce que votre bot doit faire, comment il doit fonctionner, quelles données il utilise, etc."
                       style={{ width:'100%', padding:'12px 16px', background:'#1e293b', border:'1.5px solid rgba(124,58,237,0.25)', borderRadius:10, color:'#f8fafc', fontSize:13, outline:'none', resize:'vertical', boxSizing:'border-box', fontFamily:'sans-serif', lineHeight:1.6 }}
@@ -989,11 +992,11 @@ export default function Programmation() {
                   <div style={{ display:'flex', gap:10 }}>
                     <button onClick={()=>{ setBotStep('edit'); setBotCode('// Écrivez votre code ici…\n'); }}
                       style={{ flex:1, padding:'12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#94a3b8', cursor:'pointer', fontSize:13, fontWeight:600 }}>
-                      ✏️ Coder manuellement
+                      ✏️ {autoT('Coder manuellement')}
                     </button>
                     <button onClick={generateBotCode} disabled={botGenerating || !botName.trim() || !botDesc.trim()}
                       style={{ flex:2, padding:'12px', borderRadius:10, border:'none', cursor:(botGenerating||!botName.trim()||!botDesc.trim())?'not-allowed':'pointer', fontSize:13, fontWeight:800, background:(botGenerating||!botName.trim()||!botDesc.trim())?'rgba(124,58,237,0.3)':'linear-gradient(135deg,#7c3aed,#a855f7)', color:'#fff', opacity:(botGenerating||!botName.trim()||!botDesc.trim())?0.6:1 }}>
-                      {botGenerating ? '⏳ L\'IA code votre bot…' : '🤖 L\'IA code pour moi'}
+                      {botGenerating ? `⏳ ${autoT("L'IA code votre bot…")}` : `🤖 ${autoT("L'IA code pour moi")}`}
                     </button>
                   </div>
                 </div>
@@ -1008,8 +1011,8 @@ export default function Programmation() {
               <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
                 {/* Barre du bot */}
                 <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 18px', background:'rgba(124,58,237,0.12)', borderBottom:'2px solid rgba(124,58,237,0.25)', flexShrink:0, fontFamily:'sans-serif' }}>
-                  <button onClick={()=>{ setBotStep('list'); setCurrentBot(null); }} style={{ background:'rgba(255,255,255,0.07)', border:'none', color:'#94a3b8', cursor:'pointer', fontSize:14, fontWeight:600, padding:'6px 12px', borderRadius:7 }}>← Liste</button>
-                  <span style={{ fontSize:15, color:'#a855f7', fontWeight:900 }}>🤖 {botName || 'Nouveau bot'}</span>
+                  <button onClick={()=>{ setBotStep('list'); setCurrentBot(null); }} style={{ background:'rgba(255,255,255,0.07)', border:'none', color:'#94a3b8', cursor:'pointer', fontSize:14, fontWeight:600, padding:'6px 12px', borderRadius:7 }}>← {autoT('Liste')}</button>
+                  <span style={{ fontSize:15, color:'#a855f7', fontWeight:900 }}>🤖 {botName || autoT('Nouveau bot')}</span>
                   <span style={{ fontSize:13, color:'#64748b', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{botDesc ? `• ${botDesc.slice(0,60)}${botDesc.length>60?'…':''}` : ''}</span>
                   {botSaveMsg && <span style={{ fontSize:14, fontWeight:700, color:botSaveMsg.startsWith('✅')?'#4ade80':'#f87171' }}>{botSaveMsg}</span>}
                   <select value={botLang} onChange={e=>setBotLang(e.target.value)}
@@ -1020,11 +1023,11 @@ export default function Programmation() {
                   </select>
                   <button onClick={runBotCode} disabled={botRunning}
                     style={{ padding:'9px 20px', borderRadius:9, border:'none', cursor:botRunning?'not-allowed':'pointer', fontSize:14, fontWeight:800, background:botRunning?'rgba(251,191,36,0.15)':'linear-gradient(135deg,#d97706,#fbbf24)', color:botRunning?'#fbbf24':'#111' }}>
-                    {botRunning ? '⏳ En cours…' : '▶ Tester'}
+                    {botRunning ? `⏳ ${autoT('En cours…')}` : `▶ ${autoT('Tester')}`}
                   </button>
                   <button onClick={saveBot} disabled={botSaving}
                     style={{ padding:'9px 20px', borderRadius:9, border:'none', cursor:botSaving?'not-allowed':'pointer', fontSize:14, fontWeight:800, background:botSaving?'rgba(124,58,237,0.3)':'linear-gradient(135deg,#7c3aed,#a855f7)', color:'#fff' }}>
-                    {botSaving ? '…' : '💾 Sauvegarder'}
+                    {botSaving ? '…' : `💾 ${autoT('Sauvegarder')}`}
                   </button>
                 </div>
 
@@ -1033,8 +1036,8 @@ export default function Programmation() {
                   {botGenerating ? (
                     <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, fontFamily:'sans-serif' }}>
                       <div style={{ width:40, height:40, border:'4px solid rgba(124,58,237,0.3)', borderTopColor:'#a855f7', borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
-                      <div style={{ fontSize:14, color:'#a855f7', fontWeight:700 }}>L'IA génère votre bot…</div>
-                      <div style={{ fontSize:12, color:'#475569' }}>Cela peut prendre quelques secondes</div>
+                      <div style={{ fontSize:14, color:'#a855f7', fontWeight:700 }}>{autoT("L'IA génère votre bot…")}</div>
+                      <div style={{ fontSize:12, color:'#475569' }}>{autoT('Cela peut prendre quelques secondes')}</div>
                     </div>
                   ) : (
                     <textarea ref={botTextareaRef} className="prog-textarea" value={botCode} onChange={e=>setBotCode(e.target.value)}
@@ -1048,16 +1051,16 @@ export default function Programmation() {
                 {(botResult !== null || botRunning) && (
                   <div style={{ height:200, background:'#0a0f1e', borderTop:'1px solid rgba(255,255,255,0.08)', overflow:'hidden', display:'flex', flexDirection:'column', flexShrink:0 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 16px', borderBottom:'1px solid rgba(255,255,255,0.05)', background:'#111827', flexShrink:0, fontFamily:'sans-serif' }}>
-                      <span style={{ fontSize:12, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1 }}>Résultats du test</span>
-                      {botResult && <span style={{ fontSize:11, padding:'2px 10px', borderRadius:12, fontWeight:700, background:botResult.exitCode===0?'rgba(34,197,94,0.15)':'rgba(239,68,68,0.15)', color:botResult.exitCode===0?'#4ade80':'#f87171' }}>{botResult.exitCode===0?'✅ Succès':`❌ Code ${botResult.exitCode}`}</span>}
+                      <span style={{ fontSize:12, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1 }}>{autoT('Résultats du test')}</span>
+                      {botResult && <span style={{ fontSize:11, padding:'2px 10px', borderRadius:12, fontWeight:700, background:botResult.exitCode===0?'rgba(34,197,94,0.15)':'rgba(239,68,68,0.15)', color:botResult.exitCode===0?'#4ade80':'#f87171' }}>{botResult.exitCode===0?`✅ ${autoT('Succès')}`:`❌ Code ${botResult.exitCode}`}</span>}
                       <button onClick={()=>setBotResult(null)} style={{ marginLeft:'auto', background:'none', border:'none', color:'#475569', cursor:'pointer', fontSize:14 }}>✕</button>
                     </div>
                     <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
-                      {botRunning ? <div style={{ color:'#64748b', fontSize:13 }}>⏳ Exécution en cours…</div> : (
+                      {botRunning ? <div style={{ color:'#64748b', fontSize:13 }}>⏳ {autoT('Exécution en cours…')}</div> : (
                         <>
                           {botResult?.output && <pre style={{ margin:0, fontSize:12, color:'#4ade80', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.65 }}>{botResult.output}</pre>}
                           {botResult?.error && <pre style={{ margin:0, fontSize:12, color:'#f87171', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.65 }}>{botResult.error}</pre>}
-                          {!botResult?.output && !botResult?.error && <span style={{ color:'#475569', fontSize:12 }}>(aucune sortie)</span>}
+                          {!botResult?.output && !botResult?.error && <span style={{ color:'#475569', fontSize:12 }}>({autoT('aucune sortie')})</span>}
                         </>
                       )}
                     </div>
@@ -1069,16 +1072,16 @@ export default function Programmation() {
               <div style={{ width:340, flexShrink:0, background:'#111827', borderLeft:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0, fontFamily:'sans-serif' }}>
                   <span style={{ fontSize:13 }}>💬</span>
-                  <span style={{ fontWeight:800, fontSize:12, color:'#f8fafc', flex:1 }}>Chat IA — Améliorer le bot</span>
-                  {chatHistory.length > 0 && <button onClick={()=>setChatHistory([])} style={{ background:'none', border:'none', cursor:'pointer', color:'#475569', fontSize:11, fontFamily:'sans-serif' }}>Vider</button>}
+                  <span style={{ fontWeight:800, fontSize:12, color:'#f8fafc', flex:1 }}>{autoT('Chat IA — Améliorer le bot')}</span>
+                  {chatHistory.length > 0 && <button onClick={()=>setChatHistory([])} style={{ background:'none', border:'none', cursor:'pointer', color:'#475569', fontSize:11, fontFamily:'sans-serif' }}>{autoT('Vider')}</button>}
                 </div>
                 <div style={{ flex:1, overflowY:'auto', padding:'12px 12px 0' }}>
                   {chatHistory.length === 0 && (
                     <div style={{ padding:'20px 8px', textAlign:'center', fontFamily:'sans-serif' }}>
                       <div style={{ fontSize:28, marginBottom:8 }}>💡</div>
-                      <div style={{ fontSize:12, color:'#475569', lineHeight:1.6 }}>Demandez à l'IA d'améliorer, corriger ou expliquer votre bot.</div>
+                      <div style={{ fontSize:12, color:'#475569', lineHeight:1.6 }}>{autoT("Demandez à l'IA d'améliorer, corriger ou expliquer votre bot.")}</div>
                       <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:5 }}>
-                        {['Corrige les bugs dans ce code', 'Ajoute une gestion des erreurs', 'Explique ce que fait ce bot', 'Optimise le code'].map(s=>(
+                        {[autoT('Corrige les bugs dans ce code'), autoT('Ajoute une gestion des erreurs'), autoT('Explique ce que fait ce bot'), autoT('Optimise le code')].map(s=>(
                           <button key={s} onClick={()=>{setChatInput(s);chatInputRef.current?.focus();}}
                             style={{ padding:'6px 10px', borderRadius:7, border:'1px solid rgba(255,255,255,0.07)', background:'rgba(255,255,255,0.03)', color:'#94a3b8', fontSize:11, cursor:'pointer', fontFamily:'sans-serif', textAlign:'left' }}>
                             {s}
@@ -1091,7 +1094,7 @@ export default function Programmation() {
                   {chatLoading && (
                     <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0 12px', fontFamily:'sans-serif' }}>
                       <div style={{ display:'flex', gap:4 }}>{[0,1,2].map(i=><div key={i} style={{ width:6, height:6, borderRadius:'50%', background:'#a855f7', animation:`bounce 1s ${i*0.15}s infinite` }} />)}</div>
-                      <span style={{ fontSize:11, color:'#475569' }}>L'IA réfléchit…</span>
+                      <span style={{ fontSize:11, color:'#475569' }}>{autoT("L'IA réfléchit…")}</span>
                     </div>
                   )}
                   <div ref={chatEndRef} />
@@ -1133,13 +1136,13 @@ export default function Programmation() {
         {sidebarOpen && (
           <div style={{ width:sidebarW, flexShrink:0, background:'#111827', borderRight:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
             <div style={{ padding:'14px 14px 10px', fontSize:12, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1.4, fontFamily:'sans-serif', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-              <span>📂 Fichiers du projet</span>
+              <span>📂 {autoT('Fichiers du projet')}</span>
               <button onClick={()=>setSidebarOpen(false)} title="Réduire"
                 style={{ background:'rgba(255,255,255,0.06)', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:18, lineHeight:1, padding:'2px 8px', borderRadius:6 }}>‹</button>
             </div>
             <div style={{ flex:1, overflowY:'auto', padding:'6px 6px 12px' }}>
               {files.length===0
-                ? <div style={{ padding:24, fontSize:14, color:'#475569', textAlign:'center', fontFamily:'sans-serif' }}>Chargement…</div>
+                ? <div style={{ padding:24, fontSize:14, color:'#475569', textAlign:'center', fontFamily:'sans-serif' }}>{autoT('Chargement…')}</div>
                 : <FileTree nodes={files} onSelect={loadFile} selected={selPath} />}
             </div>
           </div>
@@ -1159,11 +1162,11 @@ export default function Programmation() {
             {!selPath ? (
               <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:16, fontFamily:'sans-serif' }}>
                 <div style={{ fontSize:72 }}>📂</div>
-                <div style={{ fontSize:22, fontWeight:800, color:'#475569' }}>Sélectionnez un fichier</div>
-                <div style={{ fontSize:16, color:'#334155' }}>Cliquez sur un fichier dans la liste à gauche pour l'éditer</div>
+                <div style={{ fontSize:22, fontWeight:800, color:'#475569' }}>{autoT('Sélectionnez un fichier')}</div>
+                <div style={{ fontSize:16, color:'#334155' }}>{autoT("Cliquez sur un fichier dans la liste à gauche pour l'éditer")}</div>
                 <div style={{ marginTop:8, padding:'16px 24px', borderRadius:12, background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.25)', fontSize:14, color:'#818cf8', cursor:'pointer', textAlign:'center' }}
                   onClick={()=>setShowAiPanel(true)}>
-                  💡 Cliquez sur <strong>🤖 Config IA</strong> pour configurer votre clé API gratuite
+                  💡 {autoT('Cliquez sur')} <strong>🤖 Config IA</strong> {autoT('pour configurer votre clé API gratuite')}
                 </div>
               </div>
             ) : loading ? (
@@ -1179,20 +1182,20 @@ export default function Programmation() {
           {(result!==null||running) && (
             <div style={{ height:240, background:'#0a0f1e', borderTop:'2px solid rgba(255,255,255,0.08)', overflow:'hidden', display:'flex', flexDirection:'column', flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:'1px solid rgba(255,255,255,0.06)', background:'#111827', flexShrink:0, fontFamily:'sans-serif' }}>
-                <span style={{ fontSize:13, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1.2 }}>📋 Résultats</span>
+                <span style={{ fontSize:13, fontWeight:800, color:'#64748b', textTransform:'uppercase', letterSpacing:1.2 }}>📋 {autoT('Résultats')}</span>
                 {result && (
                   <span style={{ fontSize:13, padding:'4px 14px', borderRadius:20, fontWeight:700, background:result.exitCode===0?'rgba(34,197,94,0.15)':'rgba(239,68,68,0.15)', color:result.exitCode===0?'#4ade80':'#f87171' }}>
-                    {result.exitCode===0?'✅ Succès':`❌ Code ${result.exitCode}`}
+                    {result.exitCode===0?`✅ ${autoT('Succès')}`:`❌ Code ${result.exitCode}`}
                   </span>
                 )}
                 <button onClick={()=>setResult(null)} style={{ marginLeft:'auto', background:'rgba(255,255,255,0.06)', border:'none', color:'#94a3b8', cursor:'pointer', fontSize:16, fontFamily:'sans-serif', padding:'4px 10px', borderRadius:6 }}>✕</button>
               </div>
               <div style={{ flex:1, overflowY:'auto', padding:'14px 18px' }}>
-                {running ? <div style={{ color:'#64748b', fontSize:15 }}>⏳ Exécution en cours…</div> : (
+                {running ? <div style={{ color:'#64748b', fontSize:15 }}>⏳ {autoT('Exécution en cours…')}</div> : (
                   <>
                     {result?.output && <pre style={{ margin:0, fontSize:14, color:'#4ade80', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7 }}>{result.output}</pre>}
                     {result?.error && <pre style={{ margin:0, fontSize:14, color:'#f87171', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.7 }}>{result.error}</pre>}
-                    {!result?.output && !result?.error && <span style={{ color:'#475569', fontSize:14 }}>(aucune sortie)</span>}
+                    {!result?.output && !result?.error && <span style={{ color:'#475569', fontSize:14 }}>({autoT('aucune sortie')})</span>}
                   </>
                 )}
               </div>
@@ -1208,14 +1211,14 @@ export default function Programmation() {
               {/* En-tête chat */}
               <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 16px', borderBottom:'2px solid rgba(255,255,255,0.07)', flexShrink:0, fontFamily:'sans-serif' }}>
                 <span style={{ fontSize:18 }}>💬</span>
-                <span style={{ fontWeight:900, fontSize:15, color:'#f8fafc', flex:1 }}>Assistant IA</span>
+                <span style={{ fontWeight:900, fontSize:15, color:'#f8fafc', flex:1 }}>{autoT('Assistant IA')}</span>
                 {activeApiInfo && (
                   <span style={{ fontSize:12, color:'#64748b', fontWeight:600 }}>{activeApiInfo.apiName}</span>
                 )}
                 {chatHistory.length > 0 && (
                   <button onClick={()=>setChatHistory([])}
                     style={{ background:'rgba(255,255,255,0.06)', border:'none', cursor:'pointer', color:'#94a3b8', fontSize:13, fontFamily:'sans-serif', padding:'4px 10px', borderRadius:6, fontWeight:600 }}>
-                    Vider
+                    {autoT('Vider')}
                   </button>
                 )}
                 <button onClick={()=>setShowAiChat(false)}
@@ -1228,11 +1231,11 @@ export default function Programmation() {
                   <div style={{ padding:'28px 14px', textAlign:'center', fontFamily:'sans-serif' }}>
                     <div style={{ fontSize:40, marginBottom:14 }}>🤖</div>
                     <div style={{ fontSize:15, color:'#64748b', lineHeight:1.7 }}>
-                      Décrivez ce que vous voulez coder en français.
-                      {selPath && <span style={{ fontSize:13, color:'#475569', display:'block', marginTop:10 }}>Le code sera inséré dans <strong style={{ color:'#818cf8' }}>{selPath.split('/').pop()}</strong></span>}
+                      {autoT('Décrivez ce que vous voulez coder en français.')}
+                      {selPath && <span style={{ fontSize:13, color:'#475569', display:'block', marginTop:10 }}>{autoT('Le code sera inséré dans')} <strong style={{ color:'#818cf8' }}>{selPath.split('/').pop()}</strong></span>}
                     </div>
                     <div style={{ marginTop:18, display:'flex', flexDirection:'column', gap:8 }}>
-                      {['Crée une fonction de prédiction Baccarat', 'Explique ce fichier et propose des améliorations', 'Corrige les bugs dans ce code'].map(s => (
+                      {[autoT('Crée une fonction de prédiction Baccarat'), autoT('Explique ce fichier et propose des améliorations'), autoT('Corrige les bugs dans ce code')].map(s => (
                         <button key={s} onClick={()=>{ setChatInput(s); chatInputRef.current?.focus(); }}
                           style={{ padding:'10px 14px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#94a3b8', fontSize:13, cursor:'pointer', fontFamily:'sans-serif', textAlign:'left', fontWeight:500 }}>
                           {s}
@@ -1249,7 +1252,7 @@ export default function Programmation() {
                         <div key={i} style={{ width:8, height:8, borderRadius:'50%', background:'#4f46e5', animation:`bounce 1s ${i*0.15}s infinite` }} />
                       ))}
                     </div>
-                    <span style={{ fontSize:14, color:'#64748b' }}>Génération en cours…</span>
+                    <span style={{ fontSize:14, color:'#64748b' }}>{autoT('Génération en cours…')}</span>
                   </div>
                 )}
                 <div ref={chatEndRef} />
@@ -1275,7 +1278,7 @@ export default function Programmation() {
                   </button>
                 </div>
                 <div style={{ fontSize:12, color:'#334155', marginTop:7, fontFamily:'sans-serif' }}>
-                  Shift+Entrée pour nouvelle ligne · Entrée pour envoyer
+                  {autoT('Shift+Entrée pour nouvelle ligne · Entrée pour envoyer')}
                 </div>
               </div>
             </div>

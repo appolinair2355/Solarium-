@@ -2,10 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Avatar from '../components/Avatar';
+import { useLanguage } from '../context/LanguageContext';
 
 export default function Payment() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
+  const { autoT } = useLanguage();
   const [plans, setPlans] = useState([]);
   const [accountType, setAccountType] = useState('simple');
   const [surchargePct, setSurchargePct] = useState(0);
@@ -14,7 +16,6 @@ export default function Payment() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [creating, setCreating] = useState(false);
   const [request, setRequest] = useState(null);
-  // Étapes : 'plan' → 'whatsapp_sent' → 'screenshot' → 'patience' → 'result'
   const [phase, setPhase] = useState('plan');
   const [imagePreview, setImagePreview] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
@@ -54,7 +55,6 @@ export default function Payment() {
       .catch(() => {});
   };
 
-  // ── ÉTAPE 1 → 2 : Création de la demande + ouverture WhatsApp ──
   const startPlan = async (plan) => {
     setError('');
     setSelectedPlan(plan);
@@ -67,11 +67,9 @@ export default function Payment() {
         body: JSON.stringify({ plan_id: plan.id }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erreur lors de la création');
+      if (!res.ok) throw new Error(data.error || autoT('Erreur lors de la création'));
       setRequest({ ...data.request, whatsapp_link: data.whatsapp_link });
       setPhase('whatsapp_sent');
-      // ⚠ Ne PAS ouvrir WhatsApp automatiquement — l'utilisateur choisit lui-même
-      // entre les boutons « Ouvrir WhatsApp » et « Soumettre ma capture ».
     } catch (e) {
       setError(e.message);
       setSelectedPlan(null);
@@ -83,11 +81,11 @@ export default function Payment() {
   const handleFile = (file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setError('Veuillez sélectionner une image (JPG, PNG, etc.)');
+      setError(autoT('Veuillez sélectionner une image (JPG, PNG, etc.)'));
       return;
     }
     if (file.size > 6 * 1024 * 1024) {
-      setError('Image trop volumineuse (6 Mo maximum)');
+      setError(autoT('Image trop volumineuse (6 Mo maximum)'));
       return;
     }
     setError('');
@@ -104,7 +102,6 @@ export default function Payment() {
     reader.readAsDataURL(file);
   };
 
-  // ── ÉTAPE 3 → 4 → 5 : Envoi capture + attente 10s + résultat ──
   const submitScreenshot = async () => {
     if (!request || !imageBase64) return;
     setUploading(true);
@@ -113,7 +110,6 @@ export default function Payment() {
     setPhase('patience');
     setPatienceLeft(10);
 
-    // Compteur 10 s en parallèle de la requête
     const startedAt = Date.now();
     const tick = setInterval(() => {
       const elapsed = (Date.now() - startedAt) / 1000;
@@ -123,7 +119,6 @@ export default function Payment() {
 
     try {
       const [data] = await Promise.all([
-        // L'appel réseau
         (async () => {
           const res = await fetch(`/api/payments/${request.id}/screenshot`, {
             method: 'POST',
@@ -132,10 +127,9 @@ export default function Payment() {
             body: JSON.stringify({ image_base64: imageBase64, mime_type: imageMime }),
           });
           const d = await res.json();
-          if (!res.ok) throw new Error(d.error || "Erreur lors de l'envoi");
+          if (!res.ok) throw new Error(d.error || autoT("Erreur lors de l'envoi"));
           return d;
         })(),
-        // Le délai minimum d'attente
         new Promise(r => setTimeout(r, 10_000)),
       ]);
 
@@ -166,18 +160,18 @@ export default function Payment() {
 
   const goBackToPlan = () => {
     if (request && phase === 'whatsapp_sent') {
-      if (!confirm('Annuler cette demande et revenir au choix du plan ?')) return;
+      if (!confirm(autoT('Annuler cette demande et revenir au choix du plan ?'))) return;
     }
     reset();
   };
 
   const StatusBadge = ({ status }) => {
     const map = {
-      awaiting_screenshot: { color: '#fbbf24', bg: 'rgba(251,191,36,0.15)', label: '📤 En attente capture' },
-      ai_validated:        { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',  label: '🤖 Validée IA (sous réserve admin)' },
-      pending_admin:       { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', label: '⏳ Attente admin' },
-      approved:            { color: '#86efac', bg: 'rgba(134,239,172,0.15)', label: '✅ Approuvée' },
-      rejected:            { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',  label: '❌ Rejetée' },
+      awaiting_screenshot: { color: '#fbbf24', bg: 'rgba(251,191,36,0.15)',  label: `📤 ${autoT('En attente capture')}` },
+      ai_validated:        { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',   label: `🤖 ${autoT('Validée IA (sous réserve admin)')}` },
+      pending_admin:       { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)',  label: `⏳ ${autoT('Attente admin')}` },
+      approved:            { color: '#86efac', bg: 'rgba(134,239,172,0.15)', label: `✅ ${autoT('Approuvée')}` },
+      rejected:            { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',   label: `❌ ${autoT('Rejetée')}` },
     };
     const s = map[status] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.15)', label: status };
     return (
@@ -201,7 +195,7 @@ export default function Payment() {
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Link to="/choisir" className="btn btn-ghost btn-sm" style={{ color: '#94a3b8' }}>
-            ← Retour
+            ← {autoT('Retour')}
           </Link>
           <Avatar user={user} size={36} />
         </div>
@@ -215,13 +209,13 @@ export default function Payment() {
             border: '1px solid rgba(239,68,68,0.3)', fontSize: 12, fontWeight: 700,
             letterSpacing: 1, marginBottom: 14,
           }}>
-            ⛔ ABONNEMENT REQUIS
+            ⛔ {autoT('ABONNEMENT REQUIS')}
           </div>
           <h1 style={{ color: '#fff', fontSize: '2rem', margin: '0 0 10px' }}>
-            Choisissez votre abonnement
+            {autoT('Choisissez votre abonnement')}
           </h1>
           <p style={{ color: '#94a3b8', fontSize: 14 }}>
-            Paiement par WhatsApp, validation par l'IA puis confirmation par l'administrateur.
+            {autoT("Paiement par WhatsApp, validation par l'IA puis confirmation par l'administrateur.")}
           </p>
 
           <div style={{
@@ -237,9 +231,9 @@ export default function Payment() {
             fontWeight: 700, fontSize: 12, letterSpacing: 0.5,
           }}>
             {accountType === 'pro' ? '💎' : accountType === 'premium' ? '⭐' : '👤'}
-            COMPTE {accountType.toUpperCase()}
+            {autoT('COMPTE')} {accountType.toUpperCase()}
             {surchargePct > 0 && (
-              <span style={{ opacity: 0.85 }}>· Tarif +{surchargePct} %</span>
+              <span style={{ opacity: 0.85 }}>· {autoT('Tarif')} +{surchargePct} %</span>
             )}
           </div>
         </div>
@@ -250,7 +244,7 @@ export default function Payment() {
           </div>
         )}
 
-        {/* ═══════ PHASE 1 : Choix du plan ═══════ */}
+        {/* PHASE 1 : Choix du plan */}
         {phase === 'plan' && (
           <>
             <div style={{
@@ -277,8 +271,8 @@ export default function Payment() {
                     {p.amount_usd}<span style={{ fontSize: 16, color: '#94a3b8' }}> $</span>
                   </div>
                   <div style={{ color: '#64748b', fontSize: 11, margin: '8px 0 14px' }}>
-                    Accès {p.duration_minutes >= 1440
-                      ? Math.round(p.duration_minutes / 1440) + ' jour(s)'
+                    {autoT('Accès')} {p.duration_minutes >= 1440
+                      ? Math.round(p.duration_minutes / 1440) + ' ' + autoT('jour(s)')
                       : Math.round(p.duration_minutes / 60) + ' h'}
                   </div>
                   <button
@@ -287,7 +281,7 @@ export default function Payment() {
                     className="btn btn-gold btn-sm"
                     style={{ width: '100%' }}
                   >
-                    {creating && selectedPlan?.id === p.id ? '...' : '💳 Payer ce plan'}
+                    {creating && selectedPlan?.id === p.id ? '...' : `💳 ${autoT('Payer ce plan')}`}
                   </button>
                 </div>
               ))}
@@ -301,31 +295,31 @@ export default function Payment() {
                 border: '1px solid rgba(251,191,36,0.25)',
                 textAlign: 'center', color: '#fcd34d', fontSize: 13,
               }}>
-                💡 Vous avez un code promo personnel : <b style={{ fontFamily: 'monospace' }}>{user.promo_code}</b>.
-                Partagez-le pour gagner <b>{referral.bonus_percent} %</b> de la durée payée par chaque filleul.
+                💡 {autoT('Vous avez un code promo personnel')} : <b style={{ fontFamily: 'monospace' }}>{user.promo_code}</b>.
+                {autoT('Partagez-le pour gagner')} <b>{referral.bonus_percent} %</b> {autoT('de la durée payée par chaque filleul.')}.
               </div>
             )}
           </>
         )}
 
-        {/* ═══════ PHASES 2 & 3 COMBINÉES : Paiement (haut) + Validation (bas) ═══════ */}
+        {/* PHASES 2 & 3 : Paiement + Validation */}
         {(phase === 'whatsapp_sent' || phase === 'screenshot') && request && (
           <div style={{ maxWidth: 700, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-            {/* ──────── PANNEAU 1 : PAIEMENT WHATSAPP ──────── */}
+            {/* PANNEAU 1 : PAIEMENT WHATSAPP */}
             <div style={{
               background: 'rgba(15,23,42,0.7)', borderRadius: 16,
               border: '1px solid rgba(37,211,102,0.3)', padding: 26,
             }}>
               <div style={{ marginBottom: 18 }}>
                 <div style={{ color: '#25D366', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-                  ÉTAPE 1 / 2 — PAIEMENT WHATSAPP
+                  {autoT('ÉTAPE 1 / 2 — PAIEMENT WHATSAPP')}
                 </div>
                 <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
-                  Plan « {request.plan_label} » — {request.amount_usd} $
+                  {autoT('Plan')} « {request.plan_label} » — {request.amount_usd} $
                   {request.discount_applied && (
                     <span style={{ marginLeft: 10, fontSize: 13, color: '#86efac', fontWeight: 600 }}>
-                      🎁 -{referral.discount_percent}% appliqué
+                      🎁 -{referral.discount_percent}% {autoT('appliqué')}
                     </span>
                   )}
                 </h2>
@@ -336,16 +330,16 @@ export default function Payment() {
                 border: '1px solid rgba(37,211,102,0.3)', borderRadius: 12, marginBottom: 18,
               }}>
                 <div style={{ color: '#86efac', fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
-                  💬 Choisissez comment vous souhaitez payer
+                  💬 {autoT('Choisissez comment vous souhaitez payer')}
                 </div>
                 <ol style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
-                  <li>Cliquez sur <b>« Ouvrir WhatsApp »</b> pour contacter le support (<b>{whatsapp.number}</b>)</li>
-                  <li>Le support vous envoie le lien de paiement</li>
-                  <li>Effectuez le paiement et prenez une <b>capture d'écran</b></li>
-                  <li>Cliquez ensuite sur <b>« Soumettre ma capture »</b> ci-dessous pour validation automatique</li>
+                  <li>{autoT("Cliquez sur")} <b>« {autoT('Ouvrir WhatsApp')} »</b> {autoT('pour contacter le support')} (<b>{whatsapp.number}</b>)</li>
+                  <li>{autoT('Le support vous envoie le lien de paiement')}</li>
+                  <li>{autoT('Effectuez le paiement et prenez une')} <b>{autoT('capture d\'écran')}</b></li>
+                  <li>{autoT('Cliquez ensuite sur')} <b>« {autoT('Soumettre ma capture')} »</b> {autoT('ci-dessous pour validation automatique')}</li>
                 </ol>
                 <div style={{ marginTop: 12, padding: 10, background: 'rgba(251,191,36,0.08)', border: '1px dashed rgba(251,191,36,0.4)', borderRadius: 8, fontSize: 12, color: '#fcd34d' }}>
-                  ℹ️ <b>Aucune ouverture automatique</b> — vous gardez le contrôle. Si vous avez déjà payé, allez directement à l'étape « Validation ».
+                  ℹ️ <b>{autoT('Aucune ouverture automatique')}</b> — {autoT("vous gardez le contrôle. Si vous avez déjà payé, allez directement à l'étape « Validation ».")}
                 </div>
               </div>
 
@@ -362,7 +356,7 @@ export default function Payment() {
                     fontWeight: 700, textDecoration: 'none',
                   }}
                 >
-                  💬 Ouvrir WhatsApp ({whatsapp.number})
+                  💬 {autoT('Ouvrir WhatsApp')} ({whatsapp.number})
                 </a>
                 <button
                   type="button"
@@ -375,15 +369,15 @@ export default function Payment() {
                     fontWeight: 700, border: 'none', cursor: 'pointer',
                   }}
                 >
-                  📸 Soumettre ma capture
+                  📸 {autoT('Soumettre ma capture')}
                 </button>
                 <button onClick={goBackToPlan} className="btn btn-ghost btn-sm">
-                  ← Changer de plan
+                  ← {autoT('Changer de plan')}
                 </button>
               </div>
             </div>
 
-            {/* ──────── PANNEAU 2 : VALIDATION (CAPTURE D'ÉCRAN) ──────── */}
+            {/* PANNEAU 2 : VALIDATION */}
             <div style={{
               background: 'rgba(15,23,42,0.7)', borderRadius: 16,
               border: '2px solid rgba(251,191,36,0.4)', padding: 26,
@@ -391,14 +385,14 @@ export default function Payment() {
             }}>
               <div style={{ marginBottom: 18 }}>
                 <div style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-                  ÉTAPE 2 / 2 — VALIDATION : CAPTURE D'ÉCRAN
+                  {autoT("ÉTAPE 2 / 2 — VALIDATION : CAPTURE D'ÉCRAN")}
                 </div>
                 <h2 style={{ color: '#fff', margin: '0 0 8px' }}>
-                  Après paiement réussi, envoyez la preuve ici
+                  {autoT('Après paiement réussi, envoyez la preuve ici')}
                 </h2>
                 <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
-                  Notre IA analysera la capture (<b>montant</b>, <b>devise</b>, <b>date</b>, <b>référence</b>).
-                  Si validée, vous obtenez <b>2 h d'accès immédiat</b> en attendant la confirmation finale de l'administrateur.
+                  {autoT("Notre IA analysera la capture")} (<b>{autoT('montant')}</b>, <b>{autoT('devise')}</b>, <b>{autoT('date')}</b>, <b>{autoT('référence')}</b>).
+                  {autoT("Si validée, vous obtenez")} <b>{autoT("2 h d'accès immédiat")}</b> {autoT("en attendant la confirmation finale de l'administrateur.")}
                 </p>
               </div>
 
@@ -406,7 +400,7 @@ export default function Payment() {
                 <div style={{ marginBottom: 18 }}>
                   <img
                     src={imagePreview}
-                    alt="Aperçu"
+                    alt={autoT('Aperçu')}
                     style={{
                       maxWidth: '100%', maxHeight: 360, borderRadius: 12,
                       border: '2px solid rgba(251,191,36,0.4)', display: 'block', margin: '0 auto',
@@ -417,7 +411,7 @@ export default function Payment() {
                       onClick={() => { setImagePreview(null); setImageBase64(null); setImageMime(null); }}
                       className="btn btn-ghost btn-sm"
                     >
-                      🗑 Changer l'image
+                      🗑 {autoT("Changer l'image")}
                     </button>
                   </div>
                 </div>
@@ -431,7 +425,7 @@ export default function Payment() {
                 >
                   <div style={{ fontSize: 42, marginBottom: 8 }}>📤</div>
                   <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>
-                    Cliquez pour envoyer la capture d'écran
+                    {autoT("Cliquez pour envoyer la capture d'écran")}
                   </div>
                   <div style={{ color: '#94a3b8', fontSize: 12 }}>
                     JPG, PNG — 6 Mo max
@@ -456,8 +450,8 @@ export default function Payment() {
                 }}
               >
                 {uploading
-                  ? <><span className="btn-spinner" /> Envoi à l'IA et à l'administrateur…</>
-                  : '🤖 Envoyer la capture (IA + Administrateur)'}
+                  ? <><span className="btn-spinner" /> {autoT("Envoi à l'IA et à l'administrateur…")}</>
+                  : `🤖 ${autoT('Envoyer la capture (IA + Administrateur)')}`}
               </button>
 
               <div style={{
@@ -466,14 +460,14 @@ export default function Payment() {
                 border: '1px solid rgba(59,130,246,0.25)',
                 color: '#93c5fd', fontSize: 12, lineHeight: 1.6, textAlign: 'center',
               }}>
-                ℹ️ La capture sera envoyée à l'administrateur pour confirmation.
-                Si l'IA la valide, vous aurez accès pendant <b>2 h</b> en attendant l'accord final.
+                ℹ️ {autoT("La capture sera envoyée à l'administrateur pour confirmation.")}
+                {autoT("Si l'IA la valide, vous aurez accès pendant")} <b>2 h</b> {autoT("en attendant l'accord final.")}
               </div>
             </div>
           </div>
         )}
 
-        {/* ═══════ PHASE 4 : Veuillez patienter ═══════ */}
+        {/* PHASE 4 : Patience */}
         {phase === 'patience' && (
           <div style={{
             maxWidth: 600, margin: '0 auto',
@@ -490,11 +484,11 @@ export default function Payment() {
             }} />
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             <h2 style={{ color: '#fff', margin: '0 0 10px', fontSize: '1.6rem' }}>
-              Veuillez patienter…
+              {autoT('Veuillez patienter…')}
             </h2>
             <p style={{ color: '#cbd5e1', fontSize: 14, lineHeight: 1.6, marginBottom: 18 }}>
-              Notre intelligence artificielle analyse votre capture d'écran<br />
-              (montant, devise, date, référence, identifiant).
+              {autoT("Notre intelligence artificielle analyse votre capture d'écran")}<br />
+              ({autoT('montant')}, {autoT('devise')}, {autoT('date')}, {autoT('référence')}, {autoT('identifiant')}).
             </p>
             <div style={{
               display: 'inline-block', padding: '8px 18px', borderRadius: 100,
@@ -505,12 +499,12 @@ export default function Payment() {
               {patienceLeft}s
             </div>
             <div style={{ color: '#64748b', fontSize: 12, marginTop: 16 }}>
-              Merci de ne pas fermer cette page.
+              {autoT('Merci de ne pas fermer cette page.')}
             </div>
           </div>
         )}
 
-        {/* ═══════ PHASE 5 : Résultat ═══════ */}
+        {/* PHASE 5 : Résultat */}
         {phase === 'result' && result && (
           <div style={{
             maxWidth: 700, margin: '0 auto',
@@ -523,8 +517,8 @@ export default function Payment() {
             </div>
             <h2 style={{ color: '#fff', marginBottom: 12 }}>
               {result.ai_validated
-                ? 'Abonnement activé !'
-                : 'Capture reçue — vérification administrateur'}
+                ? autoT('Abonnement activé !')
+                : autoT('Capture reçue — vérification administrateur')}
             </h2>
             <p style={{ color: '#cbd5e1', fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
               {result.message}
@@ -537,8 +531,8 @@ export default function Payment() {
                 border: '1px solid rgba(251,191,36,0.35)',
                 color: '#fcd34d', marginBottom: 18, fontSize: 13, fontWeight: 600,
               }}>
-                ⚠ <b>Sous réserve de vérification de l'administrateur</b><br />
-                Si l'admin détecte une fraude, votre abonnement sera retiré.
+                ⚠ <b>{autoT("Sous réserve de vérification de l'administrateur")}</b><br />
+                {autoT("Si l'admin détecte une fraude, votre abonnement sera retiré.")}
               </div>
             )}
 
@@ -548,19 +542,19 @@ export default function Payment() {
                 background: 'rgba(0,0,0,0.3)', textAlign: 'left',
                 fontSize: 12, color: '#94a3b8', marginBottom: 18,
               }}>
-                <div style={{ color: '#cbd5e1', fontWeight: 700, marginBottom: 6 }}>🤖 Analyse IA :</div>
+                <div style={{ color: '#cbd5e1', fontWeight: 700, marginBottom: 6 }}>🤖 {autoT('Analyse IA')} :</div>
                 {result.ai_analysis.reason && <div>• {result.ai_analysis.reason}</div>}
                 {result.ai_analysis.amount_detected && (
-                  <div>• Montant détecté : <b>{result.ai_analysis.amount_detected}</b> {result.ai_analysis.currency_detected || ''}</div>
+                  <div>• {autoT('Montant détecté')} : <b>{result.ai_analysis.amount_detected}</b> {result.ai_analysis.currency_detected || ''}</div>
                 )}
                 {result.ai_analysis.transaction_id && (
-                  <div>• Référence : <code>{result.ai_analysis.transaction_id}</code></div>
+                  <div>• {autoT('Référence')} : <code>{result.ai_analysis.transaction_id}</code></div>
                 )}
                 {result.ai_analysis.transaction_date && (
-                  <div>• Date : {result.ai_analysis.transaction_date}</div>
+                  <div>• {autoT('Date')} : {result.ai_analysis.transaction_date}</div>
                 )}
                 {result.ai_analysis.confidence !== undefined && (
-                  <div>• Confiance : {result.ai_analysis.confidence}%</div>
+                  <div>• {autoT('Confiance')} : {result.ai_analysis.confidence}%</div>
                 )}
               </div>
             )}
@@ -570,26 +564,26 @@ export default function Payment() {
                 padding: 12, borderRadius: 10,
                 background: 'rgba(34,197,94,0.1)', color: '#86efac', marginBottom: 18, fontSize: 13,
               }}>
-                ⏱ Abonnement actif jusqu'au <b>{new Date(result.provisional_expiry).toLocaleString('fr-FR')}</b>
+                ⏱ {autoT('Abonnement actif jusqu\'au')} <b>{new Date(result.provisional_expiry).toLocaleString('fr-FR')}</b>
               </div>
             )}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button onClick={() => navigate('/choisir')} className="btn btn-gold">
-                {result.ai_validated ? '🚀 Accéder aux prédictions' : 'OK, retour à mon espace'}
+                {result.ai_validated ? `🚀 ${autoT('Accéder aux prédictions')}` : autoT('OK, retour à mon espace')}
               </button>
               <button onClick={reset} className="btn btn-ghost">
-                Nouvelle demande
+                {autoT('Nouvelle demande')}
               </button>
             </div>
           </div>
         )}
 
-        {/* ═══════ HISTORIQUE ═══════ */}
+        {/* HISTORIQUE */}
         {myRequests.length > 0 && phase === 'plan' && (
           <div style={{ maxWidth: 700, margin: '40px auto 0' }}>
             <h3 style={{ color: '#fff', fontSize: 16, marginBottom: 12 }}>
-              📋 Mes demandes de paiement
+              📋 {autoT('Mes demandes de paiement')}
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {myRequests.slice(0, 10).map(r => (

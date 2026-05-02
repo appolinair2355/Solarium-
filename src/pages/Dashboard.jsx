@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import ContactAdminModal from '../components/ContactAdminModal';
 import Avatar from '../components/Avatar';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 // Voix d'annonce vocale des prédictions (Web Speech API)
 const VOICE_OPTIONS = [
@@ -106,6 +108,35 @@ function getVoiceVolume() {
   return 1.0;
 }
 
+// Génère le texte TTS enrichi selon le type d'événement
+function buildSpeechText(pred) {
+  const numWords = numberToFrenchWords(pred.game_number);
+  const suit = suitToFrench(pred.suit_display || pred.predicted_suit);
+  const rattrapage = pred.rattrapage || 0;
+  const status = pred.status || '';
+
+  // Contexte canal selon la couleur prédite
+  const suitCtx = {
+    'Pique':   'Canal Pique Noir.',
+    'Trèfle':  'Double Canal.',
+    'Cœur':    'Canal Cœur Rouge.',
+    'Carreau': 'Canal Carreau Doré.',
+  };
+  const ctx = suitCtx[suit] || '';
+
+  if (status === 'gagne') {
+    return `Félicitations ! ${ctx} La prédiction ${suit} du jeu numéro ${numWords} est correcte. Continuez ainsi.`;
+  }
+  if (status === 'perdu') {
+    return `${ctx} La prédiction du jeu numéro ${numWords} a manqué. Restez concentré pour la prochaine.`;
+  }
+  if (rattrapage > 0) {
+    return `Attention. ${ctx} Rattrapage numéro ${rattrapage}. Jeu numéro ${numWords}. Je confirme le ${suit}. Soyez prêt.`;
+  }
+  // Nouvelle prédiction standard
+  return `Nouvelle prédiction ! ${ctx} Jeu numéro ${numWords}. Signal actif : ${suit}. Je prédit le ${suit}. Restez attentif.`;
+}
+
 function speakPrediction(pred, gender, volumeOverride) {
   if (gender === 'off') return;
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -113,13 +144,11 @@ function speakPrediction(pred, gender, volumeOverride) {
     // Réveille la synthèse au cas où elle serait suspendue (Chrome, Safari mobile…)
     try { if (window.speechSynthesis.paused) window.speechSynthesis.resume(); } catch {}
     window.speechSynthesis.cancel();
-    const numWords = numberToFrenchWords(pred.game_number);
-    const suit = suitToFrench(pred.suit_display || pred.predicted_suit);
-    const text = `Jeu numéro ${numWords}. Prédiction: ${suit}.`;
+    const text = buildSpeechText(pred);
     if (typeof console !== 'undefined') console.log('[Voix] →', text);
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
-    u.rate = 0.95;
+    u.rate = 0.88;
     u.pitch = gender === 'male' ? 0.85 : 1.15;
     const vol = (typeof volumeOverride === 'number') ? volumeOverride : getVoiceVolume();
     u.volume = Math.max(0, Math.min(1, vol));
@@ -617,6 +646,9 @@ export default function Dashboard() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const handleChangeChannel = () => navigate('/choisir');
 
+  // eslint-disable-next-line no-unused-vars
+  const { t, autoT } = useLanguage();
+
   // ── Verrouillage total si abonnement expiré (non admin) ───────────────
   // Aucun canal, aucune prédiction, aucun jeu : seul le bandeau de renouvellement.
   const lockedExpired = !!user && !user.is_admin && user.status === 'expired';
@@ -636,14 +668,14 @@ export default function Dashboard() {
           textAlign: 'center', color: '#fca5a5',
         }}>
           <div style={{ fontSize: 56, marginBottom: 12 }}>🔒</div>
-          <h2 style={{ color: '#fff', margin: '0 0 8px', fontSize: 22 }}>Abonnement expiré</h2>
+          <h2 style={{ color: '#fff', margin: '0 0 8px', fontSize: 22 }}>{autoT('Abonnement expiré')}</h2>
           <p style={{ color: '#fecaca', margin: '0 0 18px', fontSize: 14, lineHeight: 1.5 }}>
-            Toutes les prédictions, canaux et statistiques sont bloqués.<br/>
-            Renouvelez votre abonnement pour retrouver l'accès complet.
+            {autoT('Toutes les prédictions, canaux et statistiques sont bloqués.')}<br/>
+            {autoT("Renouvelez votre abonnement pour retrouver l'accès complet.")}
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link to="/paiement" className="btn btn-gold">💳 Renouveler maintenant</Link>
-            <Link to="/" className="btn btn-ghost">Retour à l'accueil</Link>
+            <Link to="/paiement" className="btn btn-gold">💳 {autoT('Renouveler maintenant')}</Link>
+            <Link to="/" className="btn btn-ghost">{autoT("Retour à l'accueil")}</Link>
           </div>
         </div>
       </div>
@@ -662,7 +694,7 @@ export default function Dashboard() {
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={e => { e.stopPropagation(); setShowVoiceSettings(v => !v); }}
-              title="Voix d'annonce des prédictions"
+              title={autoT("Voix d'annonce des prédictions")}
             >
               {VOICE_OPTIONS.find(o => o.value === voiceGender)?.label || '🔊 Voix'} ▾
             </button>
@@ -675,7 +707,7 @@ export default function Dashboard() {
                   padding: 8, minWidth: 170, boxShadow: '0 10px 30px rgba(0,0,0,0.4)'
                 }}
               >
-                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.08em', padding: '0 6px' }}>VOIX D'ANNONCE</div>
+                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.08em', padding: '0 6px' }}>{autoT("VOIX D'ANNONCE")}</div>
                 {VOICE_OPTIONS.map(opt => (
                   <button
                     key={opt.value}
@@ -730,12 +762,12 @@ export default function Dashboard() {
                         }
                       }}
                       style={{ flex: 1, accentColor: '#fbbf24', cursor: 'pointer' }}
-                      title="Volume de la voix d'annonce"
+                      title={autoT("Volume de la voix d'annonce")}
                     />
                     <span style={{ fontSize: 14 }}>🔊</span>
                   </div>
                   <div style={{ fontSize: 10, color: '#64748b', padding: '6px 6px 0', lineHeight: 1.3 }}>
-                    Astuce : si vous n'entendez rien, vérifiez aussi le volume de votre appareil et rechargez la page après création de compte.
+                    {autoT("Astuce : si vous n'entendez rien, vérifiez aussi le volume de votre appareil et rechargez la page après création de compte.")}
                   </div>
                 </div>
               </div>
@@ -750,8 +782,9 @@ export default function Dashboard() {
             <Link to="/paiement" className="btn btn-ghost btn-sm" style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)' }}>💳 Paiement</Link>
           )}
           {!user?.is_admin && <ContactAdminModal />}
-          <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>← Retour</button>
-          <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
+          <LanguageSwitcher compact />
+          <button className="btn btn-ghost btn-sm" onClick={handleChangeChannel}>← {autoT('Retour')}</button>
+          <button className="btn btn-danger btn-sm" onClick={handleLogout}>{autoT('Déconnexion')}</button>
           <Avatar user={user} size={36} style={{ marginLeft: 6 }} />
         </div>
       </nav>
@@ -765,7 +798,7 @@ export default function Dashboard() {
               <span className="db-channel-emoji" style={{ color: channel.color }}>{channel.emoji}</span>
               <div>
                 <span className="db-username">{channel.name}</span>
-                {user?.is_admin && <div className="db-channel-desc">{channel.desc}</div>}
+                {user?.is_admin && <div className="db-channel-desc">{autoT(channel.desc)}</div>}
               </div>
             </div>
             {user?.is_admin && (
@@ -786,8 +819,8 @@ export default function Dashboard() {
             </div>
             {user?.is_admin && (
               <div className="db-timer-row">
-                <span className="db-timer-label">TEMPS RESTANT</span>
-                <span className="db-timer-val">∞ Illimité</span>
+                <span className="db-timer-label">{autoT('TEMPS RESTANT')}</span>
+                <span className="db-timer-val">∞ {autoT('Illimité')}</span>
               </div>
             )}
             {!user?.is_admin && user?.subscription_expires_at && (
@@ -804,8 +837,8 @@ export default function Dashboard() {
           <div className="access-banner pending">
             <div className="access-icon">⏳</div>
             <div className="access-info">
-              <h3>Compte en attente de validation</h3>
-              <p>L'administrateur doit approuver votre accès.</p>
+              <h3>{autoT('Compte en attente de validation')}</h3>
+              <p>{autoT("L'administrateur doit approuver votre accès.")}</p>
             </div>
           </div>
         )}
@@ -813,8 +846,8 @@ export default function Dashboard() {
           <div className="access-banner expired">
             <div className="access-icon">🔒</div>
             <div className="access-info">
-              <h3>Abonnement expiré</h3>
-              <p>Contactez l'administrateur pour renouveler votre accès.</p>
+              <h3>{autoT('Abonnement expiré')}</h3>
+              <p>{autoT("Contactez l'administrateur pour renouveler votre accès.")}</p>
             </div>
           </div>
         )}
@@ -840,7 +873,7 @@ export default function Dashboard() {
             const hasCards = pCards.length > 0 || bCards.length > 0;
             const pPts = baccPoints(pCards);
             const bPts = baccPoints(bCards);
-            const winnerLabel = g.winner === 'Player' ? '🟢 Joueur gagne' : g.winner === 'Banker' ? '🔴 Banquier gagne' : g.winner === 'Tie' ? '🟡 Égalité' : null;
+            const winnerLabel = g.winner === 'Player' ? `🟢 ${autoT('Joueur gagne')}` : g.winner === 'Banker' ? `🔴 ${autoT('Banquier gagne')}` : g.winner === 'Tie' ? `🟡 ${autoT('Égalité')}` : null;
 
             if (mode === 'live') return (
               <div className="game-live-card">
@@ -851,7 +884,7 @@ export default function Dashboard() {
                 </div>
                 <div className="glc-sides">
                   <div className="glc-side">
-                    <div className="glc-side-label">JOUEUR</div>
+                    <div className="glc-side-label">{autoT('JOUEUR')}</div>
                     <div className="glc-cards">
                       {hasCards ? pCards.map((c,i) => <CardChip key={i} c={c} />) : <span className="card-dash">—</span>}
                     </div>
@@ -859,7 +892,7 @@ export default function Dashboard() {
                   </div>
                   <div className="glc-vs">VS</div>
                   <div className="glc-side">
-                    <div className="glc-side-label">BANQUIER</div>
+                    <div className="glc-side-label">{autoT('BANQUIER')}</div>
                     <div className="glc-cards">
                       {hasCards ? bCards.map((c,i) => <CardChip key={i} c={c} />) : <span className="card-dash">—</span>}
                     </div>
@@ -872,7 +905,7 @@ export default function Dashboard() {
             if (mode === 'finished') return (
               <div className="game-mini-card finished">
                 <div className="gmc-header">
-                  <span className="glc-badge done">✅ Terminé</span>
+                  <span className="glc-badge done">✅ {autoT('Terminé')}</span>
                   <span className="gmc-num">#{g.game_number}</span>
                 </div>
                 <div className="glc-sides compact">
@@ -899,10 +932,10 @@ export default function Dashboard() {
             if (mode === 'upcoming') return (
               <div className="game-mini-card upcoming">
                 <div className="gmc-header">
-                  <span className="glc-badge coming">🕐 À venir</span>
+                  <span className="glc-badge coming">🕐 {autoT('À venir')}</span>
                   <span className="gmc-num">#{g.game_number}</span>
                 </div>
-                <div className="gmc-timer-label">{g.status_label || 'Prochaine partie'}</div>
+                <div className="gmc-timer-label">{g.status_label || autoT('Prochaine partie')}</div>
               </div>
             );
             return null;
@@ -912,16 +945,16 @@ export default function Dashboard() {
             <div className="live-section">
               <div className="live-header">
                 <div className="live-dot" />
-                <span className="live-title">Parties en direct — 1xBet Baccarat</span>
-                <span className="live-subtitle">{games.length} partie{games.length > 1 ? 's' : ''} suivies</span>
+                <span className="live-title">{autoT('Parties en direct — 1xBet Baccarat')}</span>
+                <span className="live-subtitle">{games.length} {autoT('partie')}{games.length > 1 ? 's' : ''} {autoT('suivies')}</span>
               </div>
 
               {loadingGames ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: '0.85rem', padding: '12px 0' }}>
-                  <div className="spinner" style={{ width: 18, height: 18 }} /> Chargement...
+                  <div className="spinner" style={{ width: 18, height: 18 }} /> {autoT('Chargement...')}
                 </div>
               ) : games.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '12px 0' }}>Aucune partie disponible</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '12px 0' }}>{autoT('Aucune partie disponible')}</div>
               ) : (
                 <div className="live-games-layout">
                   {/* Big live game + absence counter side by side */}
@@ -936,7 +969,7 @@ export default function Dashboard() {
                       <GameRow g={liveGame} mode="live" />
                     ) : (
                       <div className="game-live-card empty">
-                        <span style={{opacity:0.5, fontSize:'0.85rem'}}>En attente de la prochaine partie...</span>
+                        <span style={{opacity:0.5, fontSize:'0.85rem'}}>{autoT('En attente de la prochaine partie...')}</span>
                       </div>
                     )}
                     {(user?.is_admin || user?.is_premium || (user?.is_pro && isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id))) && isProChannel ? (
@@ -1267,18 +1300,18 @@ export default function Dashboard() {
                     {isAleatoire && user?.is_admin ? (
                       <>
                         <div style={{ fontSize: '2.4rem', marginBottom: 8 }}>🎲</div>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#a5b4fc', marginBottom: 6 }}>Stratégie Aléatoire</div>
-                        <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 14 }}>Lancez une prédiction manuelle</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#a5b4fc', marginBottom: 6 }}>{autoT('Stratégie Aléatoire')}</div>
+                        <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 14 }}>{autoT('Lancez une prédiction manuelle')}</div>
                         <button
                           onClick={() => setAleatDashPanel({ stratId: currentStrat.id, stratName: currentStrat.name, step: 'hand', hand: null, gameInput: '', result: null, history: [] })}
                           style={{ padding: '12px 28px', borderRadius: 12, border: '2px solid rgba(99,102,241,0.6)', background: 'rgba(99,102,241,0.18)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 800, fontSize: 14, letterSpacing: 0.3 }}
-                        >🎲 Prédire maintenant</button>
+                        >🎲 {autoT('Prédire maintenant')}</button>
                       </>
                     ) : (
                       <>
                         <div style={{ fontSize: '2.8rem', marginBottom: 6, opacity: 0.4 }}>{channel.emoji}</div>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#64748b' }}>Aucune prédiction active</div>
-                        <div style={{ fontSize: '0.78rem', marginTop: 4, color: '#475569' }}>Le moteur analyse les parties en cours…</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#64748b' }}>{autoT('Aucune prédiction active')}</div>
+                        <div style={{ fontSize: '0.78rem', marginTop: 4, color: '#475569' }}>{autoT('Le moteur analyse les parties en cours…')}</div>
                       </>
                     )}
                   </div>
@@ -1286,7 +1319,7 @@ export default function Dashboard() {
                   <>
                     {/* ── Ligne haute : heure ── */}
                     <div className="pred-top-row">
-                      <span className="pred-game-num">{channel.emoji} Partie prédite</span>
+                      <span className="pred-game-num">{channel.emoji} {autoT('Partie prédite')}</span>
                       <span className="pred-time-label">{formatTime(activePred.created_at)}</span>
                     </div>
 
@@ -1298,7 +1331,7 @@ export default function Dashboard() {
                     {/* ── Badge main (joueur / banquier) ── */}
                     <div style={{ textAlign: 'center' }}>
                       <span className="pred-hand-badge">
-                        {channel.hand === 'banquier' ? '🏦 Banquier' : '🧑 Joueur'}
+                        {channel.hand === 'banquier' ? `🏦 ${autoT('Banquier')}` : `🧑 ${autoT('Joueur')}`}
                       </span>
                     </div>
 
@@ -1318,18 +1351,18 @@ export default function Dashboard() {
                     </div>
 
                     {/* ── Sous-titre ── */}
-                    <div className="pred-subtitle">va recevoir cette carte</div>
+                    <div className="pred-subtitle">{autoT('va recevoir cette carte')}</div>
 
                     {/* ── Centre bas : statut + rattrapage ── */}
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 4 }}>
                       {activePred.status === 'en_cours' && (
-                        <span className="pred-status-waiting">⏳ En attente du résultat</span>
+                        <span className="pred-status-waiting">⏳ {autoT('En attente du résultat')}</span>
                       )}
                       {activePred.status === 'gagne' && (
-                        <span className="pred-status-done gagne">✅ Prédiction gagnante</span>
+                        <span className="pred-status-done gagne">✅ {autoT('Prédiction gagnante')}</span>
                       )}
                       {activePred.status === 'perdu' && (
-                        <span className="pred-status-done perdu">❌ Prédiction perdue</span>
+                        <span className="pred-status-done perdu">❌ {autoT('Prédiction perdue')}</span>
                       )}
                       {(parseInt(activePred.rattrapage) || 0) > 0 && (
                         <span className="pred-ratt-chip">R{activePred.rattrapage}</span>
@@ -1350,13 +1383,13 @@ export default function Dashboard() {
               return (
                 <div className="pred-history-section">
                   <div className="pred-history-header">
-                    <span className="pred-history-title">📋 10 dernières prédictions vérifiées</span>
+                    <span className="pred-history-title">📋 {autoT('10 dernières prédictions vérifiées')}</span>
                     <span className="pred-history-count">{last10.length}/10</span>
                   </div>
                   {last10.length === 0 ? (
                     <div className="pred-history-empty">
                       <div style={{ fontSize: '1.8rem', marginBottom: 6 }}>📭</div>
-                      <div style={{ fontSize: '0.85rem', opacity: 0.6 }}>Aucune prédiction vérifiée pour l'instant</div>
+                      <div style={{ fontSize: '0.85rem', opacity: 0.6 }}>{autoT("Aucune prédiction vérifiée pour l'instant")}</div>
                     </div>
                   ) : (
                     <div className="pred-history-list">
@@ -1392,7 +1425,7 @@ export default function Dashboard() {
                   className="bilan-toggle"
                   onClick={() => setBilanOpen(o => !o)}
                 >
-                  <span>📊 Bilan du {dailyBilan.date}</span>
+                  <span>📊 {autoT('Bilan du')} {dailyBilan.date}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 18 }}>{bilanOpen ? '▲' : '▼'}</span>
                 </button>
 
@@ -1421,7 +1454,7 @@ export default function Dashboard() {
                                 </div>
                               </>
                             ) : (
-                              <div style={{ color: '#64748b', fontSize: 12, padding: '6px 0' }}>Aucune prédiction ce jour</div>
+                              <div style={{ color: '#64748b', fontSize: 12, padding: '6px 0' }}>{autoT('Aucune prédiction ce jour')}</div>
                             )}
                           </div>
 
@@ -1446,7 +1479,7 @@ export default function Dashboard() {
                       );
                     })}
                     <div className="bilan-footer">
-                      Généré à {dailyBilan.generated_at
+                      {autoT('Généré à')} {dailyBilan.generated_at
                         ? new Date(dailyBilan.generated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
                         : '—'}
                     </div>
@@ -1460,7 +1493,7 @@ export default function Dashboard() {
               <div className="tg-section">
                 <div className="tg-section-header">
                   <span className="tg-section-dot">✈️</span>
-                  <span className="tg-section-title">Messages du canal Telegram</span>
+                  <span className="tg-section-title">{autoT('Messages du canal Telegram')}</span>
                   <span className="tg-section-count">{tgMessages.length}</span>
                 </div>
                 <div className="tg-msg-feed">
@@ -1473,7 +1506,7 @@ export default function Dashboard() {
                         </span>
                       </div>
                       <div className="tg-feed-text">
-                        {m.text || (m.photo ? '📎 Média' : '—')}
+                        {m.text || (m.photo ? `📎 ${autoT('Média')}` : '—')}
                       </div>
                     </div>
                   ))}
@@ -1495,7 +1528,7 @@ export default function Dashboard() {
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22 }}>
               <div>
-                <div style={{ fontSize: 10, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>🎲 Stratégie Aléatoire</div>
+                <div style={{ fontSize: 10, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>🎲 {autoT('Stratégie Aléatoire')}</div>
                 <div style={{ fontSize: 17, fontWeight: 800, color: '#e2e8f0' }}>{aleatDashPanel.stratName}</div>
               </div>
               <button onClick={() => setAleatDashPanel(null)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', fontSize: 16, cursor: 'pointer', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
@@ -1504,15 +1537,15 @@ export default function Dashboard() {
             {/* STEP 1 — Main */}
             {aleatDashPanel.step === 'hand' && (
               <div>
-                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 18, textAlign: 'center' }}>Choisissez la main à prédire :</div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 18, textAlign: 'center' }}>{autoT('Choisissez la main à prédire :')}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <button onClick={() => setAleatDashPanel(p => ({ ...p, hand: 'joueur', step: 'number' }))}
                     style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(239,68,68,0.45)', background: 'rgba(239,68,68,0.09)', cursor: 'pointer', color: '#f87171', fontWeight: 800, fontSize: 22, textAlign: 'center' }}>
-                    ❤️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Joueur</span>
+                    ❤️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>{autoT('Joueur')}</span>
                   </button>
                   <button onClick={() => setAleatDashPanel(p => ({ ...p, hand: 'banquier', step: 'number' }))}
                     style={{ padding: '24px 12px', borderRadius: 14, border: '2px solid rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.09)', cursor: 'pointer', color: '#4ade80', fontWeight: 800, fontSize: 22, textAlign: 'center' }}>
-                    ♣️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>Banquier</span>
+                    ♣️<br /><span style={{ fontSize: 13, marginTop: 6, display: 'block' }}>{autoT('Banquier')}</span>
                   </button>
                 </div>
               </div>
@@ -1522,10 +1555,10 @@ export default function Dashboard() {
             {aleatDashPanel.step === 'number' && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                  <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '' }))} style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0 }}>← Retour</button>
-                  <span style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 700 }}>{aleatDashPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</span>
+                  <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '' }))} style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0 }}>← {autoT('Retour')}</button>
+                  <span style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 700 }}>{aleatDashPanel.hand === 'joueur' ? `❤️ ${autoT('Joueur')}` : `♣️ ${autoT('Banquier')}`}</span>
                 </div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>Numéro de tour à prédire (1–1440) :</label>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>{autoT('Numéro de tour à prédire (1–1440) :')}</label>
                 <input
                   type="number" min="1" max="1440"
                   value={aleatDashPanel.gameInput}
@@ -1539,7 +1572,7 @@ export default function Dashboard() {
                   onClick={submitAleatDashPrediction}
                   disabled={!aleatDashPanel.gameInput}
                   style={{ width: '100%', padding: '15px', borderRadius: 12, border: 'none', cursor: aleatDashPanel.gameInput ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 14, background: aleatDashPanel.gameInput ? 'linear-gradient(135deg,#6366f1,#a855f7)' : 'rgba(99,102,241,0.15)', color: aleatDashPanel.gameInput ? '#fff' : '#6b7280' }}
-                >🎯 Lancer la prédiction</button>
+                >🎯 {autoT('Lancer la prédiction')}</button>
               </div>
             )}
 
@@ -1549,16 +1582,16 @@ export default function Dashboard() {
                 <div style={{ fontSize: 64, marginBottom: 6 }}>{aleatDashPanel.result.suit_emoji}</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>Tour #{aleatDashPanel.result.game_number}</div>
                 <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>
-                  {aleatDashPanel.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} → <strong style={{ color: '#a5b4fc' }}>{aleatDashPanel.result.predicted_suit}</strong> prédit
+                  {aleatDashPanel.hand === 'joueur' ? `❤️ ${autoT('Joueur')}` : `♣️ ${autoT('Banquier')}`} → <strong style={{ color: '#a5b4fc' }}>{aleatDashPanel.result.predicted_suit}</strong> {autoT('prédit')}
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 20, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)', color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 22 }}>
-                  ⏳ En cours de vérification par le moteur…
+                  ⏳ {autoT('En cours de vérification par le moteur…')}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'hand', hand: null, gameInput: '', result: null }))}
-                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🎲 Nouveau</button>
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🎲 {autoT('Nouveau')}</button>
                   <button onClick={() => setAleatDashPanel(p => ({ ...p, step: 'number', result: null, gameInput: '' }))}
-                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.12)', color: '#c084fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🔢 Autre numéro</button>
+                    style={{ padding: '13px', borderRadius: 11, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.12)', color: '#c084fc', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🔢 {autoT('Autre numéro')}</button>
                 </div>
               </div>
             )}
@@ -1566,20 +1599,20 @@ export default function Dashboard() {
             {/* Historique de session */}
             {(aleatDashPanel.history || []).length > 0 && (
               <div style={{ marginTop: 24, borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 16 }}>
-                <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Historique de session</div>
+                <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>{autoT('Historique de session')}</div>
                 {[...(aleatDashPanel.history || [])].reverse().map((h, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', marginBottom: 7 }}>
                     <span style={{ fontSize: 22 }}>{h.suit_emoji}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Tour #{h.game_number}</div>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>{h.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'} — {h.predicted_suit}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{h.hand === 'joueur' ? `❤️ ${autoT('Joueur')}` : `♣️ ${autoT('Banquier')}`} — {h.predicted_suit}</div>
                     </div>
                     <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 700, whiteSpace: 'nowrap',
                       background: h.status === 'gagne' ? 'rgba(34,197,94,0.18)' : h.status === 'perdu' ? 'rgba(239,68,68,0.18)' : 'rgba(234,179,8,0.12)',
                       color:      h.status === 'gagne' ? '#4ade80'           : h.status === 'perdu' ? '#f87171'           : '#fbbf24',
                       border:     `1px solid ${h.status === 'gagne' ? 'rgba(34,197,94,0.35)' : h.status === 'perdu' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.3)'}`,
                     }}>
-                      {h.status === 'gagne' ? '✅ Gagné' : h.status === 'perdu' ? '❌ Perdu' : '⏳'}
+                      {h.status === 'gagne' ? `✅ ${autoT('Gagné')}` : h.status === 'perdu' ? `❌ ${autoT('Perdu')}` : '⏳'}
                     </span>
                   </div>
                 ))}
@@ -1609,7 +1642,7 @@ export default function Dashboard() {
             </div>
             {proMeta && (
               <span style={{ fontSize: 11, color: '#64748b', flex: 1 }}>
-                {proMeta.strategy_count} stratégie{proMeta.strategy_count > 1 ? 's' : ''} · {proMeta.filename}
+                {proMeta.strategy_count} {autoT('stratégie')}{proMeta.strategy_count > 1 ? 's' : ''} · {proMeta.filename}
               </span>
             )}
             <span style={{ fontSize: 18, color: '#475569', marginLeft: 'auto' }}>{proZoneOpen ? '▲' : '▼'}</span>
@@ -1619,16 +1652,16 @@ export default function Dashboard() {
             <>
               {!proLoaded ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '16px 0' }}>
-                  <div className="spinner" style={{ width: 16, height: 16 }} /> Chargement des prédictions Pro…
+                  <div className="spinner" style={{ width: 16, height: 16 }} /> {autoT('Chargement des prédictions Pro…')}
                 </div>
               ) : proPredictions.length === 0 ? (
                 <div style={{ padding: '20px 0', textAlign: 'center', color: '#475569', fontSize: 13 }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>🔷</div>
-                  <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>Aucune prédiction Pro active</div>
+                  <div style={{ fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>{autoT('Aucune prédiction Pro active')}</div>
                   <div style={{ fontSize: 12, color: '#475569' }}>
                     {user?.is_admin
-                      ? 'Importez un fichier de stratégie Pro dans Admin → Config Pro'
-                      : "Les prédictions Pro apparaîtront ici dès qu'une stratégie est active"}
+                      ? autoT('Importez un fichier de stratégie Pro dans Admin → Config Pro')
+                      : autoT("Les prédictions Pro apparaîtront ici dès qu'une stratégie est active")}
                   </div>
                 </div>
               ) : (() => {
@@ -1669,16 +1702,16 @@ export default function Dashboard() {
                       {/* Prédiction active */}
                       {active && (
                         <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, padding: '14px 18px', marginBottom: 14 }}>
-                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Prédiction Actuelle</div>
+                          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{autoT('Prédiction Actuelle')}</div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                             <div style={{ fontSize: 36, lineHeight: 1, color: SUIT_COLORS_PRO[active.predicted_suit] || '#a5b4fc' }}>{active.predicted_suit || '?'}</div>
                             <div>
                               <div style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0' }}>
-                                {active.predicted_suit === '♥' ? 'Coeur' : active.predicted_suit === '♦' ? 'Carreau' : active.predicted_suit === '♠' ? 'Pique' : active.predicted_suit === '♣' ? 'Trèfle' : active.predicted_suit || '?'}
+                                {active.predicted_suit === '♥' ? autoT('Coeur') : active.predicted_suit === '♦' ? autoT('Carreau') : active.predicted_suit === '♠' ? autoT('Pique') : active.predicted_suit === '♣' ? autoT('Trèfle') : active.predicted_suit || '?'}
                               </div>
-                              <div style={{ fontSize: 11, color: '#64748b' }}>Partie #{active.game_number} · {active.hand === 'joueur' ? '❤️ Joueur' : '♣️ Banquier'}</div>
+                              <div style={{ fontSize: 11, color: '#64748b' }}>{autoT('Partie')} #{active.game_number} · {active.hand === 'joueur' ? `❤️ ${autoT('Joueur')}` : `♣️ ${autoT('Banquier')}`}</div>
                             </div>
-                            <div style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 10, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>⏳ En cours</div>
+                            <div style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 10, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>⏳ {autoT('En cours')}</div>
                           </div>
                         </div>
                       )}
@@ -1686,7 +1719,7 @@ export default function Dashboard() {
                       {/* Historique Pro */}
                       {history.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Historique</div>
+                          <div style={{ fontSize: 10, color: '#475569', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{autoT('Historique')}</div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                             {history.map((p, i) => (
                               <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -1701,7 +1734,7 @@ export default function Dashboard() {
                                   color:      p.status === 'gagne' ? '#4ade80'             : p.status === 'perdu' ? '#f87171'             : '#fbbf24',
                                   border:     `1px solid ${p.status === 'gagne' ? 'rgba(34,197,94,0.3)' : p.status === 'perdu' ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.25)'}`,
                                 }}>
-                                  {p.status === 'gagne' ? '✅ Gagné' : p.status === 'perdu' ? '❌ Perdu' : '⏳'}
+                                  {p.status === 'gagne' ? `✅ ${autoT('Gagné')}` : p.status === 'perdu' ? `❌ ${autoT('Perdu')}` : '⏳'}
                                 </span>
                               </div>
                             ))}

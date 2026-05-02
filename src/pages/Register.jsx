@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { LANGUAGES } from '../i18n/translations';
 import PasswordInput from '../components/PasswordInput';
 import TalkingMascot from '../components/TalkingMascot';
 
 export default function Register() {
   const { register } = useAuth();
+  const { lang, setLang, t } = useLanguage();
+
   const [form, setForm] = useState({
     username: '', email: '', password: '', confirm: '',
-    account_type: 'simple', promo_code: '',
+    account_type: 'simple', promo_code: '', language: lang,
   });
-  const [profilePhoto, setProfilePhoto] = useState(''); // dataURL base64
+  const [profilePhoto, setProfilePhoto] = useState('');
   const [photoError, setPhotoError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -19,11 +23,17 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [mascotDone, setMascotDone] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const progressTimer = useRef(null);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  // Upload + redimensionnement client de la photo (max 400px, ~80 ko)
+  // Sync language selector with global language context
+  const handleLangChange = (code) => {
+    setForm(f => ({ ...f, language: code }));
+    setLang(code);
+  };
+
   const handlePhotoFile = (file) => {
     setPhotoError('');
     if (!file) { setProfilePhoto(''); return; }
@@ -90,6 +100,7 @@ export default function Register() {
           account_type: form.account_type,
           promo_code: form.promo_code.trim() || undefined,
           profile_photo: profilePhoto || undefined,
+          language: form.language,
         }),
       });
       const data = await res.json();
@@ -97,6 +108,8 @@ export default function Register() {
       setProgress(100);
       setGeneratedPromoCode(data.promo_code || '');
       setReferrerApplied(!!data.referrer_applied);
+      // Apply the chosen language globally
+      setLang(form.language);
       await new Promise(r => setTimeout(r, 450));
       setSuccess(true);
     } catch (err) {
@@ -110,13 +123,15 @@ export default function Register() {
   const copyCode = () => {
     if (!generatedPromoCode) return;
     try { navigator.clipboard.writeText(generatedPromoCode); } catch {}
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   };
 
   // ── SUCCESS SCREEN ──
   if (success) {
     const username = form.username || 'cher utilisateur';
     const lines = [
-      `Bienvenue ${username} !`,
+      `${t('auth.success.title')} ${username} !`,
       `Votre compte ${form.account_type === 'premium' ? 'PREMIUM' : form.account_type === 'pro' ? 'PRO' : 'SIMPLE'} est créé.`,
       `Voici votre code promotionnel personnel : ${generatedPromoCode || 'généré'}.`,
       `Partagez-le : si quelqu'un l'utilise lors de son 1er paiement, il a 20 % de réduction et vous gagnez 20 % de sa durée d'abonnement !`,
@@ -137,9 +152,9 @@ export default function Register() {
               background: 'rgba(34,197,94,0.13)', border: '1px solid rgba(34,197,94,0.3)',
               color: '#86efac', fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
             }}>
-              <span style={{ fontSize: 14 }}>✅</span> INSCRIPTION RÉUSSIE
+              <span style={{ fontSize: 14 }}>✅</span> {t('auth.success.registered')}
             </div>
-            <h2 style={{ marginTop: 14, fontSize: '1.45rem' }}>Bienvenue à bord !</h2>
+            <h2 style={{ marginTop: 14, fontSize: '1.45rem' }}>{t('auth.success.title')}</h2>
           </div>
 
           {generatedPromoCode && (
@@ -151,7 +166,7 @@ export default function Register() {
               textAlign: 'center',
             }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', letterSpacing: 1, marginBottom: 6 }}>
-                🎁 VOTRE CODE PROMO PERSONNEL
+                {t('auth.promo.your_code')}
               </div>
               <div style={{
                 fontFamily: 'monospace', fontSize: 22, fontWeight: 900,
@@ -166,7 +181,7 @@ export default function Register() {
                 className="btn btn-ghost btn-sm"
                 style={{ marginTop: 6, fontSize: 11 }}
               >
-                📋 Copier le code
+                {codeCopied ? t('action.copied') : t('auth.promo.copy')}
               </button>
               <div style={{ fontSize: 11, color: '#fcd34d', marginTop: 8, lineHeight: 1.4 }}>
                 Partagez ce code à vos amis. Lors de leur 1er paiement,<br />
@@ -187,7 +202,7 @@ export default function Register() {
           </div>
 
           <Link to="/connexion" className="btn btn-gold btn-auth" style={{ marginTop: 4 }}>
-            {mascotDone ? '🚀 Se connecter maintenant' : 'Se connecter'}
+            {mascotDone ? t('auth.login_now') : t('nav.login')}
           </Link>
         </div>
       </div>
@@ -202,15 +217,46 @@ export default function Register() {
       <div className="auth-box">
         <div className="auth-logo">
           <div className="auth-logo-icon">🎲</div>
-          <h1>Prediction Baccara Pro</h1>
-          <p>Créer un nouveau compte</p>
+          <h1>{t('app.name')}</h1>
+          <p>{t('auth.register.title')}</p>
         </div>
 
         {error && <div className="alert alert-error"><span>⚠️</span> {error}</div>}
 
         <form className="auth-form" onSubmit={handleSubmit}>
+
+          {/* ── Langue de l'interface ── */}
           <div className="form-group">
-            <label className="form-label">Nom d'utilisateur</label>
+            <label className="form-label">
+              🌐 {t('auth.field.language')}
+            </label>
+            <div className="input-wrap" style={{ flexWrap: 'wrap', gap: 8, height: 'auto', padding: '10px 14px' }}>
+              {LANGUAGES.map(l => (
+                <button
+                  key={l.code}
+                  type="button"
+                  onClick={() => handleLangChange(l.code)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '5px 10px', borderRadius: 8, border: 'none',
+                    cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    background: form.language === l.code
+                      ? 'linear-gradient(135deg,#92400e,#fbbf24)'
+                      : 'rgba(255,255,255,0.07)',
+                    color: form.language === l.code ? '#fff' : '#94a3b8',
+                    transition: 'all .15s',
+                    outline: form.language === l.code ? '2px solid rgba(251,191,36,0.5)' : 'none',
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{l.flag}</span>
+                  <span>{l.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">{t('auth.field.username')}</label>
             <div className="input-wrap">
               <span className="input-icon">👤</span>
               <input className="form-input has-icon" type="text" placeholder="votre_pseudo"
@@ -219,7 +265,7 @@ export default function Register() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Adresse email</label>
+            <label className="form-label">{t('auth.field.email')}</label>
             <div className="input-wrap">
               <span className="input-icon">📧</span>
               <input className="form-input has-icon" type="email" placeholder="email@exemple.com"
@@ -228,7 +274,7 @@ export default function Register() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Type de compte</label>
+            <label className="form-label">{t('auth.field.account_type')}</label>
             <div className="input-wrap">
               <span className="input-icon">🎯</span>
               <select
@@ -244,9 +290,11 @@ export default function Register() {
             </div>
           </div>
 
-          {/* Photo de profil (optionnelle) */}
+          {/* Photo de profil */}
           <div className="form-group">
-            <label className="form-label">Photo de profil <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnelle)</span></label>
+            <label className="form-label">
+              {t('auth.field.photo')} <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t('auth.field.photo_optional')}</span>
+            </label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <div style={{
                 width: 72, height: 72, borderRadius: '50%',
@@ -279,13 +327,12 @@ export default function Register() {
                 )}
               </div>
             </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              Image automatiquement réduite à 400px (max 500 Ko après compression).
-            </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Code promotionnel <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnel)</span></label>
+            <label className="form-label">
+              {t('auth.field.promo')} <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnel)</span>
+            </label>
             <div className="input-wrap">
               <span className="input-icon">🎁</span>
               <input
@@ -299,12 +346,12 @@ export default function Register() {
               />
             </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              Avec un code valide, vous obtenez <b style={{ color: '#fbbf24' }}>20 % de réduction</b> sur votre 1er paiement.
+              {t('auth.field.promo_hint')}
             </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Mot de passe</label>
+            <label className="form-label">{t('auth.field.password')}</label>
             <PasswordInput
               value={form.password}
               onChange={set('password')}
@@ -315,7 +362,7 @@ export default function Register() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Confirmer le mot de passe</label>
+            <label className="form-label">{t('auth.field.confirm')}</label>
             <PasswordInput
               value={form.confirm}
               onChange={set('confirm')}
@@ -340,20 +387,20 @@ export default function Register() {
               <div className="register-progress-text">
                 {progress < 30 && '🔐 Création de votre compte...'}
                 {progress >= 30 && progress < 60 && '📝 Génération de votre code promo...'}
-                {progress >= 60 && progress < 90 && '📡 Envoi à l\'administrateur...'}
+                {progress >= 60 && progress < 90 && "📡 Envoi à l'administrateur..."}
                 {progress >= 90 && '✅ Presque terminé !'}
               </div>
             </div>
           )}
 
           <button className="btn btn-gold btn-auth" type="submit" disabled={loading}>
-            {loading ? <><span className="btn-spinner" /> Inscription en cours...</> : '✨ Créer mon compte'}
+            {loading ? <><span className="btn-spinner" /> {t('auth.register.loading')}</> : t('auth.register.btn')}
           </button>
         </form>
 
-        <div className="auth-divider"><span>ou</span></div>
+        <div className="auth-divider"><span>{t('auth.or')}</span></div>
         <p className="auth-footer">
-          Déjà inscrit ? <Link to="/connexion">Se connecter</Link>
+          {t('auth.already_account')} <Link to="/connexion">{t('nav.login')}</Link>
         </p>
       </div>
     </div>
