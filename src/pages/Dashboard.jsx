@@ -925,7 +925,13 @@ export default function Dashboard() {
               ) : (
                 <div className="live-games-layout">
                   {/* Big live game + absence counter side by side */}
-                  <div className={`live-grid ${(user?.is_admin || user?.is_premium) ? 'live-grid-admin' : 'live-grid-single'}`}>
+                  {(() => {
+                    const isOwnProChannel = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id);
+                    const proCanSeeCounter = user?.is_pro && (isOwnProChannel || (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId)));
+                    const canSeeCounter = user?.is_admin || user?.is_premium || proCanSeeCounter;
+                    return null;
+                  })()}
+                  <div className={`live-grid ${(user?.is_admin || user?.is_premium || (() => { const own = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id); return user?.is_pro && (own || (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))); })()) ? 'live-grid-admin' : 'live-grid-single'}`}>
                     {liveGame ? (
                       <GameRow g={liveGame} mode="live" />
                     ) : (
@@ -933,7 +939,7 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>En attente de la prochaine partie...</span>
                       </div>
                     )}
-                    {(user?.is_admin || user?.is_premium) && isProChannel ? (
+                    {(user?.is_admin || user?.is_premium || (user?.is_pro && isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id))) && isProChannel ? (
                       <div className="pro-logs-card" style={{ display:'flex', alignItems:'flex-start', padding:8 }}>
                         <button
                           type="button"
@@ -1057,7 +1063,10 @@ export default function Dashboard() {
                           </div>
                         )}
                       </div>
-                    ) : (user?.is_admin || user?.is_premium) && (
+                    ) : (user?.is_admin || user?.is_premium || (user?.is_pro && (
+                        (isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id)) ||
+                        (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))
+                      ))) && (
                       <div className="absence-counter-chip">
                         <div className="absence-chip-title">
                           <span style={{ color: channel.color }}>📊</span>
@@ -1086,6 +1095,33 @@ export default function Dashboard() {
                         </div>
                         {absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
+                        ) : absences[0]?.isCarteValeur ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingTop: 4 }}>
+                            {absences.map(a => {
+                              const isMissing = a.count === 0;
+                              return (
+                                <div key={a.suit} style={{
+                                  display: 'flex', alignItems: 'center', gap: 4,
+                                  padding: '3px 8px', borderRadius: 7,
+                                  background: isMissing ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.04)',
+                                  border: isMissing ? '1px solid rgba(251,191,36,0.55)' : '1px solid rgba(255,255,255,0.08)',
+                                  transition: 'all 0.3s ease',
+                                }}>
+                                  <span style={{
+                                    fontSize: '0.75rem', fontWeight: 800,
+                                    color: isMissing ? '#fbbf24' : '#64748b',
+                                    fontFamily: 'monospace',
+                                  }}>{a.display}</span>
+                                  <span style={{ fontSize: '0.65rem', color: '#475569' }}>:</span>
+                                  <span style={{
+                                    fontSize: '0.8rem', fontWeight: 800,
+                                    color: isMissing ? '#f59e0b' : '#4ade80',
+                                  }}>{a.count}</span>
+                                  {isMissing && <span style={{ fontSize: '0.55rem', color: '#fbbf24' }}>●</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
                         ) : absences.map(a => {
                           const isMiroir = a.mode === 'taux_miroir';
                           const isCarte = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3' || a.mode === 'victoire_adverse' || a.mode === 'distribution' || a.mode === 'abs_3_vers_2' || a.mode === 'abs_3_vers_3' || a.mode === 'absence_victoire';

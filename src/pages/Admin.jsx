@@ -3738,6 +3738,12 @@ function AdminPanel() {
   const [editingAllowedModes, setEditingAllowedModes] = useState(null); // userId
   const [allowedModesEdit, setAllowedModesEdit] = useState([]); // array of modes
   const [allowedModesSaving, setAllowedModesSaving] = useState(false);
+  const [editingAllowedChannels, setEditingAllowedChannels] = useState(null);
+  const [allowedChannelsEdit, setAllowedChannelsEdit] = useState([]);
+  const [allowedChannelsSaving, setAllowedChannelsSaving] = useState(false);
+  const [editingCounterChannels, setEditingCounterChannels] = useState(null);
+  const [counterChannelsEdit, setCounterChannelsEdit] = useState([]);
+  const [counterChannelsSaving, setCounterChannelsSaving] = useState(false);
 
   const ALL_MODES_LIST = [
     { value: 'manquants', label: 'Absences' },
@@ -3783,6 +3789,36 @@ function AdminPanel() {
         setEditingAllowedModes(null);
       }
     } finally { setAllowedModesSaving(false); }
+  };
+
+  const saveAllowedChannels = async (userId) => {
+    setAllowedChannelsSaving(true);
+    try {
+      const r = await fetch(`/api/admin/users/${userId}/allowed-channels`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowed_channels: allowedChannelsEdit.length > 0 ? allowedChannelsEdit : null }),
+      });
+      if (r.ok) {
+        setOnlineUsers(prev => prev.map(u => u.id === userId ? { ...u, allowed_channels: allowedChannelsEdit.length > 0 ? allowedChannelsEdit : null } : u));
+        setEditingAllowedChannels(null);
+      }
+    } finally { setAllowedChannelsSaving(false); }
+  };
+
+  const saveCounterChannels = async (userId) => {
+    setCounterChannelsSaving(true);
+    try {
+      const r = await fetch(`/api/admin/users/${userId}/show-counter-channels`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_counter_channels: counterChannelsEdit.length > 0 ? counterChannelsEdit : null }),
+      });
+      if (r.ok) {
+        setOnlineUsers(prev => prev.map(u => u.id === userId ? { ...u, show_counter_channels: counterChannelsEdit.length > 0 ? counterChannelsEdit : null } : u));
+        setEditingCounterChannels(null);
+      }
+    } finally { setCounterChannelsSaving(false); }
   };
 
   const unbanUser = async (userId) => {
@@ -6131,71 +6167,205 @@ function AdminPanel() {
               <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Aucun utilisateur non-admin.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {onlineUsers.map(u => {
-                  const statusColor = u.status === 'en_ligne' ? '#22c55e' : u.status === 'actif' ? '#fbbf24' : u.status === 'hors_ligne' ? '#ef4444' : '#64748b';
-                  const statusDot   = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : u.status === 'hors_ligne' ? '🔴' : '⚪';
-                  const statusLabel = u.status === 'en_ligne' ? 'En ligne' : u.status === 'actif' ? 'Actif' : u.status === 'hors_ligne' ? 'Hors ligne' : 'Jamais connecté';
-                  const lastSeenStr = u.last_seen
-                    ? (u.diff_minutes !== null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '')
-                    : '—';
-                  const isEditingModes = editingAllowedModes === u.id;
-                  const modesForUser   = Array.isArray(u.allowed_modes) ? u.allowed_modes : [];
-                  const subExpired     = u.subscription_expires_at && new Date(u.subscription_expires_at) <= new Date();
-                  return (
-                    <div key={u.id} style={{ background: 'rgba(15,23,42,0.6)', border: `1px solid ${u.is_banned ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 18 }}>{statusDot}</span>
-                        <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 14 }}>{u.username}</span>
-                        {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
-                        <span style={{ fontSize: 11, color: statusColor, background: `${statusColor}20`, borderRadius: 5, padding: '2px 8px', fontWeight: 700 }}>{statusLabel}</span>
-                        {u.is_pro && <span style={{ fontSize: 10, color: '#818cf8', background: 'rgba(99,102,241,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>PRO</span>}
-                        {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>BANNI</span>}
-                        {subExpired && !u.is_banned && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>EXPIRÉ</span>}
-                        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
-                          Modes autorisés : {!u.allowed_modes ? <span style={{ color: '#22c55e' }}>Tous</span> : modesForUser.length === 0 ? <span style={{ color: '#ef4444' }}>Aucun</span> : <span style={{ color: '#fbbf24' }}>{modesForUser.join(', ')}</span>}
+                {(() => {
+                  const ALL_BASE_CHANNELS_LIST = [
+                    { id: 'C1', label: '♠ Pique Noir' },
+                    { id: 'C2', label: '♥ Cœur Rouge' },
+                    { id: 'C3', label: '♦ Carreau Doré' },
+                    { id: 'DC', label: '♣ Double Canal' },
+                    ...strategies.map(s => ({ id: `S${s.id}`, label: s.name || `S${s.id}` })),
+                  ];
+                  return onlineUsers.map(u => {
+                    const statusColor = u.status === 'en_ligne' ? '#22c55e' : u.status === 'actif' ? '#fbbf24' : u.status === 'hors_ligne' ? '#ef4444' : '#64748b';
+                    const statusDot   = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : u.status === 'hors_ligne' ? '🔴' : '⚪';
+                    const statusLabel = u.status === 'en_ligne' ? 'En ligne' : u.status === 'actif' ? 'Actif' : u.status === 'hors_ligne' ? 'Hors ligne' : 'Jamais connecté';
+                    const lastSeenStr = u.last_seen
+                      ? (u.diff_minutes !== null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '')
+                      : '—';
+                    const isEditingModes    = editingAllowedModes === u.id;
+                    const isEditingChannels = editingAllowedChannels === u.id;
+                    const isEditingCounter  = editingCounterChannels === u.id;
+                    const modesForUser    = Array.isArray(u.allowed_modes) ? u.allowed_modes : [];
+                    const channelsForUser = Array.isArray(u.allowed_channels) ? u.allowed_channels : [];
+                    const counterForUser  = Array.isArray(u.show_counter_channels) ? u.show_counter_channels : [];
+                    const subExpired = u.subscription_expires_at && new Date(u.subscription_expires_at) <= new Date();
+
+                    // Type de compte
+                    const isPro     = u.is_pro;
+                    const isPremium = u.is_premium && !u.is_pro;
+                    const isUser    = !u.is_pro && !u.is_premium;
+
+                    const typeBadge = isPro
+                      ? { label: 'PRO', color: '#a78bfa', bg: 'rgba(139,92,246,0.18)', border: 'rgba(139,92,246,0.45)', icon: '💎' }
+                      : isPremium
+                      ? { label: 'PREMIUM', color: '#fbbf24', bg: 'rgba(251,191,36,0.18)', border: 'rgba(251,191,36,0.45)', icon: '⭐' }
+                      : { label: 'UTILISATEUR', color: '#60a5fa', bg: 'rgba(59,130,246,0.14)', border: 'rgba(59,130,246,0.35)', icon: '👤' };
+
+                    return (
+                      <div key={u.id} style={{
+                        background: 'rgba(15,23,42,0.6)',
+                        border: `1px solid ${u.is_banned ? 'rgba(239,68,68,0.4)' : isPro ? 'rgba(139,92,246,0.25)' : isPremium ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.08)'}`,
+                        borderRadius: 10, padding: '12px 16px',
+                      }}>
+                        {/* ── Ligne identité + badges ── */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 16 }}>{statusDot}</span>
+                          <span style={{ fontWeight: 800, color: '#f1f5f9', fontSize: 14 }}>{u.username}</span>
+                          {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                          <span style={{ fontSize: 10, color: statusColor, background: `${statusColor}18`, borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>{statusLabel}</span>
+                          {/* Badge type de compte */}
+                          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: typeBadge.color, background: typeBadge.bg, border: `1px solid ${typeBadge.border}`, borderRadius: 5, padding: '2px 8px' }}>
+                            {typeBadge.icon} {typeBadge.label}
+                          </span>
+                          {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>🚫 BANNI</span>}
+                          {subExpired && !u.is_banned && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>⏱ EXPIRÉ</span>}
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
                         </div>
-                        {u.is_banned && isSuperAdmin && (
-                          <button onClick={() => unbanUser(u.id)} style={{ padding: '4px 10px', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Débannir</button>
-                        )}
-                        <button onClick={() => {
-                          if (isEditingModes) { setEditingAllowedModes(null); return; }
-                          setEditingAllowedModes(u.id);
-                          setAllowedModesEdit(modesForUser.length > 0 ? [...modesForUser] : []);
-                        }} style={{ padding: '4px 10px', background: isEditingModes ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingModes ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingModes ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-                          {isEditingModes ? '✕ Annuler' : '✏️ Modes'}
-                        </button>
-                      </div>
-                      {isEditingModes && (
-                        <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 8 }}>
-                          <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 8 }}>Modes de stratégie autorisés (laissez vide = tous)</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                            {ALL_MODES_LIST.map(m => {
-                              const active = allowedModesEdit.includes(m.value);
-                              return (
-                                <button key={m.value} type="button" onClick={() => setAllowedModesEdit(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])}
-                                  style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                    background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.05)',
-                                    border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)',
-                                    color: active ? '#fbbf24' : '#64748b' }}>
-                                  {m.label}
-                                </button>
-                              );
-                            })}
+
+                        {/* ── Ligne résumé canaux ── */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📺 Canaux : {channelsForUser.length === 0
+                              ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun assigné</span>
+                              : <span style={{ color: '#38bdf8' }}>{channelsForUser.join(', ')}</span>}
                           </div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <button onClick={() => setAllowedModesEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
-                            <button onClick={() => saveAllowedModes(u.id)} disabled={allowedModesSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-                              {allowedModesSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}
+                          {u.is_banned && isSuperAdmin && (
+                            <button onClick={() => unbanUser(u.id)} style={{ padding: '4px 10px', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Débannir</button>
+                          )}
+                          <button onClick={() => {
+                            if (isEditingChannels) { setEditingAllowedChannels(null); return; }
+                            setEditingAllowedChannels(u.id); setEditingAllowedModes(null); setEditingCounterChannels(null);
+                            setAllowedChannelsEdit(channelsForUser.length > 0 ? [...channelsForUser] : []);
+                          }} style={{ padding: '4px 10px', background: isEditingChannels ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingChannels ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingChannels ? '#38bdf8' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingChannels ? '✕ Annuler' : '📺 Canaux'}
+                          </button>
+                        </div>
+
+                        {/* ── Ligne résumé modes (uniquement PRO) ── */}
+                        {isPro && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                              ⚙️ Modes : {!u.allowed_modes ? <span style={{ color: '#22c55e' }}>Tous</span> : modesForUser.length === 0 ? <span style={{ color: '#ef4444' }}>Aucun</span> : <span style={{ color: '#fbbf24' }}>{modesForUser.join(', ')}</span>}
+                            </div>
+                            <button onClick={() => {
+                              if (isEditingModes) { setEditingAllowedModes(null); return; }
+                              setEditingAllowedModes(u.id); setEditingAllowedChannels(null); setEditingCounterChannels(null);
+                              setAllowedModesEdit(modesForUser.length > 0 ? [...modesForUser] : []);
+                            }} style={{ padding: '4px 10px', background: isEditingModes ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingModes ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingModes ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              {isEditingModes ? '✕ Annuler' : '⚙️ Modes'}
                             </button>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        )}
+
+                        {/* ── Ligne résumé compteurs (uniquement PRO) ── */}
+                        {isPro && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                              📊 Compteurs visibles : {counterForUser.length === 0
+                                ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Uniquement ses propres stratégies</span>
+                                : <span style={{ color: '#a78bfa' }}>{counterForUser.join(', ')}</span>}
+                            </div>
+                            <button onClick={() => {
+                              if (isEditingCounter) { setEditingCounterChannels(null); return; }
+                              setEditingCounterChannels(u.id); setEditingAllowedChannels(null); setEditingAllowedModes(null);
+                              setCounterChannelsEdit(counterForUser.length > 0 ? [...counterForUser] : []);
+                            }} style={{ padding: '4px 10px', background: isEditingCounter ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? '#a78bfa' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              {isEditingCounter ? '✕ Annuler' : '📊 Compteurs'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* ── Panel édition canaux ── */}
+                        {isEditingChannels && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, marginBottom: 4 }}>
+                              📺 Canaux accessibles pour ce compte {typeBadge.label}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>
+                              {isPremium ? 'PREMIUM : voit les compteurs de ces canaux.' : isUser ? 'UTILISATEUR : ne voit PAS les compteurs.' : 'PRO : utilisez aussi les canaux assignés.'}
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = allowedChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setAllowedChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])}
+                                    style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                      background: active ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)',
+                                      border: active ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                                      color: active ? '#38bdf8' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <button onClick={() => setAllowedChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => setAllowedChannelsEdit(ALL_BASE_CHANNELS_LIST.map(c => c.id))} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout sélectionner</button>
+                              <button onClick={() => saveAllowedChannels(u.id)} disabled={allowedChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                                {allowedChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Panel édition modes (PRO uniquement) ── */}
+                        {isEditingModes && isPro && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 8 }}>⚙️ Modes de stratégie autorisés (vide = tous)</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_MODES_LIST.map(m => {
+                                const active = allowedModesEdit.includes(m.value);
+                                return (
+                                  <button key={m.value} type="button" onClick={() => setAllowedModesEdit(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])}
+                                    style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                      background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.05)',
+                                      border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                                      color: active ? '#fbbf24' : '#64748b' }}>
+                                    {m.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <button onClick={() => setAllowedModesEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedModes(u.id)} disabled={allowedModesSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                                {allowedModesSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Panel édition compteurs visibles (PRO uniquement) ── */}
+                        {isEditingCounter && isPro && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#a78bfa', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce PRO voit les compteurs</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Sans sélection = voit uniquement les compteurs de ses propres stratégies créées.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = counterChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setCounterChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])}
+                                    style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                      background: active ? 'rgba(167,139,250,0.22)' : 'rgba(255,255,255,0.04)',
+                                      border: active ? '1px solid rgba(167,139,250,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                                      color: active ? '#a78bfa' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <button onClick={() => setCounterChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Réinitialiser</button>
+                              <button onClick={() => saveCounterChannels(u.id)} disabled={counterChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                                {counterChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>
@@ -6920,7 +7090,7 @@ function AdminPanel() {
               {/* ══════════════ MAIN SURVEILLÉE (Joueur / Banquier) ══════════════ */}
               {/* Cachée pour les modes qui surveillent les 2 mains automatiquement
                   (absence_victoire, distribution) ou qui n'utilisent pas la main (relance) */}
-              {!['absence_victoire', 'distribution', 'relance'].includes(stratForm.mode) && (
+              {!['absence_victoire', 'distribution', 'relance', 'carte_valeur'].includes(stratForm.mode) && (
               <div style={{ marginBottom: 18, padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' }}>
                 <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                   🎯 Main surveillée *
@@ -7308,7 +7478,7 @@ function AdminPanel() {
                     <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
-                    <option value="carte_valeur">🃏 Carte Valeur (fenêtre valeurs hautes)</option>
+                    <option value="carte_valeur">🃏 Carte Valeur</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                   </select>
@@ -7807,7 +7977,7 @@ function AdminPanel() {
               </div>
 
               {/* ══════════════ SECTION 2 — SÉQUENCES DE RELANCE ══════════════ */}
-              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <>
+              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)' }}>
                 <span style={{ fontSize: 13 }}>🔁</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#fb923c', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Séquences de Relance</span>
