@@ -1,12 +1,9 @@
 import { useEffect, lazy, Suspense, Component } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
+import LanguageSwitcher from './components/LanguageSwitcher';
 
-// ── Chargement paresseux + retry anti-page-noire ────────────────────────────
-// Quand on redéploie, les anciens fichiers /assets/Admin-XXXX.js (gardés en
-// cache navigateur) n'existent plus → 404 → React lazy() rejette → page noire.
-// On retry une fois après un court délai, puis on déclenche un rechargement
-// "propre" (paramètre cache-busting) si le chunk est toujours introuvable.
 function lazyWithRetry(factory) {
   return lazy(async () => {
     try {
@@ -20,13 +17,11 @@ function lazyWithRetry(factory) {
         const KEY = '__chunk_reload_ts';
         const last = parseInt(sessionStorage.getItem(KEY) || '0', 10);
         const now = Date.now();
-        // Évite la boucle de rechargement (max 1 reload par 30 s)
         if (now - last > 30000) {
           sessionStorage.setItem(KEY, String(now));
           const url = new URL(window.location.href);
           url.searchParams.set('_v', String(now));
           window.location.replace(url.toString());
-          // Renvoie un composant vide pendant le rechargement
           return { default: () => null };
         }
       }
@@ -41,15 +36,12 @@ const Register      = lazyWithRetry(() => import('./pages/Register'));
 const StrategySelect = lazyWithRetry(() => import('./pages/StrategySelect'));
 const Dashboard     = lazyWithRetry(() => import('./pages/Dashboard'));
 const Admin         = lazyWithRetry(() => import('./pages/Admin'));
-const TelegramFeed  = lazyWithRetry(() => import('./pages/TelegramFeed'));
 const Programmation = lazyWithRetry(() => import('./pages/Programmation'));
 const SystemLogs    = lazyWithRetry(() => import('./pages/SystemLogs'));
 const Comptages     = lazyWithRetry(() => import('./pages/Comptages'));
 const Payment       = lazyWithRetry(() => import('./pages/Payment'));
+const Shop          = lazyWithRetry(() => import('./pages/Shop'));
 
-// ── Error boundary : attrape les erreurs de chargement de chunk ─────────────
-// Affiche un écran de récupération (avec bouton "Recharger") au lieu d'une page
-// noire, et tente un rechargement automatique pour les erreurs de chunk.
 class AppErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -104,7 +96,7 @@ class AppErrorBoundary extends Component {
                 cursor: 'pointer', fontSize: 15, fontWeight: 700,
                 background: 'linear-gradient(135deg,#92400e,#fbbf24)', color: '#fff',
               }}>
-              🔁 Recharger l'application
+              Recharger l'application
             </button>
             <button
               onClick={() => {
@@ -117,7 +109,7 @@ class AppErrorBoundary extends Component {
                 cursor: 'pointer', fontSize: 15, fontWeight: 700,
                 background: 'transparent', color: '#cbd5e1',
               }}>
-              🏠 Retour à l'accueil
+              Retour à l'accueil
             </button>
           </div>
         </div>
@@ -154,7 +146,6 @@ function ProtectedRoute({ children, adminOnly = false, adminOrPro = false, admin
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
-  // Bloquer les comptes expirés sur tous les espaces sauf /choisir et /paiement
   if (!user.is_admin && user.status === 'expired') return <Navigate to="/paiement" replace />;
   if (!user.is_admin && user.status === 'pending') return <Navigate to="/choisir" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
@@ -174,9 +165,13 @@ export default function App() {
   useUiStyles();
   return (
     <AppErrorBoundary>
+    <LanguageProvider>
     <AuthProvider>
       <BrowserRouter>
         <Suspense fallback={<PageLoader />}>
+          <div className="lang-switcher-floating">
+            <LanguageSwitcher compact={false} />
+          </div>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/connexion" element={<PublicRoute><Login /></PublicRoute>} />
@@ -186,15 +181,16 @@ export default function App() {
             <Route path="/dashboard" element={<ProtectedRoute><Navigate to="/choisir" replace /></ProtectedRoute>} />
             <Route path="/dashboard/:strategy" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute adminOrPro><Admin /></ProtectedRoute>} />
-            <Route path="/canal-telegram" element={<ProtectedRoute><TelegramFeed /></ProtectedRoute>} />
             <Route path="/programmation" element={<Programmation />} />
             <Route path="/system-logs" element={<ProtectedRoute adminOrPro><SystemLogs /></ProtectedRoute>} />
             <Route path="/comptages" element={<ProtectedRoute adminProOrPremium><Comptages /></ProtectedRoute>} />
+            <Route path="/boutique" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>
     </AuthProvider>
+    </LanguageProvider>
     </AppErrorBoundary>
   );
 }
