@@ -157,8 +157,21 @@ export default function StrategySelect() {
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
           {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro & Telegram</Link>}
+          {!user?.is_admin && (user?.is_pro || user?.is_premium) && (
+            <Link to="/comptages" className="btn btn-ghost btn-sm" style={{ color: '#4ade80', borderColor: 'rgba(34,197,94,0.4)' }}>📈 Comptages</Link>
+          )}
           {!user?.is_admin && (
             <Link to="/paiement" className="btn btn-ghost btn-sm" style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)' }}>💳 Paiement</Link>
+          )}
+          {!user?.is_admin && (
+            <span style={{
+              fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 6,
+              background: user?.is_pro ? 'rgba(99,102,241,0.18)' : user?.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.15)',
+              color: user?.is_pro ? '#818cf8' : user?.is_premium ? '#fbbf24' : '#94a3b8',
+              border: `1px solid ${user?.is_pro ? 'rgba(99,102,241,0.4)' : user?.is_premium ? 'rgba(251,191,36,0.35)' : 'rgba(100,116,139,0.3)'}`,
+            }}>
+              {user?.is_pro ? '🔷 PRO' : user?.is_premium ? '⭐ PREMIUM' : '👤 UTILISATEUR'}
+            </span>
           )}
           {!user?.is_admin && <ContactAdminModal />}
           <button className="btn btn-danger btn-sm" onClick={handleLogout}>Déconnexion</button>
@@ -384,8 +397,8 @@ export default function StrategySelect() {
           );
         })}
 
-        {/* Stratégies personnalisées (S7, S8…) */}
-        {customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode)).map((s, i) => {
+        {/* Stratégies personnalisées (S7, S8…) — PRO et admin uniquement */}
+        {(user?.is_admin || user?.is_pro) && customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode)).map((s, i) => {
           const cid = `S${s.id}`;
           const { color, glow } = CUSTOM_COLORS[i % CUSTOM_COLORS.length];
           const st = getStats(cid);
@@ -398,7 +411,7 @@ export default function StrategySelect() {
               <div className="select-card-top">
                 <div className="select-card-emoji">⚙</div>
                 <div className="select-card-badge" style={{ background: color }}>
-                  {user?.is_admin ? 'ADMIN' : 'PREMIUM'}
+                  {user?.is_admin ? 'ADMIN' : 'PRO'}
                 </div>
               </div>
               <h2 className="select-card-name">{s.name}</h2>

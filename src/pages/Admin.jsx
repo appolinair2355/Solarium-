@@ -3456,6 +3456,7 @@ function AdminPanel() {
   const [visData, setVisData] = useState({}); // { userId: Set<dbId> } for channels
   const [visStratData, setVisStratData] = useState({}); // { userId: Set<stratId> } for strategies
   const [visLoading, setVisLoading] = useState(false);
+  const [visInitializedIds, setVisInitializedIds] = useState(new Set()); // IDs dont les données sont chargées
 
   const ALL_STRATEGIES = [
     { id: 'C1', name: 'Pique Noir', emoji: '♠' },
@@ -4865,18 +4866,14 @@ function AdminPanel() {
   const openVisModal = (u) => {
     setVisModal({ userId: u.id, username: u.username });
     setVisLoading(true);
+    setVisInitializedIds(prev => { const s = new Set(prev); s.delete(u.id); return s; });
     Promise.all([
-      fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }),
-      fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }),
-    ]).then(async ([chRes, stRes]) => {
-      if (chRes.ok) {
-        const d = await chRes.json();
-        setVisData(p => ({ ...p, [u.id]: new Set(d.visible) }));
-      }
-      if (stRes.ok) {
-        const d = await stRes.json();
-        setVisStratData(p => ({ ...p, [u.id]: new Set(d.visible) }));
-      }
+      fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+      fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+    ]).then(([chD, stD]) => {
+      if (chD) setVisData(p => ({ ...p, [u.id]: new Set(chD.visible || []) }));
+      if (stD) setVisStratData(p => ({ ...p, [u.id]: new Set(stD.visible || []) }));
+      if (chD && stD) setVisInitializedIds(prev => { const s = new Set(prev); s.add(u.id); return s; });
     }).catch(e => {
       showMsg(`Erreur chargement : ${e.message}`, true);
     }).finally(() => setVisLoading(false));
@@ -4901,6 +4898,12 @@ function AdminPanel() {
   const saveVisibility = async (userIdArg = null) => {
     const userId = userIdArg || (visModal && visModal.userId);
     if (!userId) return;
+    // Garde anti-race : si les données n'ont pas encore été chargées depuis le serveur,
+    // on refuse de sauvegarder pour éviter d'écraser les canaux existants avec des tableaux vides.
+    if (userIdArg && !visInitializedIds.has(userId)) {
+      showMsg('⏳ Chargement en cours, veuillez patienter puis réessayer…', true);
+      return;
+    }
     setSavingVis(true);
     const visibleChannels = [...(visData[userId] || new Set())];
     const visibleStrategies = [...(visStratData[userId] || new Set())];
@@ -5522,7 +5525,9 @@ function AdminPanel() {
                           <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Avatar user={u} size={32} />
                             <span>{u.username}</span>
-                            {u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
+                            {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
+                            {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
+                            {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
                           {/* Mot de passe configuré — affiché pour TOUS les utilisateurs (simple, pro, premium) */}
@@ -5662,14 +5667,17 @@ function AdminPanel() {
                                 } else {
                                   setExpandedUserId(u.id);
                                   setSavedFlash(null);
-                                  // Pré-charger les canaux/stratégies déjà cochés + compteur
+                                  setVisInitializedIds(prev => { const s = new Set(prev); s.delete(u.id); return s; });
                                   Promise.all([
-                                    fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
-                                    fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }).then(r => r.ok ? r.json() : { visible: [] }),
+                                    fetch(`/api/telegram/users/${u.id}/visibility`, { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+                                    fetch(`/api/admin/users/${u.id}/strategies`, { credentials: 'include' }).then(r => r.ok ? r.json() : null),
                                   ]).then(([chD, stD]) => {
-                                    setVisData(p => ({ ...p, [u.id]: new Set(chD.visible) }));
-                                    setVisStratData(p => ({ ...p, [u.id]: new Set(stD.visible) }));
-                                    setVisCounts(p => ({ ...p, [u.id]: (chD.visible || []).length + (stD.visible || []).length }));
+                                    if (chD) setVisData(p => ({ ...p, [u.id]: new Set(chD.visible || []) }));
+                                    if (stD) setVisStratData(p => ({ ...p, [u.id]: new Set(stD.visible || []) }));
+                                    if (chD && stD) {
+                                      setVisCounts(p => ({ ...p, [u.id]: (chD.visible || []).length + (stD.visible || []).length }));
+                                      setVisInitializedIds(prev => { const s = new Set(prev); s.add(u.id); return s; });
+                                    }
                                   });
                                 }
                               }}
@@ -5712,14 +5720,14 @@ function AdminPanel() {
                               {(() => {
                                 const cur = u;
                                 const baseStrats = [
-                                  { id: 'C1', name: 'C1' },
-                                  { id: 'C2', name: 'C2' },
-                                  { id: 'C3', name: 'C3' },
-                                  { id: 'DC', name: 'DC' },
+                                  { id: 'C1', name: '♠ C1 — Pique Noir' },
+                                  { id: 'C2', name: '♥ C2 — Cœur Rouge' },
+                                  { id: 'C3', name: '♦ C3 — Carreau Doré' },
+                                  { id: 'DC', name: '♣ DC — Double Canal' },
                                 ];
-                                const customStrats = strategies.filter(s => !s.is_pro_only);
+                                const customStrats = strategies.filter(s => !s.is_pro_only).map(s => ({ id: `S${s.id}`, name: `⚙ ${s.name} (S${s.id})` }));
                                 const proStrats = (cur && cur.is_pro)
-                                  ? strategies.filter(s => s.is_pro_only && s.owner_user_id === u.id)
+                                  ? strategies.filter(s => s.is_pro_only && s.owner_user_id === u.id).map(s => ({ id: `S${s.id}`, name: `⭐ ${s.name || 'Stratégie'} (S${s.id})` }))
                                   : [];
                                 const allStrats = [...baseStrats, ...customStrats, ...proStrats];
                                 const assignedS = visStratData[u.id] || new Set();
@@ -5801,8 +5809,8 @@ function AdminPanel() {
                               <button
                                 className="btn btn-gold btn-sm"
                                 onClick={() => saveVisibility(u.id)}
-                                disabled={savingVis}
-                              >{savingVis ? '⏳ Enregistrement…' : '💾 Enregistrer'}</button>
+                                disabled={savingVis || !visInitializedIds.has(u.id)}
+                              >{savingVis ? '⏳ Enregistrement…' : !visInitializedIds.has(u.id) ? '⏳ Chargement…' : '💾 Enregistrer'}</button>
                             </div>
                           </td>
                         </tr>
