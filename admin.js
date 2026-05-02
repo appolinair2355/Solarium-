@@ -438,7 +438,7 @@ function validateStrategyBody(body) {
   }
 
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -447,10 +447,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -547,7 +547,9 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee   = mode === 'lecture_passee';
     const isIntelligent     = mode === 'intelligent_cartes';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent) ? null : normalizeMappings(mappings);
+    const isCarteValeur     = mode === 'carte_valeur';
+    const isUnionEnseignes  = mode === 'union_enseignes';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -602,6 +604,12 @@ router.post('/strategies', requireAdmin, async (req, res) => {
             intelligent_categories: Array.isArray(req.body.intelligent_categories)
               ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
               : ['suit'] }
+        : isCarteValeur
+        ? { threshold: 1, mode: 'carte_valeur', mappings: null }
+        : isUnionEnseignes
+        ? { threshold: 1, mode: 'union_enseignes', mappings: null,
+            multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
+            union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -646,7 +654,9 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee   = mode === 'lecture_passee';
     const isIntelligent     = mode === 'intelligent_cartes';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent) ? null : normalizeMappings(mappings);
+    const isCarteValeur     = mode === 'carte_valeur';
+    const isUnionEnseignes  = mode === 'union_enseignes';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -698,6 +708,12 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
             intelligent_categories: Array.isArray(req.body.intelligent_categories)
               ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
               : ['suit'] }
+        : isCarteValeur
+        ? { threshold: 1, mode: 'carte_valeur', mappings: null }
+        : isUnionEnseignes
+        ? { threshold: 1, mode: 'union_enseignes', mappings: null,
+            multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
+            union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',

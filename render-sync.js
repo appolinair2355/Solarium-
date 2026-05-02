@@ -247,32 +247,54 @@ async function _pullFromExternal() {
   try {
     // 1. Importer les utilisateurs
     const usersRes = await _query('SELECT * FROM users_export');
+    let usersImported = 0;
     for (const u of usersRes.rows) {
       try {
         await db.pool.query(`
           INSERT INTO users (id, username, email, first_name, last_name, is_admin, is_approved,
-            subscription_expires_at, subscription_duration_minutes, created_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            subscription_expires_at, subscription_duration_minutes, created_at,
+            password_hash, account_type, is_premium, is_pro, promo_code,
+            referrer_user_id, referral_bonus_used, bonus_minutes_earned)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
           ON CONFLICT (id) DO UPDATE SET
-            subscription_expires_at      = EXCLUDED.subscription_expires_at,
-            subscription_duration_minutes= EXCLUDED.subscription_duration_minutes,
-            is_approved                  = EXCLUDED.is_approved,
-            first_name                   = EXCLUDED.first_name,
-            last_name                    = EXCLUDED.last_name
+            subscription_expires_at       = EXCLUDED.subscription_expires_at,
+            subscription_duration_minutes = EXCLUDED.subscription_duration_minutes,
+            is_approved                   = EXCLUDED.is_approved,
+            first_name                    = EXCLUDED.first_name,
+            last_name                     = EXCLUDED.last_name,
+            account_type                  = EXCLUDED.account_type,
+            is_premium                    = EXCLUDED.is_premium,
+            is_pro                        = EXCLUDED.is_pro,
+            promo_code                    = COALESCE(users.promo_code, EXCLUDED.promo_code),
+            bonus_minutes_earned          = EXCLUDED.bonus_minutes_earned
         `, [u.id, u.username, u.email, u.first_name, u.last_name,
             u.is_admin, u.is_approved, u.subscription_expires_at,
-            u.subscription_duration_minutes, u.created_at]);
-      } catch {}
+            u.subscription_duration_minutes, u.created_at,
+            '$imported$', u.account_type || 'simple', u.is_premium || false, u.is_pro || false,
+            u.promo_code, u.referrer_user_id, u.referral_bonus_used || false, u.bonus_minutes_earned || 0]);
+        usersImported++;
+      } catch (e) {
+        console.warn(`[RenderSync] Import user ${u.username} échoué:`, e.message);
+      }
     }
-    if (usersRes.rows.length) console.log(`[RenderSync] ← ${usersRes.rows.length} utilisateur(s) importé(s)`);
+    if (usersImported) console.log(`[RenderSync] ← ${usersImported} utilisateur(s) importé(s)`);
 
     // 2. Importer les stratégies
-    const stratRes = await _query('SELECT data FROM strategies_export LIMIT 1');
-    if (stratRes.rows.length && stratRes.rows[0].data) {
+    const stratRes = await _query('SELECT data FROM strategies_export ORDER BY id');
+    if (stratRes.rows.length) {
       const existing = await db.getSetting('custom_strategies');
       if (!existing || existing === '[]') {
-        await db.setSetting('custom_strategies', stratRes.rows[0].data);
-        console.log('[RenderSync] ← Stratégies importées');
+        const customStrats = [];
+        for (const row of stratRes.rows) {
+          try {
+            const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+            if (parsed && parsed.kind !== 'pro') customStrats.push(parsed);
+          } catch {}
+        }
+        if (customStrats.length) {
+          await db.setSetting('custom_strategies', JSON.stringify(customStrats));
+          console.log(`[RenderSync] ← ${customStrats.length} stratégie(s) importée(s)`);
+        }
       }
     }
 

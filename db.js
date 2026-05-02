@@ -209,14 +209,14 @@ async function initDB() {
         ['buzzinfluence', 'admin@baccarat.pro', hash]
       );
     }
-    // Compte super admin : sossoukouam@gmail.com (admin_level=1)
+    // Compte super admin : sossoukouam (admin_level=1)
     {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2026', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
          VALUES ($1, $2, $3, TRUE, TRUE, 1)
-         ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 1`,
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, email = EXCLUDED.email, is_admin = TRUE, is_approved = TRUE, admin_level = 1`,
         ['sossoukouam', 'sossoukouam@gmail.com', hash]
       );
     }

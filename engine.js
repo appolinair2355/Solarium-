@@ -2596,47 +2596,83 @@ class Engine {
 
     } else if (mode === 'carte_valeur') {
       // ── MODE CARTE VALEUR ────────────────────────────────────────────────
-      // Sur une fenêtre glissante de B jeux, compte combien de fois chaque
-      // COSTUME apparaît parmi les cartes de valeur "hautes" (A, K, Q, J, 10, 9, 8, 7, 6)
-      // de la main configurée.
-      // Quand exactement UN costume a count=0 dans la fenêtre → prédit ce costume (via mappings).
+      // Suit le NOMBRE D'APPARITIONS de chaque VALEUR (A, K, Q, J, 10, 9, 8, 7, 6)
+      // dans la main configurée (joueur ou banquier) — CUMULATIF (pas de fenêtre glissante).
+      // Réinitialise TOUS les compteurs dès que toutes les valeurs ont count > 0.
+      // Déclenche une alerte quand exactement UNE valeur a count = 0 (toutes les autres > 0).
+      // Pas de rattrapage, pas de décalage, pas de mappings — mode notification informatif.
       // ─────────────────────────────────────────────────────────────────────
-      // Rangs suivis (notation 0=A, 1=A, 6-10, 11=J, 12=Q, 13=K)
-      const TRACKED_RANKS = new Set([0, 1, 6, 7, 8, 9, 10, 11, 12, 13]);
-      if (!state._cvWindow)       state._cvWindow = [];       // historique par jeu
-      if (!state._cvSuitCounts)   state._cvSuitCounts = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+      const CV_VALUES  = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6'];
+      const CV_RANK_MAP = { 0:'A', 1:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6' };
 
-      // Collecter les costumes des cartes de valeur de ce jeu
+      if (!state._cvValueCounts) {
+        state._cvValueCounts = {};
+        for (const v of CV_VALUES) state._cvValueCounts[v] = 0;
+      }
+
+      // Identifier les valeurs présentes dans la main choisie pour ce jeu
       const handCardsNow = cfg.hand === 'banquier' ? bCards : pCards;
-      const suitsThisGame = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+      const appearedValues = new Set();
       for (const c of (handCardsNow || [])) {
-        const rank = parseInt(c.R);
-        const s    = (c.S || '').trim();
-        if (!TRACKED_RANKS.has(rank) || !ALL_SUITS.includes(s)) continue;
-        suitsThisGame[s] = (suitsThisGame[s] || 0) + 1;
+        const vName = CV_RANK_MAP[parseInt(c.R)];
+        if (vName) appearedValues.add(vName);
       }
 
-      // Ajouter ce jeu dans la fenêtre et mettre à jour les compteurs globaux
-      state._cvWindow.push(suitsThisGame);
-      for (const s of ALL_SUITS) state._cvSuitCounts[s] = (state._cvSuitCounts[s] || 0) + (suitsThisGame[s] || 0);
-
-      // Retirer le jeu le plus ancien si la fenêtre dépasse B
-      if (state._cvWindow.length > B) {
-        const old = state._cvWindow.shift();
-        for (const s of ALL_SUITS) state._cvSuitCounts[s] = Math.max(0, (state._cvSuitCounts[s] || 0) - (old[s] || 0));
+      // Incrémenter les compteurs pour chaque valeur apparue
+      for (const v of appearedValues) {
+        state._cvValueCounts[v] = (state._cvValueCounts[v] || 0) + 1;
       }
 
-      // N'évaluer qu'une fois la fenêtre remplie
-      if (state._cvWindow.length < B) {
-        console.log(`[${channelId}] [CarteValeur] Remplissage fenêtre ${state._cvWindow.length}/${B}`);
+      // Vérifier si TOUTES les valeurs ont count > 0 → réinitialiser pour nouveau cycle
+      const allPresent = CV_VALUES.every(v => (state._cvValueCounts[v] || 0) > 0);
+      if (allPresent) {
+        console.log(`[${channelId}] [CarteValeur] Cycle complet — toutes les valeurs vues → remise à zéro`);
+        for (const v of CV_VALUES) state._cvValueCounts[v] = 0;
       } else {
-        const zeroSuits = ALL_SUITS.filter(s => (state._cvSuitCounts[s] || 0) === 0);
-        console.log(`[${channelId}] [CarteValeur] Counts: ${ALL_SUITS.map(s => `${s}=${state._cvSuitCounts[s]}`).join(' ')} | zéros=[${zeroSuits.join(',')}]`);
-        if (zeroSuits.length === 1) {
-          const missingSuit = zeroSuits[0];
-          const ps = resolvePredictedSuit(missingSuit) || missingSuit;
-          console.log(`[${channelId}] [CarteValeur] Seul ${missingSuit} absent → prédit ${ps} jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, ps, missingSuit);
+        // Vérifier si exactement UNE valeur est absente (count = 0)
+        const zeroValues = CV_VALUES.filter(v => (state._cvValueCounts[v] || 0) === 0);
+        console.log(`[${channelId}] [CarteValeur] Counts: ${CV_VALUES.map(v => `${v}=${state._cvValueCounts[v]||0}`).join(' ')} | absentes=[${zeroValues.join(',')}]`);
+
+        if (zeroValues.length === 1 && Object.keys(state.pending).length === 0) {
+          const missingValue = zeroValues[0];
+
+          if (!(await canEmitNewPrediction(channelId))) {
+            console.log(`[${channelId}] [CarteValeur] Bloqué — prédiction récente dans la fenêtre`);
+          } else if (!(await this._isOwnerActive(cfg))) {
+            console.log(`[${channelId}] [CarteValeur] Bloqué — abonnement expiré`);
+          } else {
+            const handDisplay = cfg.hand === 'banquier' ? 'Banquier' : 'Joueur';
+            // Template Telegram spécial — format carte valeur
+            const cvTemplate = `🃏 Carte Valeur\n━━━━━━━━━━━━━━━━━━\n🔍 Manque de la valeur : ${missingValue}\n👤 Main choisir : ${handDisplay}\n📊 Valeur absente du jeu:\n🎮 Au jeu: {game}`;
+            const cvTgOpts  = { ...stratTgOpts, tg_template: cvTemplate };
+
+            console.log(`[${channelId}] [CarteValeur] Alerte — valeur absente: ${missingValue} jeu #${gn}`);
+            let inserted = false;
+            try {
+              inserted = await db.createPrediction({ strategy: channelId, game_number: gn, predicted_suit: missingValue, triggered_by: missingValue });
+            } catch (e) { console.error(`[${channelId}] createPrediction carte_valeur:`, e.message); }
+
+            if (inserted) {
+              // Alerte informative → résolution immédiate comme 'gagne' (notification envoyée = succès)
+              try {
+                await db.updatePrediction(
+                  { strategy: channelId, game_number: gn, predicted_suit: missingValue, status_filter: 'en_cours' },
+                  { status: 'gagne', rattrapage: 0, resolved_at: new Date().toISOString() }
+                );
+              } catch (e) { console.warn(`[${channelId}] updatePrediction carte_valeur:`, e.message); }
+
+              // Envoyer Telegram avec format spécial carte valeur
+              if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+                await sendCustomAndStore(tg_targets, channelId, gn, missingValue, cvTgOpts).catch(e => {
+                  console.warn(`[${channelId}] ⚠️ Telegram carte_valeur custom: ${e?.message || e}`);
+                });
+              } else {
+                await sendToStrategyChannels(channelId, gn, missingValue, cvTgOpts).catch(e => {
+                  console.warn(`[${channelId}] ⚠️ Telegram carte_valeur routage: ${e?.message || e}`);
+                });
+              }
+            }
+          }
         }
       }
 
@@ -3113,6 +3149,12 @@ class Engine {
       delete state._lastIntelligentGo;
       if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
       if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
+      // Reset état interne mode carte_valeur
+      if (state._cvValueCounts) {
+        for (const v of ['A','K','Q','J','10','9','8','7','6']) state._cvValueCounts[v] = 0;
+      }
+      delete state._cvWindow;
+      delete state._cvSuitCounts;
       // Reset complet de l'état interne des scripts Pro (stock de prédictions à zéro)
       if (state.scriptState) {
         const cfg = state.config;
