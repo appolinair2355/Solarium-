@@ -1,0 +1,1312 @@
+/**
+ * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
+ */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+
+require('dotenv').config();
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const USE_PG = !!DB_URL;
+
+// Exporté pour que render-sync puisse détecter les boucles de sync
+const MAIN_DB_URL = DB_URL;
+
+let pgPool = null;
+if (USE_PG) {
+  const { Pool } = require('pg');
+  pgPool = new Pool({
+    connectionString: DB_URL,
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
+      ? { rejectUnauthorized: false }
+      : false,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPool.on('error', (err) => {
+    console.error('[DB] Erreur pool inattendue:', err.message);
+    _notifyAdminDbError(err.message).catch(() => {});
+  });
+}
+
+const jsondb = require('./jsondb');
+
+// ── Notification admin Telegram en cas de panne DB ───────────────────────────
+let _dbErrorNotifSent = 0;
+async function _notifyAdminDbError(errMsg) {
+  const now = Date.now();
+  if (now - _dbErrorNotifSent < 10 * 60 * 1000) return; // anti-spam : 1 notif / 10 min
+  _dbErrorNotifSent = now;
+  try {
+    const fetchFn = require('node-fetch');
+    const cfgRaw  = jsondb.getSetting ? jsondb.getSetting('bot_token') : null;
+    let token = process.env.BOT_TOKEN || null;
+    if (!token && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_token' LIMIT 1`);
+        token = r.rows[0]?.value || null;
+      } catch {}
+    }
+    let adminId = process.env.ADMIN_TG_ID || null;
+    if (!adminId && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_admin_tg_id' LIMIT 1`);
+        adminId = r.rows[0]?.value || null;
+      } catch {}
+    }
+    if (!token || !adminId) return;
+    const text = `⚠️ <b>ALERTE BASE DE DONNÉES</b>\n\nErreur PostgreSQL détectée :\n<code>${String(errMsg).slice(0, 300)}</code>\n\nLe système bascule en mode JSON local. Vérifiez la base de données ou fournissez un nouveau lien de connexion.\n\n⏰ ${new Date().toLocaleString('fr-FR')}`;
+    await fetchFn(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: adminId, text, parse_mode: 'HTML' }),
+    });
+  } catch {}
+}
+
+// ── Initialisation ─────────────────────────────────────────────────
+
+async function initDB() {
+  if (USE_PG) {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(80) UNIQUE NOT NULL,
+        email VARCHAR(120) UNIQUE,
+        password_hash VARCHAR(256) NOT NULL,
+        first_name TEXT,
+        last_name TEXT,
+        is_admin BOOLEAN DEFAULT FALSE,
+        is_approved BOOLEAN DEFAULT FALSE,
+        is_premium BOOLEAN DEFAULT FALSE,
+        subscription_expires_at TIMESTAMPTZ,
+        subscription_duration_minutes INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_duration_minutes INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 2;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plain_password TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'simple';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_code TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_user_id INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS show_counter_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
+      CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS payment_requests (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        plan_id TEXT NOT NULL,
+        plan_label TEXT,
+        amount_usd NUMERIC(10,2) NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        screenshot_data TEXT,
+        ai_analysis JSONB,
+        ai_temp_access_until TIMESTAMPTZ,
+        status TEXT DEFAULT 'awaiting_screenshot',
+        admin_note TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        referrer_bonus_minutes INTEGER DEFAULT 0,
+        discount_applied BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS payment_requests_user_idx ON payment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS payment_requests_status_idx ON payment_requests(status);
+
+      CREATE TABLE IF NOT EXISTS predictions (
+        id SERIAL PRIMARY KEY,
+        strategy VARCHAR(10) NOT NULL,
+        game_number INTEGER NOT NULL,
+        predicted_suit VARCHAR(5) NOT NULL,
+        triggered_by VARCHAR(5),
+        status VARCHAR(20) DEFAULT 'en_cours',
+        rattrapage INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ,
+        player_cards TEXT,
+        banker_cards TEXT,
+        UNIQUE(strategy, game_number, predicted_suit)
+      );
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS player_cards TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS banker_cards TEXT;
+      ALTER TABLE predictions ALTER COLUMN triggered_by TYPE TEXT;
+      ALTER TABLE predictions ALTER COLUMN predicted_suit TYPE TEXT;
+      ALTER TABLE predictions ALTER COLUMN strategy TYPE TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS hand TEXT DEFAULT 'joueur';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS prediction_type TEXT DEFAULT 'standard';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence INTEGER DEFAULT 100;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS decalage_applied INTEGER DEFAULT 1;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS source_file TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS suit_label TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+      CREATE TABLE IF NOT EXISTS telegram_config (
+        id SERIAL PRIMARY KEY,
+        channel_id TEXT NOT NULL UNIQUE,
+        channel_name TEXT,
+        enabled BOOLEAN DEFAULT TRUE,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      ALTER TABLE telegram_config ADD COLUMN IF NOT EXISTS channel_name TEXT;
+
+      CREATE TABLE IF NOT EXISTS user_channel_hidden (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
+        PRIMARY KEY(user_id, channel_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_channel_visible (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
+        PRIMARY KEY(user_id, channel_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_strategy_visible (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        strategy_id TEXT NOT NULL,
+        PRIMARY KEY(user_id, strategy_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tg_pred_messages (
+        strategy TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        predicted_suit TEXT NOT NULL,
+        channel_tg_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        bot_token TEXT,
+        tg_format INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (strategy, game_number, predicted_suit, channel_tg_id)
+      );
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS bot_token TEXT;
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_format INTEGER;
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_template TEXT;
+
+      CREATE TABLE IF NOT EXISTS custom_tg_formats (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        template TEXT NOT NULL,
+        parse_mode TEXT DEFAULT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_channel_routes (
+        strategy TEXT NOT NULL,
+        channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
+        PRIMARY KEY (strategy, channel_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS project_files (
+        file_path  TEXT PRIMARY KEY,
+        content    TEXT NOT NULL,
+        is_binary  BOOLEAN DEFAULT FALSE,
+        size_bytes INTEGER DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS deploy_logs (
+        id              SERIAL PRIMARY KEY,
+        source          TEXT NOT NULL,
+        hostname        TEXT,
+        env             TEXT,
+        files_written   INTEGER DEFAULT 0,
+        files_errors    INTEGER DEFAULT 0,
+        npm_install     TEXT,
+        build_status    TEXT,
+        status          TEXT DEFAULT 'started',
+        log_text        TEXT,
+        duration_ms     INTEGER,
+        installed_at    TIMESTAMPTZ DEFAULT NOW(),
+        finished_at     TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_purchases (
+        id                  SERIAL PRIMARY KEY,
+        user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        strategy_id         TEXT NOT NULL,
+        strategy_name       TEXT NOT NULL,
+        amount_usd          NUMERIC(10,2) DEFAULT 75,
+        status              TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data     TEXT,
+        admin_note          TEXT,
+        admin_validated_by  INTEGER,
+        admin_validated_at  TIMESTAMPTZ,
+        zip_data            TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_purchases_user_idx   ON strategy_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS strategy_purchases_status_idx ON strategy_purchases(status);
+
+      CREATE TABLE IF NOT EXISTS strategy_licenses (
+        id              SERIAL PRIMARY KEY,
+        purchase_id     INTEGER REFERENCES strategy_purchases(id) ON DELETE CASCADE,
+        user_id         INTEGER,
+        strategy_id     TEXT,
+        strategy_name   TEXT,
+        license_key     TEXT UNIQUE NOT NULL,
+        status          TEXT DEFAULT 'active',
+        deploy_count    INTEGER DEFAULT 0,
+        last_ping_at    TIMESTAMPTZ,
+        first_ping_at   TIMESTAMPTZ,
+        deploy_ip       TEXT,
+        admin_note      TEXT,
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_licenses_key_idx      ON strategy_licenses(license_key);
+      CREATE INDEX IF NOT EXISTS strategy_licenses_purchase_idx ON strategy_licenses(purchase_id);
+    `);
+    // Compte admin secondaire : buzzinfluence (admin_level=2)
+    {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('arrow2025', 10);
+      await pgPool.query(
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 2)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
+        ['buzzinfluence', 'admin@baccarat.pro', hash]
+      );
+    }
+    // Compte super admin : sossoukouam (admin_level=1)
+    {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('arrow2026', 10);
+      await pgPool.query(
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 1)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, email = EXCLUDED.email, is_admin = TRUE, is_approved = TRUE, admin_level = 1`,
+        ['sossoukouam', 'sossoukouam@gmail.com', hash]
+      );
+    }
+    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
+    console.log('✅ Base de données PostgreSQL initialisée');
+  } else {
+    const existing = jsondb.getUserByUsername('buzzinfluence');
+    if (!existing) {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('arrow2025', 10);
+      jsondb.createUser({
+        username: 'buzzinfluence',
+        email: 'admin@baccarat.pro',
+        password_hash: hash,
+        is_admin: true,
+        is_approved: true,
+        admin_level: 2,
+      });
+      console.log('✅ Compte admin créé: buzzinfluence');
+    } else if (!existing.admin_level) {
+      jsondb.updateUser(existing.id, { admin_level: 2 });
+      console.log('✅ admin_level mis à jour: buzzinfluence');
+    }
+    console.log('✅ Base de données JSON locale initialisée');
+  }
+}
+
+// Ré-initialise uniquement les mots de passe admin — appelé après chaque sync externe
+// pour garantir qu'aucune opération de sync ne corrompt les comptes admin.
+async function reinitAdmins() {
+  if (!USE_PG || !pgPool) return;
+  try {
+    const bcrypt = require('bcryptjs');
+    const h1 = await bcrypt.hash('arrow2025', 10);
+    const h2 = await bcrypt.hash('arrow2026', 10);
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,2)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
+      ['buzzinfluence', 'admin@baccarat.pro', h1]
+    );
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,1)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, email=EXCLUDED.email, is_admin=TRUE, is_approved=TRUE, admin_level=1`,
+      ['sossoukouam', 'sossoukouam@gmail.com', h2]
+    );
+  } catch (e) {
+    console.warn('[DB] Erreur reinitAdmins:', e.message);
+  }
+}
+
+const pool = pgPool;
+
+// ── USERS ──────────────────────────────────────────────────────────
+
+async function getUser(id) {
+  if (USE_PG) { const r = await pgPool.query('SELECT * FROM users WHERE id = $1', [id]); return r.rows[0] || null; }
+  return jsondb.getUser(id);
+}
+
+async function getUserByLogin(login) {
+  if (USE_PG) { const r = await pgPool.query('SELECT * FROM users WHERE username = $1 OR email = $1', [login.trim()]); return r.rows[0] || null; }
+  return jsondb.getUserByLogin(login);
+}
+
+async function getUserByUsername(username) {
+  if (USE_PG) { const r = await pgPool.query('SELECT * FROM users WHERE username = $1', [username]); return r.rows[0] || null; }
+  return jsondb.getUserByUsername(username);
+}
+
+async function getAllUsers() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, account_type, subscription_expires_at, subscription_duration_minutes, created_at, allowed_modes, allowed_channels, show_counter_channels, last_seen, is_banned, plain_password FROM users ORDER BY created_at DESC'
+    );
+    return r.rows;
+  }
+  return jsondb.getAllUsers().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+async function getProUsers() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT id, username, email, first_name, last_name, is_pro, is_approved, subscription_expires_at
+       FROM users WHERE is_pro = TRUE AND is_approved = TRUE ORDER BY username`
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  return all.filter(u => u.is_pro && u.is_approved);
+}
+
+async function createUser(data) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id, profile_photo, language)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       ON CONFLICT (username) DO UPDATE SET
+         password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
+         last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
+         is_premium = EXCLUDED.is_premium,
+         subscription_expires_at = EXCLUDED.subscription_expires_at, subscription_duration_minutes = EXCLUDED.subscription_duration_minutes,
+         plain_password = COALESCE(EXCLUDED.plain_password, users.plain_password),
+         profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo)
+       RETURNING *`,
+      [data.username, data.email || null, data.password_hash, data.first_name || null, data.last_name || null,
+       data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
+       data.subscription_duration_minutes || null, data.plain_password || null,
+       data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null,
+       data.profile_photo || null, data.language || 'fr']
+    );
+    return r.rows[0];
+  }
+  if (jsondb.usernameTaken(data.username)) throw Object.assign(new Error('username taken'), { code: '23505', field: 'username' });
+  if (data.email && jsondb.emailTaken(data.email)) throw Object.assign(new Error('email taken'), { code: '23505', field: 'email' });
+  return jsondb.createUser(data);
+}
+
+async function updateUser(id, updates) {
+  if (USE_PG) {
+    const sets = []; const vals = []; let i = 1;
+    for (const [k, v] of Object.entries(updates)) { sets.push(`${k} = $${i++}`); vals.push(v); }
+    vals.push(id);
+    const r = await pgPool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+    return r.rows[0] || null;
+  }
+  return jsondb.updateUser(id, updates);
+}
+
+async function deleteUser(id) {
+  if (USE_PG) { await pgPool.query('DELETE FROM users WHERE id = $1', [id]); return true; }
+  return jsondb.deleteUser(id);
+}
+
+async function updateLastSeen(userId) {
+  try {
+    if (USE_PG) {
+      await pgPool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [userId]);
+    } else {
+      jsondb.updateUser(userId, { last_seen: new Date().toISOString() });
+    }
+  } catch {}
+}
+
+async function banInactiveUsers(hoursThreshold = 48) {
+  const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `DELETE FROM users
+       WHERE is_admin = FALSE AND is_approved = TRUE
+         AND last_seen IS NOT NULL AND last_seen < $1
+       RETURNING id, username, last_seen`,
+      [cutoff.toISOString()]
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  const deleted = [];
+  for (const u of all) {
+    if (!u.is_admin && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
+      jsondb.deleteUser(u.id);
+      deleted.push(u);
+    }
+  }
+  return deleted;
+}
+
+// ── PREDICTIONS ────────────────────────────────────────────────────
+
+async function getPredictions(opts = {}) {
+  if (USE_PG) {
+    const { strategy, status, limit = 100 } = opts;
+    const conds = []; const vals = [];
+    if (strategy) { conds.push(`strategy = $${vals.length + 1}`); vals.push(strategy); }
+    if (status)   { conds.push(`status = $${vals.length + 1}`);   vals.push(status); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    const r = await pgPool.query(`SELECT * FROM predictions ${where} ORDER BY created_at DESC LIMIT ${parseInt(limit) || 100}`, vals);
+    return r.rows;
+  }
+  return jsondb.getPredictions(opts);
+}
+
+async function createPrediction(data) {
+  if (USE_PG) {
+    try {
+      const r = await pgPool.query(
+        `INSERT INTO predictions (
+           strategy, game_number, predicted_suit, triggered_by,
+           hand, prediction_type, confidence, decalage_applied, extra_data, source_file, suit_label, display_name
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
+        [
+          data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null,
+          data.hand || 'joueur',
+          data.prediction_type || 'standard',
+          data.confidence !== undefined ? parseInt(data.confidence) : 100,
+          data.decalage_applied !== undefined ? parseInt(data.decalage_applied) : 1,
+          data.extra_data ? JSON.stringify(data.extra_data) : '{}',
+          data.source_file || null,
+          data.suit_label || null,
+          data.display_name || null,
+        ]
+      );
+      return r.rowCount > 0;
+    } catch (e) { console.error('createPrediction error:', e.message); return false; }
+  }
+  return jsondb.createPrediction(data);
+}
+
+async function updatePrediction(filter, updates) {
+  if (USE_PG) {
+    const { strategy, game_number, predicted_suit, status_filter } = filter;
+    const { status, rattrapage, resolved_at, player_cards, banker_cards } = updates;
+    await pgPool.query(
+      `UPDATE predictions SET status=$1, rattrapage=$2, resolved_at=$3, player_cards=$4, banker_cards=$5
+       WHERE strategy=$6 AND game_number=$7 AND predicted_suit=$8 AND status=$9`,
+      [status, rattrapage, resolved_at || new Date().toISOString(),
+       player_cards ? JSON.stringify(player_cards) : null,
+       banker_cards ? JSON.stringify(banker_cards) : null,
+       strategy, game_number, predicted_suit, status_filter || 'en_cours']
+    );
+    return;
+  }
+  return jsondb.updatePrediction(filter, updates);
+}
+
+async function getPredictionStats() {
+  if (USE_PG) {
+    const r = await pgPool.query(`
+      SELECT strategy,
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status='gagne') as wins,
+        COUNT(*) FILTER (WHERE status='perdu') as losses,
+        COUNT(*) FILTER (WHERE status='en_cours') as pending
+      FROM predictions GROUP BY strategy ORDER BY strategy
+    `);
+    return r.rows;
+  }
+  return jsondb.getPredictionStats();
+}
+
+async function getMaxResolvedGame() {
+  if (USE_PG) {
+    const r = await pgPool.query(`SELECT COALESCE(MAX(game_number),0) AS mx FROM predictions WHERE status IN ('gagne','perdu')`);
+    return parseInt(r.rows[0]?.mx || 0);
+  }
+  return jsondb.getMaxResolvedGame();
+}
+
+async function expireAllEnCours() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `DELETE FROM predictions WHERE status IN ('en_cours','gagne','perdu','expire')`
+    );
+    return r.rowCount;
+  }
+  const preds = jsondb.getPredictions({ limit: 1000 });
+  let count = 0;
+  for (const p of preds) {
+    if (p.status === 'en_cours' || p.status === 'gagne' || p.status === 'perdu' || p.status === 'expire') count++;
+  }
+  jsondb.d().predictions = [];
+  jsondb.d().meta.next_pred_id = 1;
+  return count;
+}
+
+async function expireStaleByGame(threshold, maxR) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='perdu', rattrapage=$2, resolved_at=NOW() WHERE status='en_cours' AND game_number <= $1`,
+      [threshold, typeof maxR === 'number' ? maxR : 2]
+    );
+    return r.rowCount;
+  }
+  return jsondb.expireStaleByGame(threshold, maxR);
+}
+
+async function expireStaleByTime(minutesOld = 22) {
+  const mins = Math.max(1, parseInt(minutesOld) || 22);
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='expire', resolved_at=NOW()
+       WHERE status='en_cours' AND created_at < NOW() - ($1 || ' minutes')::interval`,
+      [String(mins)]
+    );
+    return r.rowCount;
+  }
+  minutesOld = mins;
+  const cutoff = Date.now() - minutesOld * 60 * 1000;
+  let count = 0;
+  const preds = jsondb.getPredictions({ status: 'en_cours', limit: 500 });
+  for (const p of preds) {
+    const created = new Date(p.created_at || 0).getTime();
+    if (created < cutoff) {
+      jsondb.updatePrediction(
+        { strategy: p.strategy, game_number: p.game_number, predicted_suit: p.predicted_suit, status_filter: 'en_cours' },
+        { status: 'expire', resolved_at: new Date().toISOString() }
+      );
+      count++;
+    }
+  }
+  return count;
+}
+
+// ── SETTINGS ───────────────────────────────────────────────────────
+
+async function getSetting(key) {
+  if (USE_PG) { const r = await pgPool.query(`SELECT value FROM settings WHERE key=$1`, [key]); return r.rows[0]?.value ?? null; }
+  return jsondb.getSetting(key);
+}
+
+async function setSetting(key, value) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO settings (key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [key, value]
+    );
+    return;
+  }
+  jsondb.setSetting(key, value);
+}
+
+async function deleteSetting(key) {
+  if (USE_PG) { await pgPool.query(`DELETE FROM settings WHERE key=$1`, [key]); return; }
+  jsondb.deleteSetting(key);
+}
+
+// ── TELEGRAM CONFIG ────────────────────────────────────────────────
+
+async function getTelegramConfigs(enabledOnly = false) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      enabledOnly
+        ? 'SELECT * FROM telegram_config WHERE enabled=TRUE ORDER BY updated_at DESC'
+        : 'SELECT * FROM telegram_config ORDER BY updated_at DESC'
+    );
+    return r.rows;
+  }
+  return jsondb.getTelegramConfigs(enabledOnly);
+}
+
+async function upsertTelegramConfig({ channel_id, channel_name }) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `INSERT INTO telegram_config (channel_id,channel_name,enabled,updated_at) VALUES($1,$2,TRUE,NOW())
+       ON CONFLICT (channel_id) DO UPDATE SET channel_name=EXCLUDED.channel_name, enabled=TRUE, updated_at=NOW()
+       RETURNING *`,
+      [channel_id, channel_name]
+    );
+    return r.rows[0];
+  }
+  return jsondb.upsertTelegramConfig({ channel_id, channel_name });
+}
+
+async function deleteTelegramConfig(id) {
+  if (USE_PG) { await pgPool.query('DELETE FROM telegram_config WHERE id=$1', [id]); return; }
+  jsondb.deleteTelegramConfig(id);
+}
+
+// ── USER CHANNEL HIDDEN (legacy) ───────────────────────────────────
+
+async function getHiddenChannels(userId) {
+  if (USE_PG) { const r = await pgPool.query('SELECT channel_id FROM user_channel_hidden WHERE user_id=$1', [userId]); return r.rows.map(r => r.channel_id); }
+  return jsondb.getHiddenChannels(userId);
+}
+
+async function setHiddenChannels(userId, channelIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM user_channel_hidden WHERE user_id=$1', [userId]);
+    for (const cid of channelIds) {
+      await pgPool.query('INSERT INTO user_channel_hidden (user_id,channel_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [userId, cid]);
+    }
+    return;
+  }
+  jsondb.setHiddenChannels(userId, channelIds);
+}
+
+// ── USER CHANNEL VISIBLE (opt-in) ─────────────────────────────────
+
+const _visibleStore = new Map();
+
+async function getVisibleChannels(userId) {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT channel_id FROM user_channel_visible WHERE user_id=$1', [userId]);
+    return r.rows.map(r => r.channel_id);
+  }
+  return _visibleStore.get(userId) || [];
+}
+
+async function setVisibleChannels(userId, channelIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM user_channel_visible WHERE user_id=$1', [userId]);
+    for (const cid of channelIds) {
+      await pgPool.query('INSERT INTO user_channel_visible (user_id,channel_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [userId, cid]);
+    }
+    return;
+  }
+  _visibleStore.set(userId, [...channelIds]);
+}
+
+// ── USER STRATEGY VISIBLE ──────────────────────────────────────────
+
+async function getVisibleStrategies(userId) {
+  if (USE_PG) {
+    // Priorité : allowed_channels sur le compte (géré depuis le panneau en ligne)
+    const uRes = await pgPool.query('SELECT allowed_channels FROM users WHERE id=$1', [userId]);
+    const u = uRes.rows[0];
+    if (u && Array.isArray(u.allowed_channels) && u.allowed_channels.length > 0) {
+      return u.allowed_channels;
+    }
+    // Fallback : table user_strategy_visible (ancienne méthode)
+    const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
+    return r.rows.map(r => r.strategy_id);
+  }
+  return [];
+}
+
+async function setVisibleStrategies(userId, strategyIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM user_strategy_visible WHERE user_id=$1', [userId]);
+    for (const sid of strategyIds) {
+      await pgPool.query(
+        'INSERT INTO user_strategy_visible (user_id,strategy_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
+        [userId, String(sid)]
+      );
+    }
+    return;
+  }
+}
+
+// ── STRATEGY CHANNEL ROUTES ────────────────────────────────────────
+
+async function getStrategyRoutes(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT tc.id, tc.channel_id AS tg_id, tc.channel_name
+       FROM strategy_channel_routes scr
+       JOIN telegram_config tc ON tc.id = scr.channel_id
+       WHERE scr.strategy = $1`,
+      [strategy]
+    );
+    return r.rows;
+  }
+  return [];
+}
+
+async function getAllStrategyRoutes() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT scr.strategy, tc.id, tc.channel_id AS tg_id, tc.channel_name
+       FROM strategy_channel_routes scr
+       JOIN telegram_config tc ON tc.id = scr.channel_id
+       ORDER BY scr.strategy`
+    );
+    const map = {};
+    for (const row of r.rows) {
+      if (!map[row.strategy]) map[row.strategy] = [];
+      map[row.strategy].push({ id: row.id, tg_id: row.tg_id, channel_name: row.channel_name });
+    }
+    return map;
+  }
+  return {};
+}
+
+async function setStrategyRoutes(strategy, channelDbIds) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM strategy_channel_routes WHERE strategy=$1', [strategy]);
+    for (const cid of channelDbIds) {
+      await pgPool.query(
+        'INSERT INTO strategy_channel_routes (strategy, channel_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
+        [strategy, parseInt(cid)]
+      );
+    }
+    return;
+  }
+}
+
+// ── TG PRED MESSAGE IDS ────────────────────────────────────────────
+
+const _tgMsgStore = new Map();
+
+async function clearAllTgPredMessages() {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM tg_pred_messages');
+  } else {
+    _tgMsgStore.clear();
+  }
+}
+
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat, tgTemplate) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format, tg_template)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format, tg_template = EXCLUDED.tg_template`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null, tgTemplate || null]
+    );
+    return;
+  }
+  const key = `${strategy}:${gameNumber}:${suit}`;
+  const list = _tgMsgStore.get(key) || [];
+  const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
+  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null, tg_template: tgTemplate || null };
+  if (idx !== -1) list[idx] = entry;
+  else list.push(entry);
+  _tgMsgStore.set(key, list);
+}
+
+async function getTgMsgIds(strategy, gameNumber, suit) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT channel_tg_id, message_id, bot_token, tg_format, tg_template FROM tg_pred_messages
+       WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
+      [strategy, gameNumber, suit]
+    );
+    return r.rows;
+  }
+  return _tgMsgStore.get(`${strategy}:${gameNumber}:${suit}`) || [];
+}
+
+// ── Custom TG Formats ─────────────────────────────────────────────────────
+
+async function getCustomFormats() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode, created_at FROM custom_tg_formats ORDER BY id`);
+  return r.rows;
+}
+
+async function saveCustomFormat({ name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO custom_tg_formats (name, template, parse_mode) VALUES ($1,$2,$3) RETURNING id, name, template, parse_mode, created_at`,
+    [name, template, parse_mode || null]
+  );
+  return r.rows[0];
+}
+
+async function updateCustomFormat(id, { name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE custom_tg_formats SET name=$2, template=$3, parse_mode=$4 WHERE id=$1 RETURNING id, name, template, parse_mode, created_at`,
+    [id, name, template, parse_mode || null]
+  );
+  return r.rows[0] || null;
+}
+
+async function deleteCustomFormat(id) {
+  if (!USE_PG) return;
+  await pgPool.query(`DELETE FROM custom_tg_formats WHERE id=$1`, [id]);
+}
+
+async function getCustomFormatById(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode FROM custom_tg_formats WHERE id=$1`, [id]);
+  return r.rows[0] || null;
+}
+
+async function deleteTgMsgIds(strategy, gameNumber, suit) {
+  if (USE_PG) {
+    await pgPool.query(
+      `DELETE FROM tg_pred_messages WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
+      [strategy, gameNumber, suit]
+    );
+    return;
+  }
+  _tgMsgStore.delete(`${strategy}:${gameNumber}:${suit}`);
+}
+
+async function getTgMsgIdsForStrategy(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token FROM tg_pred_messages WHERE strategy=$1`,
+      [strategy]
+    );
+    return r.rows;
+  }
+  const result = [];
+  for (const [key, val] of _tgMsgStore.entries()) {
+    if (key.startsWith(`${strategy}:`)) result.push(...val);
+  }
+  return result;
+}
+
+async function deleteTgMsgIdsForStrategy(strategy) {
+  if (USE_PG) {
+    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy=$1`, [strategy]);
+    return;
+  }
+  for (const key of [..._tgMsgStore.keys()]) {
+    if (key.startsWith(`${strategy}:`)) _tgMsgStore.delete(key);
+  }
+}
+
+async function deleteStrategyPredictions(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(`DELETE FROM predictions WHERE strategy=$1`, [strategy]);
+    return r.rowCount;
+  }
+  const data = require('./jsondb');
+  let count = 0;
+  if (data.d) {
+    const before = (data.d().predictions || []).length;
+    data.d().predictions = (data.d().predictions || []).filter(p => p.strategy !== strategy);
+    count = before - data.d().predictions.length;
+  }
+  return count;
+}
+
+async function deleteAllPredictions() {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM tg_pred_messages').catch(() => {});
+    const r = await pgPool.query('DELETE FROM predictions');
+    return r.rowCount;
+  }
+  const data = require('./jsondb');
+  let count = 0;
+  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
+  return count;
+}
+
+async function cleanupOldPredictions(daysOld = 3) {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(
+      `DELETE FROM predictions
+       WHERE status IN ('gagne','perdu','expire')
+         AND resolved_at < NOW() - INTERVAL '${parseInt(daysOld)} days'`
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[DB] cleanupOldPredictions error:', e.message);
+    return 0;
+  }
+}
+
+async function deleteExpiredPredictions() {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(`DELETE FROM predictions WHERE status='expire'`);
+    return r.rowCount;
+  } catch (e) { return 0; }
+}
+
+async function expireStrategyPredictions(strategy) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='perdu', resolved_at=NOW() WHERE status='en_cours' AND strategy=$1`,
+      [strategy]
+    );
+    return r.rowCount;
+  }
+  let count = 0;
+  const data = require('./jsondb');
+  for (const p of (data.d ? data.d().predictions : [])) {
+    if (p.status === 'en_cours' && p.strategy === strategy) {
+      Object.assign(p, { status: 'perdu', resolved_at: new Date().toISOString() });
+      count++;
+    }
+  }
+  if (count) try { require('./jsondb')._persist(); } catch {}
+  return count;
+}
+
+// ── ADMIN STATS ────────────────────────────────────────────────────
+
+async function getUserStats() {
+  if (USE_PG) {
+    const r = await pgPool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE NOT is_approved) as pending,
+        COUNT(*) FILTER (WHERE is_approved AND subscription_expires_at > NOW()) as active,
+        COUNT(*) FILTER (WHERE is_approved AND (subscription_expires_at IS NULL OR subscription_expires_at <= NOW())) as expired,
+        COUNT(*) as total
+      FROM users WHERE NOT is_admin
+    `);
+    return r.rows[0];
+  }
+  return jsondb.getUserStats();
+}
+
+// ── BILAN QUOTIDIEN ─────────────────────────────────────────────────
+
+async function getDailyBilanStats(dateStr) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT strategy, COALESCE(rattrapage,0)::int AS rattrapage, status, COUNT(*)::int AS count
+       FROM predictions
+       WHERE resolved_at >= $1::date AND resolved_at < ($1::date + interval '1 day')
+         AND status IN ('gagne','perdu')
+       GROUP BY strategy, rattrapage, status
+       ORDER BY strategy, rattrapage`,
+      [dateStr]
+    );
+    return r.rows;
+  }
+  const all = jsondb.getPredictions({});
+  const start = new Date(dateStr);
+  const end   = new Date(dateStr); end.setDate(end.getDate() + 1);
+  const rows  = all.filter(p =>
+    ['gagne','perdu'].includes(p.status) && p.resolved_at &&
+    new Date(p.resolved_at) >= start && new Date(p.resolved_at) < end
+  );
+  const map = {};
+  for (const p of rows) {
+    const key = `${p.strategy}__${p.rattrapage ?? 0}__${p.status}`;
+    if (!map[key]) map[key] = { strategy: p.strategy, rattrapage: parseInt(p.rattrapage) || 0, status: p.status, count: 0 };
+    map[key].count++;
+  }
+  return Object.values(map).sort((a, b) => a.strategy.localeCompare(b.strategy) || a.rattrapage - b.rattrapage);
+}
+
+async function saveBilanSnapshot(dateStr, data) {
+  const payload = JSON.stringify({ date: dateStr, data, generated_at: new Date().toISOString() });
+  await setSetting('bilan_last', payload);
+}
+
+async function getLastBilanSnapshot() {
+  try {
+    const v = await getSetting('bilan_last');
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+
+// ── PROJECT FILES ───────────────────────────────────────────────────
+
+async function upsertProjectFile(filePath, content, isBinary = false) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO project_files (file_path, content, is_binary, size_bytes, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (file_path) DO UPDATE SET content = EXCLUDED.content, is_binary = EXCLUDED.is_binary, size_bytes = EXCLUDED.size_bytes, updated_at = NOW()`,
+      [filePath, content, isBinary, Buffer.byteLength(content, 'utf8')]
+    );
+    return;
+  }
+}
+
+async function getAllProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, content, is_binary, size_bytes, updated_at FROM project_files ORDER BY file_path');
+    return r.rows;
+  }
+  return [];
+}
+
+async function getProjectFileMeta() {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, size_bytes, updated_at FROM project_files');
+    const map = {};
+    for (const row of r.rows) map[row.file_path] = { size_bytes: row.size_bytes, updated_at: row.updated_at };
+    return map;
+  }
+  return {};
+}
+
+async function deleteProjectFile(filePath) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM project_files WHERE file_path = $1', [filePath]);
+    return;
+  }
+}
+
+async function clearProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('DELETE FROM project_files');
+    return r.rowCount;
+  }
+  return 0;
+}
+
+// ── DEPLOY LOGS ─────────────────────────────────────────────────────
+
+async function createDeployLog(data) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO deploy_logs (source, hostname, env, status, installed_at)
+     VALUES ($1, $2, $3, 'started', NOW()) RETURNING id`,
+    [data.source || 'unknown', data.hostname || null, data.env || null]
+  );
+  return r.rows[0]?.id || null;
+}
+
+async function updateDeployLog(id, data) {
+  if (!USE_PG || !id) return;
+  await pgPool.query(
+    `UPDATE deploy_logs SET
+       files_written = COALESCE($1, files_written),
+       files_errors  = COALESCE($2, files_errors),
+       npm_install   = COALESCE($3, npm_install),
+       build_status  = COALESCE($4, build_status),
+       status        = COALESCE($5, status),
+       log_text      = COALESCE($6, log_text),
+       duration_ms   = COALESCE($7, duration_ms),
+       finished_at   = COALESCE($8, finished_at)
+     WHERE id = $9`,
+    [
+      data.files_written  ?? null,
+      data.files_errors   ?? null,
+      data.npm_install    ?? null,
+      data.build_status   ?? null,
+      data.status         ?? null,
+      data.log_text       ?? null,
+      data.duration_ms    ?? null,
+      data.finished_at    ?? null,
+      id,
+    ]
+  );
+}
+
+async function getDeployLogs(limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT id, source, hostname, env, files_written, files_errors,
+            npm_install, build_status, status, duration_ms,
+            installed_at, finished_at,
+            LEFT(log_text, 2000) AS log_preview
+     FROM deploy_logs
+     ORDER BY installed_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return r.rows;
+}
+
+// ── PROMO CODES & PAYMENT REQUESTS ──────────────────────────────────
+
+async function getUserByPromoCode(code) {
+  if (!code) return null;
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT * FROM users WHERE promo_code = $1 LIMIT 1', [code.trim().toUpperCase()]);
+    return r.rows[0] || null;
+  }
+  const all = jsondb.getAllUsers();
+  return all.find(u => (u.promo_code || '').toUpperCase() === code.trim().toUpperCase()) || null;
+}
+
+async function isPromoCodeTaken(code) {
+  const u = await getUserByPromoCode(code);
+  return !!u;
+}
+
+async function createPaymentRequest(data) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const r = await pgPool.query(
+    `INSERT INTO payment_requests (user_id, plan_id, plan_label, amount_usd, duration_minutes, status, discount_applied)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [data.user_id, data.plan_id, data.plan_label, data.amount_usd, data.duration_minutes,
+     data.status || 'awaiting_screenshot', data.discount_applied || false]
+  );
+  return r.rows[0];
+}
+
+async function updatePaymentRequest(id, updates) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const sets = ['updated_at = NOW()'];
+  const vals = []; let i = 1;
+  for (const [k, v] of Object.entries(updates)) {
+    if (k === 'ai_analysis' && typeof v !== 'string') {
+      sets.push(`${k} = $${i++}::jsonb`);
+      vals.push(JSON.stringify(v));
+    } else {
+      sets.push(`${k} = $${i++}`);
+      vals.push(v);
+    }
+  }
+  vals.push(id);
+  const r = await pgPool.query(`UPDATE payment_requests SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+  return r.rows[0] || null;
+}
+
+async function getPaymentRequest(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM payment_requests WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+async function getUserPaymentRequests(userId, limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    'SELECT id, plan_id, plan_label, amount_usd, duration_minutes, status, ai_temp_access_until, created_at, admin_validated_at FROM payment_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [userId, limit]
+  );
+  return r.rows;
+}
+
+async function getPendingPaymentRequests() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT pr.*, u.username, u.email, u.account_type, u.promo_code, u.referrer_user_id,
+            ref.username AS referrer_username, ref.promo_code AS referrer_promo_code
+     FROM payment_requests pr
+     JOIN users u ON u.id = pr.user_id
+     LEFT JOIN users ref ON ref.id = u.referrer_user_id
+     WHERE pr.status IN ('ai_validated', 'awaiting_screenshot', 'pending_admin')
+     ORDER BY pr.created_at DESC LIMIT 200`
+  );
+  return r.rows;
+}
+
+// ── Strategy Licenses ────────────────────────────────────────────────────────
+
+async function createLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO strategy_licenses (purchase_id, user_id, strategy_id, strategy_name, license_key)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [purchase_id, user_id, strategy_id, strategy_name, license_key]
+  );
+  return r.rows[0];
+}
+
+async function getLicenses() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     ORDER BY sl.created_at DESC`
+  );
+  return r.rows;
+}
+
+async function getLicenseByKey(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM strategy_licenses WHERE license_key=$1', [key]);
+  return r.rows[0] || null;
+}
+
+async function revokeLicense(key, note = null) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='revoked', admin_note=$1 WHERE license_key=$2 RETURNING *`,
+    [note, key]
+  );
+  return r.rows[0] || null;
+}
+
+async function activateLicense(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='active', admin_note=NULL WHERE license_key=$1 RETURNING *`,
+    [key]
+  );
+  return r.rows[0] || null;
+}
+
+async function pingLicense(key, ip = null) {
+  if (!USE_PG) return;
+  await pgPool.query(
+    `UPDATE strategy_licenses
+     SET last_ping_at  = NOW(),
+         first_ping_at = COALESCE(first_ping_at, NOW()),
+         deploy_count  = COALESCE(deploy_count, 0) + 1,
+         deploy_ip     = COALESCE($1, deploy_ip)
+     WHERE license_key = $2`,
+    [ip, key]
+  );
+}
+
+async function getStrategyLicenses(strategyId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     WHERE sl.strategy_id = $1
+     ORDER BY sl.created_at DESC`,
+    [String(strategyId)]
+  );
+  return r.rows;
+}
+
+async function getUserLicenses(userId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT * FROM strategy_licenses
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+  return r.rows;
+}
+
+module.exports = {
+  pool, USE_PG, MAIN_DB_URL, initDB, reinitAdmins,
+  getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
+  updateLastSeen, banInactiveUsers,
+  getUserByPromoCode, isPromoCodeTaken,
+  createPaymentRequest, updatePaymentRequest, getPaymentRequest,
+  getUserPaymentRequests, getPendingPaymentRequests,
+  createUser, updateUser, deleteUser,
+  getPredictions, createPrediction, updatePrediction,
+  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime, expireAllEnCours,
+  clearAllTgPredMessages,
+  getSetting, setSetting, deleteSetting,
+  getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
+  getHiddenChannels, setHiddenChannels,
+  getVisibleChannels, setVisibleChannels,
+  getVisibleStrategies, setVisibleStrategies,
+  getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
+  saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
+  getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
+  getUserStats,
+  getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
+  upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
+  createDeployLog, updateDeployLog, getDeployLogs,
+  getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
+  createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
+  getStrategyLicenses, getUserLicenses,
+};

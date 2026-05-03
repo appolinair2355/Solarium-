@@ -1,0 +1,44 @@
+{
+  "type": "code",
+  "data": {
+    "files": [
+      {
+        "comment": "1. Corriger la validation backend — accepter le mode aleatoire sans mapping/seuil",
+        "path": "admin.js",
+        "find": "  if (mode === 'relance') {\n    const rules = Array.isArray(body.relance_rules) ? body.relance_rules : [];\n    if (rules.length < 1) return 'Au moins 1 stratégie source requise pour les séquences de relance';\n    return null;\n  }",
+        "replace": "  if (mode === 'relance') {\n    const rules = Array.isArray(body.relance_rules) ? body.relance_rules : [];\n    if (rules.length < 1) return 'Au moins 1 stratégie source requise pour les séquences de relance';\n    return null;\n  }\n\n  if (mode === 'aleatoire') {\n    return null;\n  }"
+      },
+      {
+        "comment": "2. Masquer 'Main à surveiller' pour aleatoire",
+        "path": "src/pages/Admin.jsx",
+        "find": "                {/* Main à surveiller : Joueur / Banquier */}\n                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && (",
+        "replace": "                {/* Main à surveiller : Joueur / Banquier */}\n                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && ("
+      },
+      {
+        "comment": "3. Masquer 'Jeu à prédire' (prediction_offset) pour aleatoire",
+        "path": "src/pages/Admin.jsx",
+        "find": "                {/* Numéro à prédire (+1, +2, ...) */}\n                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && <div style={{ gridColumn: '1 / -1' }}>",
+        "replace": "                {/* Numéro à prédire (+1, +2, ...) */}\n                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <div style={{ gridColumn: '1 / -1' }}>"
+      },
+      {
+        "comment": "4. Masquer le titre SECTION 4 MAPPINGS pour aleatoire",
+        "path": "src/pages/Admin.jsx",
+        "find": "              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && (\n              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>\n                <span style={{ fontSize: 13 }}>🗺️</span>\n                <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>\n              </div>\n              )}",
+        "replace": "              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && (\n              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>\n                <span style={{ fontSize: 13 }}>🗺️</span>\n                <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>\n              </div>\n              )}"
+      },
+      {
+        "comment": "5. Masquer les presets et mappings pour aleatoire",
+        "path": "src/pages/Admin.jsx",
+        "find": "              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance */}\n              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && <div style={{ marginTop: 0 }}>",
+        "replace": "              {/* Presets de combinaison — masqué pour absence_apparition, taux_miroir, relance, aleatoire */}\n              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={{ marginTop: 0 }}>"
+      },
+      {
+        "comment": "6. Masquer SECTION 5 EXCEPTIONS pour aleatoire",
+        "path": "src/pages/Admin.jsx",
+        "find": "              {/* ══════════════ SECTION 5 — EXCEPTIONS ══════════════ */}\n              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && <>",
+        "replace": "              {/* ══════════════ SECTION 5 — EXCEPTIONS ══════════════ */}\n              {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <>"
+      }
+    ],
+    "rebuild": true
+  }
+}
