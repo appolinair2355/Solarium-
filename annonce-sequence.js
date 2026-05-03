@@ -235,4 +235,14 @@ function resetState(stratId) {
   console.log(`[AnnonceSeq] État S${stratId} réinitialisé`);
 }
 
-module.exports = { startAnnonceSequenceScheduler, stopAnnonceSequenceScheduler, sendNow, resetState };
+/**
+ * Retourne l'index courant de la rotation pour un rotateur donné.
+ * Utilisé par le moteur de prédiction pour déléguer à la bonne stratégie enfant.
+ */
+function getActiveStrategyIndex(stratId) {
+  const key = String(stratId);
+  if (!_state[key]?.initialized) return 0;
+  return _state[key].currentIndex ?? 0;
+}
+
+module.exports = { startAnnonceSequenceScheduler, stopAnnonceSequenceScheduler, sendNow, resetState, getActiveStrategyIndex };

@@ -2199,6 +2199,36 @@ class Engine {
     const offset   = Math.max(1, parseInt(prediction_offset) || 1);
     const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
 
+    // ── MODE ROTATION (annonce_sequence) ─────────────────────────────────────
+    // Délègue la logique de prédiction à la stratégie enfant actuellement active
+    // selon l'index de rotation géré par annonce-sequence.js.
+    if (mode === 'annonce_sequence') {
+      const annonceSeq = require('./annonce-sequence');
+      const seqIds = Array.isArray(cfg.annonce_sequence_ids) ? cfg.annonce_sequence_ids : [];
+      if (seqIds.length === 0) return;
+      const allStrats = Object.values(this.custom).map(s => s.config).filter(Boolean);
+      const ordered   = seqIds.map(sid => allStrats.find(s => String(s.id) === String(sid))).filter(Boolean);
+      if (ordered.length === 0) return;
+      const activeIdx = annonceSeq.getActiveStrategyIndex(id) % ordered.length;
+      const childCfg  = ordered[activeIdx];
+      console.log(`[${channelId}] [Rotation] Délégation → "${childCfg.name}" (pos ${activeIdx + 1}/${ordered.length})`);
+      // Fusionner config : utiliser la logique de l'enfant mais garder l'identité
+      // (channelId, tg_targets) du rotateur, sauf si l'enfant a ses propres targets.
+      const mergedCfg = {
+        ...childCfg,
+        id:            cfg.id,
+        name:          cfg.name,
+        tg_targets:    (Array.isArray(cfg.tg_targets) && cfg.tg_targets.length > 0)
+                         ? cfg.tg_targets
+                         : (childCfg.tg_targets || []),
+        max_rattrapage: cfg.max_rattrapage ?? childCfg.max_rattrapage,
+        tg_format:     cfg.tg_format || childCfg.tg_format,
+      };
+      // Remettre gn en état non-traité pour que la passe récursive l'exécute
+      state.processed.delete(gn);
+      return await this._processCustomStrategy(id, state, mergedCfg, gn, suits, bSuits, pCards, bCards, winner);
+    }
+
     const emitPrediction = async (next, ps, suit) => {
       // ── Bloque l'émission si une prédiction est encore en attente ─
       if (Object.keys(state.pending).length > 0) {
@@ -2756,7 +2786,7 @@ class Engine {
       //   • La valeur apparaît enfin → édite message avec ✅ final, remet à zéro
       // ─────────────────────────────────────────────────────────────────────
       const CV_VALUES   = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6'];
-      const CV_RANK_MAP = { 0:'A', 1:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6' };
+      const CV_RANK_MAP = { 0:'A', 1:'A', 14:'A', 13:'K', 12:'Q', 11:'J', 10:'10', 9:'9', 8:'8', 7:'7', 6:'6' };
 
       if (!state._cvValueCounts) {
         state._cvValueCounts = {};
