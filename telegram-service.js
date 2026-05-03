@@ -875,6 +875,323 @@ function buildTgMessage(formatId, {
         parse_mode: null,
       };
 
+    // ── Format 26 : Dark Prestige ─────────────────────────────────────────
+    case 26:
+      return {
+        text:
+          `◼️◼️◼️ BACCARAT DARK ◼️◼️◼️\n` +
+          `◽ Tour #N${gameNumber}  ◽ ${emoji} ${name}  ◽ +${maxR}\n` +
+          `◼️ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 27 : Signal Ultra Compact ──────────────────────────────────
+    case 27:
+      return {
+        text: `🎯 S${gameNumber} · ${emoji} · ×${maxR}\n${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 28 : Diamant Style ─────────────────────────────────────────
+    case 28:
+      return {
+        text:
+          `💎 PRÉDICTION DIAMANT\n` +
+          `◆ Jeu #N${gameNumber} — ${emoji} ${name}\n` +
+          `◆ Dogon : +${maxR}\n` +
+          `◇ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 29 : Neon Pro ──────────────────────────────────────────────
+    case 29:
+      return {
+        text:
+          `🟣 NEON BACCARAT 🟣\n` +
+          `🔸 #N${gameNumber} | ${emoji} ${name} | +${maxR}\n` +
+          `🔹 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 30 : Feu Signal ────────────────────────────────────────────
+    case 30:
+      return {
+        text:
+          `🔥 SIGNAL #N${gameNumber}\n` +
+          `🌟 ${emoji} ${name.toUpperCase()}\n` +
+          `⚡ Dogon +${maxR}\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 31 : Russian Enhanced ──────────────────────────────────────
+    case 31: {
+      const sup31 = SUPERSCRIPT[maxR] ?? String(maxR);
+      return {
+        text:
+          `⚜ #N${gameNumber} Игрок +${sup31} ⚜\n` +
+          `◽ Масть ${emoji} ${name}\n` +
+          `◼️ Ставка: ${hand === 'banquier' ? 'Банкир' : 'Игрок'}\n` +
+          `◼️ Результат: ${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 32 : Deux Lignes Net ───────────────────────────────────────
+    case 32:
+      return {
+        text: `${emoji} #N${gameNumber} +${maxR}\n${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 33 : Trophée Pro ───────────────────────────────────────────
+    case 33:
+      return {
+        text:
+          `🥇 BACCARAT TROPHÉE\n` +
+          `📌 #N${gameNumber} | ${emoji} ${name} | 🔰+${maxR}\n` +
+          `━━━━━━━━━━━\n` +
+          `🏆 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 34 : Atomique ──────────────────────────────────────────────
+    case 34:
+      return {
+        text:
+          `⚛️ ATOMIC SIGNAL\n` +
+          `⚡ Tour #N${gameNumber} — ${emoji} ${name} — Dogon×${maxR}\n` +
+          `→ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 35 : Gold VIP ──────────────────────────────────────────────
+    case 35:
+      return {
+        text:
+          `✨ 𝐆𝐎𝐋𝐃 𝐕𝐈𝐏 ✨\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `🎯 #N${gameNumber}  ${emoji} ${name}  +${maxR}\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 36 : Couronne Royal ────────────────────────────────────────
+    case 36:
+      return {
+        text:
+          `👑 ROYAL BACCARAT\n` +
+          `🎮 Jeu #N${gameNumber}\n` +
+          `🃏 Signe : ${emoji} ${name}\n` +
+          `🔑 Clé : +${maxR}\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 37 : Militaire ─────────────────────────────────────────────
+    case 37:
+      return {
+        text:
+          `🎖️ OPÉRATION BACCARAT\n` +
+          `🔵 Mission #N${gameNumber} — CIBLE : ${emoji} ${name.toUpperCase()}\n` +
+          `⚔️ Dogon max : ${maxR} tentatives\n` +
+          `📡 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 38 : Tech Hacker ───────────────────────────────────────────
+    case 38:
+      return {
+        text:
+          `> BACCARAT.EXE — RUN\n` +
+          `> GAME_ID: ${gameNumber}\n` +
+          `> TARGET: ${emoji} ${name.toUpperCase()}\n` +
+          `> MAX_RETRY: ${maxR}\n` +
+          `> STATUS: ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 39 : Dragon Style ──────────────────────────────────────────
+    case 39:
+      return {
+        text:
+          `🐉 DRAGON BACCARAT\n` +
+          `🔥 Jeu #N${gameNumber} · ${emoji} ${name} · ×${maxR}\n` +
+          `⚡ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 40 : Luxe Style ────────────────────────────────────────────
+    case 40:
+      return {
+        text:
+          `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n` +
+          `🎱 Jeu #N${gameNumber}  ·  ${emoji} ${name}  ·  Dogon +${maxR}\n` +
+          `💠 Résultat → ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 41 : Bullet Speed ──────────────────────────────────────────
+    case 41:
+      return {
+        text: `🔫 #${gameNumber}|${emoji}|+${maxR}|${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 42 : Cyber 2077 ────────────────────────────────────────────
+    case 42:
+      return {
+        text:
+          `⟨⟨ CYBER_BACCARAT ⟩⟩\n` +
+          `⚙ GAME_${gameNumber} :: ${emoji}${name.toUpperCase()} :: RETRY_${maxR}\n` +
+          `⊕ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 43 : Lune Mystique ─────────────────────────────────────────
+    case 43:
+      return {
+        text:
+          `🌙 MYSTIQUE BACCARAT\n` +
+          `✨ Tirage #N${gameNumber} — ${emoji} ${name}\n` +
+          `🌟 Puissance : ×${maxR}\n` +
+          `🔮 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 44 : Matrix ────────────────────────────────────────────────
+    case 44:
+      return {
+        text:
+          `░░░ MATRIX BACCARAT ░░░\n` +
+          `▓ #N${gameNumber} ▓ ${emoji} ${name} ▓ +${maxR} ▓\n` +
+          `▒ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 45 : Roi Absolu ────────────────────────────────────────────
+    case 45: {
+      const handR45 = hand === 'banquier' ? '🏦 BANQUIER ROI' : '👑 JOUEUR ROI';
+      return {
+        text:
+          `👑 ${handR45}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🎯 Tour #N${gameNumber} → ${emoji} ${name.toUpperCase()}\n` +
+          `🔰 Protection : +${maxR} coups\n` +
+          `━━━━━━━━━━━━━━━━━━━━━\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 46 : Street Bet ────────────────────────────────────────────
+    case 46:
+      return {
+        text:
+          `🎰 STREET BET #N${gameNumber}\n` +
+          `💵 Mise sur ${emoji} ${name} | Max ${maxR} retours\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 47 : Ultimate Pro ──────────────────────────────────────────
+    case 47: {
+      const handL47 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
+      return {
+        text:
+          `🌟 ═══ ULTIMATE BACCARAT ═══ 🌟\n` +
+          `📍 Jeu #N${gameNumber}\n` +
+          `🎯 Camp : ${handL47}\n` +
+          `🃏 Signe : ${emoji} ${name.toUpperCase()}\n` +
+          `🔰 Dogon max : +${maxR}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 48 : Analyse Pro ───────────────────────────────────────────
+    case 48:
+      return {
+        text:
+          `📊 ANALYSE PRÉDICTIVE\n` +
+          `🔢 Tour : #N${gameNumber}\n` +
+          `📈 Signal : ${emoji} ${name}\n` +
+          `🔁 Fenêtre : ${maxR} jeux\n` +
+          `📋 Résultat : ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 49 : Flèche Direct ─────────────────────────────────────────
+    case 49:
+      return {
+        text: `➤ #N${gameNumber} ${emoji} ${name} (+${maxR}) → ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 50 : Star Casino ───────────────────────────────────────────
+    case 50:
+      return {
+        text:
+          `⭐⭐⭐ STAR CASINO ⭐⭐⭐\n` +
+          `🎰 Jeu #N${gameNumber}\n` +
+          `🎯 Signal : ${emoji} ${name}\n` +
+          `🔰 Dogon : +${maxR}\n` +
+          `✨ ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 51 : Whisper Style ─────────────────────────────────────────
+    case 51:
+      return {
+        text: `〰️ #N${gameNumber}\n${emoji} · +${maxR}\n${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 52 : Double Line ───────────────────────────────────────────
+    case 52: {
+      const handL52 = hand === 'banquier' ? '🏦' : '👤';
+      return {
+        text:
+          `${handL52} #N${gameNumber} — ${emoji} ${name}\n` +
+          `+${maxR} · ${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 53 : Diamant Court ─────────────────────────────────────────
+    case 53:
+      return {
+        text: `💎 #N${gameNumber} ${emoji} +${maxR} ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 54 : Fusée Futur ───────────────────────────────────────────
+    case 54:
+      return {
+        text:
+          `🚀 FUTUR BACCARAT — #N${gameNumber}\n` +
+          `🛸 Signal : ${emoji} ${name.toUpperCase()}\n` +
+          `⚡ Puissance : ×${maxR}\n` +
+          `🌌 ${statusLine}`,
+        parse_mode: null,
+      };
+
+    // ── Format 55 : Cascade Pro ───────────────────────────────────────────
+    case 55: {
+      const handL55 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      return {
+        text:
+          `🌊 CASCADE BACCARAT\n` +
+          `⏩ Jeu #N${gameNumber}\n` +
+          `⏩ ${handL55} — ${emoji} ${name}\n` +
+          `⏩ Dogon ×${maxR}\n` +
+          `⏩ ${statusLine}`,
+        parse_mode: null,
+      };
+    }
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {

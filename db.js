@@ -259,6 +259,24 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS strategy_purchases_user_idx   ON strategy_purchases(user_id);
       CREATE INDEX IF NOT EXISTS strategy_purchases_status_idx ON strategy_purchases(status);
+
+      CREATE TABLE IF NOT EXISTS strategy_licenses (
+        id              SERIAL PRIMARY KEY,
+        purchase_id     INTEGER REFERENCES strategy_purchases(id) ON DELETE CASCADE,
+        user_id         INTEGER,
+        strategy_id     TEXT,
+        strategy_name   TEXT,
+        license_key     TEXT UNIQUE NOT NULL,
+        status          TEXT DEFAULT 'active',
+        deploy_count    INTEGER DEFAULT 0,
+        last_ping_at    TIMESTAMPTZ,
+        first_ping_at   TIMESTAMPTZ,
+        deploy_ip       TEXT,
+        admin_note      TEXT,
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_licenses_key_idx      ON strategy_licenses(license_key);
+      CREATE INDEX IF NOT EXISTS strategy_licenses_purchase_idx ON strategy_licenses(purchase_id);
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
@@ -1180,6 +1198,90 @@ async function getPendingPaymentRequests() {
   return r.rows;
 }
 
+// ── Strategy Licenses ────────────────────────────────────────────────────────
+
+async function createLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO strategy_licenses (purchase_id, user_id, strategy_id, strategy_name, license_key)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [purchase_id, user_id, strategy_id, strategy_name, license_key]
+  );
+  return r.rows[0];
+}
+
+async function getLicenses() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     ORDER BY sl.created_at DESC`
+  );
+  return r.rows;
+}
+
+async function getLicenseByKey(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM strategy_licenses WHERE license_key=$1', [key]);
+  return r.rows[0] || null;
+}
+
+async function revokeLicense(key, note = null) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='revoked', admin_note=$1 WHERE license_key=$2 RETURNING *`,
+    [note, key]
+  );
+  return r.rows[0] || null;
+}
+
+async function activateLicense(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='active', admin_note=NULL WHERE license_key=$1 RETURNING *`,
+    [key]
+  );
+  return r.rows[0] || null;
+}
+
+async function pingLicense(key, ip = null) {
+  if (!USE_PG) return;
+  await pgPool.query(
+    `UPDATE strategy_licenses
+     SET last_ping_at  = NOW(),
+         first_ping_at = COALESCE(first_ping_at, NOW()),
+         deploy_count  = COALESCE(deploy_count, 0) + 1,
+         deploy_ip     = COALESCE($1, deploy_ip)
+     WHERE license_key = $2`,
+    [ip, key]
+  );
+}
+
+async function getStrategyLicenses(strategyId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     WHERE sl.strategy_id = $1
+     ORDER BY sl.created_at DESC`,
+    [String(strategyId)]
+  );
+  return r.rows;
+}
+
+async function getUserLicenses(userId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT * FROM strategy_licenses
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+  return r.rows;
+}
+
 module.exports = {
   pool, USE_PG, MAIN_DB_URL, initDB, reinitAdmins,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
@@ -1205,4 +1307,6 @@ module.exports = {
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
   createDeployLog, updateDeployLog, getDeployLogs,
   getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
+  createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
+  getStrategyLicenses, getUserLicenses,
 };

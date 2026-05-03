@@ -21,6 +21,7 @@ const systemLogsRoutes  = require('./system-logs-route');
 const { router: aiRoutes } = require('./ai-route');
 const comptages         = require('./comptages');
 const paymentRoutes     = require('./payment-route');
+const { startAnnonceSequenceScheduler } = require('./annonce-sequence');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -111,8 +112,10 @@ app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin/comptages', comptages.router);
 app.use('/api/payments', paymentRoutes);
-const shopRoutes = require('./shop');
-app.use('/api/shop', shopRoutes);
+const shopRoutes    = require('./shop');
+const licenseRoutes = require('./license-route');
+app.use('/api/shop',    shopRoutes);
+app.use('/api/license', licenseRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
@@ -426,6 +429,8 @@ async function initBackgroundServices() {
   botHost.restoreRunningBots().catch(e => console.error('[BotHost] Restauration échouée:', e.message));
   // Lancer le scheduler d'annonces toutes les minutes
   setInterval(runAnnouncementsScheduler, 60_000);
+  // Démarrer le Rotateur Promo (annonce_sequence)
+  startAnnonceSequenceScheduler();
 
   // ── Nettoyage automatique des logs en mémoire (toutes les 20 min) ──────────
   const CLEANUP_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes

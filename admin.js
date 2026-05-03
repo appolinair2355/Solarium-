@@ -464,7 +464,7 @@ function validateStrategyBody(body) {
   }
 
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -473,10 +473,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -576,7 +576,9 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     const isCarteValeur     = mode === 'carte_valeur';
     const isUnionEnseignes  = mode === 'union_enseignes';
     const isIntersection    = mode === 'intersection';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection) ? null : normalizeMappings(mappings);
+    const isComptagesEcart  = mode === 'comptages_ecart';
+    const isAnnonceSequence = mode === 'annonce_sequence';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -642,6 +644,15 @@ router.post('/strategies', requireAdmin, async (req, res) => {
             inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
             inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
             inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
+        : isComptagesEcart
+        ? { threshold: 1, mode: 'comptages_ecart', mappings: null,
+            comptages_key: req.body.comptages_key || 'suit_p_heart' }
+        : isAnnonceSequence
+        ? { threshold: 1, mode: 'annonce_sequence', mappings: null,
+            annonce_sequence_ids: Array.isArray(req.body.annonce_sequence_ids) ? req.body.annonce_sequence_ids.map(String) : [],
+            annonce_text: String(req.body.annonce_text || '').slice(0, 1000),
+            annonce_interval: Math.max(1, parseInt(req.body.annonce_interval) || 60),
+            annonce_duration: Math.max(1, parseInt(req.body.annonce_duration) || 120) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -661,6 +672,14 @@ router.post('/strategies', requireAdmin, async (req, res) => {
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
     res.json({ ok: true, strategy: strat });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/annonce-sequence/:id/send-now', requireAdmin, async (req, res) => {
+  try {
+    const { sendNow } = require('./annonce-sequence');
+    await sendNow(parseInt(req.params.id));
+    res.json({ ok: true, message: 'Annonce envoyée avec succès !' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -689,7 +708,9 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const isCarteValeur     = mode === 'carte_valeur';
     const isUnionEnseignes  = mode === 'union_enseignes';
     const isIntersection    = mode === 'intersection';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection) ? null : normalizeMappings(mappings);
+    const isComptagesEcart  = mode === 'comptages_ecart';
+    const isAnnonceSequence = mode === 'annonce_sequence';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -752,6 +773,15 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
             inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
             inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
             inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
+        : isComptagesEcart
+        ? { threshold: 1, mode: 'comptages_ecart', mappings: null,
+            comptages_key: req.body.comptages_key || 'suit_p_heart' }
+        : isAnnonceSequence
+        ? { threshold: 1, mode: 'annonce_sequence', mappings: null,
+            annonce_sequence_ids: Array.isArray(req.body.annonce_sequence_ids) ? req.body.annonce_sequence_ids.map(String) : [],
+            annonce_text: String(req.body.annonce_text || '').slice(0, 1000),
+            annonce_interval: Math.max(1, parseInt(req.body.annonce_interval) || 60),
+            annonce_duration: Math.max(1, parseInt(req.body.annonce_duration) || 120) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -4343,6 +4373,7 @@ router.get('/strategy-purchases/:id/screenshot', requireAdmin, async (req, res) 
 
 // Valider un achat + générer le ZIP de déploiement
 const { generateStrategyZip } = require('./zip-generator');
+const crypto = require('crypto');
 router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) => {
   const purchaseId = parseInt(req.params.id);
   try {
@@ -4356,8 +4387,13 @@ router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) =
     const strat     = strats.find(s => String(s.id) === String(purchase.strategy_id));
     if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
 
-    // Générer le ZIP via le module dédié
-    const zipBuf    = await generateStrategyZip(strat);
+    // Générer une clé de licence unique
+    const licenseKey = crypto.randomUUID();
+    const serverUrl  = process.env.APP_URL
+      || (req.protocol + '://' + req.get('host'));
+
+    // Générer le ZIP via le module dédié (avec licence embarquée)
+    const zipBuf    = await generateStrategyZip(strat, licenseKey, serverUrl);
     const zipBase64 = zipBuf.toString('base64');
 
     // Valider l'achat + stocker le ZIP
@@ -4365,6 +4401,15 @@ router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) =
       'UPDATE strategy_purchases SET status=\'validated\', zip_data=$1, admin_validated_by=$2, admin_validated_at=NOW(), updated_at=NOW() WHERE id=$3',
       [zipBase64, req.session.userId, purchaseId]
     );
+
+    // Créer l'enregistrement de licence
+    await db.createLicense({
+      purchase_id:   purchaseId,
+      user_id:       purchase.user_id,
+      strategy_id:   purchase.strategy_id,
+      strategy_name: purchase.strategy_name,
+      license_key:   licenseKey,
+    }).catch(e => console.warn('[License] Erreur création licence:', e.message));
 
     // Notifier l'utilisateur via message système
     try {
@@ -4442,6 +4487,34 @@ router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
     configs[String(id)] = req.body;
     await db.setSetting('strategy_promo_config', JSON.stringify(configs));
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Gestion des licences ─────────────────────────────────────────────────────
+
+router.get('/licenses', requireAdmin, async (req, res) => {
+  try {
+    const licenses = await db.getLicenses();
+    res.json(licenses);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/licenses/:key/revoke', requireAdmin, async (req, res) => {
+  const { key } = req.params;
+  const { note } = req.body || {};
+  try {
+    const lic = await db.revokeLicense(key, note || null);
+    if (!lic) return res.status(404).json({ error: 'Licence introuvable' });
+    res.json({ ok: true, license: lic });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/licenses/:key/activate', requireAdmin, async (req, res) => {
+  const { key } = req.params;
+  try {
+    const lic = await db.activateLicense(key);
+    if (!lic) return res.status(404).json({ error: 'Licence introuvable' });
+    res.json({ ok: true, license: lic });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -1,6 +1,7 @@
 'use strict';
 /**
  * zip-generator.js — Génère le ZIP de déploiement pour une stratégie achetée.
+ * Inclut un système de vérification de licence qui contacte le serveur maître.
  * Retourne un Buffer contenant le ZIP.
  */
 
@@ -151,7 +152,7 @@ function buildPredictorJs(strat) {
   ].join('\n');
 }
 
-function buildIndexJs(strat) {
+function buildIndexJs(strat, licenseKey, serverUrl) {
   const stratName = strat.name || ('Strategie S' + strat.id);
   return [
     "'use strict';",
@@ -166,6 +167,33 @@ function buildIndexJs(strat) {
     "const fetch     = (...args) => import('node-fetch').then(m => m.default(...args));",
     "const cfg       = require('./config');",
     "const predictor = require('./predictor');",
+    '',
+    '// ── Verification de licence ──────────────────────────────────────────',
+    "const LICENSE_KEY    = '" + licenseKey + "';",
+    "const LICENSE_SERVER = '" + serverUrl + "';",
+    '',
+    'async function checkLicense() {',
+    '  try {',
+    "    const r = await fetch(LICENSE_SERVER + '/api/license/check?key=' + LICENSE_KEY);",
+    '    const d = await r.json();',
+    '    if (!d.valid) {',
+    "      console.error('');",
+    "      console.error('============================================');",
+    "      console.error('  LICENCE INVALIDE OU REVOQUEE');",
+    "      console.error('  ' + (d.message || ''));",
+    "      console.error('  Le bot va s\\'arreter dans 30 secondes.');",
+    "      console.error('============================================');",
+    "      console.error('');",
+    '      setTimeout(() => process.exit(1), 30000);',
+    '      return false;',
+    '    }',
+    "    console.log('[LICENCE] Licence active - ' + (d.strategy || ''));",
+    '    return true;',
+    '  } catch (e) {',
+    "    console.warn('[LICENCE] Verification ignoree (serveur injoignable):', e.message);",
+    '    return true;',
+    '  }',
+    '}',
     '',
     'app.use(express.json());',
     '',
@@ -200,7 +228,7 @@ function buildIndexJs(strat) {
     '  if (pred) {',
     "    const emoji = pred.suit === 'P' ? '\uD83D\uDD35' : pred.suit === 'B' ? '\uD83D\uDD34' : '\uD83D\uDFE1';",
     "    const label = pred.suit === 'P' ? 'JOUEUR' : pred.suit === 'B' ? 'BANQUIER' : pred.suit;",
-    "    const message = '\uD83C\uDFAF <b>PREDICTION</b> — Etape ' + pred.stepNum + '\\n' + emoji + ' Misez sur <b>' + label + '</b>\\n\uD83E\uDDE0 Strategie : " + stratName.replace(/'/g, "\\'") + "';",
+    "    const message = '\uD83C\uDFAF <b>PREDICTION</b> \u2014 Etape ' + pred.stepNum + '\\n' + emoji + ' Misez sur <b>' + label + '</b>\\n\uD83E\uDDE0 Strategie : " + stratName.replace(/'/g, "\\'") + "';",
     '    sendTelegram(message);',
     '    return res.json({ prediction: pred, message_sent: true });',
     '  }',
@@ -210,10 +238,16 @@ function buildIndexJs(strat) {
     "app.post('/reset', (req, res) => { predictor.reset(); res.json({ ok: true }); });",
     "app.get('/state', (req, res) => res.json(predictor.getState()));",
     '',
-    'app.listen(cfg.PORT, () => {',
-    "  console.log('Baccarat Bot demarre sur le port ' + cfg.PORT);",
-    "  console.log('Strategie : " + stratName.replace(/'/g, "\\'") + " (S" + strat.id + ")');",
-    "  console.log('POST /game pour envoyer un resultat');",
+    '// ── Démarrage avec vérification de licence ───────────────────────────',
+    'checkLicense().then(ok => {',
+    '  if (!ok) return;',
+    '  app.listen(cfg.PORT, () => {',
+    "    console.log('Baccarat Bot demarre sur le port ' + cfg.PORT);",
+    "    console.log('Strategie : " + stratName.replace(/'/g, "\\'") + " (S" + strat.id + ")');",
+    "    console.log('POST /game pour envoyer un resultat de jeu');",
+    '  });',
+    '  // Re-verification automatique toutes les heures',
+    '  setInterval(checkLicense, 60 * 60 * 1000);',
     '});',
   ].join('\n');
 }
@@ -298,10 +332,12 @@ function buildReadme(strat) {
 
 /**
  * Genere le ZIP en memoire et retourne un Buffer.
- * @param {object} strat - Configuration de la strategie
+ * @param {object} strat      - Configuration de la strategie
+ * @param {string} licenseKey - Cle UUID unique generee a la validation de l'achat
+ * @param {string} serverUrl  - URL du serveur maitre pour la verification de licence
  * @returns {Promise<Buffer>}
  */
-async function generateStrategyZip(strat) {
+async function generateStrategyZip(strat, licenseKey, serverUrl) {
   return new Promise((resolve, reject) => {
     const archive = archiver('zip', { zlib: { level: 9 } });
     const chunks  = [];
@@ -312,11 +348,11 @@ async function generateStrategyZip(strat) {
     archive.pipe(pt);
 
     const folder = 'baccarat-bot-S' + strat.id + '/';
-    archive.append(buildConfigJs(strat),    { name: folder + 'config.js' });
-    archive.append(buildPredictorJs(strat), { name: folder + 'predictor.js' });
-    archive.append(buildIndexJs(strat),     { name: folder + 'index.js' });
-    archive.append(buildPackageJson(strat), { name: folder + 'package.json' });
-    archive.append(buildReadme(strat),      { name: folder + 'README.md' });
+    archive.append(buildConfigJs(strat),                      { name: folder + 'config.js' });
+    archive.append(buildPredictorJs(strat),                   { name: folder + 'predictor.js' });
+    archive.append(buildIndexJs(strat, licenseKey, serverUrl),{ name: folder + 'index.js' });
+    archive.append(buildPackageJson(strat),                   { name: folder + 'package.json' });
+    archive.append(buildReadme(strat),                        { name: folder + 'README.md' });
     archive.finalize();
   });
 }
