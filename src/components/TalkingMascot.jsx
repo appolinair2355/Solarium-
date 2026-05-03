@@ -17,6 +17,7 @@ export default function TalkingMascot({
   primaryColor = '#fbbf24',
   character = '🧑‍💼',
   skipLabel = 'Passer ▶',
+  imageSrc = null,
 }) {
   const [lineIdx, setLineIdx] = useState(0);
   const [shown, setShown]     = useState('');
@@ -117,8 +118,11 @@ export default function TalkingMascot({
     <div className="mascot-wrap" style={{ '--mascot-color': primaryColor }}>
       <div className={`mascot-character ${speaking ? 'speaking' : ''}`}>
         <div className="mascot-glow" />
-        <div className="mascot-face">{character}</div>
-        {/* mouth animation overlay (a little dot that bounces) */}
+        {imageSrc ? (
+          <img src={imageSrc} alt="mascot" className="mascot-photo" />
+        ) : (
+          <div className="mascot-face">{character}</div>
+        )}
         <div className="mascot-mouth-dots">
           <span /><span /><span />
         </div>
