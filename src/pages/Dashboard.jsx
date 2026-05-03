@@ -74,9 +74,22 @@ function suitToFrench(s) {
   return m[str.toUpperCase()[0]] || str;
 }
 
+let _voiceCache = [];
+function _loadVoiceCache() {
+  try {
+    const v = (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
+    if (v.length > 0) _voiceCache = v;
+  } catch {}
+}
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  _loadVoiceCache();
+  try { window.speechSynthesis.onvoiceschanged = _loadVoiceCache; } catch {}
+}
+
 function pickFrenchVoice(gender) {
   try {
-    const voices = window.speechSynthesis.getVoices() || [];
+    _loadVoiceCache();
+    const voices = _voiceCache.length ? _voiceCache : (window.speechSynthesis.getVoices() || []);
     const fr = voices.filter(v => /^fr(-|_|$)/i.test(v.lang));
     if (fr.length === 0) return null;
     const femaleHints = /(femme|female|amelie|amélie|audrey|virginie|marie|julie|celine|céline|google\s*français)/i;

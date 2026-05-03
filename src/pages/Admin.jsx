@@ -3797,6 +3797,8 @@ function AdminPanel() {
     comptages_key: 'suit_p_heart',
     // Mode annonce_sequence (Rotateur Promo)
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
+    // Durée de prédiction (0 = illimitée, sinon minutes)
+    pred_duration_minutes: 0,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -4807,7 +4809,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0 });
     setStratOpen(true);
   };
 
@@ -4824,7 +4826,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -7955,6 +7957,11 @@ function AdminPanel() {
                       </span>
                     )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+                      {s.pred_duration_minutes > 0 && (
+                        <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 600, marginRight: 6,
+                          background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)',
+                        }}>⏱ {s.pred_duration_minutes >= 10080 ? `${Math.round(s.pred_duration_minutes/10080)}sem` : s.pred_duration_minutes >= 1440 ? `${Math.round(s.pred_duration_minutes/1440)}j` : s.pred_duration_minutes >= 60 ? `${Math.round(s.pred_duration_minutes/60)}h` : `${s.pred_duration_minutes}min`}</span>
+                      )}
                       {(() => {
                         if (s.mode === 'multi_strategy') {
                           const srcs = (s.multi_source_ids || []).join(', ') || '—';
@@ -7975,6 +7982,14 @@ function AdminPanel() {
                           : s.mode === 'annonce_sequence' ? '📣 Rotateur Promo'
                           : s.mode;
                         const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence';
+                        if (s.mode === 'annonce_sequence') {
+                          const n = (s.annonce_sequence_ids || []).length;
+                          const dur = parseInt(s.annonce_duration) || 120;
+                          const durStr = dur >= 1440 ? `${Math.round(dur/1440)}j` : dur >= 60 ? `${Math.round(dur/60)}h` : `${dur}min`;
+                          const intv = parseInt(s.annonce_interval) || 60;
+                          const intvStr = intv >= 60 ? `${Math.round(intv/60)}h` : `${intv}min`;
+                          return `📣 ${n} stratégie${n !== 1 ? 's' : ''} en rotation · Durée/strat : ${durStr} · Intervalle promo : ${intvStr}`;
+                        }
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
@@ -9126,7 +9141,7 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
@@ -9232,6 +9247,49 @@ function AdminPanel() {
                   </div>
                 </div>
                 )}
+
+                {/* ── Durée de prédiction ── */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
+                    ⏱ Durée de prédiction — la stratégie émet des prédictions pendant cette durée
+                  </label>
+                  <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                    {[
+                      { val: 0,     label: '∞ Illimitée' },
+                      { val: 60,    label: '1 heure' },
+                      { val: 300,   label: '5 heures' },
+                      { val: 1440,  label: '24 heures' },
+                      { val: 2880,  label: '48 heures' },
+                      { val: 10080, label: '1 semaine' },
+                      { val: 20160, label: '2 semaines' },
+                      { val: 43200, label: '1 mois' },
+                    ].map(opt => {
+                      const active = (stratForm.pred_duration_minutes ?? 0) === opt.val;
+                      return (
+                        <button key={opt.val} type="button"
+                          onClick={() => setStratForm(p => ({ ...p, pred_duration_minutes: opt.val }))}
+                          style={{ padding: '7px 13px', borderRadius: 8, cursor: 'pointer', fontWeight: active ? 800 : 500, fontSize: 12,
+                            border: active ? '2px solid #f59e0b' : '1px solid rgba(245,158,11,0.2)',
+                            background: active ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.04)',
+                            color: active ? '#fbbf24' : '#94a3b8', transition: 'all 0.15s' }}>
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(stratForm.pred_duration_minutes ?? 0) > 0 && (
+                    <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.22)', fontSize: 11, color: '#fbbf24', lineHeight: 1.6 }}>
+                      ⚠️ La stratégie cessera d'émettre des prédictions après <strong>{
+                        stratForm.pred_duration_minutes >= 43200 ? '1 mois' :
+                        stratForm.pred_duration_minutes >= 20160 ? '2 semaines' :
+                        stratForm.pred_duration_minutes >= 10080 ? '1 semaine' :
+                        stratForm.pred_duration_minutes >= 1440 ? `${Math.round(stratForm.pred_duration_minutes/1440)} jour(s)` :
+                        stratForm.pred_duration_minutes >= 60 ? `${Math.round(stratForm.pred_duration_minutes/60)} heure(s)` :
+                        `${stratForm.pred_duration_minutes} min`
+                      }</strong> depuis son activation. Une alerte Telegram sera envoyée toutes les heures tant que la durée est dépassée.
+                    </div>
+                  )}
+                </div>
 
                 {/* Visibilité */}
                 <div>
