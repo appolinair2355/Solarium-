@@ -14,6 +14,19 @@ const db = require('./db');
 let _timer = null;
 // État par rotateur : { currentIndex, stratStartedAt, lastPromoSentAt, initialized }
 let _state = {};
+// Compteur de prédictions par stratégie enfant : { seqStratId: { childStratId: count } }
+let _predCounts = {};
+
+function incrementPredCount(seqStratId, childStratId) {
+  const k = String(seqStratId);
+  if (!_predCounts[k]) _predCounts[k] = {};
+  const ck = String(childStratId);
+  _predCounts[k][ck] = (_predCounts[k][ck] || 0) + 1;
+}
+
+function getPredCounts(seqStratId) {
+  return _predCounts[String(seqStratId)] || {};
+}
 
 // ── Message de DÉMARRAGE — envoyé lors d'un changement de stratégie ──────────
 function buildStartMessage(feat, orderNum, totalCount, durationMin) {
@@ -245,4 +258,4 @@ function getActiveStrategyIndex(stratId) {
   return _state[key].currentIndex ?? 0;
 }
 
-module.exports = { startAnnonceSequenceScheduler, stopAnnonceSequenceScheduler, sendNow, resetState, getActiveStrategyIndex };
+module.exports = { startAnnonceSequenceScheduler, stopAnnonceSequenceScheduler, sendNow, resetState, getActiveStrategyIndex, incrementPredCount, getPredCounts };

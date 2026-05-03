@@ -137,6 +137,13 @@ class Engine {
     this._PRO_LOG_MAX = 500;
     this._proLogsSaveTimer = null;
 
+    // ── Durée de prédiction expirée — cache des alertes horaires ──────────
+    // { channelId: lastAlertTimestamp }
+    this._predDurationAlertCache = {};
+
+    // ── Contexte de rotation — défini pendant la délégation rotation ──────
+    this._currentRotationContext = null;
+
     // ── Bloqueur de mauvaises prédictions ─────────────────────────────────
     // { stratId: { blockedUntilGame: N, reason: '...', triggeredAt: Date } }
     this.badPredBlocker = {};
@@ -153,6 +160,34 @@ class Engine {
 
   // Vérifie si le propriétaire d'une stratégie Pro est encore actif (non expiré, approuvé)
   // Renvoie true pour les stratégies non-Pro (sans owner_user_id) ou pour les admins.
+  // Gère l'expiration de la durée de prédiction : envoie une alerte Telegram max 1×/heure
+  async _handlePredDurationExpired(cfg, channelId) {
+    const now = Date.now();
+    const lastAlert = this._predDurationAlertCache[channelId] || 0;
+    if (now - lastAlert < 3600000) return;
+    this._predDurationAlertCache[channelId] = now;
+
+    const dur = cfg.pred_duration_minutes || 0;
+    const durStr = dur >= 43200 ? '1 mois'
+      : dur >= 20160 ? '2 semaines'
+      : dur >= 10080 ? '1 semaine'
+      : dur >= 1440  ? `${Math.round(dur / 1440)} jour(s)`
+      : dur >= 60    ? `${Math.round(dur / 60)} heure(s)`
+      : `${dur} minute(s)`;
+
+    const alertText = `🔴 <b>DURÉE DE PRÉDICTION EXPIRÉE</b>\n\nLa stratégie <b>${cfg.name || channelId}</b> a atteint sa limite de durée (${durStr}).\n\n⚠️ Aucune nouvelle prédiction ne sera envoyée.\n\n<i>Contactez votre administrateur pour renouveler.</i>`;
+    console.log(`[${channelId}] ⏰ Durée de prédiction expirée — alerte horaire envoyée`);
+    try {
+      const { sendRawMessage } = require('./telegram-service');
+      const targets = Array.isArray(cfg.tg_targets) ? cfg.tg_targets : [];
+      for (const t of targets) {
+        if (t.bot_token && t.channel_id) {
+          await sendRawMessage(t.bot_token, t.channel_id, alertText, 'HTML').catch(() => {});
+        }
+      }
+    } catch {}
+  }
+
   async _isOwnerActive(cfg) {
     if (!cfg || !cfg.is_pro) return true;
     const ownerId = cfg.owner_user_id;
@@ -2199,6 +2234,15 @@ class Engine {
     const offset   = Math.max(1, parseInt(prediction_offset) || 1);
     const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
 
+    // ── Durée de prédiction expirée ────────────────────────────────────────
+    if (cfg.pred_duration_minutes > 0 && cfg.pred_duration_started_at) {
+      const expiresAt = new Date(cfg.pred_duration_started_at).getTime() + cfg.pred_duration_minutes * 60000;
+      if (Date.now() > expiresAt) {
+        await this._handlePredDurationExpired(cfg, channelId);
+        return;
+      }
+    }
+
     // ── MODE ROTATION (annonce_sequence) ─────────────────────────────────────
     // Délègue la logique de prédiction à la stratégie enfant actuellement active
     // selon l'index de rotation géré par annonce-sequence.js.
@@ -2223,10 +2267,19 @@ class Engine {
                          : (childCfg.tg_targets || []),
         max_rattrapage: cfg.max_rattrapage ?? childCfg.max_rattrapage,
         tg_format:     cfg.tg_format || childCfg.tg_format,
+        // Ne pas propager la durée de l'enfant dans le contexte rotation
+        pred_duration_minutes: 0,
+        pred_duration_started_at: null,
       };
       // Remettre gn en état non-traité pour que la passe récursive l'exécute
       state.processed.delete(gn);
-      return await this._processCustomStrategy(id, state, mergedCfg, gn, suits, bSuits, pCards, bCards, winner);
+      // Contexte de rotation : permet d'incrémenter le compteur par stratégie enfant
+      this._currentRotationContext = { seqStratId: cfg.id, childStratId: childCfg.id };
+      try {
+        return await this._processCustomStrategy(id, state, mergedCfg, gn, suits, bSuits, pCards, bCards, winner);
+      } finally {
+        this._currentRotationContext = null;
+      }
     }
 
     const emitPrediction = async (next, ps, suit) => {
@@ -2252,6 +2305,13 @@ class Engine {
         inserted = await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
         if (inserted) {
           console.log(`[${channelId}] Prédiction #${next} ${SUIT_DISPLAY[ps] || ps} (${handLabel})`);
+          // Compteur rotation : incrémenter le total de la stratégie enfant active
+          if (this._currentRotationContext && `S${this._currentRotationContext.seqStratId}` === channelId) {
+            try {
+              const annonceSeq = require('./annonce-sequence');
+              annonceSeq.incrementPredCount(this._currentRotationContext.seqStratId, this._currentRotationContext.childStratId);
+            } catch {}
+          }
         } else {
           console.warn(`[${channelId}] Prédiction #${next} déjà existante — Telegram ignoré (doublon évité)`);
         }
@@ -2823,15 +2883,13 @@ class Engine {
       // Vérifier si TOUTES les valeurs ont count > 0 → cycle complet
       const allPresent = CV_VALUES.every(v => (state._cvValueCounts[v] || 0) > 0);
       if (allPresent) {
-        // Si un message était actif → édition finale ✅ puis suppression des message_ids
+        // La valeur manquante est apparue → réinitialisation SILENCIEUSE (pas d'édition du message)
         if (state._cvActiveAlert) {
           const alert = state._cvActiveAlert;
-          const finalText = buildCvText(alert.missingValue, alert.cycleStartGn, gn, true);
-          console.log(`[${channelId}] [CarteValeur] Valeur ${alert.missingValue} trouvée jeu #${gn} — édition finale msg#${alert.firstGn}`);
+          console.log(`[${channelId}] [CarteValeur] Valeur ${alert.missingValue} trouvée jeu #${gn} — réinitialisation silencieuse (msg non modifié)`);
           try {
-            await editRawStoredMessages(channelId, alert.firstGn, alert.missingValue, finalText);
             await db.deleteTgMsgIds(channelId, alert.firstGn, alert.missingValue).catch(() => {});
-          } catch (e) { console.warn(`[${channelId}] CV edit final:`, e.message); }
+          } catch (e) { console.warn(`[${channelId}] CV deleteTgMsgIds:`, e.message); }
           state._cvActiveAlert = null;
         }
         console.log(`[${channelId}] [CarteValeur] Cycle complet (jeux #${state._cvCycleStartGame}→#${gn}) — toutes les valeurs vues → remise à zéro`);

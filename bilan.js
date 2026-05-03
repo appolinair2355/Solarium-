@@ -84,8 +84,14 @@ function buildBilanData(rows, strategies) {
 
     const name      = stratCfg ? stratCfg.name : stratId;
     const tgTargets = stratCfg?.tg_targets || [];
+    const isRotation = stratCfg?.mode === 'annonce_sequence';
+    const childNames = isRotation
+      ? (stratCfg.annonce_sequence_ids || [])
+          .map(id => strategies.find(s => String(s.id) === String(id))?.name)
+          .filter(Boolean)
+      : [];
 
-    result.push({ stratId, name, maxR, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets });
+    result.push({ stratId, name, maxR, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets, isRotation, childNames });
   }
 
   return result.sort((a, b) => a.stratId.localeCompare(b.stratId));
@@ -103,6 +109,13 @@ function formatBilanText(entry, dateStr) {
   lines.push(`📊 <b>BILAN</b>`);
   lines.push(`📅 <i>${dateStr}</i>`);
   lines.push(BAR_THIN);
+
+  if (entry.isRotation && entry.childNames && entry.childNames.length > 0) {
+    lines.push(`🔄 <b>Rotateur Promo</b>`);
+    lines.push(`Stratégies en rotation :`);
+    entry.childNames.forEach((n, i) => lines.push(`  ${i + 1}. ${n}`));
+    lines.push(BAR_THIN);
+  }
 
   if (entry.total === 0) {
     lines.push('Aucune prédiction vérifiée ce jour.');

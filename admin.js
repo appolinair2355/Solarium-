@@ -358,7 +358,14 @@ async function getStrategies() {
   const v = await db.getSetting('custom_strategies');
   if (!v) return [];
   const parsed = JSON.parse(v);
-  return Array.isArray(parsed) ? parsed : [parsed];
+  const list = Array.isArray(parsed) ? parsed : [parsed];
+  // Normalisation rétro-compatible : les anciennes stratégies n'ont pas pred_duration_minutes.
+  // On leur ajoute la valeur par défaut 0 (= aucune limite) pour éviter tout comportement inattendu.
+  return list.map(s => ({
+    pred_duration_minutes:    0,
+    pred_duration_started_at: null,
+    ...s,
+  }));
 }
 
 async function saveStrategies(list) {
@@ -666,11 +673,24 @@ router.post('/strategies', requireAdmin, async (req, res) => {
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
         ? Math.max(1, parseInt(tg_format) || 1) : null,
+      pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
+      pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
+        ? new Date().toISOString() : null,
     };
     list.push(strat);
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
+    // Message de bienvenue pour chaque canal Telegram nouvellement configuré
+    if (tg_targets.length > 0) {
+      const { sendRawMessage } = require('./telegram-service');
+      const welcomeText = `🎯 <b>Bienvenue sur le site de prédiction automatique de Sossou Kouamé</b>\n\nVous allez recevoir des prédictions de qualité en temps réel pour le jeu <b>Baccarat 1xBet</b>.\n\nRestez attentif aux signaux — chaque prédiction compte !\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Suivez nos signaux et maximisez vos gains.`;
+      for (const t of tg_targets) {
+        if (t.bot_token && t.channel_id) {
+          sendRawMessage(t.bot_token, t.channel_id, welcomeText, 'HTML').catch(() => {});
+        }
+      }
+    }
     res.json({ ok: true, strategy: strat });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -680,6 +700,27 @@ router.post('/annonce-sequence/:id/send-now', requireAdmin, async (req, res) => 
     const { sendNow } = require('./annonce-sequence');
     await sendNow(parseInt(req.params.id));
     res.json({ ok: true, message: 'Annonce envoyée avec succès !' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Statut du rotateur : index actif + compteurs de prédictions par stratégie enfant ──
+router.get('/rotation-status/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { getPredCounts, getActiveStrategyIndex } = require('./annonce-sequence');
+    const list = await getStrategies();
+    const strat = list.find(s => s.id === id);
+    if (!strat || strat.mode !== 'annonce_sequence') {
+      return res.json({ counts: {}, activeIdx: 0, childStrategies: [] });
+    }
+    const seqIds = Array.isArray(strat.annonce_sequence_ids) ? strat.annonce_sequence_ids : [];
+    const childStrategies = seqIds.map(sid => {
+      const child = list.find(s => String(s.id) === String(sid));
+      return child ? { id: child.id, name: child.name } : { id: sid, name: `Stratégie ${sid}` };
+    });
+    const counts   = getPredCounts(id);
+    const activeIdx = getActiveStrategyIndex(id);
+    res.json({ counts, activeIdx, childStrategies });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -716,6 +757,9 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
       return [];
     };
+    const oldTgTargets = list[idx].tg_targets || [];
+    const oldEnabled   = list[idx].enabled;
+    const oldPredDurationStartedAt = list[idx].pred_duration_started_at || null;
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
@@ -795,10 +839,32 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
         ? Math.max(1, parseInt(tg_format) || 1) : null,
+      pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
+      pred_duration_started_at: (() => {
+        const dur = parseInt(req.body.pred_duration_minutes) || 0;
+        const willEnabled = enabled !== false;
+        if (dur <= 0) return null;
+        if (!oldEnabled && willEnabled) return new Date().toISOString();
+        if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
+        return oldPredDurationStartedAt;
+      })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
+    // Message de bienvenue pour les canaux Telegram nouvellement ajoutés
+    const addedTargets = tg_targets.filter(nt =>
+      !oldTgTargets.some(ot => ot.channel_id === nt.channel_id && ot.bot_token === nt.bot_token)
+    );
+    if (addedTargets.length > 0) {
+      const { sendRawMessage } = require('./telegram-service');
+      const welcomeText = `🎯 <b>Bienvenue sur le site de prédiction automatique de Sossou Kouamé</b>\n\nVous allez recevoir des prédictions de qualité en temps réel pour le jeu <b>Baccarat 1xBet</b>.\n\nRestez attentif aux signaux — chaque prédiction compte !\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Suivez nos signaux et maximisez vos gains.`;
+      for (const t of addedTargets) {
+        if (t.bot_token && t.channel_id) {
+          sendRawMessage(t.bot_token, t.channel_id, welcomeText, 'HTML').catch(() => {});
+        }
+      }
+    }
     res.json({ ok: true, strategy: list[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
