@@ -324,7 +324,9 @@ export default function Dashboard() {
       emoji: s.hand === 'banquier' ? '🏦' : '🧑',
       color,
       glow,
-      desc: `Stratégie ${s.id} · B=${s.threshold} · ${s.mode}`,
+      desc: s.mode === 'annonce_sequence'
+        ? `Rotateur Promo · ${(s.annonce_sequence_ids || []).length} stratégies`
+        : `Stratégie ${s.id} · B=${s.threshold} · ${s.mode}`,
       hand: s.hand || 'joueur',
     };
   });
@@ -359,6 +361,7 @@ export default function Dashboard() {
   // Affiche/masque les explications "💡 raison" inline sous chaque ligne
   const [proLogsShowReasons, setProLogsShowReasons] = useState(true);
   const [lossSeqData, setLossSeqData] = useState({ streaks: {}, sequences: [] });
+  const [rotationStatus, setRotationStatus] = useState(null);
   const [tgMessages, setTgMessages] = useState([]);
   const [dailyBilan, setDailyBilan] = useState(null);
   const [bilanOpen, setBilanOpen] = useState(false);
@@ -386,7 +389,7 @@ export default function Dashboard() {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     try { window.speechSynthesis.getVoices(); } catch {}
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = () => { try { window.speechSynthesis.getVoices(); } catch {} };
+      window.speechSynthesis.onvoiceschanged = _loadVoiceCache;
     }
     const unlock = () => {
       primeVoice();
@@ -458,9 +461,26 @@ export default function Dashboard() {
       .catch(() => {});
   }, []);
 
-  // Stratégie courante (pour mode aleatoire)
+  // Stratégie courante (pour mode aleatoire / annonce_sequence)
   const currentStrat = customStrategies.find(s => `S${s.id}` === channelId) || null;
   const isAleatoire  = currentStrat?.mode === 'aleatoire';
+
+  // ── Statut du rotateur (annonce_sequence) : polling toutes les 10s ────────
+  useEffect(() => {
+    if (!currentStrat || currentStrat.mode !== 'annonce_sequence') {
+      setRotationStatus(null);
+      return;
+    }
+    const fetchStatus = () => {
+      fetch(`/api/admin/rotation-status/${currentStrat.id}`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setRotationStatus(data); })
+        .catch(() => {});
+    };
+    fetchStatus();
+    const iv = setInterval(fetchStatus, 10000);
+    return () => clearInterval(iv);
+  }, [currentStrat?.id, currentStrat?.mode]);
 
   const submitAleatDashPrediction = async () => {
     if (!aleatDashPanel || !aleatDashPanel.gameInput) return;
@@ -1139,7 +1159,40 @@ export default function Dashboard() {
                             }}>● LIVE</span>
                           )}
                         </div>
-                        {absences.length === 0 ? (
+                        {currentStrat?.mode === 'annonce_sequence' ? (
+                          <div style={{ paddingTop: 4 }}>
+                            {!rotationStatus ? (
+                              <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
+                            ) : (rotationStatus.childStrategies || []).map((child, idx) => {
+                              const count = (rotationStatus.counts || {})[String(child.id)] || 0;
+                              const isActive = idx === rotationStatus.activeIdx;
+                              return (
+                                <div key={child.id} className="absence-row" style={{
+                                  opacity: isActive ? 1 : 0.55,
+                                  background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                  borderRadius: 6, padding: '2px 4px',
+                                  border: isActive ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                                  marginBottom: 3,
+                                  transition: 'all 0.3s ease',
+                                }}>
+                                  <span className="absence-suit" style={{ fontSize: '0.7rem', color: isActive ? '#818cf8' : '#64748b', fontWeight: isActive ? 800 : 500 }}>
+                                    {isActive ? '▶ ' : ''}{child.name}
+                                  </span>
+                                  <div className="absence-bar-wrap" style={{ flex: 1 }}>
+                                    <div className="absence-bar-fill" style={{
+                                      width: count > 0 ? '100%' : '0%',
+                                      background: isActive ? '#6366f1' : '#334155',
+                                      transition: 'width 0.4s ease',
+                                    }} />
+                                  </div>
+                                  <span className="absence-count" style={{ color: isActive ? '#a5b4fc' : '#475569', fontWeight: isActive ? 800 : 600 }}>
+                                    {count} pred
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
                         ) : absences[0]?.isCarteValeur ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingTop: 4 }}>
