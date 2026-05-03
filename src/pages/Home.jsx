@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import TalkingMascot from '../components/TalkingMascot';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 
 const STEPS = [
@@ -68,6 +68,7 @@ export default function Home() {
   const [navLoading, setNavLoading] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [tickerIdx, setTickerIdx] = useState(0);
+  const sectionsRef = useRef([]);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowWelcome(true), 800);
@@ -77,6 +78,15 @@ export default function Home() {
   useEffect(() => {
     const iv = setInterval(() => setTickerIdx(i => (i + 1) % LIVE_FEED.length), 2500);
     return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); }),
+      { threshold: 0.12 }
+    );
+    document.querySelectorAll('.fade-up').forEach(el => obs.observe(el));
+    return () => obs.disconnect();
   }, []);
 
   const goWithLoader = (path) => (e) => {
@@ -286,17 +296,62 @@ export default function Home() {
       </section>
 
 
+      {/* ── Statistiques strip ── */}
+      <section className="stats-section">
+        {[
+          { num: '4',    lbl: autoT('Canaux dédiés'),       icon: '📡' },
+          { num: '24/7', lbl: autoT('Temps réel'),           icon: '⚡' },
+          { num: '82%+', lbl: autoT('Taux de précision'),    icon: '🎯' },
+          { num: '100%', lbl: autoT('Automatique & Sécurisé'), icon: '🔐' },
+        ].map((s, i) => (
+          <div className={`stat-box fade-up fade-up-d${i + 1}`} key={i}>
+            <div style={{ fontSize: 24, marginBottom: 4 }}>{s.icon}</div>
+            <div className="stat-box-num">{s.num}</div>
+            <div className="stat-box-lbl">{s.lbl}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* ── Canaux disponibles ── */}
+      <section className="channels-section">
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div className="section-title fade-up">
+            <div className="section-badge">🃏 {autoT('NOS CANAUX')}</div>
+            <h2>{autoT('4 canaux de prédiction')}</h2>
+            <p>{autoT('Choisissez le canal adapté à votre style de jeu')}</p>
+          </div>
+          <div className="channels-grid">
+            {CHANNELS.map((ch, i) => (
+              <div
+                key={ch.name}
+                className={`channel-card-v2 fade-up fade-up-d${i + 1}`}
+                style={{ '--ch-c': ch.color }}
+              >
+                <div className="channel-card-shine" />
+                <div className="channel-card-icon">{ch.icon}</div>
+                <h3>{autoT(ch.name)}</h3>
+                <p>{autoT(ch.desc)}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="channel-rate-badge">🎯 {ch.rate}</span>
+                  <span className="channel-b-badge">Seuil {ch.badge}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* How to use */}
       <section className="how-section">
-        <div className="section-title">
+        <div className="section-title fade-up">
           <div className="section-badge">{autoT("GUIDE D'UTILISATION")}</div>
           <h2>{autoT("Comment utiliser l'application")}</h2>
           <p>{autoT('Suivez ces étapes pour bien démarrer')}</p>
         </div>
         <div className="how-steps">
-          {STEPS.map(h => (
-            <div className="how-step" key={h.n}>
-              <div className="how-step-num">{h.icon}</div>
+          {STEPS.map((h, i) => (
+            <div className={`how-step fade-up fade-up-d${i + 1}`} key={h.n}>
+              <div className="how-step-icon-box">{h.icon}</div>
               <div className="how-step-body">
                 <h4>{autoT(h.title)}</h4>
                 <p>{autoT(h.desc)}</p>
@@ -308,42 +363,35 @@ export default function Home() {
 
       {/* Dashboard preview guide */}
       <section className="how-section" style={{ background: '#f8fafc' }}>
-        <div className="section-title">
+        <div className="section-title fade-up">
           <div className="section-badge">{autoT('TABLEAU DE BORD')}</div>
           <h2>{autoT('Lire le tableau de bord')}</h2>
           <p>{autoT('Comprendre les informations affichées')}</p>
         </div>
         <div className="home-guide-grid">
-          <div className="home-guide-card">
-            <div className="home-guide-icon">⚡</div>
-            <h4>{autoT('Parties Live')}</h4>
-            <p>{autoT("Les parties en cours s'affichent avec les cartes joueur et banquier ainsi que les points de chaque côté.")}</p>
-          </div>
-          <div className="home-guide-card">
-            <div className="home-guide-icon">🎯</div>
-            <h4>{autoT('Zone de prédiction')}</h4>
-            <p>{autoT('La prédiction active s\'affiche ici avec le symbole prédit. Elle se met à jour automatiquement en temps réel.')}</p>
-          </div>
-          <div className="home-guide-card">
-            <div className="home-guide-icon">📋</div>
-            <h4>{autoT('Historique')}</h4>
-            <p>{autoT('Chaque ligne affiche le numéro de partie, le résultat (✅ gagné / ❌ perdu), les cartes et les points totaux.')}</p>
-          </div>
-          <div className="home-guide-card">
-            <div className="home-guide-icon">🏆</div>
-            <h4>{autoT("Format de l'historique")}</h4>
-            <p><code>#N687. ✅9(9♣10♥) - 8(7♠A♦) #T17</code><br />{autoT('Numéro · Résultat · Points joueur (cartes) - Points banquier (cartes) · Total')}</p>
-          </div>
+          {[
+            { icon: '⚡', title: autoT('Parties Live'), desc: autoT("Les parties en cours s'affichent avec les cartes joueur et banquier ainsi que les points de chaque côté.") },
+            { icon: '🎯', title: autoT('Zone de prédiction'), desc: autoT("La prédiction active s'affiche ici avec le symbole prédit. Elle se met à jour automatiquement en temps réel.") },
+            { icon: '📋', title: autoT('Historique'), desc: autoT('Chaque ligne affiche le numéro de partie, le résultat (✅ gagné / ❌ perdu), les cartes et les points totaux.') },
+            { icon: '🏆', title: autoT("Format de l'historique"), extra: <><code>#N687. ✅9(9♣10♥) - 8(7♠A♦) #T17</code><br />{autoT('Numéro · Résultat · Points joueur (cartes) - Points banquier (cartes) · Total')}</> },
+          ].map((g, i) => (
+            <div className={`home-guide-card fade-up fade-up-d${i + 1}`} key={i}>
+              <div className="home-guide-icon">{g.icon}</div>
+              <h4>{g.title}</h4>
+              {g.desc && <p>{g.desc}</p>}
+              {g.extra && <p>{g.extra}</p>}
+            </div>
+          ))}
         </div>
       </section>
 
       {/* CTA */}
       <section className="cta-section">
-        <div className="cta-box">
+        <div className="cta-box fade-up">
           <div className="cta-glow" />
           <h2>{autoT('Prêt à commencer ?')}</h2>
           <p>{autoT('Créez votre compte et attendez la validation pour accéder aux signaux en direct.')}</p>
-          <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg">{autoT('Créer mon compte')}</Link>
+          <Link to="/inscription" onClick={goWithLoader('/inscription')} className="btn btn-gold btn-lg btn-shine">✨ {autoT('Créer mon compte')}</Link>
         </div>
       </section>
 

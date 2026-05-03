@@ -3500,6 +3500,51 @@ function AdminPanel() {
     setTimeout(() => setStratPurchMsg(m => { const n = { ...m }; delete n[id]; return n; }), 4000);
   }
 
+  // ── Licences déployées ────────────────────────────────────────────────
+  const [licenses, setLicenses]     = useState([]);
+  const [licLoading, setLicLoading] = useState(false);
+  const [licMsg, setLicMsg]         = useState({});
+
+  const loadLicenses = useCallback(async () => {
+    setLicLoading(true);
+    try {
+      const r = await fetch('/api/admin/licenses', { credentials: 'include' });
+      if (r.ok) setLicenses(await r.json());
+    } catch {} finally { setLicLoading(false); }
+  }, []);
+
+  useEffect(() => { loadLicenses(); }, [loadLicenses]);
+
+  async function revokeLicenseKey(key) {
+    setLicMsg(m => ({ ...m, [key]: { text: '⏳ Révocation…', error: false } }));
+    try {
+      const r = await fetch(`/api/admin/licenses/${key}/revoke`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      });
+      if (r.ok) {
+        setLicMsg(m => ({ ...m, [key]: { text: "✅ Révoquée — le bot s'arrêtera dans 1h max", error: false } }));
+        await loadLicenses();
+      } else {
+        const d = await r.json();
+        setLicMsg(m => ({ ...m, [key]: { text: `❌ ${d.error}`, error: true } }));
+      }
+    } catch { setLicMsg(m => ({ ...m, [key]: { text: '❌ Erreur réseau', error: true } })); }
+    setTimeout(() => setLicMsg(m => { const n = { ...m }; delete n[key]; return n; }), 8000);
+  }
+
+  async function activateLicenseKey(key) {
+    setLicMsg(m => ({ ...m, [key]: { text: '⏳ Activation…', error: false } }));
+    try {
+      const r = await fetch(`/api/admin/licenses/${key}/activate`, { method: 'POST', credentials: 'include' });
+      if (r.ok) {
+        setLicMsg(m => ({ ...m, [key]: { text: '✅ Licence réactivée', error: false } }));
+        await loadLicenses();
+      }
+    } catch {}
+    setTimeout(() => setLicMsg(m => { const n = { ...m }; delete n[key]; return n; }), 5000);
+  }
+
   // ── Vitrine / Panneau de Vente ─────────────────────────────────────
   const BLANK_PROMO = { enabled: false, titre: '', tagline: '', badge: '🔥', plan_requis: 'standard', prix_texte: '', bullet1: '', bullet2: '', bullet3: '', cta: 'Souscrire maintenant' };
   const [promoConfigs, setPromoConfigs] = useState({});
@@ -3683,24 +3728,61 @@ function AdminPanel() {
   // Formats de message Telegram (partagé dans tout l'admin)
   const TG_FORMATS = [
     { value: '',   label: '— Global (paramètre général) —' },
-    { value: '9',  label: 'Joueur dédié' },
-    { value: '10', label: 'Banquier dédié' },
-    { value: '8',  label: 'Banquier / Joueur Pro' },
-    { value: '1',  label: 'Style Russe' },
-    { value: '2',  label: 'Premium' },
-    { value: '3',  label: 'Baccara Pro' },
-    { value: '4',  label: 'Prédiction' },
-    { value: '5',  label: 'Barre de progression' },
-    { value: '6',  label: 'Classique' },
-    { value: '7',  label: 'Joueur Carte' },
-    { value: '11', label: '📊 Distribution' },
-    { value: '12', label: '🃏 Cartes 2/3 Standard' },
-    { value: '13', label: '🏆 Victoire Pro (Banquier/Joueur)' },
-    { value: '14', label: '🏆 Victoire Compact' },
-    { value: '15', label: '🤝 Match Nul Pro' },
-    { value: '16', label: '🤝 Match Nul Compact' },
-    { value: '17', label: '⚡ 2+3 Cartes Pro' },
-    { value: '18', label: '🃏 Cartes 2/3 Style B' },
+    { value: '9',  label: '#9 — Joueur dédié' },
+    { value: '10', label: '#10 — Banquier dédié' },
+    { value: '8',  label: '#8 — Banquier / Joueur Pro' },
+    { value: '1',  label: '#1 — Style Russe' },
+    { value: '2',  label: '#2 — Premium' },
+    { value: '3',  label: '#3 — Baccara Pro' },
+    { value: '4',  label: '#4 — Prédiction' },
+    { value: '5',  label: '#5 — Barre de progression' },
+    { value: '6',  label: '#6 — Classique' },
+    { value: '7',  label: '#7 — Joueur Carte' },
+    { value: '11', label: '#11 — 📊 Distribution' },
+    { value: '12', label: '#12 — 🃏 Cartes 2/3 Standard' },
+    { value: '13', label: '#13 — 🏆 Victoire Pro' },
+    { value: '14', label: '#14 — 🏆 Victoire Compact' },
+    { value: '15', label: '#15 — 🤝 Match Nul Pro' },
+    { value: '16', label: '#16 — 🤝 Match Nul Compact' },
+    { value: '17', label: '#17 — ⚡ 2+3 Cartes Pro' },
+    { value: '18', label: '#18 — 🃏 Cartes 2/3 Style B' },
+    { value: '19', label: '#19 — 🎯 VIP Casino' },
+    { value: '20', label: '#20 — ⚡ Flash Signal' },
+    { value: '21', label: '#21 — 🃏 Casino Royale' },
+    { value: '22', label: '#22 — 🔔 Signal Pro' },
+    { value: '23', label: '#23 — 🚨 Alert Pro' },
+    { value: '24', label: '#24 — ★ Minimaliste Stars' },
+    { value: '25', label: '#25 — 🏅 Scoreboard Pro' },
+    { value: '26', label: '#26 — ◼️ Dark Prestige' },
+    { value: '27', label: '#27 — 🎯 Signal Ultra Compact' },
+    { value: '28', label: '#28 — 💎 Diamant Style' },
+    { value: '29', label: '#29 — 🟣 Neon Pro' },
+    { value: '30', label: '#30 — 🔥 Feu Signal' },
+    { value: '31', label: '#31 — ⚜ Russian Enhanced' },
+    { value: '32', label: '#32 — 🎯 Deux Lignes Net' },
+    { value: '33', label: '#33 — 🥇 Trophée Pro' },
+    { value: '34', label: '#34 — ⚛️ Atomique' },
+    { value: '35', label: '#35 — ✨ Gold VIP' },
+    { value: '36', label: '#36 — 👑 Couronne Royal' },
+    { value: '37', label: '#37 — 🎖️ Militaire' },
+    { value: '38', label: '#38 — ⚙ Tech Hacker' },
+    { value: '39', label: '#39 — 🐉 Dragon Style' },
+    { value: '40', label: '#40 — 🌹 Luxe Style' },
+    { value: '41', label: '#41 — 🔫 Bullet Speed' },
+    { value: '42', label: '#42 — ⟨⟩ Cyber 2077' },
+    { value: '43', label: '#43 — 🌙 Lune Mystique' },
+    { value: '44', label: '#44 — ░ Matrix' },
+    { value: '45', label: '#45 — 👑 Roi Absolu' },
+    { value: '46', label: '#46 — 🎰 Street Bet' },
+    { value: '47', label: '#47 — 🌟 Ultimate Pro' },
+    { value: '48', label: '#48 — 📊 Analyse Pro' },
+    { value: '49', label: '#49 — ➤ Flèche Direct' },
+    { value: '50', label: '#50 — ⭐ Star Casino' },
+    { value: '51', label: '#51 — 〰️ Whisper Style' },
+    { value: '52', label: '#52 — 🏦 Double Line' },
+    { value: '53', label: '#53 — 💎 Diamant Court' },
+    { value: '54', label: '#54 — 🚀 Fusée Futur' },
+    { value: '55', label: '#55 — 🌊 Cascade Pro' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -3713,6 +3795,8 @@ function AdminPanel() {
     inter_category: 'costume', inter_hi: 2, inter_max_ecart: 1,
     // Mode comptages_ecart
     comptages_key: 'suit_p_heart',
+    // Mode annonce_sequence (Rotateur Promo)
+    annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -4072,7 +4156,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -4723,7 +4807,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120 });
     setStratOpen(true);
   };
 
@@ -4740,7 +4824,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart' });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5139,7 +5223,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur' };
 
   return (
     <>
@@ -6934,6 +7018,101 @@ function AdminPanel() {
                 })}
               </div>
             )}
+
+            {/* ── Licences déployées ── */}
+            <div style={{ marginTop: 44, borderTop: '1px solid rgba(192,132,252,0.15)', paddingTop: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: 17, fontWeight: 800, color: '#c084fc', margin: 0 }}>🔑 Licences déployées</h3>
+                  <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0' }}>Contrôlez les bots vendus — révoquez une licence pour stopper un bot à distance (délai max 1h)</p>
+                </div>
+                <button onClick={loadLicenses} disabled={licLoading}
+                  style={{ padding: '7px 14px', background: 'rgba(192,132,252,0.1)', border: '1px solid rgba(192,132,252,0.3)', borderRadius: 8, color: '#c084fc', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  {licLoading ? '⏳' : '↻ Actualiser'}
+                </button>
+              </div>
+
+              {licenses.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '28px 0', color: '#475569' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔑</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Aucune licence générée</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>Les licences sont créées automatiquement lors de la validation d'un achat.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {licenses.map(lic => {
+                    const isActive  = lic.status === 'active';
+                    const isRevoked = lic.status === 'revoked';
+                    const msg       = licMsg[lic.license_key];
+                    const lastPing  = lic.last_ping_at
+                      ? new Date(lic.last_ping_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : '—';
+                    return (
+                      <div key={lic.license_key} style={{ background: 'rgba(15,23,42,0.9)', border: `1px solid ${isRevoked ? 'rgba(239,68,68,0.4)' : 'rgba(192,132,252,0.25)'}`, borderRadius: 12, padding: '14px 18px' }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          <div style={{ flex: 1, minWidth: 180 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: '#f1f5f9', marginBottom: 3 }}>
+                              {lic.strategy_name} <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400 }}>(S{lic.strategy_id})</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>
+                              👤 <strong style={{ color: '#94a3b8' }}>{lic.username || `user#${lic.user_id}`}</strong>
+                              {lic.email && <> · {lic.email}</>}
+                            </div>
+                          </div>
+                          <div style={{ padding: '3px 11px', borderRadius: 100, fontSize: 11, fontWeight: 700,
+                            background: isRevoked ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.1)',
+                            border: `1px solid ${isRevoked ? 'rgba(239,68,68,0.45)' : 'rgba(34,197,94,0.4)'}`,
+                            color: isRevoked ? '#f87171' : '#4ade80' }}>
+                            {isRevoked ? '🚫 Révoquée' : '✅ Active'}
+                          </div>
+                        </div>
+
+                        {/* Clé de licence */}
+                        <div style={{ fontSize: 11, color: '#818cf8', background: 'rgba(0,0,0,0.25)', borderRadius: 6, padding: '6px 10px', marginBottom: 10, fontFamily: 'monospace', wordBreak: 'break-all', userSelect: 'all' }}>
+                          🔑 {lic.license_key}
+                        </div>
+
+                        {/* Stats */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 11, color: '#64748b', marginBottom: 12 }}>
+                          <span>📊 Pings : <strong style={{ color: '#94a3b8' }}>{lic.deploy_count || 0}</strong></span>
+                          <span>🕐 Dernier ping : <strong style={{ color: '#94a3b8' }}>{lastPing}</strong></span>
+                          {lic.deploy_ip && <span>🌐 IP : <strong style={{ color: '#94a3b8' }}>{lic.deploy_ip}</strong></span>}
+                          <span>📅 Créée : <strong style={{ color: '#94a3b8' }}>{new Date(lic.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
+                          {lic.admin_note && <span>📝 Note : <em style={{ color: '#f87171' }}>{lic.admin_note}</em></span>}
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                          {isActive && (
+                            <button
+                              onClick={() => { if (window.confirm("Révoquer cette licence ?\n\nLe bot s'arrêtera lors de sa prochaine vérification horaire.")) revokeLicenseKey(lic.license_key); }}
+                              style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171' }}>
+                              🚫 Révoquer
+                            </button>
+                          )}
+                          {isRevoked && (
+                            <button onClick={() => activateLicenseKey(lic.license_key)}
+                              style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.35)', color: '#4ade80' }}>
+                              ✅ Réactiver
+                            </button>
+                          )}
+                          {msg && (
+                            <div style={{ padding: '6px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                              background: msg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                              border: `1px solid ${msg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                              color: msg.error ? '#f87171' : '#86efac' }}>
+                              {msg.text}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -7279,6 +7458,186 @@ function AdminPanel() {
               result:  `🏅 BACCARAT SCOREBOARD\n┌─────────────────────┐\n│ #N${G} │ ♠️ Pique │ +${maxRattrapage} │\n└─────────────────────┘\n✅ ${RE[0]} GAGNÉ`,
               perdu:   `🏅 BACCARAT SCOREBOARD\n┌─────────────────────┐\n│ #N${G} │ ♠️ Pique │ +${maxRattrapage} │\n└─────────────────────┘\n❌`,
             },
+            {
+              id: 26, label: 'Dark Prestige', icon: '◼️',
+              preview: `◼️◼️◼️ BACCARAT DARK ◼️◼️◼️\n◽ Tour #N${G}  ◽ ♠️ Pique  ◽ +${maxRattrapage}\n◼️ ⌛`,
+              result:  `◼️◼️◼️ BACCARAT DARK ◼️◼️◼️\n◽ Tour #N${G}  ◽ ♠️ Pique  ◽ +${maxRattrapage}\n◼️ ✅ ${RE[0]}`,
+              perdu:   `◼️◼️◼️ BACCARAT DARK ◼️◼️◼️\n◽ Tour #N${G}  ◽ ♠️ Pique  ◽ +${maxRattrapage}\n◼️ ❌`,
+            },
+            {
+              id: 27, label: 'Signal Ultra Compact', icon: '🎯',
+              preview: `🎯 S${G} · ♠️ · ×${maxRattrapage}\n⌛`,
+              result:  `🎯 S${G} · ♠️ · ×${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🎯 S${G} · ♠️ · ×${maxRattrapage}\n❌`,
+            },
+            {
+              id: 28, label: 'Diamant Style', icon: '💎',
+              preview: `💎 PRÉDICTION DIAMANT\n◆ Jeu #N${G} — ♠️ Pique\n◆ Dogon : +${maxRattrapage}\n◇ ⌛`,
+              result:  `💎 PRÉDICTION DIAMANT\n◆ Jeu #N${G} — ♠️ Pique\n◆ Dogon : +${maxRattrapage}\n◇ ✅ ${RE[0]}`,
+              perdu:   `💎 PRÉDICTION DIAMANT\n◆ Jeu #N${G} — ♠️ Pique\n◆ Dogon : +${maxRattrapage}\n◇ ❌`,
+            },
+            {
+              id: 29, label: 'Neon Pro', icon: '🟣',
+              preview: `🟣 NEON BACCARAT 🟣\n🔸 #N${G} | ♠️ Pique | +${maxRattrapage}\n🔹 ⌛`,
+              result:  `🟣 NEON BACCARAT 🟣\n🔸 #N${G} | ♠️ Pique | +${maxRattrapage}\n🔹 ✅ ${RE[0]}`,
+              perdu:   `🟣 NEON BACCARAT 🟣\n🔸 #N${G} | ♠️ Pique | +${maxRattrapage}\n🔹 ❌`,
+            },
+            {
+              id: 30, label: 'Feu Signal', icon: '🔥',
+              preview: `🔥 SIGNAL #N${G}\n🌟 ♠️ PIQUE\n⚡ Dogon +${maxRattrapage}\n⌛`,
+              result:  `🔥 SIGNAL #N${G}\n🌟 ♠️ PIQUE\n⚡ Dogon +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🔥 SIGNAL #N${G}\n🌟 ♠️ PIQUE\n⚡ Dogon +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 31, label: 'Russian Enhanced', icon: '⚜',
+              preview: `⚜ #N${G} Игрок +${sup} ⚜\n◽ Масть ♠️ Pique\n◼️ Ставка: Игрок\n◼️ Результат: ⌛`,
+              result:  `⚜ #N${G} Игрок +${sup} ⚜\n◽ Масть ♠️ Pique\n◼️ Ставка: Игрок\n◼️ Результат: ✅ ${RE[0]}`,
+              perdu:   `⚜ #N${G} Игрок +${sup} ⚜\n◽ Масть ♠️ Pique\n◼️ Ставка: Игрок\n◼️ Результат: ❌`,
+            },
+            {
+              id: 32, label: 'Deux Lignes Net', icon: '🎯',
+              preview: `♠️ #N${G} +${maxRattrapage}\n⌛`,
+              result:  `♠️ #N${G} +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `♠️ #N${G} +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 33, label: 'Trophée Pro', icon: '🥇',
+              preview: `🥇 BACCARAT TROPHÉE\n📌 #N${G} | ♠️ Pique | 🔰+${maxRattrapage}\n━━━━━━━━━━━\n🏆 ⌛`,
+              result:  `🥇 BACCARAT TROPHÉE\n📌 #N${G} | ♠️ Pique | 🔰+${maxRattrapage}\n━━━━━━━━━━━\n🏆 ✅ ${RE[0]}`,
+              perdu:   `🥇 BACCARAT TROPHÉE\n📌 #N${G} | ♠️ Pique | 🔰+${maxRattrapage}\n━━━━━━━━━━━\n🏆 ❌`,
+            },
+            {
+              id: 34, label: 'Atomique', icon: '⚛️',
+              preview: `⚛️ ATOMIC SIGNAL\n⚡ Tour #N${G} — ♠️ Pique — Dogon×${maxRattrapage}\n→ ⌛`,
+              result:  `⚛️ ATOMIC SIGNAL\n⚡ Tour #N${G} — ♠️ Pique — Dogon×${maxRattrapage}\n→ ✅ ${RE[0]}`,
+              perdu:   `⚛️ ATOMIC SIGNAL\n⚡ Tour #N${G} — ♠️ Pique — Dogon×${maxRattrapage}\n→ ❌`,
+            },
+            {
+              id: 35, label: 'Gold VIP', icon: '✨',
+              preview: `✨ 𝐆𝐎𝐋𝐃 𝐕𝐈𝐏 ✨\n━━━━━━━━━━━━━━━━━\n🎯 #N${G}  ♠️ Pique  +${maxRattrapage}\n━━━━━━━━━━━━━━━━━\n⌛`,
+              result:  `✨ 𝐆𝐎𝐋𝐃 𝐕𝐈𝐏 ✨\n━━━━━━━━━━━━━━━━━\n🎯 #N${G}  ♠️ Pique  +${maxRattrapage}\n━━━━━━━━━━━━━━━━━\n✅ ${RE[0]}`,
+              perdu:   `✨ 𝐆𝐎𝐋𝐃 𝐕𝐈𝐏 ✨\n━━━━━━━━━━━━━━━━━\n🎯 #N${G}  ♠️ Pique  +${maxRattrapage}\n━━━━━━━━━━━━━━━━━\n❌`,
+            },
+            {
+              id: 36, label: 'Couronne Royal', icon: '👑',
+              preview: `👑 ROYAL BACCARAT\n🎮 Jeu #N${G}\n🃏 Signe : ♠️ Pique\n🔑 Clé : +${maxRattrapage}\n⌛`,
+              result:  `👑 ROYAL BACCARAT\n🎮 Jeu #N${G}\n🃏 Signe : ♠️ Pique\n🔑 Clé : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `👑 ROYAL BACCARAT\n🎮 Jeu #N${G}\n🃏 Signe : ♠️ Pique\n🔑 Clé : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 37, label: 'Militaire', icon: '🎖️',
+              preview: `🎖️ OPÉRATION BACCARAT\n🔵 Mission #N${G} — CIBLE : ♠️ PIQUE\n⚔️ Dogon max : ${maxRattrapage} tentatives\n📡 ⌛`,
+              result:  `🎖️ OPÉRATION BACCARAT\n🔵 Mission #N${G} — CIBLE : ♠️ PIQUE\n⚔️ Dogon max : ${maxRattrapage} tentatives\n📡 ✅ ${RE[0]}`,
+              perdu:   `🎖️ OPÉRATION BACCARAT\n🔵 Mission #N${G} — CIBLE : ♠️ PIQUE\n⚔️ Dogon max : ${maxRattrapage} tentatives\n📡 ❌`,
+            },
+            {
+              id: 38, label: 'Tech Hacker', icon: '⚙',
+              preview: `> BACCARAT.EXE — RUN\n> GAME_ID: ${G}\n> TARGET: ♠️ PIQUE\n> MAX_RETRY: ${maxRattrapage}\n> STATUS: ⌛`,
+              result:  `> BACCARAT.EXE — RUN\n> GAME_ID: ${G}\n> TARGET: ♠️ PIQUE\n> MAX_RETRY: ${maxRattrapage}\n> STATUS: ✅ ${RE[0]}`,
+              perdu:   `> BACCARAT.EXE — RUN\n> GAME_ID: ${G}\n> TARGET: ♠️ PIQUE\n> MAX_RETRY: ${maxRattrapage}\n> STATUS: ❌`,
+            },
+            {
+              id: 39, label: 'Dragon Style', icon: '🐉',
+              preview: `🐉 DRAGON BACCARAT\n🔥 Jeu #N${G} · ♠️ Pique · ×${maxRattrapage}\n⚡ ⌛`,
+              result:  `🐉 DRAGON BACCARAT\n🔥 Jeu #N${G} · ♠️ Pique · ×${maxRattrapage}\n⚡ ✅ ${RE[0]}`,
+              perdu:   `🐉 DRAGON BACCARAT\n🔥 Jeu #N${G} · ♠️ Pique · ×${maxRattrapage}\n⚡ ❌`,
+            },
+            {
+              id: 40, label: 'Luxe Style', icon: '🌹',
+              preview: `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n🎱 Jeu #N${G}  ·  ♠️ Pique  ·  Dogon +${maxRattrapage}\n💠 Résultat → ⌛`,
+              result:  `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n🎱 Jeu #N${G}  ·  ♠️ Pique  ·  Dogon +${maxRattrapage}\n💠 Résultat → ✅ ${RE[0]}`,
+              perdu:   `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n🎱 Jeu #N${G}  ·  ♠️ Pique  ·  Dogon +${maxRattrapage}\n💠 Résultat → ❌`,
+            },
+            {
+              id: 41, label: 'Bullet Speed', icon: '🔫',
+              preview: `🔫 #${G}|♠️|+${maxRattrapage}|⌛`,
+              result:  `🔫 #${G}|♠️|+${maxRattrapage}|✅ ${RE[0]}`,
+              perdu:   `🔫 #${G}|♠️|+${maxRattrapage}|❌`,
+            },
+            {
+              id: 42, label: 'Cyber 2077', icon: '⟨⟩',
+              preview: `⟨⟨ CYBER_BACCARAT ⟩⟩\n⚙ GAME_${G} :: ♠️PIQUE :: RETRY_${maxRattrapage}\n⊕ ⌛`,
+              result:  `⟨⟨ CYBER_BACCARAT ⟩⟩\n⚙ GAME_${G} :: ♠️PIQUE :: RETRY_${maxRattrapage}\n⊕ ✅ ${RE[0]}`,
+              perdu:   `⟨⟨ CYBER_BACCARAT ⟩⟩\n⚙ GAME_${G} :: ♠️PIQUE :: RETRY_${maxRattrapage}\n⊕ ❌`,
+            },
+            {
+              id: 43, label: 'Lune Mystique', icon: '🌙',
+              preview: `🌙 MYSTIQUE BACCARAT\n✨ Tirage #N${G} — ♠️ Pique\n🌟 Puissance : ×${maxRattrapage}\n🔮 ⌛`,
+              result:  `🌙 MYSTIQUE BACCARAT\n✨ Tirage #N${G} — ♠️ Pique\n🌟 Puissance : ×${maxRattrapage}\n🔮 ✅ ${RE[0]}`,
+              perdu:   `🌙 MYSTIQUE BACCARAT\n✨ Tirage #N${G} — ♠️ Pique\n🌟 Puissance : ×${maxRattrapage}\n🔮 ❌`,
+            },
+            {
+              id: 44, label: 'Matrix', icon: '░',
+              preview: `░░░ MATRIX BACCARAT ░░░\n▓ #N${G} ▓ ♠️ Pique ▓ +${maxRattrapage} ▓\n▒ ⌛`,
+              result:  `░░░ MATRIX BACCARAT ░░░\n▓ #N${G} ▓ ♠️ Pique ▓ +${maxRattrapage} ▓\n▒ ✅ ${RE[0]}`,
+              perdu:   `░░░ MATRIX BACCARAT ░░░\n▓ #N${G} ▓ ♠️ Pique ▓ +${maxRattrapage} ▓\n▒ ❌`,
+            },
+            {
+              id: 45, label: 'Roi Absolu', icon: '👑',
+              preview: `👑 JOUEUR ROI\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tour #N${G} → ♠️ PIQUE\n🔰 Protection : +${maxRattrapage} coups\n━━━━━━━━━━━━━━━━━━━━━\n⌛`,
+              result:  `👑 JOUEUR ROI\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tour #N${G} → ♠️ PIQUE\n🔰 Protection : +${maxRattrapage} coups\n━━━━━━━━━━━━━━━━━━━━━\n✅ ${RE[0]}`,
+              perdu:   `👑 JOUEUR ROI\n━━━━━━━━━━━━━━━━━━━━━\n🎯 Tour #N${G} → ♠️ PIQUE\n🔰 Protection : +${maxRattrapage} coups\n━━━━━━━━━━━━━━━━━━━━━\n❌`,
+            },
+            {
+              id: 46, label: 'Street Bet', icon: '🎰',
+              preview: `🎰 STREET BET #N${G}\n💵 Mise sur ♠️ Pique | Max ${maxRattrapage} retours\n⌛`,
+              result:  `🎰 STREET BET #N${G}\n💵 Mise sur ♠️ Pique | Max ${maxRattrapage} retours\n✅ ${RE[0]}`,
+              perdu:   `🎰 STREET BET #N${G}\n💵 Mise sur ♠️ Pique | Max ${maxRattrapage} retours\n❌`,
+            },
+            {
+              id: 47, label: 'Ultimate Pro', icon: '🌟',
+              preview: `🌟 ═══ ULTIMATE BACCARAT ═══ 🌟\n📍 Jeu #N${G}\n🎯 Camp : 👤 JOUEUR\n🃏 Signe : ♠️ PIQUE\n🔰 Dogon max : +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━━━\n⌛`,
+              result:  `🌟 ═══ ULTIMATE BACCARAT ═══ 🌟\n📍 Jeu #N${G}\n🎯 Camp : 👤 JOUEUR\n🃏 Signe : ♠️ PIQUE\n🔰 Dogon max : +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━━━\n✅ ${RE[0]}`,
+              perdu:   `🌟 ═══ ULTIMATE BACCARAT ═══ 🌟\n📍 Jeu #N${G}\n🎯 Camp : 👤 JOUEUR\n🃏 Signe : ♠️ PIQUE\n🔰 Dogon max : +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━━━\n❌`,
+            },
+            {
+              id: 48, label: 'Analyse Pro', icon: '📊',
+              preview: `📊 ANALYSE PRÉDICTIVE\n🔢 Tour : #N${G}\n📈 Signal : ♠️ Pique\n🔁 Fenêtre : ${maxRattrapage} jeux\n📋 Résultat : ⌛`,
+              result:  `📊 ANALYSE PRÉDICTIVE\n🔢 Tour : #N${G}\n📈 Signal : ♠️ Pique\n🔁 Fenêtre : ${maxRattrapage} jeux\n📋 Résultat : ✅ ${RE[0]}`,
+              perdu:   `📊 ANALYSE PRÉDICTIVE\n🔢 Tour : #N${G}\n📈 Signal : ♠️ Pique\n🔁 Fenêtre : ${maxRattrapage} jeux\n📋 Résultat : ❌`,
+            },
+            {
+              id: 49, label: 'Flèche Direct', icon: '➤',
+              preview: `➤ #N${G} ♠️ Pique (+${maxRattrapage}) → ⌛`,
+              result:  `➤ #N${G} ♠️ Pique (+${maxRattrapage}) → ✅ ${RE[0]}`,
+              perdu:   `➤ #N${G} ♠️ Pique (+${maxRattrapage}) → ❌`,
+            },
+            {
+              id: 50, label: 'Star Casino', icon: '⭐',
+              preview: `⭐⭐⭐ STAR CASINO ⭐⭐⭐\n🎰 Jeu #N${G}\n🎯 Signal : ♠️ Pique\n🔰 Dogon : +${maxRattrapage}\n✨ ⌛`,
+              result:  `⭐⭐⭐ STAR CASINO ⭐⭐⭐\n🎰 Jeu #N${G}\n🎯 Signal : ♠️ Pique\n🔰 Dogon : +${maxRattrapage}\n✨ ✅ ${RE[0]}`,
+              perdu:   `⭐⭐⭐ STAR CASINO ⭐⭐⭐\n🎰 Jeu #N${G}\n🎯 Signal : ♠️ Pique\n🔰 Dogon : +${maxRattrapage}\n✨ ❌`,
+            },
+            {
+              id: 51, label: 'Whisper Style', icon: '〰️',
+              preview: `〰️ #N${G}\n♠️ · +${maxRattrapage}\n⌛`,
+              result:  `〰️ #N${G}\n♠️ · +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `〰️ #N${G}\n♠️ · +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 52, label: 'Double Line', icon: '🏦',
+              preview: `👤 #N${G} — ♠️ Pique\n+${maxRattrapage} · ⌛`,
+              result:  `👤 #N${G} — ♠️ Pique\n+${maxRattrapage} · ✅ ${RE[0]}`,
+              perdu:   `👤 #N${G} — ♠️ Pique\n+${maxRattrapage} · ❌`,
+            },
+            {
+              id: 53, label: 'Diamant Court', icon: '💎',
+              preview: `💎 #N${G} ♠️ +${maxRattrapage} ⌛`,
+              result:  `💎 #N${G} ♠️ +${maxRattrapage} ✅ ${RE[0]}`,
+              perdu:   `💎 #N${G} ♠️ +${maxRattrapage} ❌`,
+            },
+            {
+              id: 54, label: 'Fusée Futur', icon: '🚀',
+              preview: `🚀 FUTUR BACCARAT — #N${G}\n🛸 Signal : ♠️ PIQUE\n⚡ Puissance : ×${maxRattrapage}\n🌌 ⌛`,
+              result:  `🚀 FUTUR BACCARAT — #N${G}\n🛸 Signal : ♠️ PIQUE\n⚡ Puissance : ×${maxRattrapage}\n🌌 ✅ ${RE[0]}`,
+              perdu:   `🚀 FUTUR BACCARAT — #N${G}\n🛸 Signal : ♠️ PIQUE\n⚡ Puissance : ×${maxRattrapage}\n🌌 ❌`,
+            },
+            {
+              id: 55, label: 'Cascade Pro', icon: '🌊',
+              preview: `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ⌛`,
+              result:  `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ✅ ${RE[0]}`,
+              perdu:   `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ❌`,
+            },
           ];
 
           return (
@@ -7613,8 +7972,9 @@ function AdminPanel() {
                           : s.mode === 'abs_3_vers_2' ? '🃏 3→2 Abs'
                           : s.mode === 'abs_3_vers_3' ? '🃏 3→3 Abs'
                           : s.mode === 'absence_victoire' ? '🏆 Abs Victoire'
+                          : s.mode === 'annonce_sequence' ? '📣 Rotateur Promo'
                           : s.mode;
-                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire';
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence';
                         const mappingStr = isAutoMode ? 'prédit costume déclencheur'
                           : Object.entries(s.mappings || {}).map(([k,v]) => { const pool = Array.isArray(v) ? v : [v]; return `${k}→${pool.join('/')}${pool.length > 1 ? '↻' : ''}`; }).join('  ');
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
@@ -8123,10 +8483,12 @@ function AdminPanel() {
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
                     <option value="carte_valeur">🃏 Carte Valeur</option>
+                    <option value="victoire_adverse">🏆 Victoire Adverse</option>
                     <option value="comptages_ecart">📊 Comptages Écart (seuil dynamique)</option>
                     <option value="intersection">🎯 Intersection (consensus stratégies)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
+                    <option value="annonce_sequence">📣 Rotateur Promo (annonces séquentielles)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -8176,6 +8538,14 @@ function AdminPanel() {
                       <div>Surveille <strong>toutes les stratégies existantes</strong> de la même main. Quand au moins <strong>Hi stratégies</strong> prédisent le <strong>même résultat</strong> sur des numéros de jeux proches (écart ≤ Max Écart) → déclenche la prédiction sur le plus petit numéro.</div>
                       <div style={{ marginTop: 6 }}>Ex. : Hi=2, écart=2, catégorie=costume · Alpha prédit #45 ♣ + Beta prédit #46 ♣ → écart=1 ≤ 2 → <strong>prédit #45 ♣</strong>.</div>
                       <div style={{ marginTop: 6, color: '#fb7185', fontWeight: 600 }}>⚠️ La main configurée filtre les stratégies surveillées (seules celles de la même main sont prises en compte).</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'annonce_sequence' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📣 Mode Rotateur Promo</div>
+                      <div>Sélectionnez des stratégies existantes et définissez leur <strong>ordre de rotation</strong>. À chaque intervalle configuré, une annonce Telegram promotionnelle est envoyée pour mettre en avant la stratégie courante.</div>
+                      <div style={{ marginTop: 6 }}>Chaque message inclut le nom de la stratégie, votre texte personnalisé, le prix (<strong>75$</strong>) et les instructions d'achat complètes.</div>
+                      <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>📦 Après paiement : licence personnelle + fichier ZIP prêt à déployer sur Telegram.</div>
                     </div>
                   )}
 
@@ -8338,8 +8708,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -8498,6 +8868,135 @@ function AdminPanel() {
                     <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(34,211,238,0.07)', borderRadius: 7, fontSize: 10, color: '#67e8f9' }}>
                       💡 Catégorie de <strong>costume</strong> → le costume absent est prédit automatiquement. Autre catégorie → configurez les <strong>mappings</strong> ci-dessous pour définir le costume à prédire.
                     </div>
+                  </div>
+                )}
+
+                {/* ── Paramètres — MODE ANNONCE SÉQUENCE (Rotateur Promo) ── */}
+                {stratForm.mode === 'annonce_sequence' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '16px', borderRadius: 12, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.28)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#fbbf24', marginBottom: 16 }}>📣 Configuration du Rotateur Promo</div>
+
+                    {/* Étape 1 : Sélection et ordre des stratégies */}
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>1️⃣ Sélectionner et ordonner les stratégies</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Disponibles — cliquez pour ajouter</div>
+                          <div style={{ background: '#0f172a', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', maxHeight: 200, overflowY: 'auto', padding: 5 }}>
+                            {strategies.filter(s => s.mode !== 'annonce_sequence' && !stratForm.annonce_sequence_ids.includes(String(s.id))).length === 0 && (
+                              <div style={{ color: '#475569', fontSize: 11, padding: '8px 10px', fontStyle: 'italic' }}>Toutes les stratégies sont déjà sélectionnées</div>
+                            )}
+                            {strategies.filter(s => s.mode !== 'annonce_sequence' && !stratForm.annonce_sequence_ids.includes(String(s.id))).map(s => (
+                              <button key={s.id} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, annonce_sequence_ids: [...p.annonce_sequence_ids, String(s.id)] }))}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', margin: '2px 0', borderRadius: 7, cursor: 'pointer', background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.12)', color: '#e2e8f0', fontSize: 12 }}>
+                                ➕ S{s.id} — {s.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Ordre de diffusion — ▲▼ pour réordonner</div>
+                          <div style={{ background: '#0f172a', borderRadius: 8, border: '1px solid rgba(251,191,36,0.22)', minHeight: 60, maxHeight: 200, overflowY: 'auto', padding: 5 }}>
+                            {stratForm.annonce_sequence_ids.length === 0 && (
+                              <div style={{ color: '#475569', fontSize: 11, padding: '8px 10px', fontStyle: 'italic' }}>Aucune stratégie sélectionnée</div>
+                            )}
+                            {stratForm.annonce_sequence_ids.map((sid, idx) => {
+                              const found = strategies.find(x => String(x.id) === String(sid));
+                              return (
+                                <div key={sid} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 8px', margin: '2px 0', borderRadius: 7, background: 'rgba(251,191,36,0.09)', border: '1px solid rgba(251,191,36,0.22)' }}>
+                                  <span style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', minWidth: 22 }}>{idx + 1}.</span>
+                                  <span style={{ flex: 1, fontSize: 11, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>S{sid} — {found?.name || '?'}</span>
+                                  <button type="button" disabled={idx === 0}
+                                    onClick={() => setStratForm(p => { const ids = [...p.annonce_sequence_ids]; [ids[idx-1], ids[idx]] = [ids[idx], ids[idx-1]]; return { ...p, annonce_sequence_ids: ids }; })}
+                                    style={{ padding: '1px 6px', borderRadius: 4, cursor: idx === 0 ? 'default' : 'pointer', background: idx === 0 ? 'transparent' : 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.18)', color: idx === 0 ? '#334155' : '#fbbf24', fontSize: 11 }}>▲</button>
+                                  <button type="button" disabled={idx === stratForm.annonce_sequence_ids.length - 1}
+                                    onClick={() => setStratForm(p => { const ids = [...p.annonce_sequence_ids]; [ids[idx+1], ids[idx]] = [ids[idx], ids[idx+1]]; return { ...p, annonce_sequence_ids: ids }; })}
+                                    style={{ padding: '1px 6px', borderRadius: 4, cursor: idx === stratForm.annonce_sequence_ids.length - 1 ? 'default' : 'pointer', background: idx === stratForm.annonce_sequence_ids.length - 1 ? 'transparent' : 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.18)', color: idx === stratForm.annonce_sequence_ids.length - 1 ? '#334155' : '#fbbf24', fontSize: 11 }}>▼</button>
+                                  <button type="button"
+                                    onClick={() => setStratForm(p => ({ ...p, annonce_sequence_ids: p.annonce_sequence_ids.filter((_, i) => i !== idx) }))}
+                                    style={{ padding: '1px 6px', borderRadius: 4, cursor: 'pointer', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)', color: '#f87171', fontSize: 11 }}>✕</button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Étape 2 : Texte personnalisé */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>2️⃣ Texte personnalisé de l'annonce</div>
+                      <textarea
+                        value={stratForm.annonce_text || ''}
+                        onChange={e => setStratForm(p => ({ ...p, annonce_text: e.target.value }))}
+                        rows={3}
+                        placeholder="Entrez votre texte promotionnel... Il sera ajouté dans chaque annonce après la description de la stratégie vedette."
+                        style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid rgba(251,191,36,0.28)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6, boxSizing: 'border-box' }}
+                      />
+                      <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Facultatif — laissez vide pour n'utiliser que le message promotionnel automatique.</div>
+                    </div>
+
+                    {/* Étape 3 : Durée par stratégie */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>3️⃣ Durée d'activité par stratégie</div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Combien de temps chaque stratégie reste active avant de passer à la suivante.</div>
+                      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                        {[{ val: 30, label: '30 min' }, { val: 60, label: '1 heure' }, { val: 120, label: '2 heures' }, { val: 240, label: '4 heures' }, { val: 360, label: '6 heures' }, { val: 720, label: '12 heures' }, { val: 1440, label: '24 heures' }, { val: 2880, label: '48 heures' }].map(opt => {
+                          const active = parseInt(stratForm.annonce_duration) === opt.val;
+                          return (
+                            <button key={opt.val} type="button"
+                              onClick={() => setStratForm(p => ({ ...p, annonce_duration: opt.val }))}
+                              style={{ padding: '7px 13px', borderRadius: 8, cursor: 'pointer', fontWeight: active ? 800 : 500, fontSize: 12, border: active ? '2px solid #38bdf8' : '1px solid rgba(56,189,248,0.2)', background: active ? 'rgba(56,189,248,0.15)' : 'rgba(56,189,248,0.03)', color: active ? '#38bdf8' : '#94a3b8', transition: 'all 0.15s' }}>
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Étape 4 : Intervalle d'annonce promo */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>4️⃣ Intervalle d'envoi des annonces promo</div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Fréquence d'envoi des messages promotionnels pendant l'activité d'une stratégie.</div>
+                      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                        {[{ val: 30, label: '30 min' }, { val: 60, label: '1 heure' }, { val: 120, label: '2 heures' }, { val: 360, label: '6 heures' }, { val: 720, label: '12 heures' }, { val: 1440, label: '24 heures' }].map(opt => {
+                          const active = parseInt(stratForm.annonce_interval) === opt.val;
+                          return (
+                            <button key={opt.val} type="button"
+                              onClick={() => setStratForm(p => ({ ...p, annonce_interval: opt.val }))}
+                              style={{ padding: '7px 13px', borderRadius: 8, cursor: 'pointer', fontWeight: active ? 800 : 500, fontSize: 12, border: active ? '2px solid #fbbf24' : '1px solid rgba(251,191,36,0.2)', background: active ? 'rgba(251,191,36,0.18)' : 'rgba(251,191,36,0.04)', color: active ? '#fbbf24' : '#94a3b8', transition: 'all 0.15s' }}>
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Aperçu des messages */}
+                    {stratForm.annonce_sequence_ids.length > 0 && (() => {
+                      const total = stratForm.annonce_sequence_ids.length;
+                      const firstId = stratForm.annonce_sequence_ids[0];
+                      const feat = strategies.find(s => String(s.id) === String(firstId));
+                      const name = feat?.name || `S${firstId}`;
+                      const customText = (stratForm.annonce_text || '').trim();
+                      const dur = parseInt(stratForm.annonce_duration) || 120;
+                      const durStr = dur >= 1440 ? `${Math.round(dur/1440)} jour(s)` : dur >= 60 ? `${Math.round(dur/60)} heure(s)` : `${dur} minute(s)`;
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {/* Message de démarrage */}
+                          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.22)' }}>
+                            <div style={{ fontWeight: 700, color: '#38bdf8', marginBottom: 8, fontSize: 11 }}>🚀 Aperçu — Message de démarrage (envoyé lors du changement)</div>
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 10, color: '#cbd5e1', lineHeight: 1.75 }}>{`🚀 CHANGEMENT DE STRATÉGIE — ROTATION PROMO\n\nLa rotation vient de changer. La nouvelle stratégie active est :\n\n🎯 ${name}\n\nCette stratégie prend maintenant le relais et génère les prédictions dans vos canaux Baccarat 1xBet.\n\n⏱ Durée d'activité : ${durStr}${total > 1 ? `\n📌 Position 1 / ${total} dans la rotation` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n📲 Suivez les signaux en temps réel sur notre plateforme !`}</pre>
+                          </div>
+                          {/* Message promotionnel */}
+                          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(251,191,36,0.13)' }}>
+                            <div style={{ fontWeight: 700, color: '#fbbf24', marginBottom: 8, fontSize: 11 }}>📣 Aperçu — Message promo (envoyé toutes les {parseInt(stratForm.annonce_interval) >= 60 ? `${Math.round(parseInt(stratForm.annonce_interval)/60)}h` : `${stratForm.annonce_interval}min`})</div>
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 10, color: '#cbd5e1', lineHeight: 1.75 }}>{`🔥 STRATÉGIE EN VEDETTE — ${name}\n\n✨ ${name} est la stratégie active de la rotation. Elle prédit actuellement avec la plus grande précision sur la plateforme Baccarat 1xBet.\nElle analyse les jeux en temps réel et génère des signaux fiables pour vous aider à maximiser vos gains.${customText ? `\n\n📝 ${customText}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n💰 COMMENT ACQUÉRIR CETTE STRATÉGIE ?\n\n💵 Prix : 75$\n📦 Après paiement : licence personnelle + fichier ZIP complet prêt à déployer\n🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux\n\n👉 Étapes pour acheter :\n1️⃣ Inscrivez-vous sur notre plateforme\n2️⃣ Allez dans la section "Acheter Stratégie"\n3️⃣ Sélectionnez ${name} et soumettez votre capture de paiement\n4️⃣ Après validation par l'administrateur, téléchargez votre licence et votre ZIP\n\n🔒 Licence unique — liée à votre compte${total > 1 ? `\n📌 Stratégie 1 / ${total} dans la rotation` : ''}`}</pre>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -8880,7 +9379,7 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -8888,7 +9387,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -8909,7 +9408,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :

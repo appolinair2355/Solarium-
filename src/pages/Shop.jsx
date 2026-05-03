@@ -195,7 +195,7 @@ export default function Shop() {
                   const planColor = promo.plan_requis === 'pro' ? '#c084fc' : promo.plan_requis === 'premium' ? '#fbbf24' : '#22c55e';
 
                   return (
-                    <div key={item.id} style={{
+                    <div key={item.id} className="shop-card-glow" style={{
                       borderRadius: 16, overflow: 'hidden',
                       background: 'linear-gradient(145deg, #0f172a, #1a2744)',
                       border: '1.5px solid rgba(250,204,21,0.35)',
