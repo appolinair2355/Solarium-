@@ -3797,6 +3797,8 @@ function AdminPanel() {
     comptages_key: 'suit_p_heart',
     // Mode annonce_sequence (Rotateur Promo)
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
+    // Mode first_card_plus6
+    proche: 3, banker_card_count: 0,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
   };
@@ -4810,7 +4812,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0 });
     setStratOpen(true);
   };
 
@@ -4827,7 +4829,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5245,7 +5247,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage' };
 
   return (
     <>
@@ -8584,6 +8586,7 @@ function AdminPanel() {
                     <option value="intersection">🎯 Intersection (consensus stratégies)</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
+                    <option value="first_card_plus6">🎯 Première Carte +Décalage</option>
                     <option value="annonce_sequence">📣 Rotateur Promo (annonces séquentielles)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
@@ -8642,6 +8645,38 @@ function AdminPanel() {
                       <div>Sélectionnez des stratégies existantes et définissez leur <strong>ordre de rotation</strong>. À chaque intervalle configuré, une annonce Telegram promotionnelle est envoyée pour mettre en avant la stratégie courante.</div>
                       <div style={{ marginTop: 6 }}>Chaque message inclut le nom de la stratégie, votre texte personnalisé, le prix (<strong>75$</strong>) et les instructions d'achat complètes.</div>
                       <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>📦 Après paiement : licence personnelle + fichier ZIP prêt à déployer sur Telegram.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'first_card_plus6' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Première Carte +Décalage</div>
+                      <div><strong>Déclencheur (jeu N)</strong> : le Joueur a 2 cartes de <em>costumes différents</em>, et le Banquier n'a <em>aucune</em> carte du costume de la 1ère carte Joueur.</div>
+                      <div style={{ marginTop: 6 }}><strong>Prédiction</strong> : costume de la 1ère carte Joueur au jeu <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>N + Décalage</code>.</div>
+                      <div style={{ marginTop: 6 }}><strong>Proche</strong> : la prédiction est mise en attente jusqu'à ce que <code>(targetGn − live) ≤ Proche</code>, puis émise.</div>
+                      <div style={{ marginTop: 6 }}><strong>Nb cartes banquier</strong> : 0 = indifférent, 2 ou 3 = nombre exact de cartes exigé.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'first_card_plus6' && (
+                    <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Proche (émettre si distance ≤)</label>
+                          <input type="number" min="1" max="50" value={stratForm.proche}
+                            onChange={e => setStratForm(prev => ({ ...prev, proche: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Nb cartes banquier (0 = indifférent)</label>
+                          <select value={stratForm.banker_card_count}
+                            onChange={e => setStratForm(prev => ({ ...prev, banker_card_count: parseInt(e.target.value) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                            <option value={0}>0 — Indifférent</option>
+                            <option value={2}>2 — Exactement 2 cartes</option>
+                            <option value={3}>3 — Exactement 3 cartes</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -8804,8 +8839,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6 */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -9518,7 +9553,7 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -9526,7 +9561,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -9547,7 +9582,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
