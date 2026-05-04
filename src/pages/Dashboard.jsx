@@ -1322,7 +1322,123 @@ export default function Dashboard() {
                               );
                             })}
                           </div>
-                        ) : absences.map(a => {
+                        ) : absences[0]?.isFC6 ? (() => {
+                          const { lastLog: ll, deferred, proche, pending: fc6Pending } = absences[0];
+                          const SUIT_COLOR = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                          const Row = ({ ok, label }) => (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                              <span style={{ fontSize: '0.75rem', minWidth: 16, textAlign: 'center' }}>{ok ? '✅' : '❌'}</span>
+                              <span style={{ fontSize: '0.72rem', color: ok ? '#86efac' : '#94a3b8' }}>{label}</span>
+                            </div>
+                          );
+                          if (!ll) {
+                            if (fc6Pending && fc6Pending.length > 0) {
+                              const p = fc6Pending[0];
+                              return (
+                                <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                    ⏳ Prédiction en vérification
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ fontSize: '0.7rem', color: '#fbbf24', fontWeight: 700 }}>Cible #{p.gn}</span>
+                                    <span style={{ fontSize: '1.1rem', color: SUIT_COLOR[p.suit] || '#e2e8f0', fontWeight: 800 }}>{p.suit}</span>
+                                  </div>
+                                  <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                                    Rattrapage <span style={{ color: '#94a3b8', fontWeight: 600 }}>{p.rattrapage}/{p.maxR}</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div style={{ color: '#475569', fontSize: '0.75rem', paddingTop: 4 }}>
+                                En attente du premier jeu analysé…
+                              </div>
+                            );
+                          }
+                          return (
+                            <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              {/* Numéro du jeu analysé */}
+                              <div style={{ fontSize: '0.62rem', color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2, fontWeight: 700 }}>
+                                Jeu #{ll.gameNumber} — Analyse
+                              </div>
+
+                              {/* Joueur 2 cartes */}
+                              <Row ok={ll.playerHas2} label={ll.playerHas2 ? `Joueur a eu 2 cartes` : `Joueur n'a pas eu 2 cartes (${ll.playerCards})`} />
+
+                              {/* Banquier 2 cartes */}
+                              <Row ok={ll.bankerHas2} label={ll.bankerHas2 ? `Banquier a eu 2 cartes` : `Banquier n'a pas eu 2 cartes (${ll.bankerCards})`} />
+
+                              {/* Séparateur */}
+                              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
+
+                              {/* Prédiction accordée ou non */}
+                              {ll.triggered ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.68rem', color: '#4ade80', fontWeight: 800 }}>🎯 Prédiction accordée pour le #{ ll.targetGn }</span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Costume retenu :</span>
+                                    <span style={{ fontSize: '1rem', color: SUIT_COLOR[ll.suit] || '#e2e8f0', fontWeight: 800 }}>{ll.suit}</span>
+                                    <span style={{ fontSize: '0.6rem', color: '#64748b' }}>(1ère carte joueur #{ ll.gameNumber })</span>
+                                  </div>
+                                  {ll.reason && (
+                                    <div style={{ fontSize: '0.6rem', color: '#64748b', marginTop: 1 }}>
+                                      <span style={{ color: '#475569', fontWeight: 600 }}>Raison : </span>{ll.reason}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  <div style={{ fontSize: '0.68rem', color: '#475569' }}>⛔ Pas de prédiction</div>
+                                  {ll.reason && (
+                                    <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                                      <span style={{ color: '#475569', fontWeight: 600 }}>Raison : </span>{ll.reason}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Différé en attente */}
+                              {deferred && (
+                                <>
+                                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                      ⏳ Numéro en cours (différé)
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontSize: '0.72rem', color: '#fbbf24', fontWeight: 800 }}>Cible #{deferred.targetGn}</span>
+                                      <span style={{ fontSize: '1rem', color: SUIT_COLOR[deferred.suit] || '#e2e8f0', fontWeight: 800 }}>{deferred.suit}</span>
+                                    </div>
+                                    <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                                      Sera lancé quand la distance ≤ <span style={{ color: '#f59e0b', fontWeight: 700 }}>{proche}</span>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+
+                              {/* Prédiction en vérification (pending) */}
+                              {fc6Pending && fc6Pending.length > 0 && (
+                                <>
+                                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <div style={{ fontSize: '0.62rem', color: '#38bdf8', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                      🔍 En vérification
+                                    </div>
+                                    {fc6Pending.map(p => (
+                                      <div key={p.gn} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '0.7rem', color: '#7dd3fc', fontWeight: 700 }}>Cible #{p.gn}</span>
+                                        <span style={{ fontSize: '1rem', color: SUIT_COLOR[p.suit] || '#e2e8f0', fontWeight: 800 }}>{p.suit}</span>
+                                        <span style={{ fontSize: '0.6rem', color: '#475569' }}>R{p.rattrapage}/{p.maxR}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })() : absences.map(a => {
                           const isMiroir = a.mode === 'taux_miroir';
                           const isCarte = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3' || a.mode === 'victoire_adverse' || a.mode === 'distribution' || a.mode === 'abs_3_vers_2' || a.mode === 'abs_3_vers_3' || a.mode === 'absence_victoire';
                           const barColor = isMiroir
