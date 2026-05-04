@@ -1194,6 +1194,107 @@ export default function Dashboard() {
                           </div>
                         ) : absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
+                        ) : absences[0]?.isIntersection ? (
+                          (() => {
+                            const { monitor } = absences[0];
+                            if (!monitor) return <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Aucune donnée</div>;
+                            const { monitored = [], accordSuits = [], hi, maxEcart } = monitor;
+                            const SUIT_COLORS = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                            const ALL_S = ['♠','♥','♦','♣'];
+                            const hasAnyAccord = accordSuits.length > 0;
+
+                            // Regrouper toutes les prédictions actives par costume
+                            const suitGroups = {};
+                            for (const strat of monitored) {
+                              for (const p of strat.pending) {
+                                if (!suitGroups[p.suit]) suitGroups[p.suit] = [];
+                                suitGroups[p.suit].push({ gameNumber: p.gameNumber, stratName: strat.name });
+                              }
+                            }
+
+                            return (
+                              <div style={{ paddingTop: 4 }}>
+                                {/* ── Ligne d'en-tête ── */}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                  <span style={{ fontSize: '0.58rem', color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                                    {hi} strat. requises · écart ≤ {maxEcart}
+                                  </span>
+                                  {hasAnyAccord
+                                    ? <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#4ade80', background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.4)', borderRadius: 999, padding: '2px 8px', animation: 'pulse 1.5s infinite' }}>✅ ACCORD</span>
+                                    : <span style={{ fontSize: '0.62rem', color: '#475569', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999, padding: '2px 8px' }}>En attente…</span>
+                                  }
+                                </div>
+
+                                {/* ── Grille résumé par costume ── */}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginBottom: 8 }}>
+                                  {ALL_S.map(suit => {
+                                    const preds = suitGroups[suit] || [];
+                                    const inAccord = accordSuits.includes(suit);
+                                    const count = preds.length;
+                                    const nearAccord = !inAccord && count >= hi - 1;
+                                    return (
+                                      <div key={suit} style={{
+                                        padding: '5px 7px', borderRadius: 7,
+                                        background: inAccord ? 'rgba(74,222,128,0.12)' : nearAccord ? 'rgba(245,158,11,0.10)' : 'rgba(255,255,255,0.03)',
+                                        border: inAccord ? '1px solid rgba(74,222,128,0.45)' : nearAccord ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(255,255,255,0.07)',
+                                        transition: 'all 0.3s ease',
+                                      }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                          <span style={{ fontSize: '0.9rem', color: SUIT_COLORS[suit] }}>{suit}</span>
+                                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: inAccord ? '#4ade80' : nearAccord ? '#f59e0b' : '#475569' }}>
+                                            {count}/{hi}
+                                          </span>
+                                        </div>
+                                        <div style={{ fontSize: '0.58rem', color: inAccord ? '#86efac' : '#64748b', marginTop: 2, minHeight: 10 }}>
+                                          {preds.length > 0 ? preds.map(p => `#${p.gameNumber}`).join(' · ') : '—'}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* ── Séparateur ── */}
+                                <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginBottom: 6 }} />
+
+                                {/* ── Détail par stratégie ── */}
+                                {monitored.length === 0 ? (
+                                  <div style={{ color: '#475569', fontSize: '0.72rem' }}>Aucune stratégie surveillée active</div>
+                                ) : monitored.map(strat => {
+                                  const hasAccord = strat.pending.some(p => accordSuits.includes(p.suit));
+                                  return (
+                                    <div key={strat.id} style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      padding: '3px 5px', borderRadius: 5, marginBottom: 3,
+                                      background: hasAccord ? 'rgba(74,222,128,0.06)' : 'transparent',
+                                      border: hasAccord ? '1px solid rgba(74,222,128,0.18)' : '1px solid transparent',
+                                    }}>
+                                      <span style={{ fontSize: '0.62rem', color: hasAccord ? '#4ade80' : '#94a3b8', fontWeight: hasAccord ? 700 : 500, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+                                        {strat.name}
+                                      </span>
+                                      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                        {strat.pending.length === 0 ? (
+                                          <span style={{ fontSize: '0.58rem', color: '#334155' }}>—</span>
+                                        ) : strat.pending.map(p => {
+                                          const inAccord = accordSuits.includes(p.suit);
+                                          return (
+                                            <span key={p.gameNumber} style={{
+                                              fontSize: '0.65rem', padding: '1px 5px', borderRadius: 4,
+                                              background: inAccord ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
+                                              border: inAccord ? '1px solid rgba(74,222,128,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                                              color: inAccord ? '#4ade80' : (SUIT_COLORS[p.suit] || '#94a3b8'),
+                                              fontWeight: inAccord ? 800 : 600,
+                                            }}>
+                                              #{p.gameNumber} {p.suit}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()
                         ) : absences[0]?.isCarteValeur ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingTop: 4 }}>
                             {absences.map(a => {
