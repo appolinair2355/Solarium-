@@ -3834,6 +3834,7 @@ function AdminPanel() {
   const [stratSaving, setStratSaving] = useState(false);
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
   const [mirrorCountsData, setMirrorCountsData] = useState({}); // { [stratId]: { counts, threshold } }
+  const [interMonitorData, setInterMonitorData] = useState({}); // { [stratId]: { startGame, monitored, accordSuits } }
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -5036,6 +5037,25 @@ function AdminPanel() {
     };
     fetchMirrorCounts();
     const iv = setInterval(fetchMirrorCounts, 5000);
+    return () => clearInterval(iv);
+  }, [strategies]);
+
+  // Fetch intersection monitor toutes les 4s pour les stratégies intersection
+  useEffect(() => {
+    const fetchInterMonitor = async () => {
+      const interStrats = strategies.filter(s => s.mode === 'intersection' && s.enabled);
+      if (!interStrats.length) return;
+      const updates = {};
+      await Promise.all(interStrats.map(async s => {
+        try {
+          const r = await fetch(`/api/admin/intersection-monitor/${s.id}`, { credentials: 'include' });
+          if (r.ok) { const d = await r.json(); if (!d.error) updates[s.id] = d; }
+        } catch {}
+      }));
+      if (Object.keys(updates).length) setInterMonitorData(p => ({ ...p, ...updates }));
+    };
+    fetchInterMonitor();
+    const iv = setInterval(fetchInterMonitor, 4000);
     return () => clearInterval(iv);
   }, [strategies]);
 
@@ -7995,6 +8015,67 @@ function AdminPanel() {
                         return `B≥${s.threshold} · ${mLabel} · ${mappingStr}`;
                       })()}
                     </div>
+                    {/* ── Moniteur Intersection temps réel ── */}
+                    {s.mode === 'intersection' && interMonitorData[s.id] && (() => {
+                      const mon = interMonitorData[s.id];
+                      const { startGame, monitored = [], accordSuits = [], hi, maxEcart } = mon;
+                      const SUIT_EMOJI = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
+                      return (
+                        <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(251,113,133,0.07)', border: '1px solid rgba(251,113,133,0.2)' }}>
+                          <div style={{ fontSize: 10, color: '#fb7185', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            🎯 INTERSECTION — Moniteur
+                            {startGame !== null && <span style={{ color: '#64748b', fontWeight: 400 }}>· départ jeu #{startGame}</span>}
+                            {accordSuits.length > 0 && (
+                              <span style={{ background: 'rgba(34,197,94,0.2)', color: '#22c55e', borderRadius: 5, padding: '1px 6px', fontWeight: 800, fontSize: 10 }}>
+                                ✓ ACCORD {accordSuits.join(' ')}
+                              </span>
+                            )}
+                          </div>
+                          {monitored.length === 0 ? (
+                            <div style={{ fontSize: 10, color: '#475569' }}>Aucune stratégie compatible active</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {monitored.map(m => {
+                                const inAccord = m.pending.some(p => accordSuits.includes(p.suit));
+                                return (
+                                  <div key={m.id} style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
+                                    padding: '3px 7px', borderRadius: 6,
+                                    background: inAccord ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.03)',
+                                    border: inAccord ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(255,255,255,0.06)',
+                                  }}>
+                                    <span style={{ color: inAccord ? '#22c55e' : '#94a3b8', fontWeight: 700, minWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+                                    <span style={{ color: '#475569', fontSize: 9 }}>({m.mode})</span>
+                                    {m.pending.length === 0 ? (
+                                      <span style={{ color: '#374151', fontSize: 10, marginLeft: 4 }}>— aucune prédiction active</span>
+                                    ) : (
+                                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginLeft: 4 }}>
+                                        {m.pending.map((p, i) => {
+                                          const isAccordSuit = accordSuits.includes(p.suit);
+                                          return (
+                                            <span key={i} style={{
+                                              fontSize: 11, padding: '1px 7px', borderRadius: 6, fontWeight: 800,
+                                              background: isAccordSuit ? 'rgba(34,197,94,0.25)' : 'rgba(99,102,241,0.15)',
+                                              color: isAccordSuit ? '#4ade80' : '#a5b4fc',
+                                              border: isAccordSuit ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(99,102,241,0.3)',
+                                            }}>
+                                              #{p.gameNumber} {SUIT_EMOJI[p.suit] || p.suit}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 5, fontSize: 9, color: '#475569' }}>
+                            Accord si ≥{hi} strats · même costume · écart ≤{maxEcart} jeu(x)
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {/* ── Compteurs miroir temps réel ── */}
                     {s.mode === 'taux_miroir' && mirrorCountsData[s.id] && (
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
