@@ -3118,26 +3118,48 @@ class Engine {
         return;
       }
 
-      // Log analyse joueur
       const pCardCount = Array.isArray(pCards) ? pCards.length : 0;
       const bCardCount = Array.isArray(bCards) ? bCards.length : 0;
       const p1Suit = Array.isArray(pCards) && pCards[0] ? pCards[0].S : null;
       const p2Suit = Array.isArray(pCards) && pCards[1] ? pCards[1].S : null;
 
+      // Objet log — rempli au fur et à mesure, stocké dans state.fc_last_log
+      const fcLog = {
+        gameNumber: gn,
+        playerCards: pCardCount,
+        playerHas2: pCardCount === 2,
+        bankerCards: bCardCount,
+        bankerHas2: bCardCount === 2,
+        bankerCardCountRequired: bankerCardCount,
+        p1Suit,
+        p2Suit,
+        triggered: false,
+        suit: null,
+        targetGn: null,
+        deferred: false,
+        reason: null,
+      };
+
       // Vérification : nombre de cartes du banquier (si configuré)
       if (bankerCardCount > 0 && bCardCount !== bankerCardCount) {
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — Banquier ${bCardCount} carte(s) ≠ requis ${bankerCardCount} → pas de signal`);
+        fcLog.reason = `Banquier ${bCardCount} carte(s) ≠ requis ${bankerCardCount}`;
+        state.fc_last_log = fcLog;
+        console.log(`[${channelId}] [FC+6] Jeu #${gn} — ${fcLog.reason} → pas de signal`);
         return;
       }
 
       // Vérification : joueur a exactement 2 cartes
       if (pCardCount !== 2) {
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — Joueur ${pCardCount} carte(s) ≠ 2 → pas de signal`);
+        fcLog.reason = `Joueur ${pCardCount} carte(s) ≠ 2`;
+        state.fc_last_log = fcLog;
+        console.log(`[${channelId}] [FC+6] Jeu #${gn} — ${fcLog.reason} → pas de signal`);
         return;
       }
 
       // Vérification : les 2 cartes du joueur ont des costumes DIFFÉRENTS
       if (!p1Suit || !p2Suit || p1Suit === p2Suit) {
+        fcLog.reason = `Joueur 2 cartes même costume (${SUIT_DISPLAY[p1Suit] || p1Suit})`;
+        state.fc_last_log = fcLog;
         console.log(`[${channelId}] [FC+6] Jeu #${gn} — Joueur 2 cartes même costume (${p1Suit}) → pas de signal`);
         return;
       }
@@ -3145,6 +3167,8 @@ class Engine {
       // Vérification : le banquier n'a PAS le costume de la 1ère carte du joueur
       const bankerHasFirstSuit = (bSuits || []).includes(p1Suit);
       if (bankerHasFirstSuit) {
+        fcLog.reason = `Banquier possède ${SUIT_DISPLAY[p1Suit] || p1Suit} (costume P1 du joueur)`;
+        state.fc_last_log = fcLog;
         console.log(`[${channelId}] [FC+6] Jeu #${gn} — Banquier possède ${p1Suit} (costume P1) → pas de signal`);
         return;
       }
@@ -3153,14 +3177,23 @@ class Engine {
       const targetGn  = gn + offset;
       const remaining = targetGn - gn;
       const bNbLabel  = bankerCardCount > 0 ? `${bankerCardCount} carte(s)` : `${bCardCount} carte(s) (indifférent)`;
+
+      fcLog.triggered = true;
+      fcLog.suit      = p1Suit;
+      fcLog.targetGn  = targetGn;
+      fcLog.reason    = `J: ${SUIT_DISPLAY[p1Suit]||p1Suit}≠${SUIT_DISPLAY[p2Suit]||p2Suit} (costumes différents) · B(${bNbLabel}) sans ${SUIT_DISPLAY[p1Suit]||p1Suit}`;
+
       console.log(`[${channelId}] [FC+6] ✅ Signal jeu #${gn} — Joueur P1=${p1Suit} P2=${p2Suit} (différents) | Banquier (${bNbLabel}) sans ${p1Suit} → cible #${targetGn} (proche=${proche})`);
       console.log(`[${channelId}] [FC+6] Distance trigger→cible = ${remaining} | seuil proche = ${proche}`);
 
       if (remaining <= proche) {
         console.log(`[${channelId}] [FC+6] Distance ${remaining} ≤ proche ${proche} → émission immédiate ${SUIT_DISPLAY[p1Suit] || p1Suit} → #${targetGn}`);
+        state.fc_last_log = fcLog;
         await emitPrediction(targetGn, p1Suit, p1Suit);
       } else {
         console.log(`[${channelId}] [FC+6] Distance ${remaining} > proche ${proche} → prédiction différée (sera émise quand distance ≤ ${proche})`);
+        fcLog.deferred = true;
+        state.fc_last_log = fcLog;
         state.fc_deferred = { targetGn, suit: p1Suit };
       }
     }
@@ -3956,6 +3989,24 @@ class Engine {
         const monitor = this.getIntersectionMonitor(id);
         if (!monitor) return [];
         return [{ isIntersection: true, monitor }];
+      }
+
+      // Mode Première Carte +Décalage → afficher le log du dernier jeu analysé + différé en cours
+      if (mode === 'first_card_plus6') {
+        const proche = Math.max(1, parseInt(entry.config?.proche) || 3);
+        const pendingEntries = Object.entries(entry.pending || {});
+        return [{
+          isFC6: true,
+          lastLog: entry.fc_last_log || null,
+          deferred: entry.fc_deferred || null,
+          proche,
+          pending: pendingEntries.map(([pgn, p]) => ({
+            gn: parseInt(pgn),
+            suit: p.suit,
+            rattrapage: p.rattrapage || 0,
+            maxR: p.maxR || 0,
+          })),
+        }];
       }
 
       return ALL_SUITS.map(suit => {

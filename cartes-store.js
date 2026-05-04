@@ -31,13 +31,7 @@
 
 const { Pool } = require('pg');
 
-// ─── URL DE LA BASE `les_cartes` — HARDCODÉE ──────────────────────────────
-// L'URL est intentionnellement écrite EN DUR ici (pas dans une variable
-// d'environnement Render). Pour changer de DB, modifier cette ligne et
-// redéployer.
-const URL =
-  'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg' +
-  '@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+const URL = process.env.LES_CARTES_DATABASE_URL || null;
 
 let pool = null;
 let initialized = false;
@@ -45,9 +39,10 @@ let initPromise = null;
 
 function getPool() {
   if (pool) return pool;
+  const sslNeeded = URL && (URL.includes('render.com') || URL.includes('sslmode'));
   pool = new Pool({
     connectionString: URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslNeeded ? { rejectUnauthorized: false } : false,
     max: 5,
     idleTimeoutMillis: 30_000,
   });
@@ -56,6 +51,11 @@ function getPool() {
 }
 
 async function init() {
+  if (!URL) {
+    console.log('[CartesStore] LES_CARTES_DATABASE_URL non défini — module désactivé');
+    initialized = true;
+    return;
+  }
   if (initialized) return;
   if (initPromise) return initPromise;
   initPromise = (async () => {
@@ -145,6 +145,7 @@ function deriveWinner(rawWinner, ps, bs, np, nb) {
 
 // ── Enregistrement d'un jeu terminé ────────────────────────────────────────
 async function recordGame(game) {
+  if (!URL) return false;
   if (!game || !game.is_finished || game.game_number == null) return false;
   try {
     await init();
