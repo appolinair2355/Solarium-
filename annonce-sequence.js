@@ -93,6 +93,14 @@ function buildPromoMessage(feat, customText, orderNum, totalCount) {
   return lines.join('\n');
 }
 
+// ── Vérifie si la durée de prédiction de ce rotateur est expirée ─────────────
+function _isPredDurationExpired(strat) {
+  const dur = parseInt(strat.pred_duration_minutes) || 0;
+  if (dur <= 0 || !strat.pred_duration_started_at) return false;
+  const expiresAt = new Date(strat.pred_duration_started_at).getTime() + dur * 60000;
+  return Date.now() > expiresAt;
+}
+
 // ── Envoi Telegram vers tous les canaux cibles ───────────────────────────────
 async function _sendToChannels(seqStrat, text) {
   const fetch   = (...a) => import('node-fetch').then(m => m.default(...a));
@@ -137,6 +145,12 @@ async function _tick() {
 
     for (const seqStrat of seqStrats) {
       try {
+        // ── Durée de prédiction expirée → bloquer TOUS les messages de ce rotateur ──
+        if (_isPredDurationExpired(seqStrat)) {
+          console.log(`[AnnonceSeq] S${seqStrat.id} — durée de prédiction expirée, tous les messages bloqués`);
+          continue;
+        }
+
         const seqIds = Array.isArray(seqStrat.annonce_sequence_ids) ? seqStrat.annonce_sequence_ids : [];
         if (seqIds.length === 0) continue;
 
@@ -226,6 +240,11 @@ async function sendNow(stratId) {
   const strats = raw ? JSON.parse(raw) : [];
   const seqStrat = strats.find(s => String(s.id) === String(stratId));
   if (!seqStrat || seqStrat.mode !== 'annonce_sequence') throw new Error('Stratégie introuvable ou mode incorrect');
+
+  // Bloquer si la durée de prédiction est expirée
+  if (_isPredDurationExpired(seqStrat)) {
+    throw new Error('Durée de prédiction expirée — envoi bloqué');
+  }
 
   const seqIds  = Array.isArray(seqStrat.annonce_sequence_ids) ? seqStrat.annonce_sequence_ids : [];
   const ordered = seqIds.map(id => strats.find(s => String(s.id) === String(id))).filter(Boolean);

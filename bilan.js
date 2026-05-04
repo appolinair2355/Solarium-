@@ -91,7 +91,11 @@ function buildBilanData(rows, strategies) {
           .filter(Boolean)
       : [];
 
-    result.push({ stratId, name, maxR, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets, isRotation, childNames });
+    result.push({
+      stratId, name, maxR, totalWins, totalLosses, total, winRate, byRattrapage, tgTargets, isRotation, childNames,
+      pred_duration_minutes:    stratCfg?.pred_duration_minutes    ?? 0,
+      pred_duration_started_at: stratCfg?.pred_duration_started_at ?? null,
+    });
   }
 
   return result.sort((a, b) => a.stratId.localeCompare(b.stratId));
@@ -177,6 +181,15 @@ async function sendDailyBilan(dateStr) {
     // Chaque stratégie est envoyée indépendamment sur ses propres canaux.
     // Cela garantit qu'aucune stratégie ne se mélange avec une autre.
     for (const entry of bilanData) {
+      // ── Bloquer le bilan si la durée de prédiction est expirée pour cette stratégie ──
+      if ((entry.pred_duration_minutes || 0) > 0 && entry.pred_duration_started_at) {
+        const expiresAt = new Date(entry.pred_duration_started_at).getTime() + entry.pred_duration_minutes * 60000;
+        if (Date.now() > expiresAt) {
+          console.log(`[Bilan] ${entry.stratId} (${entry.name}) — durée de prédiction expirée, bilan non envoyé`);
+          continue;
+        }
+      }
+
       const text = formatBilanText(entry, dateStr);
 
       if (entry.tgTargets && entry.tgTargets.length > 0) {

@@ -175,7 +175,26 @@ class Engine {
       : dur >= 60    ? `${Math.round(dur / 60)} heure(s)`
       : `${dur} minute(s)`;
 
-    const alertText = `🔴 <b>DURÉE DE PRÉDICTION EXPIRÉE</b>\n\nLa stratégie <b>${cfg.name || channelId}</b> a atteint sa limite de durée (${durStr}).\n\n⚠️ Aucune nouvelle prédiction ne sera envoyée.\n\n<i>Contactez votre administrateur pour renouveler.</i>`;
+    // Lire le lien du site et la signature admin depuis les paramètres
+    let siteUrl  = '';
+    let adminSig = 'Sossou Kouamé';
+    try {
+      siteUrl  = (await db.getSetting('site_url').catch(() => '')) || '';
+      adminSig = (await db.getSetting('admin_signature').catch(() => '')) || 'Sossou Kouamé';
+    } catch {}
+
+    const stratName = cfg.name || channelId;
+    let alertText =
+      `🔴 <b>DURÉE DE PRÉDICTION EXPIRÉE</b>\n\n` +
+      `La stratégie <b>${stratName}</b> a atteint sa limite de durée (${durStr}).\n\n` +
+      `⚠️ Aucune nouvelle prédiction ne sera envoyée.`;
+
+    if (siteUrl) {
+      alertText += `\n\n🌐 <a href="${siteUrl}">${siteUrl}</a>`;
+    }
+    alertText += `\n\n<i>Contactez votre administrateur pour renouveler.</i>`;
+    alertText += `\n\n— <b>${adminSig}</b>`;
+
     console.log(`[${channelId}] ⏰ Durée de prédiction expirée — alerte horaire envoyée`);
     try {
       const { sendRawMessage } = require('./telegram-service');
@@ -503,7 +522,9 @@ class Engine {
   }
 
   reloadCustomStrategies(list) {
-    for (const cfg of list) {
+    for (const rawCfg of list) {
+      // Normalisation rétro-compatible : ancienne strat sans pred_duration_minutes → 0 (aucune limite)
+      const cfg = { pred_duration_minutes: 0, pred_duration_started_at: null, ...rawCfg };
       if (!this.custom[cfg.id]) {
         // Nouvelle stratégie : initialiser l'état complet
         const s = this._makeCustomState();
@@ -548,9 +569,28 @@ class Engine {
       if (!v) return;
       const parsed = JSON.parse(v);
       const list = Array.isArray(parsed) ? parsed : [parsed];
-      for (const cfg of list) {
+      for (const rawCfg of list) {
+        // Normalisation rétro-compatible : ancienne strat sans pred_duration_minutes → 0 (aucune limite)
+        const cfg = { pred_duration_minutes: 0, pred_duration_started_at: null, ...rawCfg };
         this.custom[cfg.id] = this._makeCustomState();
         this.custom[cfg.id].config = cfg;
+        // ── Restauration de predHistory depuis la DB ────────────────────────
+        // Sans cette restauration, l'exception consec_same_suit_pred ne fonctionne
+        // pas après un redémarrage car predHistory repart à [] en mémoire.
+        try {
+          const recentPreds = await db.getPredictions({ strategy: `S${cfg.id}`, limit: 30 });
+          // getPredictions retourne ORDER BY created_at DESC → inverser pour ordre chronologique ASC
+          const asc = [...recentPreds].reverse();
+          this.custom[cfg.id].predHistory = asc.map(p => ({
+            suit:      p.predicted_suit,
+            timestamp: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+          }));
+          if (this.custom[cfg.id].predHistory.length > 0) {
+            console.log(`[S${cfg.id}] predHistory restauré (${this.custom[cfg.id].predHistory.length} entrées — exception consec_same_suit_pred opérationnelle)`);
+          }
+        } catch (eH) {
+          console.warn(`[S${cfg.id}] predHistory non restauré : ${eH.message}`);
+        }
         console.log(`[S${cfg.id}] "${cfg.name}" chargée (mode=${cfg.mode}, B=${cfg.threshold})`);
       }
     } catch (e) { console.error('loadCustomStrategies error:', e.message); }
