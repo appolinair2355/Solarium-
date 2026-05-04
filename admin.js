@@ -703,6 +703,16 @@ router.post('/annonce-sequence/:id/send-now', requireAdmin, async (req, res) => 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Moniteur Intersection : stratégies surveillées + prédictions actives ──
+router.get('/intersection-monitor/:id', requireAdmin, (req, res) => {
+  try {
+    const eng = require('./engine');
+    const data = eng.getIntersectionMonitor(parseInt(req.params.id));
+    if (!data) return res.json({ error: 'Stratégie intersection introuvable ou inactive' });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Statut du rotateur : index actif + compteurs de prédictions par stratégie enfant ──
 router.get('/rotation-status/:id', requireAdmin, async (req, res) => {
   try {

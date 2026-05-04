@@ -235,7 +235,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -1528,6 +1528,8 @@ class Engine {
     // Surveille toutes les stratégies existantes de la MÊME main.
     // Quand au moins `hi` stratégies prédisent le même résultat sur des
     // numéros proches (écart ≤ inter_max_ecart) → émet sur le min jeu.
+    // DÉPART À ZÉRO : seules les prédictions émises APRÈS la création de
+    // cette stratégie intersection sont prises en compte.
     // ─────────────────────────────────────────────────────────────────────
     if (!this.custom[id]) return;
     const channelId  = `S${id}`;
@@ -1536,6 +1538,12 @@ class Engine {
     const stratMaxR  = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
     const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
+
+    // ── Départ à zéro : mémoriser le jeu de départ au premier appel ──────
+    if (state.interStartGame === null || state.interStartGame === undefined) {
+      state.interStartGame = gn;
+      console.log(`[${channelId}] [Intersection] Démarrage à zéro depuis le jeu #${gn}`);
+    }
 
     // ── Résoudre les pending en cours ──
     if (Object.keys(state.pending).length > 0) {
@@ -1554,7 +1562,8 @@ class Engine {
     const category = cfg.inter_category || 'costume';
 
     // ── Collecter les pending de toutes les autres stratégies custom de la même main ──
-    // Chaque entrée : { suit, gameNumber }
+    // Seules les prédictions émises APRÈS le jeu de départ (interStartGame) sont acceptées.
+    // Chaque entrée : { suit, gameNumber, stratId, stratName }
     const candidates = [];
 
     for (const [otherId, otherState] of Object.entries(this.custom)) {
@@ -1568,9 +1577,11 @@ class Engine {
       for (const [pgStr, info] of Object.entries(otherState.pending || {})) {
         const pg = parseInt(pgStr);
         if (pg < gn) continue; // prédiction expirée côté jeux passés
+        // ── Départ à zéro : ignorer prédictions émises avant le démarrage ──
+        if (pg < state.interStartGame) continue;
         const suit = info.suit;
         if (!suit || !ALL_SUITS.includes(suit)) continue;
-        candidates.push({ suit, gameNumber: pg });
+        candidates.push({ suit, gameNumber: pg, stratId: parseInt(otherId), stratName: oCfg.name || `S${otherId}` });
       }
     }
 
@@ -3929,6 +3940,62 @@ class Engine {
     this.running = false;
     if (this.interval) clearInterval(this.interval);
     console.log('🔴 Moteur arrêté');
+  }
+
+  // ── Moniteur intersection : données pour l'admin ──────────────────────────
+  // Retourne pour chaque stratégie surveillée ses prédictions actives.
+  getIntersectionMonitor(id) {
+    const interId  = parseInt(id);
+    const interSt  = this.custom[interId];
+    if (!interSt) return null;
+    const cfg      = interSt.config;
+    if (!cfg || cfg.mode !== 'intersection') return null;
+
+    const hand       = cfg.hand || 'joueur';
+    const category   = cfg.inter_category || 'costume';
+    const hi         = Math.max(2, parseInt(cfg.inter_hi) || 2);
+    const maxEcart   = Math.max(0, parseInt(cfg.inter_max_ecart) || 2);
+    const startGame  = interSt.interStartGame ?? null;
+
+    const monitored = [];
+    for (const [otherId, otherState] of Object.entries(this.custom)) {
+      if (parseInt(otherId) === interId) continue;
+      const oCfg = otherState.config;
+      if (!oCfg?.enabled) continue;
+      if ((oCfg.hand || 'joueur') !== hand) continue;
+      if (!this._interMatchCategory(oCfg, category)) continue;
+
+      const pending = Object.entries(otherState.pending || {})
+        .filter(([pgStr]) => {
+          const pg = parseInt(pgStr);
+          return pg >= (startGame ?? 0);
+        })
+        .map(([pgStr, info]) => ({ gameNumber: parseInt(pgStr), suit: info.suit }))
+        .filter(p => p.suit && ALL_SUITS.includes(p.suit))
+        .sort((a, b) => a.gameNumber - b.gameNumber);
+
+      monitored.push({ id: parseInt(otherId), name: oCfg.name || `S${otherId}`, mode: oCfg.mode, hand: oCfg.hand || 'joueur', pending });
+    }
+
+    // Calculer quels costumes sont en accord (pour mise en évidence)
+    const bySuit = {};
+    for (const m of monitored) {
+      for (const p of m.pending) {
+        if (!bySuit[p.suit]) bySuit[p.suit] = [];
+        bySuit[p.suit].push(p.gameNumber);
+      }
+    }
+    const accordSuits = [];
+    for (const [suit, gnums] of Object.entries(bySuit)) {
+      if (gnums.length < hi) continue;
+      const sorted = [...gnums].sort((a, b) => a - b);
+      for (let i = 0; i <= sorted.length - hi; i++) {
+        const win = sorted.slice(i, i + hi);
+        if (win[win.length - 1] - win[0] <= maxEcart) { accordSuits.push(suit); break; }
+      }
+    }
+
+    return { startGame, hand, category, hi, maxEcart, monitored, accordSuits };
   }
 }
 

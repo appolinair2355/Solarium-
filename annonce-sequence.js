@@ -17,6 +17,21 @@ let _state = {};
 // Compteur de prédictions par stratégie enfant : { seqStratId: { childStratId: count } }
 let _predCounts = {};
 
+// ── Persistance de l'état de rotation en DB ──────────────────────────────────
+async function _saveRotationState(stratId, currentIndex, stratStartedAt) {
+  try {
+    await db.setSetting(`annonce_rot_state_${stratId}`, JSON.stringify({ currentIndex, stratStartedAt }));
+  } catch (e) { console.warn(`[AnnonceSeq] Impossible de sauvegarder l'état S${stratId}:`, e.message); }
+}
+
+async function _loadRotationState(stratId) {
+  try {
+    const v = await db.getSetting(`annonce_rot_state_${stratId}`);
+    if (!v) return null;
+    return JSON.parse(v);
+  } catch { return null; }
+}
+
 function incrementPredCount(seqStratId, childStratId) {
   const k = String(seqStratId);
   if (!_predCounts[k]) _predCounts[k] = {};
@@ -163,22 +178,40 @@ async function _tick() {
         const intervalMin = Math.max(1, parseInt(seqStrat.annonce_interval) || 60);
         const now         = Date.now();
 
-        // ── Initialisation (premier démarrage) ─────────────────────────────
+        // ── Initialisation / Restauration après redémarrage ────────────────
         if (!_state[stateKey]?.initialized) {
-          const savedIdx = _state[stateKey]?.currentIndex ?? 0;
-          const idx      = Math.min(savedIdx, ordered.length - 1);
+          // Tenter de restaurer l'état persisté en DB
+          const saved = await _loadRotationState(seqStrat.id);
+          let idx           = 0;
+          let stratStartedAt = now;
+          let isResume      = false;
+
+          if (saved && typeof saved.currentIndex === 'number') {
+            idx           = Math.min(saved.currentIndex, ordered.length - 1);
+            stratStartedAt = saved.stratStartedAt || now;
+            isResume      = true;
+          }
+
           _state[stateKey] = {
             currentIndex:    idx,
-            stratStartedAt:  now,
+            stratStartedAt,
             lastPromoSentAt: 0,
             initialized:     true,
           };
-          // Annoncer la stratégie de départ
-          const feat     = ordered[idx];
-          const startMsg = buildStartMessage(feat, idx + 1, ordered.length, durationMin);
-          await _sendToChannels(seqStrat, startMsg);
-          console.log(`[AnnonceSeq] S${seqStrat.id} → Démarrage initial : "${feat.name}" (durée ${durationMin}min)`);
-          continue; // attendre le prochain tick pour les promos
+
+          // Si la durée est déjà écoulée depuis la sauvegarde → on ira en rotation au prochain check
+          const alreadyElapsed = (now - stratStartedAt) / 60000;
+          if (isResume) {
+            console.log(`[AnnonceSeq] S${seqStrat.id} → Reprise : "${ordered[idx].name}" (pos ${idx + 1}/${ordered.length}, écoulé ${Math.round(alreadyElapsed)}min/${durationMin}min)`);
+          } else {
+            // Première initialisation : envoyer message de départ
+            const feat     = ordered[idx];
+            const startMsg = buildStartMessage(feat, idx + 1, ordered.length, durationMin);
+            await _sendToChannels(seqStrat, startMsg);
+            await _saveRotationState(seqStrat.id, idx, stratStartedAt);
+            console.log(`[AnnonceSeq] S${seqStrat.id} → Démarrage initial : "${feat.name}" (durée ${durationMin}min)`);
+          }
+          continue; // attendre le prochain tick
         }
 
         const st             = _state[stateKey];
@@ -192,7 +225,10 @@ async function _tick() {
 
           _state[stateKey].currentIndex    = newIdx;
           _state[stateKey].stratStartedAt  = now;
-          _state[stateKey].lastPromoSentAt = now; // reset le compteur promo
+          _state[stateKey].lastPromoSentAt = now;
+
+          // Persister le nouvel état en DB
+          await _saveRotationState(seqStrat.id, newIdx, now);
 
           const startMsg = buildStartMessage(feat, newIdx + 1, ordered.length, durationMin);
           await _sendToChannels(seqStrat, startMsg);
@@ -223,6 +259,8 @@ async function _tick() {
 
 function startAnnonceSequenceScheduler() {
   if (_timer) return;
+  // Premier tick immédiat pour restaurer l'état depuis la DB sans attendre 60s
+  _tick().catch(e => console.error('[AnnonceSeq] Erreur tick initial:', e.message));
   _timer = setInterval(_tick, 60 * 1000);
   console.log('[AnnonceSeq] Rotateur Promo démarré (vérification toutes les 60s)');
 }
@@ -261,10 +299,12 @@ async function sendNow(stratId) {
 
 /**
  * Réinitialise l'état d'un rotateur (force le redémarrage depuis S1 au prochain tick).
+ * Efface aussi l'état persisté en DB.
  */
 function resetState(stratId) {
   delete _state[String(stratId)];
-  console.log(`[AnnonceSeq] État S${stratId} réinitialisé`);
+  db.setSetting(`annonce_rot_state_${stratId}`, '').catch(() => {});
+  console.log(`[AnnonceSeq] État S${stratId} réinitialisé (DB + mémoire)`);
 }
 
 /**
