@@ -3864,6 +3864,13 @@ class Engine {
         });
       }
 
+      // Mode Intersection → retourner le moniteur des stratégies surveillées
+      if (mode === 'intersection') {
+        const monitor = this.getIntersectionMonitor(id);
+        if (!monitor) return [];
+        return [{ isIntersection: true, monitor }];
+      }
+
       return ALL_SUITS.map(suit => {
         const base = entry.counts[suit] || 0;
         let count  = base;

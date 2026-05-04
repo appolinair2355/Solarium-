@@ -67,9 +67,11 @@ function _createPool(url) {
     connectionString: url,
     ssl: { rejectUnauthorized: false },
     connectionTimeoutMillis: 12000,
-    idleTimeoutMillis: 30000,         // ferme les connexions idles avant que Render ne les coupe
+    idleTimeoutMillis: 8000,           // ferme les connexions idles AVANT que Render ne les coupe (~10-15s)
     max: 2,                            // peu de connexions simultanées sur Render free
+    min: 0,                            // ne pas garder de connexions persistantes inutiles
     keepAlive: true,                   // évite les déconnexions silencieuses
+    keepAliveInitialDelayMillis: 5000, // ping keepalive après 5s d'inactivité
     statement_timeout: 20000,
   });
   // Capture les erreurs de connexion idle pour empêcher le crash du process
@@ -114,6 +116,9 @@ async function _query(sql, params, retries = 2) {
         await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
         continue;
       }
+      // Marquer l'erreur comme transitoire pour que les appelants ne la loggent pas
+      // (le circuit-breaker la gère déjà)
+      if (transient && !e.code) e.code = 'TRANSIENT';
       _onFailure(msg);
       throw e;
     }
@@ -157,7 +162,7 @@ async function loadRenderUrl() {
       }
     }
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur chargement URL:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur chargement URL:', e.message);
     // Ne pas détruire le pool — on tentera à la prochaine sync
   }
 }
@@ -246,7 +251,7 @@ async function initRenderDb() {
 
     console.log('[RenderSync] Tables initialisées');
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur init tables:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur init tables:', e.message);
   }
 }
 
@@ -336,7 +341,7 @@ async function _pullFromExternal() {
     } catch {}
 
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur extraction externe:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur extraction externe:', e.message);
   }
 }
 
@@ -364,7 +369,7 @@ async function _pushVerifiedPredictions() {
     }
     console.log(`[RenderSync] → ${r.rows.length} prédiction(s) poussée(s)`);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur push prédictions:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur push prédictions:', e.message);
   }
 }
 
@@ -377,7 +382,7 @@ async function syncAllUsers() {
     for (const u of users) await syncUser(u);
     if (users.length) console.log(`[RenderSync] → ${users.length} utilisateur(s) synchronisé(s)`);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync utilisateurs:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync utilisateurs:', e.message);
   }
 }
 
@@ -416,7 +421,7 @@ async function syncUser(u) {
       u.referral_bonus_used || false, u.bonus_minutes_earned || 0,
     ]);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync user:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync user:', e.message);
   }
 }
 
@@ -445,7 +450,7 @@ async function syncStrategies() {
       console.log(`[RenderSync] → ${count} stratégie(s) custom + ${proCount} stratégie(s) Pro synchronisée(s)`);
     }
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync stratégies:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync stratégies:', e.message);
   }
 }
 
@@ -474,12 +479,12 @@ async function syncProStrategies() {
         `, [s.id, JSON.stringify(payload)]);
         synced++;
       } catch (e) {
-        if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur sync Pro S${s.id}:`, e.message);
+        if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error(`[RenderSync] Erreur sync Pro S${s.id}:`, e.message);
       }
     }
     return synced;
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync stratégies Pro:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync stratégies Pro:', e.message);
     return 0;
   }
 }
@@ -499,7 +504,7 @@ async function syncProStrategy(meta, content = null) {
       ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, synced_at=NOW()
     `, [meta.id, JSON.stringify(payload)]);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur sync Pro S${meta.id}:`, e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error(`[RenderSync] Erreur sync Pro S${meta.id}:`, e.message);
   }
 }
 
@@ -510,7 +515,7 @@ async function syncDeleteStrategy(id) {
     const r = await _query(`DELETE FROM strategies_export WHERE id = $1`, [parseInt(id)]);
     if (r.rowCount) console.log(`[RenderSync] 🗑 Stratégie #${id} supprimée de la base externe`);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error(`[RenderSync] Erreur suppression stratégie #${id}:`, e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error(`[RenderSync] Erreur suppression stratégie #${id}:`, e.message);
   }
 }
 
@@ -531,7 +536,7 @@ async function syncAllSettings() {
       if (val !== null) await _upsertSetting(key, val);
     }
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync settings:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync settings:', e.message);
   }
 }
 
@@ -565,7 +570,7 @@ async function syncTelegramChannels() {
     }
     console.log(`[RenderSync] → ${channels.length} canal(aux) Telegram synchronisé(s)`);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync canaux Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync canaux Telegram:', e.message);
   }
 }
 
@@ -582,7 +587,7 @@ async function syncDeleteTelegramChannel(channelId) {
       [String(channelId)]
     );
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur suppression canal Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur suppression canal Telegram:', e.message);
   }
 }
 
@@ -597,7 +602,7 @@ async function _upsertTelegramChannel(ch) {
         synced_at    = NOW()
     `, [String(ch.channel_id), ch.channel_name || ch.channel_id, ch.enabled !== false]);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur upsert canal Telegram:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur upsert canal Telegram:', e.message);
   }
 }
 
@@ -630,7 +635,7 @@ async function syncVerifiedPrediction(pred) {
       pred.created_at   || new Date().toISOString(),
     ]);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur sync prédiction:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur sync prédiction:', e.message);
   }
 }
 
@@ -645,7 +650,7 @@ async function handleGameOne(gameNumber) {
     const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur reset jeu #1:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur reset jeu #1:', e.message);
     _gameOneHandled = false;
   }
 }
@@ -697,7 +702,7 @@ async function clearExternalPredictions() {
     console.log(`[RenderSync] 🧹 ${r.rowCount} prédiction(s) effacée(s) de la base Render externe`);
     return r.rowCount;
   } catch (e) {
-    if (e.code !== 'CIRCUIT_OPEN') console.error('[RenderSync] Erreur clearExternalPredictions:', e.message);
+    if (e.code !== 'CIRCUIT_OPEN' && e.code !== 'TRANSIENT') console.error('[RenderSync] Erreur clearExternalPredictions:', e.message);
     return 0;
   }
 }
