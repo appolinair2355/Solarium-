@@ -2449,28 +2449,35 @@ class Engine {
       }
     } else if (mode === 'absence_confirmee') {
       // ── MODE ABSENCE CONFIRMÉE ─────────────────────────────────────────────
-      // Phase 1 (comptage) : compte les absences consécutives d'un costume.
-      //   Quand le compteur atteint B → passe en phase confirmation (jeu suivant).
-      //   Le compteur se remet à 0 immédiatement si le costume réapparaît avant B.
-      // Phase 2 (confirmation) : au jeu suivant (B+1), vérifie si le costume réapparaît.
-      //   Si OUI → émet la prédiction pour gn + offset, reset.
-      //   Si NON → reset sans prédiction (pas de signal).
-      // Exemple B=2, offset=1 : absent jeux 1+2 → vérifie jeu 3 → prédit jeu 4.
+      // Phase 1 (comptage) : compte les absences consécutives d'un costume dans
+      //   la main choisie. Quand le compteur atteint B → feu JAUNE (confirmPending).
+      //   Le compteur reste à B (ne remet PAS à 0 immédiatement) pour que l'affichage
+      //   montre bien la valeur atteinte pendant la phase jaune.
+      //   Si le costume réapparaît avant B → reset à 0.
+      // Phase 2 (confirmation) : au jeu suivant après le jaune, vérifie si le costume
+      //   réapparaît dans la main choisie.
+      //   Si OUI → feu VERT → prédiction pour gn + offset → reset compteur à 0.
+      //   Si NON → reset à 0 sans prédiction (le feu repasse rouge).
+      // Exemple B=2, offset=1 :
+      //   Jeu N   : ♣️ absent, compteur=1
+      //   Jeu N+1 : ♣️ absent, compteur=2 (=B) → jaune
+      //   Jeu N+2 : ♣️ présent → vert → prédit jeu N+3 → compteur=0
       if (!state.confirmPending) state.confirmPending = {};
       for (const suit of ALL_SUITS) {
         if (state.confirmPending[suit]) {
-          // Phase confirmation : le costume était absent B fois, on vérifie s'il réapparaît maintenant
+          // Phase confirmation (feu jaune allumé) : vérifier si le costume réapparaît
           if (handSuits.includes(suit)) {
             const ps = resolvePredictedSuit(suit);
-            console.log(`[${channelId}] [AbsConf] ✅ ${suit} confirmé après B=${B} absence(s) → prédiction jeu #${gn + offset} (→${ps || suit})`);
+            console.log(`[${channelId}] [AbsConf] ✅ ${suit} confirmé (feu VERT) après B=${B} absence(s) → prédiction jeu #${gn + offset} (→${ps || suit})`);
             if (ps) await emitPrediction(gn + offset, ps, suit);
           } else {
-            console.log(`[${channelId}] [AbsConf] ❌ ${suit} absent à la confirmation (B=${B}) → reset sans prédiction`);
+            console.log(`[${channelId}] [AbsConf] ❌ ${suit} absent à la confirmation (B=${B}) → feu rouge, reset sans prédiction`);
           }
+          // Dans les deux cas : reset après la phase confirmation
           state.confirmPending[suit] = false;
           state.counts[suit] = 0;
         } else if (handSuits.includes(suit)) {
-          // Costume présent → reset compteur d'absence
+          // Costume présent (hors phase confirmation) → reset compteur d'absence
           if ((state.counts[suit] || 0) > 0) {
             console.log(`[${channelId}] [AbsConf] ${suit} réapparu après ${state.counts[suit]} absence(s) < B=${B} → reset sans signal`);
           }
@@ -2480,7 +2487,9 @@ class Engine {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
           console.log(`[${channelId}] [AbsConf] ${suit} absent — compteur=${state.counts[suit]} / seuil B=${B}`);
           if (state.counts[suit] >= B) {
-            console.log(`[${channelId}] [AbsConf] ${suit} seuil B=${B} atteint → attente confirmation au jeu #${gn + 1}`);
+            // Seuil atteint → feu JAUNE allumé d'abord, puis compteur remis à 0 immédiatement
+            // (le jaune s'allume avant le reset, pas besoin d'attendre le jeu suivant)
+            console.log(`[${channelId}] [AbsConf] ${suit} seuil B=${B} atteint → feu JAUNE allumé → compteur=0, attente confirmation au jeu #${gn + 1}`);
             state.confirmPending[suit] = true;
             state.counts[suit] = 0;
           }
@@ -3400,6 +3409,10 @@ class Engine {
         if (mode === 'absence_apparition') {
           // Costume absent depuis >= B jeux ET vient d'apparaître dans la main live
           shouldTrigger = handSuits.includes(suit) && (entry.counts[suit] || 0) >= B;
+        } else if (mode === 'absence_confirmee') {
+          // FEU JAUNE actif pour ce costume ET le costume réapparaît dans la main live
+          // → prédiction immédiate sans attendre la fin du jeu
+          shouldTrigger = !!entry.confirmPending?.[suit] && handSuits.includes(suit);
         } else {
           // Costume présent depuis >= B jeux ET absent de la main live
           shouldTrigger = !handSuits.includes(suit) && (entry.counts[suit] || 0) >= B;
@@ -3415,8 +3428,16 @@ class Engine {
           continue;
         }
 
+        // Pour absence_confirmee : vider confirmPending[suit] immédiatement
+        // pour éviter un double-déclenchement lors du traitement en fin de jeu
+        if (mode === 'absence_confirmee' && entry.confirmPending) {
+          entry.confirmPending[suit] = false;
+          entry.counts[suit] = 0;
+          console.log(`[${channelId}] ⚡ AbsConf Live: ${suit} réapparu → FEU VERT → prédiction immédiate #${next}`);
+        }
+
         entry.liveTriggeredGame = gn;
-        console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, count=${entry.counts[suit]}, seuil≥${B}) → prédiction immédiate ${ps} #${next}`);
+        console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, seuil atteint) → prédiction immédiate ${ps} #${next}`);
 
         try {
           const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
@@ -4112,6 +4133,29 @@ class Engine {
             maxR: p.maxR || 0,
           })),
         }];
+      }
+
+      // ── Mode Absence Confirmée : projection live correcte + état feu tricolore ──
+      if (mode === 'absence_confirmee') {
+        const confirmPending = entry.confirmPending || {};
+        return ALL_SUITS.map(suit => {
+          const base = entry.counts[suit] || 0;
+          let count  = base;
+          let isLive = false;
+          // Logique absence : costume présent → reset à 0 ; absent → incrémente
+          if (liveSuits !== null) {
+            isLive = true;
+            count  = liveSuits.includes(suit) ? 0 : base + 1;
+          }
+          return {
+            suit, display: SUIT_DISPLAY[suit] || suit,
+            count, threshold,
+            mode, label: 'Absences',
+            isLive,
+            // true = feu jaune (seuil B atteint, attend confirmation au jeu suivant)
+            confirmPending: !!confirmPending[suit],
+          };
+        });
       }
 
       return ALL_SUITS.map(suit => {

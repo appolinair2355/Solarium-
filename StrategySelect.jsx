@@ -205,7 +205,7 @@ export default function StrategySelect() {
               </div>
               <h2 className="select-card-name">{s.name}</h2>
               <p className="select-card-desc">
-                Seuil B={s.threshold} · {s.mode === 'manquants' ? 'Absences' : 'Apparitions'} · Stratégie {s.id}
+                {s.mode === 'absence_confirmee' ? `Abs. Confirmée · B=${s.threshold} absences` : s.mode === 'taux_miroir' ? `Miroir Taux · écart B=${s.threshold}` : s.mode === 'compteur_adverse' ? `Compteur Adverse · B=${s.threshold}` : s.mode === 'first_card_plus6' ? `Première Carte +Décalage` : s.mode === 'intersection' ? `Intersection stratégies` : `Seuil B=${s.threshold} · ${s.mode}`}
               </p>
 
               <div className="select-card-stats">

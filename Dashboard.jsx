@@ -694,25 +694,44 @@ export default function Dashboard() {
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
                         ) : absences.map(a => {
                           const isMiroir = a.mode === 'taux_miroir';
+                          const isAbsConf = a.mode === 'absence_confirmee';
                           const barColor = isMiroir
                             ? (a.count >= a.threshold ? '#6366f1' : a.count >= a.threshold * 0.7 ? '#f59e0b' : '#6366f1')
                             : (a.count >= a.threshold ? '#ef4444' : a.count >= a.threshold - 1 ? '#f59e0b' : a.isLive ? '#4ade80' : channel.color);
+                          // Feu tricolore pour absence_confirmee
+                          const feuColor = isAbsConf
+                            ? (a.confirmPending ? '#f59e0b' : '#ef4444')
+                            : null;
+                          const feuAnim = isAbsConf ? 'feuBlink 0.9s infinite' : null;
                           return (
                           <div key={a.suit} className="absence-row"
                                style={{ opacity: a.dimmed ? 0.35 : 1 }}>
+                            {/* Feu tricolore (absence_confirmee uniquement) */}
+                            {isAbsConf && (
+                              <span style={{
+                                display: 'inline-block',
+                                width: 9, height: 9,
+                                borderRadius: '50%',
+                                background: feuColor,
+                                boxShadow: `0 0 5px ${feuColor}`,
+                                animation: feuAnim,
+                                marginRight: 5,
+                                flexShrink: 0,
+                              }} />
+                            )}
                             <span className="absence-suit">{a.display}</span>
                             <div className="absence-bar-wrap">
                               <div
                                 className="absence-bar-fill"
                                 style={{
                                   width: `${Math.min(100, (a.count / a.threshold) * 100)}%`,
-                                  background: barColor,
+                                  background: isAbsConf && a.confirmPending ? '#f59e0b' : barColor,
                                   transition: 'width 0.4s ease, background 0.3s ease',
                                 }}
                               />
                             </div>
                             <span className="absence-count"
-                                  style={{ color: isMiroir ? '#a5b4fc' : a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: isMiroir || a.isLive ? 800 : 600 }}>
+                                  style={{ color: isAbsConf ? (a.confirmPending ? '#f59e0b' : a.count > 0 ? '#ef4444' : '#475569') : isMiroir ? '#a5b4fc' : a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: isMiroir || a.isLive ? 800 : 600 }}>
                               {a.count}
                             </span>
                           </div>
