@@ -841,11 +841,15 @@ class Engine {
 
     // 1. Résoudre les prédictions en attente
     if (Object.keys(state.pending).length > 0) {
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-        if (won) this._onStratWin(channelId);
-        else this._onStratLoss(channelId, gn, ps);
+        if (won) {
+          this._onStratWin(channelId);
+          if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
+        } else {
+          this._onStratLoss(channelId, gn, ps);
+        }
       }, stratMaxR, stratTgOpts, cfg.hand === 'banquier' ? bCards : pCards, winner);
     }
 
@@ -1651,7 +1655,7 @@ class Engine {
       if (gn > pgNum + effectiveMaxR) {
         await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
         delete pending[pg];
-        if (onLoss) onLoss(false, ps, pgNum);
+        if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
         continue;
       }
 
@@ -2213,11 +2217,15 @@ class Engine {
 
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-        if (won) this._onStratWin(channelId);
-        else this._onStratLoss(channelId, gn, ps);
+        if (won) {
+          this._onStratWin(channelId);
+          if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
+        } else {
+          this._onStratLoss(channelId, gn, ps);
+        }
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
       }, stratMaxRForResolve, stratTgOpts, handCards, winner);
