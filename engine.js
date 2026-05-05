@@ -235,7 +235,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {} };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -543,6 +543,9 @@ class Engine {
           // Reset mirrorCounts (taux_miroir)
           const mc = this.custom[cfg.id].mirrorCounts;
           if (mc) for (const s of ALL_SUITS) mc[s] = 0;
+          // Reset confirmPending (absence_confirmee)
+          const cp = this.custom[cfg.id].confirmPending;
+          if (cp) for (const s of ALL_SUITS) cp[s] = false;
           // Reset histoire (basée sur la main surveillée)
           this.custom[cfg.id].history = [];
           // Reset lastHour pour forcer la réinitialisation de mirrorLastHour
@@ -2444,6 +2447,46 @@ class Engine {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
         }
       }
+    } else if (mode === 'absence_confirmee') {
+      // ── MODE ABSENCE CONFIRMÉE ─────────────────────────────────────────────
+      // Phase 1 (comptage) : compte les absences consécutives d'un costume.
+      //   Quand le compteur atteint B → passe en phase confirmation (jeu suivant).
+      //   Le compteur se remet à 0 immédiatement si le costume réapparaît avant B.
+      // Phase 2 (confirmation) : au jeu suivant (B+1), vérifie si le costume réapparaît.
+      //   Si OUI → émet la prédiction pour gn + offset, reset.
+      //   Si NON → reset sans prédiction (pas de signal).
+      // Exemple B=2, offset=1 : absent jeux 1+2 → vérifie jeu 3 → prédit jeu 4.
+      if (!state.confirmPending) state.confirmPending = {};
+      for (const suit of ALL_SUITS) {
+        if (state.confirmPending[suit]) {
+          // Phase confirmation : le costume était absent B fois, on vérifie s'il réapparaît maintenant
+          if (handSuits.includes(suit)) {
+            const ps = resolvePredictedSuit(suit);
+            console.log(`[${channelId}] [AbsConf] ✅ ${suit} confirmé après B=${B} absence(s) → prédiction jeu #${gn + offset} (→${ps || suit})`);
+            if (ps) await emitPrediction(gn + offset, ps, suit);
+          } else {
+            console.log(`[${channelId}] [AbsConf] ❌ ${suit} absent à la confirmation (B=${B}) → reset sans prédiction`);
+          }
+          state.confirmPending[suit] = false;
+          state.counts[suit] = 0;
+        } else if (handSuits.includes(suit)) {
+          // Costume présent → reset compteur d'absence
+          if ((state.counts[suit] || 0) > 0) {
+            console.log(`[${channelId}] [AbsConf] ${suit} réapparu après ${state.counts[suit]} absence(s) < B=${B} → reset sans signal`);
+          }
+          state.counts[suit] = 0;
+        } else {
+          // Costume absent → incrémenter compteur
+          state.counts[suit] = (state.counts[suit] || 0) + 1;
+          console.log(`[${channelId}] [AbsConf] ${suit} absent — compteur=${state.counts[suit]} / seuil B=${B}`);
+          if (state.counts[suit] >= B) {
+            console.log(`[${channelId}] [AbsConf] ${suit} seuil B=${B} atteint → attente confirmation au jeu #${gn + 1}`);
+            state.confirmPending[suit] = true;
+            state.counts[suit] = 0;
+          }
+        }
+      }
+
     } else if (mode === 'distribution') {
       // Compte les jeux consécutifs NON-naturels (absence de distribution).
       // Logique identique à absence_apparition : quand une distribution survient
@@ -3149,8 +3192,8 @@ class Engine {
 
       const pCardCount = Array.isArray(pCards) ? pCards.length : 0;
       const bCardCount = Array.isArray(bCards) ? bCards.length : 0;
-      const p1Suit = Array.isArray(pCards) && pCards[0] ? pCards[0].S : null;
-      const p2Suit = Array.isArray(pCards) && pCards[1] ? pCards[1].S : null;
+      const p1Suit = Array.isArray(pCards) && pCards[0] ? normalizeSuit(pCards[0].S || '') : null;
+      const p2Suit = Array.isArray(pCards) && pCards[1] ? normalizeSuit(pCards[1].S || '') : null;
 
       // Objet log — rempli au fur et à mesure, stocké dans state.fc_last_log
       const fcLog = {
