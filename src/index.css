@@ -386,6 +386,7 @@ body {
   box-shadow: 0 0 10px var(--green); animation: pulse 2s infinite;
 }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes feuBlink { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.25; transform: scale(0.75); } }
 .live-title { font-weight: 700; font-size: 0.88rem; color: #1a1a2e; }
 .live-subtitle { font-size: 0.72rem; color: #64748b; margin-left: auto; }
 
