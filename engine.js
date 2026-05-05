@@ -3811,6 +3811,36 @@ class Engine {
       const id    = parseInt(channelId.slice(1));
       const entry = this.custom[id];
       if (!entry?.config) return null;
+
+      // ── Stratégies Pro JS / Python → lire state.absences ──────────────────
+      if (entry.config.type === 'script_js' || entry.config.type === 'script_py') {
+        const scriptState = entry.scriptState || {};
+        const sm = entry.config._scriptModule; // disponible uniquement en JS
+        const threshold = sm?.SEUIL_ABSENCE || sm?.counter?.threshold || sm?.threshold || 5;
+        const label = sm?.counter?.label || entry.config.name || 'Compteur Pro';
+        if (scriptState.absences && typeof scriptState.absences === 'object') {
+          const suitKeys = ['♠','♥','♦','♣'].filter(s => s in scriptState.absences);
+          if (suitKeys.length > 0) {
+            return suitKeys.map(suit => ({
+              suit, display: SUIT_DISPLAY[suit] || suit,
+              count: scriptState.absences[suit] || 0, threshold,
+              isPro: true, label,
+            }));
+          }
+          const anyKeys = Object.keys(scriptState.absences).filter(k => /[♠♥♦♣]/.test(k));
+          if (anyKeys.length > 0) {
+            return anyKeys.map(suit => ({
+              suit, display: SUIT_DISPLAY[suit] || suit,
+              count: scriptState.absences[suit] || 0, threshold,
+              isPro: true, label,
+            }));
+          }
+        }
+        return [{ suit: 'pro', display: '🔷', count: 0, threshold: 1,
+          isPro: true, singleCounter: true, label: entry.config.name,
+          description: 'Ajoutez state.absences dans processGame() pour activer le compteur' }];
+      }
+
       const { threshold, mode, hand } = entry.config;
 
       // Si une partie est en cours et que la main concernée a déjà tiré ses cartes,
