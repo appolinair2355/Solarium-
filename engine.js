@@ -3181,7 +3181,7 @@ class Engine {
       fcLog.triggered = true;
       fcLog.suit      = p1Suit;
       fcLog.targetGn  = targetGn;
-      fcLog.reason    = `J: ${SUIT_DISPLAY[p1Suit]||p1Suit}≠${SUIT_DISPLAY[p2Suit]||p2Suit} (costumes différents) · B(${bNbLabel}) sans ${SUIT_DISPLAY[p1Suit]||p1Suit}`;
+      fcLog.reason    = `J: ${SUIT_DISPLAY[p1Suit]||p1Suit}≠${SUIT_DISPLAY[p2Suit]||p2Suit} (costumes différents) · Banquier(${bNbLabel}) sans ${SUIT_DISPLAY[p1Suit]||p1Suit}`;
 
       console.log(`[${channelId}] [FC+6] ✅ Signal jeu #${gn} — Joueur P1=${p1Suit} P2=${p2Suit} (différents) | Banquier (${bNbLabel}) sans ${p1Suit} → cible #${targetGn} (proche=${proche})`);
       console.log(`[${channelId}] [FC+6] Distance trigger→cible = ${remaining} | seuil proche = ${proche}`);
