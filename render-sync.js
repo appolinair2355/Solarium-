@@ -59,7 +59,7 @@ function _onFailure(msg) {
 
 // ── Connexion ────────────────────────────────────────────────────────
 
-const DEFAULT_RENDER_URL = process.env.DATABASE_URL || null;
+const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
 
 // ── Pool factory avec gestion d'erreurs robuste ──────────────────────
 function _createPool(url) {

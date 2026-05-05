@@ -796,7 +796,6 @@ class Engine {
       tg_targets: tgTargets,
       enabled: scriptModule.enabled !== false,
       exceptions: _jsExceptions,
-      counters_def: Array.isArray(scriptModule.counters) ? scriptModule.counters : null,
       _scriptModule: scriptModule,
     };
 
@@ -1059,21 +1058,6 @@ class Engine {
     const id = parseInt(m[1]);
     delete this.proLogs[id];
     this._scheduleProLogsSave();
-  }
-
-  // Accès public utilisé par /api/games/pro-counters
-  // Retourne { counters_def: [...], values: {...} } si la stratégie JS expose des compteurs,
-  // ou null si pas de compteurs définis.
-  getProCounters(channelKey) {
-    if (!channelKey) return null;
-    const m = /^S(\d{4,5})$/.exec(channelKey);
-    if (!m) return null;
-    const id = parseInt(m[1]);
-    if (!this.custom[id]) return null;
-    const cfg = this.custom[id].config;
-    if (!cfg || !cfg.counters_def) return null;
-    const values = this.custom[id].scriptState || {};
-    return { counters_def: cfg.counters_def, values };
   }
 
   // ── Appel JS (vm sandbox) ─────────────────────────────────────────────────
@@ -3092,174 +3076,6 @@ class Engine {
       const ps = pool[Math.floor(Math.random() * pool.length)];
       console.log(`[${channelId}] [ComptagesÉcart] cur(${cur}) >= B(${dynB}) → prédit ${SUIT_DISPLAY[ps] || ps}`);
       await emitPrediction(gn + offset, ps, triggerSuit);
-
-    } else if (mode === 'first_card_plus6') {
-      // ── MODE PREMIÈRE CARTE +DÉCALAGE ─────────────────────────────────────
-      // Déclencheur : le jeu terminé doit satisfaire :
-      //   1. Le joueur a EXACTEMENT 2 cartes de costumes DIFFÉRENTS
-      //   2. Le banquier n'a PAS le costume de la 1ère carte du joueur
-      //   3. (optionnel) le banquier a exactement banker_card_count cartes (0 = indifférent)
-      //
-      // Prédiction : costume de la 1ère carte du joueur → jeu gn + offset
-      //
-      // Proche   : prédiction différée tant que (targetGn − currentGn) > proche ;
-      //            émission seulement quand la distance ≤ proche
-      // gap_min  : écart minimum entre deux prédictions consécutives (≥ 2).
-      //            Chaque signal est mis en file d'attente (fc_queue) ; le
-      //            prochain n'est activé que si targetGn − dernierPréditGn ≥ gap_min
-      // ─────────────────────────────────────────────────────────────────────
-      const proche          = Math.max(1, parseInt(cfg.proche) || 3);
-      const bankerCardCount = parseInt(cfg.banker_card_count) || 0;
-      const gapMin          = Math.max(2, parseInt(cfg.gap_min) || 2);
-
-      // Initialisation des structures de file d'attente
-      if (!Array.isArray(state.fc_queue))             state.fc_queue = [];
-      if (typeof state.fc_last_pred_gn !== 'number')  state.fc_last_pred_gn = 0;
-
-      // Purge des entrées périmées (cible déjà passée)
-      state.fc_queue = state.fc_queue.filter(e => e.targetGn >= gn);
-
-      // ── Phase 2 : émettre la prédiction différée si on est à portée ───────
-      if (state.fc_deferred) {
-        const { targetGn: dTarget, suit: dSuit } = state.fc_deferred;
-        const remaining = dTarget - gn;
-        console.log(`[${channelId}] [FC+6] Différé → cible #${dTarget} | distance=${remaining} | proche=${proche}`);
-        if (remaining < 0) {
-          console.log(`[${channelId}] [FC+6] Cible #${dTarget} dépassée (jeu #${gn}) → abandon du différé`);
-          state.fc_deferred = null;
-          // On tombe dans Phase 2b pour activer le suivant de la file
-        } else if (remaining <= proche) {
-          console.log(`[${channelId}] [FC+6] Distance ${remaining} ≤ proche ${proche} → émission différée ${SUIT_DISPLAY[dSuit] || dSuit} → #${dTarget}`);
-          await emitPrediction(dTarget, dSuit, dSuit);
-          state.fc_last_pred_gn = dTarget;
-          state.fc_deferred = null;
-          return;
-        } else {
-          // Encore trop loin — on attend sans toucher à la file
-          return;
-        }
-      }
-
-      // ── Phase 2b : activer la prochaine entrée de la file d'attente ────────
-      if (!state.fc_deferred && state.fc_queue.length > 0) {
-        const next     = state.fc_queue[0];
-        const lastPred = state.fc_last_pred_gn || 0;
-        const gap      = lastPred === 0 ? gapMin : (next.targetGn - lastPred);
-        console.log(`[${channelId}] [FC+6] File [${state.fc_queue.length}] → prochain cible #${next.targetGn} | gap=${gap} (min=${gapMin}) | dernier=#${lastPred}`);
-        if (gap >= gapMin) {
-          state.fc_queue.shift();
-          const remaining = next.targetGn - gn;
-          if (remaining < 0) {
-            console.log(`[${channelId}] [FC+6] Cible #${next.targetGn} périmée en file → ignorée`);
-          } else if (remaining <= proche) {
-            console.log(`[${channelId}] [FC+6] File→émission immédiate ${SUIT_DISPLAY[next.suit] || next.suit} → #${next.targetGn}`);
-            await emitPrediction(next.targetGn, next.suit, next.suit);
-            state.fc_last_pred_gn = next.targetGn;
-            return;
-          } else {
-            console.log(`[${channelId}] [FC+6] File→différé #${next.targetGn} (distance ${remaining} > proche ${proche})`);
-            state.fc_deferred = { targetGn: next.targetGn, suit: next.suit };
-            return;
-          }
-        } else {
-          console.log(`[${channelId}] [FC+6] File→gap insuffisant (${gap} < ${gapMin}) — prédiction en attente`);
-          // On ne retourne PAS ici : on continue vers Phase 1 pour détecter un nouveau signal
-        }
-      }
-
-      // ── Phase 1 : évaluer le déclencheur ──────────────────────────────────
-      // Bloquer si une prédiction est déjà en cours de rattrapage (vérification en direct)
-      if (Object.keys(state.pending).length > 0) {
-        console.log(`[${channelId}] [FC+6] Bloqué — prédiction en attente de vérification`);
-        return;
-      }
-
-      const pCardCount = Array.isArray(pCards) ? pCards.length : 0;
-      const bCardCount = Array.isArray(bCards) ? bCards.length : 0;
-      const p1Suit = Array.isArray(pCards) && pCards[0] ? pCards[0].S : null;
-      const p2Suit = Array.isArray(pCards) && pCards[1] ? pCards[1].S : null;
-
-      // Objet log — rempli au fur et à mesure, stocké dans state.fc_last_log
-      const fcLog = {
-        gameNumber: gn,
-        playerCards: pCardCount,
-        playerHas2: pCardCount === 2,
-        bankerCards: bCardCount,
-        bankerHas2: bCardCount === 2,
-        bankerCardCountRequired: bankerCardCount,
-        p1Suit,
-        p2Suit,
-        triggered: false,
-        suit: null,
-        targetGn: null,
-        queued: false,
-        reason: null,
-      };
-
-      // Vérification : nombre de cartes du banquier (si configuré)
-      if (bankerCardCount > 0 && bCardCount !== bankerCardCount) {
-        fcLog.reason = `Banquier ${bCardCount} carte(s) ≠ requis ${bankerCardCount}`;
-        state.fc_last_log = fcLog;
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — ${fcLog.reason} → pas de signal`);
-        return;
-      }
-
-      // Vérification : joueur a exactement 2 cartes
-      if (pCardCount !== 2) {
-        fcLog.reason = `Joueur ${pCardCount} carte(s) ≠ 2`;
-        state.fc_last_log = fcLog;
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — ${fcLog.reason} → pas de signal`);
-        return;
-      }
-
-      // Vérification : les 2 cartes du joueur ont des costumes DIFFÉRENTS
-      if (!p1Suit || !p2Suit || p1Suit === p2Suit) {
-        fcLog.reason = `Joueur 2 cartes même costume (${SUIT_DISPLAY[p1Suit] || p1Suit})`;
-        state.fc_last_log = fcLog;
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — Joueur 2 cartes même costume (${p1Suit}) → pas de signal`);
-        return;
-      }
-
-      // Vérification : le banquier n'a PAS le costume de la 1ère carte du joueur
-      const bankerHasFirstSuit = (bSuits || []).includes(p1Suit);
-      if (bankerHasFirstSuit) {
-        fcLog.reason = `Banquier possède ${SUIT_DISPLAY[p1Suit] || p1Suit} (costume P1 du joueur)`;
-        state.fc_last_log = fcLog;
-        console.log(`[${channelId}] [FC+6] Jeu #${gn} — Banquier possède ${p1Suit} (costume P1) → pas de signal`);
-        return;
-      }
-
-      // ✅ Toutes les conditions sont remplies — ajouter à la file d'attente
-      const targetGn = gn + offset;
-      const bNbLabel = bankerCardCount > 0 ? `${bankerCardCount} carte(s)` : `${bCardCount} carte(s) (indifférent)`;
-
-      fcLog.triggered = true;
-      fcLog.suit      = p1Suit;
-      fcLog.targetGn  = targetGn;
-      fcLog.queued    = true;
-      fcLog.reason    = `J: ${SUIT_DISPLAY[p1Suit]||p1Suit}≠${SUIT_DISPLAY[p2Suit]||p2Suit} (costumes différents) · Banquier(${bNbLabel}) sans ${SUIT_DISPLAY[p1Suit]||p1Suit}`;
-
-      state.fc_queue.push({ triggerGn: gn, targetGn, suit: p1Suit });
-      state.fc_last_log = fcLog;
-
-      const lastPred2 = state.fc_last_pred_gn || 0;
-      const gap2 = lastPred2 === 0 ? gapMin : (targetGn - lastPred2);
-      console.log(`[${channelId}] [FC+6] ✅ Signal jeu #${gn} → file d'attente (cible #${targetGn}, file=${state.fc_queue.length}, gap=${gap2}/${gapMin})`);
-
-      // Tenter d'activer immédiatement si aucun différé actif et gap OK
-      if (!state.fc_deferred && gap2 >= gapMin) {
-        state.fc_queue.pop(); // retirer ce qu'on vient d'ajouter (on l'active directement)
-        const remaining = targetGn - gn;
-        if (remaining <= proche) {
-          console.log(`[${channelId}] [FC+6] Activation immédiate ${SUIT_DISPLAY[p1Suit] || p1Suit} → #${targetGn}`);
-          await emitPrediction(targetGn, p1Suit, p1Suit);
-          state.fc_last_pred_gn = targetGn;
-        } else {
-          console.log(`[${channelId}] [FC+6] Différé immédiat #${targetGn} (distance ${remaining} > proche ${proche})`);
-          fcLog.queued = false;
-          state.fc_deferred = { targetGn, suit: p1Suit };
-        }
-      }
     }
   }
 
@@ -3315,12 +3131,11 @@ class Engine {
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
       const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
 
-      // ── Mode Distribution / first_card_plus6 : résolution en fin de jeu uniquement ──
-      // Ne pas résoudre live — on attend que le jeu soit terminé.
-      // Pour distribution : vérifier que les DEUX mains ont exactement 2 cartes.
-      // Pour first_card_plus6 : vérifier le costume APRÈS la fin du tour du joueur.
+      // ── Mode Distribution : résolution en fin de jeu uniquement ─────
+      // Ne pas résoudre live — on attend que le jeu soit terminé
+      // pour vérifier que les DEUX mains ont exactement 2 cartes.
       // La résolution correcte est dans _resolvePending (appelé par processGame).
-      if (cfg.mode === 'distribution' || cfg.mode === 'first_card_plus6') {
+      if (cfg.mode === 'distribution') {
         continue; // skip tryResolve, résolution via _resolvePending en fin de jeu
       }
 
@@ -4054,28 +3869,6 @@ class Engine {
         const monitor = this.getIntersectionMonitor(id);
         if (!monitor) return [];
         return [{ isIntersection: true, monitor }];
-      }
-
-      // Mode Première Carte +Décalage → afficher le log du dernier jeu analysé + file d'attente
-      if (mode === 'first_card_plus6') {
-        const proche   = Math.max(1, parseInt(entry.config?.proche) || 3);
-        const gapMin   = Math.max(2, parseInt(entry.config?.gap_min) || 2);
-        const pendingEntries = Object.entries(entry.pending || {});
-        return [{
-          isFC6: true,
-          lastLog:       entry.fc_last_log      || null,
-          deferred:      entry.fc_deferred       || null,
-          proche,
-          gapMin,
-          fc_queue:      Array.isArray(entry.fc_queue) ? entry.fc_queue : [],
-          fc_last_pred_gn: entry.fc_last_pred_gn || 0,
-          pending: pendingEntries.map(([pgn, p]) => ({
-            gn: parseInt(pgn),
-            suit: p.suit,
-            rattrapage: p.rattrapage || 0,
-            maxR: p.maxR || 0,
-          })),
-        }];
       }
 
       return ALL_SUITS.map(suit => {
