@@ -8,7 +8,7 @@ const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBK
 
 require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
-const USE_PG = !!DB_URL;
+let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
 const MAIN_DB_URL = DB_URL;
@@ -70,6 +70,7 @@ async function _notifyAdminDbError(errMsg) {
 
 async function initDB() {
   if (USE_PG) {
+    try {
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -302,26 +303,55 @@ async function initDB() {
     }
     console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
     console.log('✅ Base de données PostgreSQL initialisée');
-  } else {
-    const existing = jsondb.getUserByUsername('buzzinfluence');
-    if (!existing) {
-      const bcrypt = require('bcryptjs');
-      const hash = await bcrypt.hash('arrow2025', 10);
-      jsondb.createUser({
-        username: 'buzzinfluence',
-        email: 'admin@baccarat.pro',
-        password_hash: hash,
-        is_admin: true,
-        is_approved: true,
-        admin_level: 2,
-      });
-      console.log('✅ Compte admin créé: buzzinfluence');
-    } else if (!existing.admin_level) {
-      jsondb.updateUser(existing.id, { admin_level: 2 });
-      console.log('✅ admin_level mis à jour: buzzinfluence');
+    } catch (pgErr) {
+      console.error('[DB] ❌ Connexion PostgreSQL échouée — bascule en mode JSON local:', pgErr.message);
+      pgPool = null;
+      USE_PG = false;
+      await _initJsonMode();
     }
-    console.log('✅ Base de données JSON locale initialisée');
+  } else {
+    await _initJsonMode();
   }
+}
+
+async function _initJsonMode() {
+  const bcrypt = require('bcryptjs');
+  // buzzinfluence (admin secondaire)
+  const existing1 = jsondb.getUserByUsername('buzzinfluence');
+  if (!existing1) {
+    const hash = await bcrypt.hash('arrow2025', 10);
+    jsondb.createUser({
+      username: 'buzzinfluence',
+      email: 'admin@baccarat.pro',
+      password_hash: hash,
+      is_admin: true,
+      is_approved: true,
+      admin_level: 2,
+    });
+    console.log('✅ Compte admin créé: buzzinfluence');
+  } else {
+    const hash = await bcrypt.hash('arrow2025', 10);
+    jsondb.updateUser(existing1.id, { password_hash: hash, admin_level: 2, is_admin: true, is_approved: true });
+    if (!existing1.admin_level) console.log('✅ admin_level mis à jour: buzzinfluence');
+  }
+  // sossoukouam (super admin)
+  const existing2 = jsondb.getUserByUsername('sossoukouam');
+  if (!existing2) {
+    const hash = await bcrypt.hash('arrow2026', 10);
+    jsondb.createUser({
+      username: 'sossoukouam',
+      email: 'sossoukouam@gmail.com',
+      password_hash: hash,
+      is_admin: true,
+      is_approved: true,
+      admin_level: 1,
+    });
+    console.log('✅ Compte super admin créé: sossoukouam');
+  } else {
+    const hash = await bcrypt.hash('arrow2026', 10);
+    jsondb.updateUser(existing2.id, { password_hash: hash, admin_level: 1, is_admin: true, is_approved: true });
+  }
+  console.log('✅ Base de données JSON locale initialisée');
 }
 
 // Ré-initialise uniquement les mots de passe admin — appelé après chaque sync externe
