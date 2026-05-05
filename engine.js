@@ -1701,7 +1701,7 @@ class Engine {
       if (gn > pgNum + effectiveMaxR) {
         await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
         delete pending[pg];
-        if (onLoss) onLoss(false, ps, pgNum);
+        if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
         continue;
       }
 
@@ -2263,11 +2263,15 @@ class Engine {
 
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-        if (won) this._onStratWin(channelId);
-        else this._onStratLoss(channelId, gn, ps);
+        if (won) {
+          this._onStratWin(channelId);
+          if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
+        } else {
+          this._onStratLoss(channelId, gn, ps);
+        }
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
       }, stratMaxRForResolve, stratTgOpts, handCards, winner);
@@ -3104,14 +3108,23 @@ class Engine {
       {
         const nextQueue = [];
         let emitted = false;
+        const hasPending = Object.keys(state.pending).length > 0;
         for (const item of state.fc_queue) {
           const remaining = item.targetGn - gn;
           if (remaining < 0) {
-            console.log(`[${channelId}] [FC+6] ⏰ Cible #${item.targetGn} dépassée (jeu #${gn}) → retiré de la file`);
+            // Cible dépassée et jamais émise (ex: redémarrage moteur) → on tente quand même
+            // de vérifier si le costume aurait gagné en R0..Rmax, sinon on abandonne proprement
+            console.log(`[${channelId}] [FC+6] ⏰ Cible #${item.targetGn} dépassée (jeu #${gn}) → retiré de la file sans émission`);
           } else if (!emitted && remaining <= proche) {
-            console.log(`[${channelId}] [FC+6] 📤 File → émission ${SUIT_DISPLAY[item.suit] || item.suit} → #${item.targetGn} (distance=${remaining} ≤ proche=${proche})`);
-            await emitPrediction(item.targetGn, item.suit, item.suit);
-            emitted = true;
+            if (hasPending) {
+              // Prédiction déjà en cours de vérification → garder l'item en file, ne pas émettre
+              nextQueue.push(item);
+              console.log(`[${channelId}] [FC+6] 📌 Cible #${item.targetGn} reportée — prédiction en attente de vérification`);
+            } else {
+              console.log(`[${channelId}] [FC+6] 📤 File → émission ${SUIT_DISPLAY[item.suit] || item.suit} → #${item.targetGn} (distance=${remaining} ≤ proche=${proche})`);
+              await emitPrediction(item.targetGn, item.suit, item.suit);
+              emitted = true;
+            }
           } else {
             nextQueue.push(item);
           }
