@@ -3633,6 +3633,12 @@ function AdminPanel() {
       { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',       map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
       { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
     ],
+    absence_confirmee: [
+      { label: 'Identique',        desc: 'Prédit le même costume confirmé', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+      { label: 'Contraire total',  desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦',        map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',        map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',        map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+    ],
     taux_miroir: [
       { label: 'Prédire le retardataire', desc: 'Prédit le costume qui est en retard (identique)', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
       { label: 'Contraire du retardataire', desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
@@ -3889,6 +3895,7 @@ function AdminPanel() {
     { value: 'manquants', label: 'Absences' },
     { value: 'apparents', label: 'Apparitions' },
     { value: 'absence_apparition', label: 'Absence → Apparition' },
+    { value: 'absence_confirmee', label: 'Absence Confirmée' },
     { value: 'apparition_absence', label: 'Apparition → Absence' },
     { value: 'taux_miroir', label: 'Taux Miroir' },
     { value: 'compteur_adverse', label: 'Compteur Adverse' },
@@ -7980,6 +7987,7 @@ function AdminPanel() {
                           : s.mode === 'abs_3_vers_2' ? '🃏 3→2 Abs'
                           : s.mode === 'abs_3_vers_3' ? '🃏 3→3 Abs'
                           : s.mode === 'absence_victoire' ? '🏆 Abs Victoire'
+                          : s.mode === 'absence_confirmee' ? '✅ Abs Confirmée'
                           : s.mode === 'annonce_sequence' ? '📣 Rotateur Promo'
                           : s.mode;
                         const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence';
@@ -8542,6 +8550,7 @@ function AdminPanel() {
                       ...p,
                       mode: m,
                       ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
+                      ...(m === 'absence_confirmee' ? { threshold: 1, max_rattrapage: 20 } : {}),
                       ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
                       ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2 } : {}),
                     }));
@@ -8550,6 +8559,7 @@ function AdminPanel() {
                     <option value="manquants">Manquants — prédit l'absent</option>
                     <option value="apparents">Apparents — prédit le fréquent</option>
                     <option value="absence_apparition">Absence → Apparition</option>
+                    <option value="absence_confirmee">✅ Absence Confirmée (B absences + réapparition)</option>
                     <option value="apparition_absence">Apparition → Absence</option>
                     <option value="distribution">📊 Distribution</option>
                     <option value="carte_3_vers_2">3️⃣ 3 cartes → prédit 2 cartes</option>
@@ -8776,6 +8786,17 @@ function AdminPanel() {
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
                       ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
+                    </div>
+                  )}
+                  {stratForm.mode === 'absence_confirmee' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.35)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>✅ Mode Absence Confirmée — Comment ça fonctionne ?</div>
+                      <div><strong>Phase 1 — Comptage :</strong> le moteur compte les jeux consécutifs où le costume est <em>absent</em>. Dès que le compteur atteint <strong>B</strong>, il passe en attente de confirmation.</div>
+                      <div style={{ marginTop: 6 }}><strong>Phase 2 — Confirmation :</strong> au jeu suivant (B+1), si le costume <em>réapparaît</em> → la prédiction est émise pour le jeu <code style={{ background: 'rgba(16,185,129,0.18)', padding: '1px 5px', borderRadius: 4 }}>B+1 + Décalage</code>. Si le costume est encore absent → reset sans signal.</div>
+                      <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(16,185,129,0.12)', borderRadius: 6, fontFamily: 'monospace', fontSize: 11 }}>
+                        Ex. B=2, Décalage=1 : ♠ absent jeux 1+2 → jeu 3 : ♠ réapparaît ✅ → prédit ♠ au jeu 4
+                      </div>
+                      <div style={{ marginTop: 6, color: '#34d399' }}>✔ Le seuil B, le Décalage et le Rattrapage sont configurables. Configurez les <strong>mappings</strong> pour choisir quel costume prédire à partir du costume confirmé (ex. ♠ confirmé → prédit ♥).</div>
                     </div>
                   )}
                   {stratForm.mode === 'distribution' && (
