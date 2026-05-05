@@ -1323,7 +1323,7 @@ export default function Dashboard() {
                             })}
                           </div>
                         ) : absences[0]?.isFC6 ? (() => {
-                          const { lastLog: ll, deferred, proche, pending: fc6Pending } = absences[0];
+                          const { lastLog: ll, queue: fc6Queue, deferred, proche, pending: fc6Pending } = absences[0];
                           const SUIT_COLOR = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
                           const Row = ({ ok, label }) => (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
@@ -1403,20 +1403,23 @@ export default function Dashboard() {
                                 </div>
                               )}
 
-                              {/* Différé en attente */}
-                              {deferred && (
+                              {/* File d'attente des prédictions différées */}
+                              {fc6Queue && fc6Queue.length > 0 && (
                                 <>
                                   <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                                     <div style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                                      ⏳ Numéro en cours (différé)
+                                      ⏳ File d'attente ({fc6Queue.length})
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <span style={{ fontSize: '0.72rem', color: '#fbbf24', fontWeight: 800 }}>Cible #{deferred.targetGn}</span>
-                                      <span style={{ fontSize: '1rem', color: SUIT_COLOR[deferred.suit] || '#e2e8f0', fontWeight: 800 }}>{deferred.suit}</span>
-                                    </div>
-                                    <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
-                                      Sera lancé quand la distance ≤ <span style={{ color: '#f59e0b', fontWeight: 700 }}>{proche}</span>
+                                    {fc6Queue.map((item, idx) => (
+                                      <div key={item.targetGn} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '0.6rem', color: '#64748b', minWidth: 14 }}>#{idx + 1}</span>
+                                        <span style={{ fontSize: '0.72rem', color: '#fbbf24', fontWeight: 800 }}>Cible #{item.targetGn}</span>
+                                        <span style={{ fontSize: '1rem', color: SUIT_COLOR[item.suit] || '#e2e8f0', fontWeight: 800 }}>{item.suit}</span>
+                                      </div>
+                                    ))}
+                                    <div style={{ fontSize: '0.6rem', color: '#64748b', marginTop: 1 }}>
+                                      Émission quand distance ≤ <span style={{ color: '#f59e0b', fontWeight: 700 }}>{proche}</span>
                                     </div>
                                   </div>
                                 </>
