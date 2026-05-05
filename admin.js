@@ -207,13 +207,15 @@ router.get('/online-users', requireAdmin, async (req, res) => {
           : diff < ONLINE_MS  ? 'en_ligne'
           : diff < ACTIVE_MS  ? 'actif'
           : 'hors_ligne';
+        const isPro     = !!(u.is_pro || u.account_type === 'pro');
+        const isPremium = !!(u.is_premium || u.account_type === 'premium');
         return {
           id: u.id,
           username: u.username,
           first_name: u.first_name,
           last_name: u.last_name,
-          is_pro: u.is_pro,
-          is_premium: u.is_premium,
+          is_pro: isPro,
+          is_premium: isPremium,
           account_type: u.account_type || 'simple',
           is_approved: u.is_approved,
           is_banned: u.is_banned,
@@ -258,9 +260,12 @@ router.put('/users/:id/allowed-channels', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { allowed_channels } = req.body;
-    const val = allowed_channels === null ? null : (Array.isArray(allowed_channels) ? JSON.stringify(allowed_channels) : null);
+    const ids = Array.isArray(allowed_channels) ? allowed_channels : [];
+    const val = ids.length > 0 ? JSON.stringify(ids) : null;
     const u = await db.updateUser(id, { allowed_channels: val });
     if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    // Synchroniser vers user_strategy_visible pour que getVisibleStrategies soit cohérent
+    await db.setVisibleStrategies(id, ids);
     res.json({ ok: true, allowed_channels: u.allowed_channels });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -1281,6 +1286,9 @@ router.put('/users/:userId/strategies', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'strategy_ids doit être un tableau' });
   try {
     await db.setVisibleStrategies(userId, strategy_ids);
+    // Synchroniser allowed_channels pour garder cohérence avec user_strategy_visible
+    const val = strategy_ids.length > 0 ? JSON.stringify(strategy_ids) : null;
+    await db.updateUser(userId, { allowed_channels: val });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3217,15 +3225,34 @@ router.post('/users/:id/toggle-pro', requireSuperAdmin, async (req, res) => {
     if (!current) return res.status(404).json({ error: 'Utilisateur non trouvé' });
     if (current.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
     const newVal = !current.is_pro;
-    const user = await db.updateUser(id, { is_pro: newVal });
+    const user = await db.updateUser(id, {
+      is_pro: newVal,
+      account_type: newVal ? 'pro' : (current.is_premium ? 'premium' : 'simple'),
+    });
     console.log(`[Pro] Compte Pro ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
-    // Refresh pro_strategy_ids (la liste tient compte des owners désactivés) + recharger le moteur
     try {
       const list = await getProStrategiesList();
       await saveProStrategiesList(list);
       require('./engine').reloadProStrategies().catch(() => {});
     } catch (e) { console.warn('[Pro] reload après toggle:', e.message); }
     res.json({ ok: true, is_pro: newVal, user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/users/:id/toggle-premium', requireSuperAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const current = await db.getUser(id);
+    if (!current) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    if (current.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
+    if (current.is_pro) return res.status(400).json({ error: 'Ce compte est PRO — désactivez PRO d\'abord' });
+    const newVal = !current.is_premium;
+    const user = await db.updateUser(id, {
+      is_premium: newVal,
+      account_type: newVal ? 'premium' : 'simple',
+    });
+    console.log(`[Premium] Compte Premium ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
+    res.json({ ok: true, is_premium: newVal, user });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

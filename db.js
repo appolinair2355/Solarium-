@@ -733,15 +733,17 @@ async function setVisibleChannels(userId, channelIds) {
 
 async function getVisibleStrategies(userId) {
   if (USE_PG) {
-    // Priorité : allowed_channels sur le compte (géré depuis le panneau en ligne)
+    // Source canonique : table user_strategy_visible
+    const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
+    const fromTable = r.rows.map(row => row.strategy_id);
+    // Compatibilité : fusionner avec allowed_channels si présent (colonne legacy)
     const uRes = await pgPool.query('SELECT allowed_channels FROM users WHERE id=$1', [userId]);
     const u = uRes.rows[0];
-    if (u && Array.isArray(u.allowed_channels) && u.allowed_channels.length > 0) {
-      return u.allowed_channels;
-    }
-    // Fallback : table user_strategy_visible (ancienne méthode)
-    const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
-    return r.rows.map(r => r.strategy_id);
+    const fromUser = (u && Array.isArray(u.allowed_channels) && u.allowed_channels.length > 0)
+      ? u.allowed_channels
+      : [];
+    // Union des deux sources, sans doublon
+    return [...new Set([...fromTable, ...fromUser])];
   }
   return [];
 }

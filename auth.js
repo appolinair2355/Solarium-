@@ -112,6 +112,8 @@ router.post('/register', async (req, res) => {
       password_hash: hash,
       plain_password: password,
       account_type: accountType,
+      is_premium: accountType === 'premium',
+      is_pro: accountType === 'pro',
       promo_code: newPromoCode,
       referrer_user_id: referrerUserId,
       profile_photo: profilePhoto,
