@@ -3086,35 +3086,51 @@ class Engine {
       //
       // Prédiction : costume de la 1ère carte du joueur → jeu gn + offset
       //
-      // Proche : prédiction différée tant que (targetGn - currentGn) > proche
-      //          Émission seulement quand on est à ≤ proche jeux de la cible
+      // File d'attente (fc_queue) : prédictions déclenchées mais pas encore émises.
+      //   Émission différée tant que (targetGn - gn) > proche.
+      //   Dès que la distance ≤ proche, on émet le premier élément de la file.
+      //
+      // fc_ecart : nombre minimum de jeux entre deux déclenchements (défaut 2)
       // ─────────────────────────────────────────────────────────────────────
       const proche          = Math.max(1, parseInt(cfg.proche) || 3);
-      const bankerCardCount = parseInt(cfg.banker_card_count) || 0; // 0 = indifférent
+      const bankerCardCount = parseInt(cfg.banker_card_count) || 0;
+      const fcEcart         = Math.max(1, parseInt(cfg.fc_ecart) || 2);
 
-      // ── Phase 2 : émettre une prédiction différée si on est à portée ──────
-      if (state.fc_deferred) {
-        const { targetGn: dTarget, suit: dSuit } = state.fc_deferred;
-        const remaining = dTarget - gn;
-        console.log(`[${channelId}] [FC+6] Différé → cible #${dTarget} | distance=${remaining} | proche=${proche}`);
-        if (remaining < 0) {
-          console.log(`[${channelId}] [FC+6] Cible #${dTarget} dépassée (jeu #${gn}) → abandon du différé`);
-          state.fc_deferred = null;
-        } else if (remaining <= proche) {
-          console.log(`[${channelId}] [FC+6] Distance ${remaining} ≤ proche ${proche} → émission différée ${SUIT_DISPLAY[dSuit] || dSuit} → #${dTarget}`);
-          await emitPrediction(dTarget, dSuit, dSuit);
-          state.fc_deferred = null;
-          return;
-        } else {
-          // Encore trop loin, on attend
-          return;
+      // Initialiser la file d'attente et le tracking du dernier déclenchement
+      if (!Array.isArray(state.fc_queue)) state.fc_queue = [];
+      if (!state.fc_last_trigger_gn) state.fc_last_trigger_gn = 0;
+
+      // ── Phase 2 : traiter la file d'attente ────────────────────────────────
+      {
+        const nextQueue = [];
+        let emitted = false;
+        for (const item of state.fc_queue) {
+          const remaining = item.targetGn - gn;
+          if (remaining < 0) {
+            console.log(`[${channelId}] [FC+6] ⏰ Cible #${item.targetGn} dépassée (jeu #${gn}) → retiré de la file`);
+          } else if (!emitted && remaining <= proche) {
+            console.log(`[${channelId}] [FC+6] 📤 File → émission ${SUIT_DISPLAY[item.suit] || item.suit} → #${item.targetGn} (distance=${remaining} ≤ proche=${proche})`);
+            await emitPrediction(item.targetGn, item.suit, item.suit);
+            emitted = true;
+          } else {
+            nextQueue.push(item);
+          }
         }
+        state.fc_queue = nextQueue;
+        if (emitted) return;
       }
 
       // ── Phase 1 : évaluer le déclencheur ──────────────────────────────────
-      // Ne pas ré-déclencher si une prédiction est déjà en cours de rattrapage
+      // Bloqué si une prédiction est déjà en cours de vérification (pending)
       if (Object.keys(state.pending).length > 0) {
         console.log(`[${channelId}] [FC+6] Bloqué — prédiction en attente de vérification`);
+        return;
+      }
+
+      // Vérifier l'écart minimum entre deux déclenchements consécutifs
+      const lastTrig = state.fc_last_trigger_gn || 0;
+      if (lastTrig > 0 && (gn - lastTrig) < fcEcart) {
+        console.log(`[${channelId}] [FC+6] Jeu #${gn} — écart trop court (${gn - lastTrig} < ${fcEcart}) depuis dernier déclenchement #${lastTrig} → skip`);
         return;
       }
 
@@ -3182,19 +3198,20 @@ class Engine {
       fcLog.suit      = p1Suit;
       fcLog.targetGn  = targetGn;
       fcLog.reason    = `J: ${SUIT_DISPLAY[p1Suit]||p1Suit}≠${SUIT_DISPLAY[p2Suit]||p2Suit} (costumes différents) · Banquier(${bNbLabel}) sans ${SUIT_DISPLAY[p1Suit]||p1Suit}`;
+      state.fc_last_log = fcLog;
+      state.fc_last_trigger_gn = gn;
 
-      console.log(`[${channelId}] [FC+6] ✅ Signal jeu #${gn} — Joueur P1=${p1Suit} P2=${p2Suit} (différents) | Banquier (${bNbLabel}) sans ${p1Suit} → cible #${targetGn} (proche=${proche})`);
+      console.log(`[${channelId}] [FC+6] ✅ Signal jeu #${gn} — Joueur P1=${p1Suit} P2=${p2Suit} (différents) | Banquier (${bNbLabel}) sans ${p1Suit} → cible #${targetGn} (proche=${proche}, écart=${fcEcart})`);
       console.log(`[${channelId}] [FC+6] Distance trigger→cible = ${remaining} | seuil proche = ${proche}`);
 
       if (remaining <= proche) {
         console.log(`[${channelId}] [FC+6] Distance ${remaining} ≤ proche ${proche} → émission immédiate ${SUIT_DISPLAY[p1Suit] || p1Suit} → #${targetGn}`);
-        state.fc_last_log = fcLog;
+        fcLog.deferred = false;
         await emitPrediction(targetGn, p1Suit, p1Suit);
       } else {
-        console.log(`[${channelId}] [FC+6] Distance ${remaining} > proche ${proche} → prédiction différée (sera émise quand distance ≤ ${proche})`);
         fcLog.deferred = true;
-        state.fc_last_log = fcLog;
-        state.fc_deferred = { targetGn, suit: p1Suit };
+        state.fc_queue.push({ targetGn, suit: p1Suit, triggerGn: gn });
+        console.log(`[${channelId}] [FC+6] Distance ${remaining} > proche ${proche} → ajouté à la file (${state.fc_queue.length} élément(s) en attente)`);
       }
     }
   }
@@ -3991,14 +4008,16 @@ class Engine {
         return [{ isIntersection: true, monitor }];
       }
 
-      // Mode Première Carte +Décalage → afficher le log du dernier jeu analysé + différé en cours
+      // Mode Première Carte +Décalage → afficher le log du dernier jeu analysé + file d'attente
       if (mode === 'first_card_plus6') {
         const proche = Math.max(1, parseInt(entry.config?.proche) || 3);
         const pendingEntries = Object.entries(entry.pending || {});
+        const queue = Array.isArray(entry.fc_queue) ? entry.fc_queue : [];
         return [{
           isFC6: true,
           lastLog: entry.fc_last_log || null,
-          deferred: entry.fc_deferred || null,
+          queue,
+          deferred: queue[0] || null,
           proche,
           pending: pendingEntries.map(([pgn, p]) => ({
             gn: parseInt(pgn),
