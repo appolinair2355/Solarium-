@@ -1320,46 +1320,109 @@ export default function Dashboard() {
                               )}
                             </div>
                           );
-                        })() : absences.map(a => {
-                          const isMiroir = a.mode === 'taux_miroir';
-                          const isCarte = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3' || a.mode === 'victoire_adverse' || a.mode === 'distribution' || a.mode === 'abs_3_vers_2' || a.mode === 'abs_3_vers_3' || a.mode === 'absence_victoire';
-                          const barColor = isMiroir
-                            ? (a.count >= a.threshold ? '#6366f1' : a.count >= a.threshold * 0.7 ? '#f59e0b' : '#6366f1')
-                            : isCarte
-                            ? (a.waiting ? '#22c55e' : a.count >= a.threshold - 1 ? '#f59e0b' : channel.color)
-                            : (a.count >= a.threshold ? '#ef4444' : a.count >= a.threshold - 1 ? '#f59e0b' : a.isLive ? '#4ade80' : channel.color);
-                          if (isCarte && a.waiting) {
-                            return (
-                              <div key={a.suit} className="absence-row">
-                                <span className="absence-suit">{a.display}</span>
-                                <div className="absence-bar-wrap">
-                                  <div className="absence-bar-fill" style={{ width: '100%', background: '#22c55e', transition: 'width 0.4s ease' }} />
-                                </div>
-                                <span className="absence-count" style={{ color: '#4ade80', fontWeight: 800, fontSize: '0.7rem' }}>⏳</span>
-                              </div>
-                            );
-                          }
+                        })() : (() => {
+                          const isAbsConfMode = absences.length > 0 && absences[0].mode === 'absence_confirmee';
+
                           return (
-                          <div key={a.suit} className="absence-row"
-                               style={{ opacity: a.dimmed ? 0.35 : 1 }}>
-                            <span className="absence-suit">{a.display}</span>
-                            <div className="absence-bar-wrap">
-                              <div
-                                className="absence-bar-fill"
-                                style={{
-                                  width: `${Math.min(100, (a.count / (a.threshold || 1)) * 100)}%`,
-                                  background: barColor,
-                                  transition: 'width 0.4s ease, background 0.3s ease',
-                                }}
-                              />
-                            </div>
-                            <span className="absence-count"
-                                  style={{ color: isMiroir ? '#a5b4fc' : isCarte ? (a.count >= a.threshold - 1 ? '#f59e0b' : '#475569') : a.count >= a.threshold ? '#ef4444' : a.isLive ? '#4ade80' : '#475569', fontWeight: isMiroir || a.isLive ? 800 : 600 }}>
-                              {isCarte ? `${a.count}/${a.threshold}` : a.count}
-                            </span>
-                          </div>
+                            <>
+                              {/* ── HAUT : compteur statique par costume (pas de clignotement) ── */}
+                              {absences.map(a => {
+                                const isMiroir = a.mode === 'taux_miroir';
+                                const isCarte  = a.mode === 'carte_3_vers_2' || a.mode === 'carte_2_vers_3' || a.mode === 'victoire_adverse' || a.mode === 'distribution' || a.mode === 'abs_3_vers_2' || a.mode === 'abs_3_vers_3' || a.mode === 'absence_victoire';
+                                const barColor = isMiroir
+                                  ? (a.count >= a.threshold ? '#6366f1' : a.count >= a.threshold * 0.7 ? '#f59e0b' : '#6366f1')
+                                  : isAbsConfMode
+                                  ? (a.count >= a.threshold - 1 ? '#f59e0b' : a.isLive ? '#4ade80' : channel.color)
+                                  : isCarte
+                                  ? (a.waiting ? '#22c55e' : a.count >= a.threshold - 1 ? '#f59e0b' : channel.color)
+                                  : (a.count >= a.threshold ? '#ef4444' : a.count >= a.threshold - 1 ? '#f59e0b' : a.isLive ? '#4ade80' : channel.color);
+
+                                if (isCarte && a.waiting) {
+                                  return (
+                                    <div key={a.suit} className="absence-row">
+                                      <span className="absence-suit">{a.display}</span>
+                                      <div className="absence-bar-wrap">
+                                        <div className="absence-bar-fill" style={{ width: '100%', background: '#22c55e', transition: 'width 0.4s ease' }} />
+                                      </div>
+                                      <span className="absence-count" style={{ color: '#4ade80', fontWeight: 800, fontSize: '0.7rem' }}>⏳</span>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div key={a.suit} className="absence-row" style={{ opacity: a.dimmed ? 0.35 : 1 }}>
+                                    <span className="absence-suit">{a.display}</span>
+                                    <div className="absence-bar-wrap">
+                                      <div
+                                        className="absence-bar-fill"
+                                        style={{
+                                          width: `${Math.min(100, (a.count / (a.threshold || 1)) * 100)}%`,
+                                          background: barColor,
+                                          transition: 'width 0.4s ease, background 0.3s ease',
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="absence-count" style={{
+                                      color: isAbsConfMode
+                                        ? (a.count > 0 ? '#ef4444' : '#475569')
+                                        : isMiroir ? '#a5b4fc'
+                                        : isCarte ? (a.count >= a.threshold - 1 ? '#f59e0b' : '#475569')
+                                        : a.count >= a.threshold ? '#ef4444'
+                                        : a.isLive ? '#4ade80' : '#475569',
+                                      fontWeight: isMiroir || a.isLive ? 800 : 600,
+                                    }}>
+                                      {isCarte ? `${a.count}/${a.threshold}` : a.count}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+
+                              {/* ── BAS : costumes ayant atteint le seuil B → feu jaune clignotant ── */}
+                              {isAbsConfMode && (() => {
+                                const seuil = absences.filter(a => a.confirmPending);
+                                if (seuil.length === 0) return null;
+                                return (
+                                  <div style={{
+                                    marginTop: 8,
+                                    borderTop: '1px solid rgba(251,146,60,0.25)',
+                                    paddingTop: 7,
+                                  }}>
+                                    <div style={{ fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600, marginBottom: 5, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                      Seuil atteint
+                                    </div>
+                                    {seuil.map(a => {
+                                      const SC = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                                      return (
+                                      <div key={a.suit} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+                                        {/* Feu jaune clignotant */}
+                                        <span style={{
+                                          display: 'inline-block', flexShrink: 0,
+                                          width: 11, height: 11, borderRadius: '50%',
+                                          background: '#f59e0b',
+                                          boxShadow: '0 0 8px 3px #f59e0b',
+                                          animation: 'feuBlink 0.8s infinite',
+                                        }} />
+                                        {/* Symbole du costume */}
+                                        <span style={{
+                                          fontSize: '1.1rem',
+                                          color: SC[a.suit] || '#e2e8f0',
+                                          fontWeight: 800,
+                                          lineHeight: 1,
+                                        }}>
+                                          {a.display}
+                                        </span>
+                                        <span style={{ fontSize: '0.62rem', color: '#f59e0b', fontWeight: 700 }}>
+                                          FEU JAUNE
+                                        </span>
+                                      </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </>
                           );
-                        })}
+                        })()}
                       </div>
                     )}
                   </div>

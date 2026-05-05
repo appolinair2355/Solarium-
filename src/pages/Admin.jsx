@@ -3706,7 +3706,7 @@ function AdminPanel() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'all', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
     // Mode lecture_passee (lecture de jeux passés depuis cartes_jeu)
     carte_p: 2, carte_h: 32, carte_ecart: 1, carte_position: 1, carte_source_hand: 'joueur',
     // Mode intelligent_cartes (analyse de patterns dans cartes_jeu)
@@ -4150,7 +4150,7 @@ function AdminPanel() {
 
   const showStratMsg = (text, error = false) => {
     setStratMsg({ text, error });
-    setTimeout(() => setStratMsg(''), 4000);
+    setTimeout(() => setStratMsg(''), 8000);
   };
 
   const showMsg = (msg, isError) => {
@@ -4788,6 +4788,18 @@ function AdminPanel() {
   const saveStrat = async () => {
     console.log('[saveStrat] Bouton cliqué, stratForm:', JSON.stringify(stratForm).substring(0, 300));
     console.log('[saveStrat] stratEditing:', stratEditing);
+    if (!stratForm.name.trim()) {
+      showStratMsg('❌ Veuillez saisir un nom pour la stratégie avant d\'enregistrer.', true);
+      return;
+    }
+    const SUITS_CHECK = ['♠','♥','♦','♣'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6'];
+    if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison' && stratForm.mode !== 'relance') {
+      for (const s of SUITS_CHECK) {
+        const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
+        if (pool.length === 0) { showStratMsg(`❌ Mapping incomplet : sélectionnez au moins 1 costume cible pour ${s}`, true); return; }
+      }
+    }
     setStratSaving(true);
     try {
       const url = stratEditing !== null ? `/api/admin/strategies/${stratEditing}` : '/api/admin/strategies';
@@ -9935,18 +9947,25 @@ function AdminPanel() {
               </>}
 
               {/* ── Boutons d'action ── */}
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
-                {stratEditing !== null && (
-                  <button className="btn btn-ghost btn-sm" onClick={cancelStratForm}>✕ Annuler</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
+                {!stratForm.name.trim() && (
+                  <div style={{ textAlign: 'right', fontSize: 12, color: '#fbbf24', padding: '4px 0' }}>
+                    ⚠️ Le champ <strong>Nom de la stratégie</strong> est obligatoire pour enregistrer.
+                  </div>
                 )}
-                <button
-                  className="btn btn-gold btn-sm"
-                  style={{ background: stratEditing !== null ? 'linear-gradient(135deg,#7e22ce,#a855f7)' : 'linear-gradient(135deg,#15803d,#22c55e)', minWidth: 200 }}
-                  onClick={saveStrat}
-                  disabled={stratSaving || !stratForm.name.trim()}
-                >
-                  {stratSaving ? '⏳ Enregistrement…' : stratEditing !== null ? `💾 Mettre à jour S${stratEditing}` : `✅ Créer la stratégie`}
-                </button>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  {stratEditing !== null && (
+                    <button className="btn btn-ghost btn-sm" onClick={cancelStratForm}>✕ Annuler</button>
+                  )}
+                  <button
+                    className="btn btn-gold btn-sm"
+                    style={{ background: stratEditing !== null ? 'linear-gradient(135deg,#7e22ce,#a855f7)' : 'linear-gradient(135deg,#15803d,#22c55e)', minWidth: 200, opacity: (!stratSaving && !stratForm.name.trim()) ? 0.5 : 1 }}
+                    onClick={saveStrat}
+                    disabled={stratSaving}
+                  >
+                    {stratSaving ? '⏳ Enregistrement…' : stratEditing !== null ? `💾 Mettre à jour S${stratEditing}` : `✅ Créer la stratégie`}
+                  </button>
+                </div>
               </div>
 
               </div>{/* fin padding */}
