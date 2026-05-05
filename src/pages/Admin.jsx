@@ -4804,6 +4804,10 @@ function AdminPanel() {
         hand: s?.hand || stratForm.hand,
         visibility: s?.visibility || stratForm.visibility,
         threshold: s?.threshold ?? stratForm.threshold,
+        prediction_offset: s?.prediction_offset ?? stratForm.prediction_offset,
+        proche: s?.proche ?? stratForm.proche,
+        fc_ecart: s?.fc_ecart ?? stratForm.fc_ecart,
+        banker_card_count: s?.banker_card_count ?? stratForm.banker_card_count,
         max_rattrapage: s?.max_rattrapage ?? stratForm.max_rattrapage,
         exceptions: Array.isArray(s?.exceptions) ? s.exceptions : (stratForm.exceptions || []),
         tg_targets: Array.isArray(s?.tg_targets) ? s.tg_targets : (stratForm.tg_targets || []),
@@ -5473,8 +5477,15 @@ function AdminPanel() {
                 margin: '0 0 18px', animation: 'smFadeUp 0.4s 0.44s ease-out both',
               }}>
                 {[
-                  { icon: '⚖️', label: successModal.mode === 'taux_miroir' ? 'Différence' : 'Seuil B', value: successModal.threshold },
-                  { icon: '🔁', label: 'Rattrapages max', value: `R${successModal.max_rattrapage ?? 20}` },
+                  ...(successModal.mode === 'first_card_plus6' ? [
+                    { icon: '🎯', label: 'Décalage (N+X)', value: `+${successModal.prediction_offset ?? 6}` },
+                    { icon: '📍', label: 'Proche', value: successModal.proche ?? 3 },
+                    { icon: '↔️', label: 'Écart min signaux', value: successModal.fc_ecart ?? 2 },
+                    { icon: '🃏', label: 'Cartes banquier', value: successModal.banker_card_count === 0 ? 'Indifférent' : `${successModal.banker_card_count} cartes` },
+                  ] : [
+                    { icon: '⚖️', label: successModal.mode === 'taux_miroir' ? 'Différence' : 'Seuil B', value: successModal.threshold },
+                    { icon: '🔁', label: 'Rattrapages max', value: `R${successModal.max_rattrapage ?? 20}` },
+                  ]),
                   { icon: '⛔', label: 'Exceptions', value: (successModal.exceptions?.length || 0) === 0 ? 'Aucune' : `${successModal.exceptions.length} règle(s)` },
                   { icon: '✈️', label: 'Canaux Telegram', value: (successModal.tg_targets?.filter(t => t.bot_token && t.channel_id).length || 0) === 0 ? 'Aucun' : `${successModal.tg_targets.filter(t=>t.bot_token&&t.channel_id).length} canal(aux)` },
                 ].map(item => (
