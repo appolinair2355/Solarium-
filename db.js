@@ -1,8 +1,13 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+
 require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || null;
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 const USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -13,7 +18,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || (DB_URL && (DB_URL.includes('render.com') || DB_URL.includes('sslmode') || DB_URL.includes('replit'))))
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
       ? { rejectUnauthorized: false }
       : false,
     max: 5,
