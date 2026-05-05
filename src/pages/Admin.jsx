@@ -5039,6 +5039,22 @@ function AdminPanel() {
     if (res.ok) { showMsg('Accès révoqué'); loadUsers(); }
   };
 
+  const togglePremium = async uid => {
+    const res = await fetch(`/api/admin/users/${uid}/toggle-premium`, { method: 'POST', credentials: 'include' });
+    const d = await res.json();
+    if (res.ok) {
+      showMsg(d.is_premium ? '⭐ Compte passé en PREMIUM' : '👤 Compte repassé en SIMPLE');
+      loadUsers();
+      setOnlineUsers(prev => prev.map(u => u.id === uid ? {
+        ...u,
+        is_premium: d.is_premium,
+        account_type: d.is_premium ? 'premium' : 'simple',
+      } : u));
+    } else {
+      showMsg(d.error || 'Erreur', true);
+    }
+  };
+
   const deleteUser = async uid => {
     if (!confirm('Supprimer définitivement cet utilisateur ?')) return;
     const res = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE', credentials: 'include' });
@@ -6045,6 +6061,13 @@ function AdminPanel() {
                             {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
                             {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
                             {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
+                            {isSuperAdmin && !u.is_pro && (
+                              <button
+                                title={u.is_premium ? 'Retirer le statut Premium' : 'Passer en Premium'}
+                                onClick={() => togglePremium(u.id)}
+                                style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, border: u.is_premium ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.12)', background: u.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.05)', color: u.is_premium ? '#fbbf24' : '#64748b' }}
+                              >{u.is_premium ? '⭐ Retirer Premium' : '⭐ Activer Premium'}</button>
+                            )}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
                           {/* Mot de passe configuré — affiché pour TOUS les utilisateurs (simple, pro, premium) */}
@@ -6698,6 +6721,14 @@ function AdminPanel() {
                           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: typeBadge.color, background: typeBadge.bg, border: `1px solid ${typeBadge.border}`, borderRadius: 5, padding: '2px 8px' }}>
                             {typeBadge.icon} {typeBadge.label}
                           </span>
+                          {/* Bouton toggle PREMIUM (super-admin seulement, pas pour PRO) */}
+                          {isSuperAdmin && !isPro && (
+                            <button
+                              title={isPremium ? 'Retirer le statut Premium' : 'Passer en Premium'}
+                              onClick={() => togglePremium(u.id)}
+                              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: isPremium ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.12)', background: isPremium ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)', color: isPremium ? '#fbbf24' : '#64748b' }}
+                            >{isPremium ? '⭐ Retirer Premium' : '⭐ → Premium'}</button>
+                          )}
                           {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>🚫 BANNI</span>}
                           {subExpired && !u.is_banned && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>⏱ EXPIRÉ</span>}
                           <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
@@ -6738,19 +6769,19 @@ function AdminPanel() {
                           </div>
                         )}
 
-                        {/* ── Ligne résumé compteurs (uniquement PRO) ── */}
-                        {isPro && (
+                        {/* ── Ligne résumé compteurs (PRO + PREMIUM) ── */}
+                        {(isPro || isPremium) && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                             <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
                               📊 Compteurs visibles : {counterForUser.length === 0
-                                ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Uniquement ses propres stratégies</span>
-                                : <span style={{ color: '#a78bfa' }}>{counterForUser.join(', ')}</span>}
+                                ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>{isPremium ? 'Aucun canal activé' : 'Uniquement ses propres stratégies'}</span>
+                                : <span style={{ color: isPremium ? '#fbbf24' : '#a78bfa' }}>{counterForUser.join(', ')}</span>}
                             </div>
                             <button onClick={() => {
                               if (isEditingCounter) { setEditingCounterChannels(null); return; }
                               setEditingCounterChannels(u.id); setEditingAllowedChannels(null); setEditingAllowedModes(null);
                               setCounterChannelsEdit(counterForUser.length > 0 ? [...counterForUser] : []);
-                            }} style={{ padding: '4px 10px', background: isEditingCounter ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? '#a78bfa' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            }} style={{ padding: '4px 10px', background: isEditingCounter ? (isPremium ? 'rgba(251,191,36,0.2)' : 'rgba(167,139,250,0.2)') : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? (isPremium ? 'rgba(251,191,36,0.4)' : 'rgba(167,139,250,0.4)') : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? (isPremium ? '#fbbf24' : '#a78bfa') : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                               {isEditingCounter ? '✕ Annuler' : '📊 Compteurs'}
                             </button>
                           </div>
@@ -6763,7 +6794,7 @@ function AdminPanel() {
                               📺 Canaux accessibles pour ce compte {typeBadge.label}
                             </div>
                             <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>
-                              {isPremium ? 'PREMIUM : voit les compteurs de ces canaux.' : isUser ? 'UTILISATEUR : ne voit PAS les compteurs.' : 'PRO : utilisez aussi les canaux assignés.'}
+                              {isPremium ? 'PREMIUM : utilisez le bouton 📊 Compteurs pour activer le compteur par canal.' : isUser ? 'UTILISATEUR : ne voit PAS les compteurs.' : 'PRO : utilisez aussi les canaux assignés.'}
                             </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
                               {ALL_BASE_CHANNELS_LIST.map(ch => {
@@ -6817,10 +6848,10 @@ function AdminPanel() {
                         )}
 
                         {/* ── Panel édition compteurs visibles (PRO uniquement) ── */}
-                        {isEditingCounter && isPro && (
-                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 8 }}>
-                            <div style={{ fontSize: 11, color: '#a78bfa', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce PRO voit les compteurs</div>
-                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Sans sélection = voit uniquement les compteurs de ses propres stratégies créées.</div>
+                        {isEditingCounter && (isPro || isPremium) && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: isPremium ? 'rgba(251,191,36,0.06)' : 'rgba(139,92,246,0.06)', border: `1px solid ${isPremium ? 'rgba(251,191,36,0.25)' : 'rgba(139,92,246,0.25)'}`, borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: isPremium ? '#fbbf24' : '#a78bfa', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce {isPremium ? 'PREMIUM' : 'PRO'} voit les compteurs</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>{isPremium ? 'Cochez les canaux pour lesquels ce Premium verra le compteur d\'absences.' : 'Sans sélection = voit uniquement les compteurs de ses propres stratégies créées.'}</div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
                               {ALL_BASE_CHANNELS_LIST.map(ch => {
                                 const active = counterChannelsEdit.includes(ch.id);

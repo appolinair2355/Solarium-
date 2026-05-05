@@ -399,8 +399,8 @@ export default function StrategySelect() {
           );
         })}
 
-        {/* Stratégies personnalisées (S7, S8…) — PRO et admin uniquement */}
-        {(user?.is_admin || user?.is_pro) && customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode)).map((s, i) => {
+        {/* Stratégies personnalisées (S7, S8…) — visibles si assignées par l'admin */}
+        {(visibleStratIds !== null || user?.is_admin) && customStrategies.filter(s => canSeeStrategy(`S${s.id}`, s.mode)).map((s, i) => {
           const cid = `S${s.id}`;
           const { color, glow } = CUSTOM_COLORS[i % CUSTOM_COLORS.length];
           const st = getStats(cid);

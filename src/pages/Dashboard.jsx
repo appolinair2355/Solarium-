@@ -991,12 +991,20 @@ export default function Dashboard() {
                 <div className="live-games-layout">
                   {/* Big live game + absence counter side by side */}
                   {(() => {
-                    const isOwnProChannel = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id);
-                    const proCanSeeCounter = user?.is_pro && (isOwnProChannel || (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId)));
-                    const canSeeCounter = user?.is_admin || user?.is_premium || proCanSeeCounter;
+                    // Règles compteur par type de compte :
+                    // Admin    → toujours visible
+                    // Premium  → visible si admin a coché ce canal dans show_counter_channels
+                    // Pro      → visible uniquement pour ses propres stratégies importées (isProChannel + owner)
+                    // Simple   → jamais
                     return null;
                   })()}
-                  <div className={`live-grid ${(user?.is_admin || user?.is_premium || (() => { const own = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id); return user?.is_pro && (own || (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))); })()) ? 'live-grid-admin' : 'live-grid-single'}`}>
+                  {(() => {
+                    const isOwnProChannel = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id);
+                    const canSeeCounter = user?.is_admin
+                      || (user?.is_premium && Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))
+                      || (user?.is_pro && isOwnProChannel);
+                    return (
+                  <div className={`live-grid ${canSeeCounter ? 'live-grid-admin' : 'live-grid-single'}`}>
                     {liveGame ? (
                       <GameRow g={liveGame} mode="live" />
                     ) : (
@@ -1004,10 +1012,7 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>{autoT('En attente de la prochaine partie...')}</span>
                       </div>
                     )}
-                    {(user?.is_admin || user?.is_premium || (user?.is_pro && (
-                        (isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id)) ||
-                        (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))
-                      ))) && (
+                    {canSeeCounter && (
                       <div className="absence-counter-chip">
                         <div className="absence-chip-title">
                           <span style={{ color: channel.color }}>📊</span>
@@ -1426,6 +1431,8 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
+                    );
+                  })()}
 
                   {/* ── Séquences de Relance — barres de progression pertes ── */}
                   {(user?.is_admin || user?.is_premium) && (() => {
