@@ -34,5 +34,32 @@
       </div>
     </div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      (function() {
+        var KEY = '__loader_reload_ts';
+        var MAX_WAIT = 25000;
+        var timer = setTimeout(function() {
+          var root = document.getElementById('root');
+          var loader = document.getElementById('app-loader');
+          if (loader && root && root.contains(loader)) {
+            var last = parseInt(sessionStorage.getItem(KEY) || '0', 10);
+            var now = Date.now();
+            if (now - last > 30000) {
+              sessionStorage.setItem(KEY, String(now));
+              var url = new URL(window.location.href);
+              url.searchParams.set('_r', String(now));
+              window.location.replace(url.toString());
+            }
+          }
+        }, MAX_WAIT);
+        window.addEventListener('DOMContentLoaded', function() {
+          var obs = new MutationObserver(function() {
+            var loader = document.getElementById('app-loader');
+            if (!loader) { clearTimeout(timer); obs.disconnect(); }
+          });
+          obs.observe(document.getElementById('root') || document.body, { childList: true, subtree: true });
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -452,7 +452,7 @@ function validateStrategyBody(body) {
   if (!name || !name.trim())         return 'Nom requis';
   if (!['admin', 'all'].includes(visibility)) return 'Visibilité invalide';
   const offset = parseInt(body.prediction_offset);
-  if (!isNaN(offset) && (offset < 1 || offset > 10)) return 'Décalage de prédiction invalide (1–10)';
+  if (!isNaN(offset) && (offset < 1 || offset > 30)) return 'Décalage de prédiction invalide (1–30)';
 
   if (strategy_type === 'combinaison') {
     const sources = Array.isArray(body.multi_source_ids) ? body.multi_source_ids : [];
@@ -470,6 +470,10 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'first_card_plus6') {
+    return null;
+  }
+
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
   const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
 
@@ -480,10 +484,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
