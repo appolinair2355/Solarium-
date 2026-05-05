@@ -567,15 +567,14 @@ export default function Dashboard() {
   }, [hasAccess]);
 
   useEffect(() => {
-    if (!user?.is_admin && !user?.is_premium) return;
-    if (isProChannel) { setAbsences([]); return; } // pas d'absences pour les slots Pro
+    if (!user?.is_admin && !user?.is_premium && !user?.is_pro) return;
     const load = () =>
       fetch(`/api/games/absences?channel=${channelId}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : []).then(setAbsences);
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [user?.is_admin, user?.is_premium, channelId, isProChannel]);
+  }, [user?.is_admin, user?.is_premium, user?.is_pro, channelId, isProChannel]);
 
   // ── Polling des logs Pro pour les canaux S5001…S5100 ───────────────────────
   useEffect(() => {
@@ -1005,131 +1004,7 @@ export default function Dashboard() {
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>{autoT('En attente de la prochaine partie...')}</span>
                       </div>
                     )}
-                    {(user?.is_admin || user?.is_premium || (user?.is_pro && isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id))) && isProChannel ? (
-                      <div className="pro-logs-card" style={{ display:'flex', alignItems:'flex-start', padding:8 }}>
-                        <button
-                          type="button"
-                          onClick={() => setProLogsView('expanded')}
-                          title={`Ouvrir les logs Pro de la stratégie ${channel.name}`}
-                          style={{
-                            display:'inline-flex', alignItems:'center', gap:6,
-                            padding:'6px 12px', borderRadius:8,
-                            border:'1px solid rgba(168,85,247,0.4)',
-                            background:'rgba(168,85,247,0.12)',
-                            color:'#e9d5ff', cursor:'pointer',
-                            fontSize:12, fontWeight:700,
-                          }}>
-                          <span>📜</span>
-                          <span>Logs Pro · {channel.name}</span>
-                        </button>
-
-                        {/* ── MODALE PLEIN ÉCRAN — vue détaillée des logs ─────── */}
-                        {proLogsView !== 'compact' && (
-                          <div className={`pro-logs-modal pro-logs-modal-${proLogsView}`} onClick={() => setProLogsView('compact')}>
-                            <div className="pro-logs-modal-inner" onClick={e => e.stopPropagation()}>
-                              <div className="pro-logs-modal-head">
-                                <div style={{ minWidth: 0, flex: 1 }}>
-                                  <div className="pro-logs-modal-title">
-                                    📡 Logs détaillés — <b>{channel.name}</b>
-                                  </div>
-                                  <div className="pro-logs-modal-sub">
-                                    Stratégie : <code>{proMeta?.filename || channelId}</code>
-                                    {proMeta?.strategy_name ? <> · <b style={{color:'#c084fc'}}>{proMeta.strategy_name}</b></> : null}
-                                    {proMeta?.strategy_info?.hand ? <> · {proMeta.strategy_info.hand === 'banquier' ? '🏦 Banquier' : '🃏 Joueur'}</> : null}
-                                    {proMeta?.strategy_info?.decalage !== undefined ? <> · décalage <b>+{proMeta.strategy_info.decalage}</b></> : null}
-                                  </div>
-                                </div>
-                                <div className="pro-logs-size-toggle">
-                                  <button
-                                    className={`pls-btn ${proLogsView === 'expanded' ? 'is-active' : ''}`}
-                                    title="Taille moyenne (960px)"
-                                    onClick={() => setProLogsView('expanded')}>▭</button>
-                                  <button
-                                    className={`pls-btn ${proLogsView === 'fullscreen' ? 'is-active' : ''}`}
-                                    title="Plein écran"
-                                    onClick={() => setProLogsView('fullscreen')}>⛶</button>
-                                  <button
-                                    className="pls-btn pls-btn-reduce"
-                                    title="Réduire (revenir à la carte du dashboard)"
-                                    onClick={() => setProLogsView('compact')}>━</button>
-                                  <button
-                                    className={`pls-btn pls-btn-reasons ${proLogsShowReasons ? 'is-active' : ''}`}
-                                    title="Afficher / masquer les raisons"
-                                    onClick={() => setProLogsShowReasons(v => !v)}>💡</button>
-                                </div>
-                                <button className="pro-logs-modal-close" onClick={() => setProLogsView('compact')}>✕</button>
-                              </div>
-
-                              <div className="pro-logs-modal-body">
-                                {proLogs.length === 0 ? (
-                                  <div className="pro-logs-empty">
-                                    <div className="pro-logs-empty-pulse" />
-                                    <div>Aucun log capturé pour l'instant</div>
-                                    <div className="pro-logs-empty-hint">Attendez qu'une partie soit analysée par la stratégie Pro</div>
-                                  </div>
-                                ) : proLogs.map((l, i) => {
-                                  const t = new Date(l.ts);
-                                  const hh = String(t.getHours()).padStart(2,'0');
-                                  const mm = String(t.getMinutes()).padStart(2,'0');
-                                  const ss = String(t.getSeconds()).padStart(2,'0');
-                                  const ms = String(t.getMilliseconds()).padStart(3,'0');
-                                  const m = String(l.msg || '');
-                                  let kind = 'info';
-                                  if (l.level === 'error') kind = 'error';
-                                  else if (l.level === 'warn') kind = 'warn';
-                                  else if (/Prédiction\s*:/i.test(m) || /^[#\s]*N?\s*\+\s*\d/.test(m)) kind = 'pred';
-                                  else if (/BANQUIER|JOUEUR/.test(m) && /\d\s*cart/i.test(m)) kind = 'hand';
-                                  else if (/Carte d[ée]tect/i.test(m)) kind = 'card';
-                                  else if (/Exception/i.test(m)) kind = 'exception';
-                                  else if (/—{2,}.*Jeu\s*#?\d+/i.test(m) || /^[—\s]*Jeu\s*#?\d+/i.test(m)) kind = 'game';
-                                  else if (/^\[Pro/i.test(m) || /\[appolinaire/i.test(m)) kind = 'tag';
-
-                                  const parts = m.split(/(♠|♥|♦|♣)/g);
-                                  const rendered = parts.map((p, k) => {
-                                    if (p === '♠' || p === '♣') return <span key={k} className="suit-chip suit-chip-dark">{p}</span>;
-                                    if (p === '♥' || p === '♦') return <span key={k} className="suit-chip suit-chip-red">{p}</span>;
-                                    return <span key={k}>{p}</span>;
-                                  });
-
-                                  const reason = explainProLog(m, kind, proMeta);
-                                  return (
-                                    <div key={i} className={`pro-log-row pro-log-${kind} pro-log-row-big`}>
-                                      <span className="pro-log-num">#{i + 1}</span>
-                                      <span className="pro-log-time">{hh}:{mm}:{ss}<small>.{ms}</small></span>
-                                      <span className="pro-log-kind">{kind}</span>
-                                      <div className="pro-log-msgcol">
-                                        <span className="pro-log-msg">{rendered}</span>
-                                        {reason && <div className="pro-log-reason pro-log-reason-big">💡 {reason}</div>}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="pro-logs-modal-foot">
-                                <span className="pro-logs-count">{proLogs.length} ligne{proLogs.length > 1 ? 's' : ''} affichée{proLogs.length > 1 ? 's' : ''}</span>
-                                <div style={{ display:'flex', gap: 8 }}>
-                                  <button
-                                    className="pro-logs-btn pro-logs-btn-clear"
-                                    onClick={async () => {
-                                      if (!confirm('Effacer définitivement tous les logs de ce canal ?\n\nAstuce : copiez d\'abord ce qui vous intéresse — c\'est irréversible.')) return;
-                                      try {
-                                        await fetch(`/api/games/pro-logs?channel=${channelId}`, { method: 'DELETE', credentials: 'include' });
-                                        setProLogs([]);
-                                      } catch {}
-                                    }}>
-                                    🗑 Effacer définitivement
-                                  </button>
-                                  <button className="pro-logs-btn pro-logs-btn-expand" onClick={() => setProLogsView('compact')}>
-                                    Fermer
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (user?.is_admin || user?.is_premium || (user?.is_pro && (
+                    {(user?.is_admin || user?.is_premium || (user?.is_pro && (
                         (isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id)) ||
                         (Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))
                       ))) && (

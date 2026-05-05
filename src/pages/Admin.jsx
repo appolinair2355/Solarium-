@@ -1463,17 +1463,17 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
   const [quickSaving, setQuickSaving] = React.useState(false);
   const [quickMsg, setQuickMsg] = React.useState('');
 
-  // ── Logs Pro par stratégie (live) ──
-  const [proLogsById, setProLogsById] = React.useState({});           // { [id]: [{ts, level, msg}] }
-  const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // id de la stratégie ouverte en grand
+  // ── Compteurs Pro par stratégie (live, remplace les logs) ──
+  const [proCountersById, setProCountersById] = React.useState({});   // { [id]: [{suit, display, count, threshold, ...}] }
+  const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // conservé pour la modale source
   const [proSourceById, setProSourceById] = React.useState({});       // { [id]: 'contenu source' }
 
-  const fetchProLogs = React.useCallback(async (id) => {
+  const fetchProCounter = React.useCallback(async (id) => {
     try {
-      const r = await fetch(`/api/games/pro-logs?channel=S${id}`, { credentials: 'include' });
+      const r = await fetch(`/api/games/absences?channel=S${id}`, { credentials: 'include' });
       if (!r.ok) return;
       const d = await r.json();
-      setProLogsById(prev => ({ ...prev, [id]: Array.isArray(d) ? d : [] }));
+      setProCountersById(prev => ({ ...prev, [id]: Array.isArray(d) ? d : [] }));
     } catch {}
   }, []);
 
@@ -1486,25 +1486,18 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
     } catch {}
   }, [qs]);
 
-  const clearProLogs = async (id) => {
-    try {
-      await fetch(`/api/games/pro-logs?channel=S${id}`, { method: 'DELETE', credentials: 'include' });
-      setProLogsById(prev => ({ ...prev, [id]: [] }));
-    } catch {}
-  };
-
-  // Polling automatique des logs de toutes les stratégies chargées (toutes les 3s)
+  // Polling automatique des compteurs de toutes les stratégies chargées (toutes les 5s)
   React.useEffect(() => {
     if (!stratList.length) return;
     let cancelled = false;
     const tick = () => {
       if (cancelled) return;
-      stratList.forEach(s => fetchProLogs(s.id));
+      stratList.filter(s => s.engine_loaded).forEach(s => fetchProCounter(s.id));
     };
     tick();
-    const iv = setInterval(tick, 3000);
+    const iv = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(iv); };
-  }, [stratList, fetchProLogs]);
+  }, [stratList, fetchProCounter]);
 
   // Charger la liste des comptes Pro pour le sélecteur (admin uniquement)
   React.useEffect(() => {
@@ -1982,7 +1975,7 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
 //   null            →  aucune prédiction ce tour
 //
 // PARAMÈTRES lus automatiquement par le moteur :
-//   name, hand, decalage, max_rattrapage, tg_format
+//   name, hand, decalage, max_rattrapage, tg_format, counter
 // ════════════════════════════════════════════════════════════════
 
 module.exports = {
@@ -1992,6 +1985,15 @@ module.exports = {
   hand:           'joueur',   // 'joueur' ou 'banquier'
   decalage:       2,          // Prédit pour le jeu N+2
   max_rattrapage: 4,          // Max 4 rattrapages si erreur
+
+  // ─── Compteur personnalisé (affiché sur le Dashboard) ──────
+  // Alimenté par state.absences dans processGame() ci-dessous.
+  // label     → titre affiché dans le widget compteur
+  // threshold → valeur seuil : la case devient rouge quand atteinte
+  counter: {
+    label:     'Absences Joueur',  // Titre affiché dans le compteur
+    threshold: 5,                  // Seuil d'alerte (même que SEUIL_ABSENCE)
+  },
 
   // FORMAT DU MESSAGE TELEGRAM
   // Option A : tg_format   → numéro d'un format intégré (1-18) ou personnalisé (19+)
@@ -2021,7 +2023,9 @@ module.exports = {
   processGame(gn, pSuits, bSuits, winner, state) {
 
     // ── 1. Initialisation du state (première exécution) ──────
-    if (!state.absences)      state.absences      = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+    // state.absences alimente le compteur affiché sur le Dashboard.
+    // Chaque clé est un costume, la valeur est le nombre de jeux d'absence.
+    if (!state.absences)       state.absences      = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
     if (!state.serieVictoires) state.serieVictoires = 0;
     if (!state.serieDefaites)  state.serieDefaites  = 0;
     if (!state.dernierWinner)  state.dernierWinner  = null;
@@ -2517,8 +2521,6 @@ export default function StrategieVisualisation({ gameHistory }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {stratList.map(s => {
-                const logs = proLogsById[s.id] || [];
-                const lastLogs = logs.slice(-4);
                 return (
                 <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: 'rgba(15,23,42,0.5)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.15)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2542,32 +2544,39 @@ export default function StrategieVisualisation({ gameHistory }) {
                       style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>🗑</button>
                   </div>
 
-                  {/* Bouton d'ouverture des logs Pro */}
+                  {/* Compteur Pro (remplace les logs) */}
                   {s.engine_loaded === true && (
-                    <button type="button"
-                      onClick={() => { setProLogsExpanded(s.id); fetchProLogs(s.id); fetchProSource(s.id); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                        padding: '10px 14px', borderRadius: 8,
-                        border: '1px solid rgba(168,85,247,0.35)',
-                        background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(99,102,241,0.10))',
-                        color: '#e9d5ff', cursor: 'pointer', fontWeight: 700, fontSize: 12,
-                        textAlign: 'left', width: '100%',
-                      }}
-                      title={`Ouvrir les logs Pro de "${s.strategy_name || s.filename}"`}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ fontSize: 16 }}>📜</span>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Ouvrir les logs Pro de la stratégie <span style={{ color: '#fff', fontWeight: 800 }}>{s.strategy_name || s.filename}</span>
-                        </span>
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', padding: '2px 7px', borderRadius: 5, fontFamily: 'monospace' }}>
-                          {logs.length} ligne{logs.length > 1 ? 's' : ''}
-                        </span>
-                        <span style={{ fontSize: 13 }}>⛶</span>
-                      </span>
-                    </button>
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 8,
+                      border: '1px solid rgba(99,102,241,0.25)',
+                      background: 'rgba(99,102,241,0.07)',
+                    }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+                        📊 Compteur · S{s.id}
+                      </div>
+                      {!proCountersById[s.id] ? (
+                        <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Chargement…</div>
+                      ) : proCountersById[s.id].length === 0 ? (
+                        <div style={{ fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>
+                          Pas de compteur — initialisez <code style={{ color: '#818cf8' }}>state.absences</code> dans votre stratégie
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {proCountersById[s.id].map(a => (
+                            <div key={a.suit} style={{
+                              display: 'flex', alignItems: 'center', gap: 5,
+                              padding: '5px 11px', borderRadius: 8,
+                              background: a.count >= a.threshold ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.12)',
+                              border: `1px solid ${a.count >= a.threshold ? 'rgba(239,68,68,0.45)' : 'rgba(99,102,241,0.25)'}`,
+                            }}>
+                              <span style={{ fontSize: '1rem' }}>{a.display || a.suit}</span>
+                              <span style={{ fontSize: 13, fontWeight: 800, color: a.count >= a.threshold ? '#f87171' : '#a5b4fc', fontFamily: 'monospace' }}>{a.count}</span>
+                              {a.threshold > 0 && <span style={{ fontSize: 10, color: '#475569' }}>/{a.threshold}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
                 );
@@ -2916,101 +2925,6 @@ export default function StrategieVisualisation({ gameHistory }) {
         )}
       </div>
 
-      {/* ── Modal Logs Pro agrandis ───────────────────────────────────── */}
-      {proLogsExpanded !== null && (() => {
-        const s = stratList.find(x => x.id === proLogsExpanded);
-        const logs = proLogsById[proLogsExpanded] || [];
-        const source = proSourceById[proLogsExpanded] || '';
-        return (
-          <div onClick={() => setProLogsExpanded(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-            <div onClick={e => e.stopPropagation()}
-              style={{ background: '#0f172a', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 14, width: '100%', maxWidth: 960, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
-              <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0' }}>📜 Logs Pro · S{proLogsExpanded}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: 2 }}>
-                    {s?.filename} {s?.strategy_name ? `· ${s.strategy_name}` : ''}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" onClick={() => fetchProLogs(proLogsExpanded)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)', color: '#a5b4fc', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🔄 Rafraîchir</button>
-                  <button type="button" onClick={() => clearProLogs(proLogsExpanded)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🗑 Vider</button>
-                  <button type="button" onClick={() => setProLogsExpanded(null)}
-                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(100,116,139,0.4)', background: 'transparent', color: '#cbd5e1', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>✕ Fermer</button>
-                </div>
-              </div>
-              {/* Bandeau "idée de la stratégie" : extrait du commentaire en tête du fichier */}
-              {(() => {
-                const headerLines = [];
-                if (source) {
-                  const lines = source.split('\n');
-                  for (const ln of lines) {
-                    const t = ln.trim();
-                    if (t === '' || t === '//' || /^\/\*+/.test(t) || /^\*+\/?$/.test(t)) continue;
-                    const m = t.match(/^(?:\/\/+|#|\*+)\s?(.*)$/);
-                    if (m) {
-                      const cleaned = m[1].replace(/^[=\-─━]+$/, '').trim();
-                      if (cleaned) headerLines.push(cleaned);
-                    } else {
-                      break; // première ligne de code → on s'arrête
-                    }
-                    if (headerLines.length >= 8) break;
-                  }
-                }
-                const info = s?.strategy_info || {};
-                return (
-                  <div style={{ padding: '10px 14px', background: 'rgba(168,85,247,0.06)', borderBottom: '1px solid rgba(168,85,247,0.2)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
-                      💡 Idée de la stratégie
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: headerLines.length ? 8 : 0 }}>
-                      {info.hand && <span style={{ fontSize: 10, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>main : {info.hand}</span>}
-                      {(info.decalage !== undefined) && <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>décalage : +{info.decalage}</span>}
-                      {(info.max_rattrapage !== undefined) && <span style={{ fontSize: 10, color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>rattrapages max : {info.max_rattrapage}</span>}
-                      {info.entry_fn && <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontFamily: 'monospace' }}>fonction : {info.entry_fn}()</span>}
-                    </div>
-                    {headerLines.length > 0 && (
-                      <div style={{ fontSize: 11.5, color: '#cbd5e1', lineHeight: 1.55, fontStyle: 'italic' }}>
-                        {headerLines.map((l, i) => <div key={i}>· {l}</div>)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'minmax(0,1.2fr) minmax(0,1fr)', gap: 1, background: 'rgba(99,102,241,0.15)' }}>
-                {/* Zone HAUT : logs en direct (la raison des prédictions) */}
-                <div style={{ background: '#0a0f1c', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#0a0f1c', paddingBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span>🔴 Raison des prédictions · logs en direct</span>
-                    <span style={{ color: '#64748b', fontWeight: 700 }}>{logs.length} ligne{logs.length > 1 ? 's' : ''}</span>
-                  </div>
-                  <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, lineHeight: 1.55 }}>
-                    {logs.length === 0 ? (
-                      <div style={{ color: '#475569', fontStyle: 'italic' }}>Aucun log capturé pour l'instant. Les <code>console.log()</code> de votre stratégie apparaîtront ici dès qu'une partie sera traitée.</div>
-                    ) : logs.map((l, i) => (
-                      <div key={i} style={{ color: l.level === 'error' ? '#f87171' : l.level === 'warn' ? '#fbbf24' : '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 3 }}>
-                        <span style={{ color: '#475569', marginRight: 6 }}>{new Date(l.ts).toLocaleTimeString('fr-FR')}</span>{l.msg}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* Zone BAS : règles de prédiction (code source) */}
-                <div style={{ background: '#020617', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#020617', paddingBottom: 6 }}>
-                    📄 Règles de prédiction · code source de la stratégie
-                  </div>
-                  <pre style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.5, color: '#cbd5e1', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {source || '— code non chargé —'}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
     </div>
   );
@@ -7895,6 +7809,60 @@ function AdminPanel() {
                             </select>
                           </div>
                         </div>
+                        {/* ── Annonce planifiée ─────────────────────────────── */}
+                        {(() => {
+                          const annKey = `pro_ann_${p.id}`;
+                          const annSub = getAnnSub(annKey);
+                          return (
+                            <div style={{ marginTop: 12, border: '1px solid rgba(168,85,247,0.25)', borderRadius: 8, overflow: 'hidden' }}>
+                              <button
+                                type="button"
+                                onClick={() => setAnnSub(annKey, { open: !annSub.open })}
+                                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: annSub.open ? 'rgba(168,85,247,0.14)' : 'rgba(168,85,247,0.06)', border: 'none', cursor: 'pointer', color: '#d8b4fe', fontWeight: 700, fontSize: 12 }}>
+                                <span>📅 Annonce planifiée (optionnel)</span>
+                                <span>{annSub.open ? '▾' : '▸'}</span>
+                              </button>
+                              {annSub.open && (
+                                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(15,23,42,0.4)' }}>
+                                  <textarea
+                                    value={annSub.text}
+                                    onChange={e => setAnnSub(annKey, { text: e.target.value })}
+                                    placeholder="Texte de l'annonce…"
+                                    rows={3}
+                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+                                  />
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Planification :</span>
+                                    {[{ v: 'interval', l: '⏱ Intervalle' }, { v: 'times', l: '🕐 Horaires fixes' }].map(opt => (
+                                      <button key={opt.v} type="button"
+                                        onClick={() => setAnnSub(annKey, { schedule_type: opt.v })}
+                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid rgba(168,85,247,${annSub.schedule_type === opt.v ? '0.5' : '0.2'})`, background: annSub.schedule_type === opt.v ? 'rgba(168,85,247,0.2)' : 'transparent', color: annSub.schedule_type === opt.v ? '#d8b4fe' : '#94a3b8' }}>
+                                        {opt.l}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  {annSub.schedule_type === 'interval' ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Toutes les</span>
+                                      <input type="number" min="0.25" step="0.25" value={annSub.interval_hours}
+                                        onChange={e => setAnnSub(annKey, { interval_hours: e.target.value })}
+                                        style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                                      />
+                                      <span style={{ fontSize: 11, color: '#94a3b8' }}>heure(s)</span>
+                                    </div>
+                                  ) : (
+                                    <input type="text" value={annSub.times_input}
+                                      onChange={e => setAnnSub(annKey, { times_input: e.target.value })}
+                                      placeholder="ex: 08:00, 12:00, 20:00"
+                                      style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                           <button
                             type="button"
@@ -7903,7 +7871,7 @@ function AdminPanel() {
                           >Annuler</button>
                           <button
                             type="button"
-                            onClick={() => saveProStratTgTarget(p.id)}
+                            onClick={async () => { await saveProStratTgTarget(p.id); saveAnnSub(`pro_ann_${p.id}`, f.bot_token, f.channel_id, p.strategy_name); }}
                             disabled={!!proStratTgSaving[p.id]}
                             style={{ fontSize: 12, padding: '7px 14px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer', fontWeight: 700 }}
                           >
