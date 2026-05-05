@@ -8564,6 +8564,7 @@ function AdminPanel() {
                       mode: m,
                       ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
                       ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
+                      ...(m === 'first_card_plus6' ? { prediction_offset: 6 } : {}),
                     }));
                   }}
                     style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
@@ -8651,20 +8652,29 @@ function AdminPanel() {
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Première Carte +Décalage</div>
                       <div><strong>Déclencheur (jeu N)</strong> : le Joueur a 2 cartes de <em>costumes différents</em>, et le Banquier n'a <em>aucune</em> carte du costume de la 1ère carte Joueur.</div>
-                      <div style={{ marginTop: 6 }}><strong>Prédiction</strong> : costume de la 1ère carte Joueur au jeu <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>N + Décalage</code>.</div>
-                      <div style={{ marginTop: 6 }}><strong>Proche</strong> : la prédiction est mise en attente jusqu'à ce que <code>(targetGn − live) ≤ Proche</code>, puis émise.</div>
+                      <div style={{ marginTop: 6 }}><strong>Prédiction</strong> : costume de la 1ère carte Joueur au jeu <code style={{ background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 4 }}>N + Décalage</code>. Ex : signal au jeu 10 avec Décalage=6 → cible le jeu 16.</div>
+                      <div style={{ marginTop: 6 }}><strong>Proche</strong> : la prédiction est différée tant que <code>(cible − live) &gt; Proche</code>, puis émise dès que la distance ≤ Proche. Doit être ≤ Décalage.</div>
                       <div style={{ marginTop: 6 }}><strong>Nb cartes banquier</strong> : 0 = indifférent, 2 ou 3 = nombre exact de cartes exigé.</div>
+                      <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Le seuil B n'est pas utilisé dans ce mode.</div>
                     </div>
                   )}
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Décalage (N + X)</label>
+                          <input type="number" min="1" max="30" value={stratForm.prediction_offset || 6}
+                            onChange={e => setStratForm(prev => ({ ...prev, prediction_offset: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '2px solid rgba(99,102,241,0.5)', borderRadius: 7, color: '#a5b4fc', fontSize: 14, fontWeight: 700 }} />
+                          <div style={{ fontSize: 10, color: '#6366f1', marginTop: 3 }}>Signal au jeu N → cible N+{stratForm.prediction_offset || 6}</div>
+                        </div>
                         <div>
                           <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Proche (émettre si distance ≤)</label>
-                          <input type="number" min="1" max="50" value={stratForm.proche}
+                          <input type="number" min="1" max="30" value={stratForm.proche}
                             onChange={e => setStratForm(prev => ({ ...prev, proche: Math.max(1, parseInt(e.target.value) || 1) }))}
                             style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                          <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Recommandé : ≤ Décalage</div>
                         </div>
                         <div>
                           <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Nb cartes banquier (0 = indifférent)</label>

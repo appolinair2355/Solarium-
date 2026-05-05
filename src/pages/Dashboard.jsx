@@ -1365,8 +1365,12 @@ export default function Dashboard() {
                               {/* Joueur 2 cartes */}
                               <Row ok={ll.playerHas2} label={ll.playerHas2 ? `Joueur a eu 2 cartes` : `Joueur n'a pas eu 2 cartes (${ll.playerCards})`} />
 
-                              {/* Banquier 2 cartes */}
-                              <Row ok={ll.bankerHas2} label={ll.bankerHas2 ? `Banquier a eu 2 cartes` : `Banquier n'a pas eu 2 cartes (${ll.bankerCards})`} />
+                              {/* Banquier cartes — affiché selon banker_card_count requis */}
+                              {ll.bankerCardCountRequired > 0 ? (
+                                <Row ok={ll.bankerCards === ll.bankerCardCountRequired} label={ll.bankerCards === ll.bankerCardCountRequired ? `Banquier a ${ll.bankerCardCountRequired} carte(s) ✓` : `Banquier a ${ll.bankerCards} carte(s) (requis : ${ll.bankerCardCountRequired})`} />
+                              ) : (
+                                <Row ok={true} label={`Banquier a ${ll.bankerCards} carte(s) (indifférent)`} />
+                              )}
 
                               {/* Séparateur */}
                               <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '4px 0' }} />
