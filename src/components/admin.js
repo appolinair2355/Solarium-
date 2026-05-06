@@ -1,11 +1,13 @@
-const express = require('express');
-const bcrypt  = require('bcryptjs');
-const fetch   = require('node-fetch');
-const db      = require('./db');
-const router  = express.Router();
-const fs      = require('fs');
-const path    = require('path');
-const { spawn } = require('child_process');
+const express              = require('express');
+const bcrypt               = require('bcryptjs');
+const fetch                = require('node-fetch');
+const crypto               = require('crypto');
+const fs                   = require('fs');
+const path                 = require('path');
+const { spawn }            = require('child_process');
+const db                   = require('./db');
+const { generateStrategyZip } = require('./zip-generator');
+const router               = express.Router();
 
 function genPassword(len = 10) {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -2598,7 +2600,7 @@ router.get('/project-backup/zip', requireAdmin, (req, res) => {
     const distDir  = path.join(root, 'dist');
     const distFiles = fs.existsSync(distDir) ? scanDistFiles(distDir, 'dist') : [];
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appolinaire-${date}.zip`;
+    const filename = `baccarat-pro-complet-${date}.zip`;
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -2736,7 +2738,7 @@ router.get('/project-backup/zip-render', requireAdmin, (req, res) => {
     });
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appomain-${date}.zip`;
+    const filename = `baccarat-pro-render-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -2785,7 +2787,7 @@ router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
     }
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appolinaire-diff-${date}.zip`;
+    const filename = `baccarat-pro-diff-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -4411,8 +4413,6 @@ router.get('/strategy-purchases/:id/screenshot', requireAdmin, async (req, res) 
 });
 
 // Valider un achat + générer le ZIP de déploiement
-const { generateStrategyZip } = require('./zip-generator');
-const crypto = require('crypto');
 router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) => {
   const purchaseId = parseInt(req.params.id);
   try {
