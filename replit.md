@@ -60,11 +60,13 @@ Configured as a VM deployment (always-running) to support the persistent predict
 
 ## Admin Panel Tab Structure
 
-5 tabs, each with a clear domain:
+Key tabs:
 - **👥 Utilisateurs** — user management, premium generation, approvals
-- **⚙️ Créer Stratégie** — strategy list, "Séquences de Relance" card, creation/edit form
-- **📊 Bilan** — per-strategy win/loss statistics grid (C1, C2, C3, DC + custom)
-- **✈️ Telegram** — ALL Telegram configuration: global bot token, message format previews, canaux par défaut (C1-C4 with token+format+channelId), stratégies personnalisées, canaux globaux, announcements
+- **💰 Achats Stratégies** — validate purchases, revoke/activate licenses
+- **🛒 Vente Stratégies** — dedicated boutique management: toggle each strategy ON/OFF for sale, edit fiche (titre, tagline, badge, bullets, CTA, prix), live preview card; uses `strategy_promo_config` setting in DB
+- **⚙️ Stratégies** — strategy list, "Séquences de Relance" card, creation/edit form (also has embedded promo panel)
+- **📊 Bilan** — per-strategy win/loss statistics grid
+- **✈️ Telegram** — ALL Telegram configuration
 - **🔀 Routage** — ONLY routing: which global channels receive C1/C2/C3/DC predictions
 
 ## Key Features
@@ -82,4 +84,4 @@ Configured as a VM deployment (always-running) to support the persistent predict
 
 ## Deployment Package
 
-`baccarat-pro-deploy.zip` contains all production files (dist/, backend .js files, package.json, data/) excluding node_modules, src/, .git, .local.
+`dinz.zip` contains all production files (dist/, backend .js files, package.json, data/) excluding node_modules, src/, .git, .local. Rebuilt after every significant change.

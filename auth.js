@@ -78,10 +78,8 @@ router.post('/register', async (req, res) => {
   if (password.length < 6)
     return res.status(400).json({ error: 'Mot de passe: 6 caractères minimum' });
 
-  // Trois types autorisés à l'inscription : simple / pro / premium
-  // (l'ancien bouton d'activation côté admin a été retiré, mais le choix
-  //  reste libre pour l'utilisateur lors de son inscription.)
-  const ALLOWED_TYPES = ['simple', 'pro', 'premium'];
+  // Deux types autorisés à l'inscription : simple / premium
+  const ALLOWED_TYPES = ['simple', 'premium'];
   const accountType = ALLOWED_TYPES.includes(account_type) ? account_type : 'simple';
 
   // Validation de la photo de profil (optionnelle, max ~600 ko base64 = ~450 ko binaire)

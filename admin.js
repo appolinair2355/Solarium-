@@ -4609,6 +4609,243 @@ router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Export / Import de la base de données ────────────────────────────────────
+
+router.get('/db-export-data', requireAdmin, async (req, res) => {
+  try {
+    const safeParse = (v, fb = null) => { try { return v ? JSON.parse(v) : fb; } catch { return fb; } };
+
+    const users           = await db.getAllUsers();
+    const strategies      = await getStrategies();
+    const proStrategies   = safeParse(await db.getSetting('pro_strategies'), []);
+    const tgChannels      = await db.getTelegramConfigs(false).catch(() => []);
+    const strategyRoutes  = await db.getAllStrategyRoutes().catch(() => ({}));
+
+    // Paramètres clés
+    const botToken        = await db.getSetting('bot_token').catch(() => null);
+    const tgMsgFormat     = await db.getSetting('tg_msg_format').catch(() => null);
+    const defaultTg       = await db.getSetting('default_strategies_tg').catch(() => null);
+    const lossSequences   = safeParse(await db.getSetting('loss_sequences').catch(() => null), []);
+    const announcements   = safeParse(await db.getSetting('tg_announcements').catch(() => null), []);
+
+    const payload = {
+      _meta: {
+        version: '2.0',
+        exported_at: new Date().toISOString(),
+        project: 'Baccarat Pro',
+        counts: {
+          users: users.length,
+          strategies: strategies.length,
+          pro_strategies: proStrategies.length,
+          telegram_channels: tgChannels.length,
+          strategy_routes: Object.keys(strategyRoutes).length,
+        },
+      },
+
+      // ── Utilisateurs ──────────────────────────────────────────────────────
+      users: users.map(u => ({
+        username:                      u.username,
+        email:                         u.email || null,
+        password_hash:                 u.password_hash || null,
+        plain_password:                u.plain_password || null,
+        first_name:                    u.first_name || null,
+        last_name:                     u.last_name || null,
+        is_admin:                      u.is_admin || false,
+        is_approved:                   u.is_approved || false,
+        is_premium:                    u.is_premium || false,
+        is_pro:                        u.is_pro || false,
+        is_banned:                     u.is_banned || false,
+        account_type:                  u.account_type || 'simple',
+        subscription_expires_at:       u.subscription_expires_at || null,
+        subscription_duration_minutes: u.subscription_duration_minutes || null,
+        allowed_modes:                 u.allowed_modes || null,
+        allowed_channels:              u.allowed_channels || null,
+        show_counter_channels:         u.show_counter_channels || null,
+        promo_code:                    u.promo_code || null,
+        created_at:                    u.created_at || null,
+      })),
+
+      // ── Stratégies ────────────────────────────────────────────────────────
+      strategies,
+      pro_strategies: proStrategies,
+
+      // ── Canaux Telegram ───────────────────────────────────────────────────
+      telegram_channels: tgChannels.map(c => ({
+        channel_id:   c.channel_id,
+        channel_name: c.channel_name,
+        enabled:      c.enabled !== false,
+      })),
+
+      // ── Routage stratégies → canaux ───────────────────────────────────────
+      // Format: { "C1": [{tg_id, channel_name}], "S7": [...], ... }
+      strategy_routes: Object.fromEntries(
+        Object.entries(strategyRoutes).map(([strat, channels]) => [
+          strat,
+          channels.map(c => ({ tg_id: c.tg_id, channel_name: c.channel_name })),
+        ])
+      ),
+
+      // ── Paramètres importants ─────────────────────────────────────────────
+      settings: {
+        bot_token:              botToken  || null,
+        tg_msg_format:          tgMsgFormat ? parseInt(tgMsgFormat) : 1,
+        default_strategies_tg:  safeParse(defaultTg, {}),
+        loss_sequences:         lossSequences,
+        tg_announcements:       announcements,
+      },
+    };
+
+    const filename = `baccarat-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.json(payload);
+  } catch (e) {
+    console.error('[db-export-data]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/db-import-data', requireAdmin, async (req, res) => {
+  try {
+    const { users, strategies, pro_strategies, telegram_channels, strategy_routes, settings, _meta } = req.body || {};
+    const results = {
+      users_ok: 0, users_skip: 0,
+      strategies_ok: 0, pro_strategies_ok: 0,
+      channels_ok: 0, routes_ok: 0,
+      settings_ok: 0,
+      errors: [],
+    };
+
+    // ── Import utilisateurs ──────────────────────────────────────────────────
+    if (Array.isArray(users)) {
+      for (const u of users) {
+        if (!u.username) { results.errors.push(`Utilisateur sans nom ignoré`); continue; }
+        try {
+          await db.createUser({
+            username:                    u.username,
+            email:                       u.email || null,
+            password_hash:               u.password_hash || await require('bcryptjs').hash(u.plain_password || 'changeme', 10),
+            plain_password:              u.plain_password || null,
+            first_name:                  u.first_name || null,
+            last_name:                   u.last_name || null,
+            is_admin:                    u.is_admin || false,
+            is_approved:                 u.is_approved || false,
+            is_premium:                  u.is_premium || false,
+            subscription_expires_at:     u.subscription_expires_at || null,
+            subscription_duration_minutes: u.subscription_duration_minutes || null,
+            account_type:                u.account_type || 'simple',
+            promo_code:                  u.promo_code || null,
+          });
+          const saved = await db.getUserByUsername(u.username);
+          if (saved) {
+            const extras = {};
+            if (u.is_banned !== undefined)             extras.is_banned = u.is_banned;
+            if (u.is_pro !== undefined)                extras.is_pro    = u.is_pro;
+            if (u.allowed_modes !== undefined)         extras.allowed_modes = u.allowed_modes;
+            if (u.allowed_channels !== undefined)      extras.allowed_channels = u.allowed_channels;
+            if (u.show_counter_channels !== undefined) extras.show_counter_channels = u.show_counter_channels;
+            if (Object.keys(extras).length) await db.updateUser(saved.id, extras);
+          }
+          results.users_ok++;
+        } catch (e) {
+          if (e.code === '23505' || (e.message || '').includes('taken')) {
+            results.users_skip++;
+          } else {
+            results.errors.push(`Utilisateur "${u.username}" : ${e.message}`);
+          }
+        }
+      }
+    }
+
+    // ── Import stratégies personnalisées ─────────────────────────────────────
+    if (Array.isArray(strategies) && strategies.length > 0) {
+      await saveStrategies(strategies);
+      results.strategies_ok = strategies.length;
+      try { require('./engine').reloadCustomStrategies(strategies); } catch {}
+    }
+
+    // ── Import stratégies Pro ─────────────────────────────────────────────────
+    if (Array.isArray(pro_strategies) && pro_strategies.length > 0) {
+      await db.setSetting('pro_strategies', JSON.stringify(pro_strategies));
+      results.pro_strategies_ok = pro_strategies.length;
+    }
+
+    // ── Import canaux Telegram ────────────────────────────────────────────────
+    // Upsert chaque canal par son channel_id (identifiant Telegram)
+    const tgIdToDbId = {}; // channel_id (tg) → db id
+    if (Array.isArray(telegram_channels) && telegram_channels.length > 0) {
+      for (const c of telegram_channels) {
+        if (!c.channel_id) continue;
+        try {
+          const saved = await db.upsertTelegramConfig({ channel_id: c.channel_id, channel_name: c.channel_name || c.channel_id });
+          if (saved?.id) tgIdToDbId[c.channel_id] = saved.id;
+          results.channels_ok++;
+        } catch (e) {
+          results.errors.push(`Canal Telegram "${c.channel_id}" : ${e.message}`);
+        }
+      }
+    }
+
+    // ── Import routage stratégies → canaux ────────────────────────────────────
+    // strategy_routes: { "C1": [{tg_id, channel_name}], ... }
+    if (strategy_routes && typeof strategy_routes === 'object') {
+      // Si les canaux n'ont pas encore été importés ci-dessus,
+      // on charge le mapping existant depuis la DB
+      if (Object.keys(tgIdToDbId).length === 0) {
+        const existing = await db.getTelegramConfigs(false).catch(() => []);
+        for (const c of existing) tgIdToDbId[c.channel_id] = c.id;
+      }
+      for (const [strat, channels] of Object.entries(strategy_routes)) {
+        if (!Array.isArray(channels)) continue;
+        const dbIds = channels.map(c => tgIdToDbId[c.tg_id]).filter(Boolean);
+        if (dbIds.length > 0) {
+          try {
+            await db.setStrategyRoutes(strat, dbIds);
+            results.routes_ok++;
+          } catch (e) {
+            results.errors.push(`Routage "${strat}" : ${e.message}`);
+          }
+        }
+      }
+    }
+
+    // ── Import paramètres ─────────────────────────────────────────────────────
+    if (settings && typeof settings === 'object') {
+      const settingMap = {
+        bot_token:             'bot_token',
+        tg_msg_format:         'tg_msg_format',
+        default_strategies_tg: 'default_strategies_tg',
+        loss_sequences:        'loss_sequences',
+        tg_announcements:      'tg_announcements',
+      };
+      for (const [key, dbKey] of Object.entries(settingMap)) {
+        if (settings[key] !== undefined && settings[key] !== null) {
+          const val = typeof settings[key] === 'object' ? JSON.stringify(settings[key]) : String(settings[key]);
+          try { await db.setSetting(dbKey, val); results.settings_ok++; } catch {}
+        }
+      }
+    }
+
+    const parts = [
+      `${results.users_ok} utilisateur(s) importé(s)`,
+      results.users_skip > 0 ? `${results.users_skip} déjà existant(s)` : null,
+      results.strategies_ok > 0 ? `${results.strategies_ok} stratégie(s) perso` : null,
+      results.pro_strategies_ok > 0 ? `${results.pro_strategies_ok} stratégie(s) Pro` : null,
+      results.channels_ok > 0 ? `${results.channels_ok} canal/canaux Telegram` : null,
+      results.routes_ok > 0 ? `${results.routes_ok} routage(s) restauré(s)` : null,
+    ].filter(Boolean);
+
+    res.json({
+      ok: true,
+      message: `✅ Import terminé : ${parts.join(', ')}.`,
+      results,
+    });
+  } catch (e) {
+    console.error('[db-import-data]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Gestion des licences ─────────────────────────────────────────────────────
 
 router.get('/licenses', requireAdmin, async (req, res) => {
