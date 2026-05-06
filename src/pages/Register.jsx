@@ -132,7 +132,7 @@ export default function Register() {
     const username = form.username || 'cher utilisateur';
     const lines = [
       `${t('auth.success.title')} ${username} !`,
-      `Votre compte ${form.account_type === 'premium' ? 'PREMIUM' : form.account_type === 'pro' ? 'PRO' : 'SIMPLE'} est créé.`,
+      `Votre compte ${form.account_type === 'premium' ? 'PREMIUM' : 'SIMPLE'} est créé.`,
       `Voici votre code promotionnel personnel : ${generatedPromoCode || 'généré'}.`,
       `Partagez-le : si quelqu'un l'utilise lors de son 1er paiement, il a 20 % de réduction et vous gagnez 20 % de sa durée d'abonnement !`,
       referrerApplied
@@ -284,7 +284,6 @@ export default function Register() {
                 style={{ cursor: 'pointer' }}
               >
                 <option value="simple">👤 Compte Utilisateur</option>
-                <option value="pro">💎 Compte Pro</option>
                 <option value="premium">⭐ Compte Premium</option>
               </select>
             </div>

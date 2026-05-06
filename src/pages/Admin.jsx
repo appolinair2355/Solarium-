@@ -3450,6 +3450,375 @@ function ProjectBackupPanel() {
   );
 }
 
+// ── Composant dédié : Gestion de la Boutique (Vente Stratégies) ─────────────
+function VenteStrategiesPanel({ strategies, promoConfigs, loadPromoConfigs, stratStats }) {
+  const BLANK = { enabled: false, titre: '', tagline: '', badge: '🔥', plan_requis: 'standard', prix_texte: '', bullet1: '', bullet2: '', bullet3: '', cta: 'Acheter maintenant' };
+  const [expandedId, setExpandedId]   = React.useState(null);
+  const [forms, setForms]             = React.useState({});
+  const [saving, setSaving]           = React.useState({});
+  const [msgs, setMsgs]               = React.useState({});
+
+  const getStats = React.useCallback((id) => {
+    const st = (stratStats || []).find(x => x.strategy === `S${id}`);
+    if (!st) return { wins: 0, losses: 0, pending: 0, total: 0, winRate: null };
+    const wins   = parseInt(st.wins)   || 0;
+    const losses = parseInt(st.losses) || 0;
+    const resolved = wins + losses;
+    return { wins, losses, pending: parseInt(st.pending)||0, total: parseInt(st.total)||0, winRate: resolved > 0 ? (wins / resolved * 100) : null };
+  }, [stratStats]);
+
+  const winColor = (rate) => rate === null ? '#64748b' : rate >= 65 ? '#22c55e' : rate >= 50 ? '#f59e0b' : '#f87171';
+  const winBg    = (rate) => rate === null ? 'rgba(100,116,139,0.12)' : rate >= 65 ? 'rgba(34,197,94,0.12)' : rate >= 50 ? 'rgba(245,158,11,0.12)' : 'rgba(248,113,113,0.12)';
+  const winBorder= (rate) => rate === null ? 'rgba(100,116,139,0.25)' : rate >= 65 ? 'rgba(34,197,94,0.35)' : rate >= 50 ? 'rgba(245,158,11,0.35)' : 'rgba(248,113,113,0.35)';
+
+  const CARD_COLORS = [
+    ['#6366f1','#8b5cf6'], ['#3b82f6','#06b6d4'], ['#ec4899','#f43f5e'],
+    ['#f59e0b','#f97316'], ['#22c55e','#10b981'], ['#a855f7','#6366f1'],
+  ];
+
+  // Initialise le formulaire d'une stratégie depuis promoConfigs
+  const getForm = (id) => forms[String(id)] ?? { ...BLANK, ...(promoConfigs[String(id)] || {}) };
+
+  const setField = (id, field, value) => {
+    const sid = String(id);
+    setForms(prev => ({ ...prev, [sid]: { ...getForm(id), [field]: value } }));
+  };
+
+  const saveStrategy = async (id) => {
+    const sid = String(id);
+    setSaving(p => ({ ...p, [sid]: true }));
+    try {
+      const r = await fetch(`/api/admin/strategy-promo/${sid}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getForm(id)),
+      });
+      if (r.ok) {
+        await loadPromoConfigs();
+        setMsgs(p => ({ ...p, [sid]: { text: '✅ Sauvegardé', error: false } }));
+      } else {
+        setMsgs(p => ({ ...p, [sid]: { text: '❌ Erreur', error: true } }));
+      }
+    } catch {
+      setMsgs(p => ({ ...p, [sid]: { text: '❌ Erreur réseau', error: true } }));
+    } finally {
+      setSaving(p => ({ ...p, [sid]: false }));
+      setTimeout(() => setMsgs(p => { const n = { ...p }; delete n[sid]; return n; }), 3500);
+    }
+  };
+
+  const toggleEnabled = async (id, currentEnabled) => {
+    const sid = String(id);
+    const current = { ...BLANK, ...(promoConfigs[sid] || {}), ...(forms[sid] || {}) };
+    const updated = { ...current, enabled: !currentEnabled };
+    setForms(prev => ({ ...prev, [sid]: updated }));
+    setSaving(p => ({ ...p, [sid]: true }));
+    try {
+      const r = await fetch(`/api/admin/strategy-promo/${sid}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+      if (r.ok) {
+        await loadPromoConfigs();
+        setMsgs(p => ({ ...p, [sid]: { text: updated.enabled ? '✅ Mise en vente' : '⏸ Retirée de la boutique', error: false } }));
+      }
+    } catch {}
+    finally {
+      setSaving(p => ({ ...p, [sid]: false }));
+      setTimeout(() => setMsgs(p => { const n = { ...p }; delete n[sid]; return n; }), 2500);
+    }
+  };
+
+  const activeCount = Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length;
+  const totalWins   = (stratStats || []).reduce((a, s) => a + (parseInt(s.wins) || 0), 0);
+  const totalLosses = (stratStats || []).reduce((a, s) => a + (parseInt(s.losses) || 0), 0);
+  const globalRate  = (totalWins + totalLosses) > 0 ? (totalWins / (totalWins + totalLosses) * 100).toFixed(1) : null;
+
+  return (
+    <div style={{ padding: '0 8px' }}>
+      {/* ── En-tête dashboard ── */}
+      <div style={{ marginBottom: 24 }}>
+        {/* Titre + actions */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 900, color: '#f1f5f9', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>🛒 Gestion de la Boutique</span>
+            </h2>
+            <p style={{ fontSize: 12, color: '#64748b', margin: '5px 0 0' }}>
+              Activez / configurez vos stratégies pour les mettre en vente ·{' '}
+              <a href="/boutique" target="_blank" rel="noreferrer" style={{ color: '#a78bfa', textDecoration: 'none', fontWeight: 700 }}>Voir la boutique →</a>
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ padding: '8px 16px', borderRadius: 20, background: activeCount > 0 ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.1)', border: `1px solid ${activeCount > 0 ? 'rgba(34,197,94,0.4)' : 'rgba(100,116,139,0.2)'}`, fontSize: 13, fontWeight: 700, color: activeCount > 0 ? '#22c55e' : '#64748b' }}>
+              {activeCount > 0 ? `✅ ${activeCount} stratégie${activeCount > 1 ? 's' : ''} en vente` : '○ Boutique vide'}
+            </div>
+          </div>
+        </div>
+
+        {/* Bande de stats globales */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {[
+            { label: 'Stratégies total', val: strategies.length, icon: '⚙️', color: '#818cf8', bg: 'rgba(99,102,241,0.08)' },
+            { label: 'En vente', val: activeCount, icon: '🛒', color: '#22c55e', bg: 'rgba(34,197,94,0.08)' },
+            { label: 'Victoires totales', val: totalWins, icon: '✅', color: '#4ade80', bg: 'rgba(34,197,94,0.08)' },
+            { label: 'Défaites totales', val: totalLosses, icon: '❌', color: '#f87171', bg: 'rgba(239,68,68,0.08)' },
+            { label: 'Taux global', val: globalRate !== null ? `${globalRate}%` : '—', icon: '📈', color: globalRate !== null ? (parseFloat(globalRate) >= 65 ? '#22c55e' : parseFloat(globalRate) >= 50 ? '#f59e0b' : '#f87171') : '#64748b', bg: 'rgba(250,204,21,0.06)' },
+          ].map(kpi => (
+            <div key={kpi.label} style={{ background: kpi.bg, border: `1px solid ${kpi.color}22`, borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 22 }}>{kpi.icon}</span>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: kpi.color, lineHeight: 1.1 }}>{kpi.val}</div>
+                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 2 }}>{kpi.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Corps ── */}
+      {strategies.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
+          <div style={{ fontSize: 44, marginBottom: 14 }}>⚙️</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0' }}>Aucune stratégie personnalisée</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>Créez d'abord des stratégies dans l'onglet <strong style={{ color: '#fbbf24' }}>Stratégies</strong>.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
+          {strategies.map((s, idx) => {
+            const sid       = String(s.id);
+            const cfg       = promoConfigs[sid] || {};
+            const form      = getForm(s.id);
+            const isOn      = form.enabled ?? cfg.enabled ?? false;
+            const isOpen    = expandedId === sid;
+            const isSaving  = !!saving[sid];
+            const msg       = msgs[sid];
+            const st        = getStats(s.id);
+            const rate      = st.winRate;
+            const resolved  = st.wins + st.losses;
+            const barPct    = resolved > 0 ? (st.wins / resolved * 100) : 0;
+            const [c1, c2]  = CARD_COLORS[idx % CARD_COLORS.length];
+            const BADGE_LABELS = { '🔥': 'Populaire', '⭐': 'Nouveau', '🏆': 'Premium', '💎': 'Exclusif', '🚀': 'Puissant', '🎯': 'Précis', '🤖': 'Auto' };
+
+            return (
+              <div key={sid} style={{ display: 'flex', flexDirection: 'column', background: 'rgba(15,23,42,0.9)', border: `1.5px solid ${isOn ? `${c1}55` : 'rgba(51,65,85,0.5)'}`, borderRadius: 16, overflow: 'hidden', transition: 'all 0.2s', boxShadow: isOn ? `0 4px 24px ${c1}18` : 'none' }}>
+
+                {/* ── En-tête coloré ── */}
+                <div style={{ background: `linear-gradient(135deg, ${c1}22, ${c2}14)`, borderBottom: `1px solid ${c1}28`, padding: '18px 20px 14px', position: 'relative', overflow: 'hidden' }}>
+                  {/* Déco fond */}
+                  <div style={{ position: 'absolute', top: -18, right: -18, width: 90, height: 90, borderRadius: '50%', background: `radial-gradient(circle, ${c1}22, transparent 70%)`, pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', bottom: -10, left: 40, width: 60, height: 60, borderRadius: '50%', background: `radial-gradient(circle, ${c2}18, transparent 70%)`, pointerEvents: 'none' }} />
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, position: 'relative' }}>
+                    {/* Icône stratégie */}
+                    <div style={{ width: 46, height: 46, borderRadius: 12, background: `linear-gradient(135deg, ${c1}, ${c2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, color: '#fff', flexShrink: 0, boxShadow: `0 4px 12px ${c1}44` }}>
+                      S{s.id}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9', lineHeight: 1.2, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {cfg.titre || s.name}
+                      </div>
+                      {cfg.titre && cfg.titre !== s.name && (
+                        <div style={{ fontSize: 10, color: `${c1}cc`, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>{s.name}</div>
+                      )}
+                      <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 100, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          {s.mode || 'custom'}
+                        </span>
+                        {isOn && cfg.badge && (
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 100, background: 'rgba(250,204,21,0.18)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' }}>
+                            {cfg.badge} {BADGE_LABELS[cfg.badge] || ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Taux de réussite — cercle */}
+                    <div style={{ flexShrink: 0, width: 54, height: 54, borderRadius: '50%', background: winBg(rate), border: `2px solid ${winBorder(rate)}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', boxShadow: rate !== null ? `0 2px 12px ${winColor(rate)}22` : 'none' }}>
+                      <span style={{ fontSize: rate !== null ? 13 : 11, fontWeight: 900, color: winColor(rate), lineHeight: 1 }}>
+                        {rate !== null ? `${rate.toFixed(0)}%` : '—'}
+                      </span>
+                      <span style={{ fontSize: 8, color: '#475569', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>Succès</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Barre victoires/défaites ── */}
+                <div style={{ padding: '10px 20px 0' }}>
+                  <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                    {resolved > 0 ? (
+                      <div style={{ display: 'flex', height: '100%' }}>
+                        <div style={{ width: `${barPct}%`, background: 'linear-gradient(90deg, #22c55e, #4ade80)', borderRadius: '99px 0 0 99px', transition: 'width 0.6s' }} />
+                        <div style={{ flex: 1, background: 'linear-gradient(90deg, #ef4444, #f87171)', borderRadius: '0 99px 99px 0' }} />
+                      </div>
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.04)', borderRadius: 99 }} />
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Stats compteurs ── */}
+                <div style={{ padding: '10px 20px 14px', display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)', borderRadius: 9, padding: '8px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#4ade80', lineHeight: 1 }}>{st.wins}</div>
+                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 3 }}>Victoires</div>
+                  </div>
+                  <div style={{ flex: 1, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)', borderRadius: 9, padding: '8px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#f87171', lineHeight: 1 }}>{st.losses}</div>
+                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 3 }}>Défaites</div>
+                  </div>
+                  <div style={{ flex: 1, background: 'rgba(100,116,139,0.08)', border: '1px solid rgba(100,116,139,0.15)', borderRadius: 9, padding: '8px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#94a3b8', lineHeight: 1 }}>{st.pending}</div>
+                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 3 }}>En cours</div>
+                  </div>
+                  <div style={{ flex: 1, background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.15)', borderRadius: 9, padding: '8px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#818cf8', lineHeight: 1 }}>{st.total}</div>
+                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 3 }}>Total</div>
+                  </div>
+                </div>
+
+                {/* ── Contrôles : toggle + bouton configurer ── */}
+                <div style={{ padding: '0 20px 14px', display: 'flex', alignItems: 'center', gap: 12, borderTop: '1px solid rgba(51,65,85,0.4)', paddingTop: 12 }}>
+                  {/* Toggle switch */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <div
+                      onClick={() => !isSaving && toggleEnabled(s.id, isOn)}
+                      style={{ width: 46, height: 26, borderRadius: 13, cursor: isSaving ? 'wait' : 'pointer', flexShrink: 0, position: 'relative', transition: 'background 0.25s',
+                        background: isOn ? `linear-gradient(135deg, ${c1}, ${c2})` : 'rgba(51,65,85,0.6)',
+                        border: `1px solid ${isOn ? `${c1}80` : 'rgba(71,85,105,0.6)'}`,
+                        boxShadow: isOn ? `0 2px 8px ${c1}44` : 'none' }}
+                    >
+                      <div style={{ position: 'absolute', top: 4, left: isOn ? 22 : 4, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.35)' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: isOn ? '#22c55e' : '#475569', lineHeight: 1 }}>{isOn ? 'En vente' : 'Désactivée'}</div>
+                      {msg && <div style={{ fontSize: 10, fontWeight: 700, color: msg.error ? '#f87171' : '#4ade80', marginTop: 1 }}>{msg.text}</div>}
+                    </div>
+                  </div>
+                  {/* Bouton configurer */}
+                  <button
+                    onClick={() => setExpandedId(isOpen ? null : sid)}
+                    style={{ padding: '7px 15px', borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                      background: isOpen ? `${c1}28` : 'rgba(51,65,85,0.4)',
+                      border: `1px solid ${isOpen ? `${c1}55` : 'rgba(71,85,105,0.5)'}`,
+                      color: isOpen ? c1 : '#94a3b8', transition: 'all 0.18s' }}>
+                    {isOpen ? '▲ Fermer' : '✏️ Configurer'}
+                  </button>
+                </div>
+
+                {/* ── Formulaire accordéon ── */}
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid ${c1}28`, padding: '20px 20px', background: 'rgba(0,0,0,0.25)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: c1, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 14 }}>
+                      ⚙️ Configuration de la fiche de vente
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Badge</label>
+                        <select value={form.badge} onChange={e => setField(s.id, 'badge', e.target.value)}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12 }}>
+                          <option value="🔥">🔥 Populaire</option>
+                          <option value="⭐">⭐ Nouveau</option>
+                          <option value="🏆">🏆 Premium</option>
+                          <option value="💎">💎 Exclusif</option>
+                          <option value="🚀">🚀 Puissant</option>
+                          <option value="🎯">🎯 Précis</option>
+                          <option value="🤖">🤖 Auto</option>
+                          <option value="">∅ Aucun</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Plan requis</label>
+                        <select value={form.plan_requis} onChange={e => setField(s.id, 'plan_requis', e.target.value)}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12 }}>
+                          <option value="standard">Standard</option>
+                          <option value="premium">Premium ⭐</option>
+                          <option value="pro">Pro 💼</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Titre affiché</label>
+                      <input type="text" value={form.titre} maxLength={60} onChange={e => setField(s.id, 'titre', e.target.value)}
+                        placeholder="Ex : Stratégie Miroir Avancée"
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Accroche (tagline)</label>
+                      <input type="text" value={form.tagline} maxLength={80} onChange={e => setField(s.id, 'tagline', e.target.value)}
+                        placeholder="Ex : Résultats prouvés, signaux en temps réel"
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                    {['bullet1','bullet2','bullet3'].map((b, i) => (
+                      <div key={b} style={{ marginBottom: 7 }}>
+                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Argument {i+1}</label>
+                        <input type="text" value={form[b]} maxLength={80} onChange={e => setField(s.id, b, e.target.value)}
+                          placeholder={['Mise à jour en temps réel','Compatible toutes tables','Support inclus 30 jours'][i]}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                      </div>
+                    ))}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8, marginBottom: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix affiché</label>
+                        <input type="text" value={form.prix_texte} maxLength={20} onChange={e => setField(s.id, 'prix_texte', e.target.value)}
+                          placeholder="Ex : 75 $"
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Texte bouton</label>
+                        <input type="text" value={form.cta} maxLength={40} onChange={e => setField(s.id, 'cta', e.target.value)}
+                          placeholder="Acheter maintenant"
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                      </div>
+                    </div>
+                    <button onClick={() => saveStrategy(s.id)} disabled={isSaving}
+                      style={{ width: '100%', padding: '10px 0', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: isSaving ? 'wait' : 'pointer',
+                        background: `linear-gradient(135deg, ${c1}44, ${c2}28)`, border: `1px solid ${c1}60`, color: c1 }}>
+                      {isSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Résumé actives ── */}
+      {activeCount > 0 && (
+        <div style={{ marginTop: 28, padding: '16px 20px', borderRadius: 14, background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.18)' }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#22c55e', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span>🏪</span> Actuellement en vente ({activeCount})
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => {
+              const strat = strategies.find(s => String(s.id) === id);
+              const st2   = getStats(id);
+              const r2    = st2.winRate;
+              return (
+                <button key={id}
+                  onClick={() => setExpandedId(expandedId === id ? null : id)}
+                  style={{ padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                    background: expandedId === id ? 'rgba(250,204,21,0.15)' : 'rgba(34,197,94,0.08)',
+                    border: `1px solid ${expandedId === id ? 'rgba(250,204,21,0.45)' : 'rgba(34,197,94,0.3)'}`,
+                    color: expandedId === id ? '#fbbf24' : '#4ade80' }}>
+                  <span>{cfg.badge || '⚙️'}</span>
+                  <span>S{id} — {cfg.titre || strat?.name || `Stratégie ${id}`}</span>
+                  {r2 !== null && (
+                    <span style={{ fontSize: 11, fontWeight: 900, color: winColor(r2), background: winBg(r2), padding: '1px 7px', borderRadius: 100, border: `1px solid ${winBorder(r2)}` }}>
+                      {r2.toFixed(0)}%
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
   return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
 }
@@ -3865,6 +4234,11 @@ function AdminPanel() {
   const [clearStratId, setClearStratId] = useState('');
   const [clearStratBusy, setClearStratBusy] = useState(false);
   const [clearStratMsg, setClearStratMsg] = useState(null); // { ok, text }
+  const [dbExportBusy, setDbExportBusy] = useState(false);
+  const [dbImportBusy, setDbImportBusy] = useState(false);
+  const [dbImportMsg, setDbImportMsg]   = useState(null); // { ok, text }
+  const [dbImportFile, setDbImportFile] = useState(null);
+  const dbImportRef = useRef(null);
 
   // ── Stratégies Pro (S5001-S5100) — onglet Telegram admin ─────────────
   const [proStratsTg, setProStratsTg]   = useState([]); // [{id, owner_username, strategy_name, tg_targets:[]}, ...]
@@ -5814,7 +6188,8 @@ function AdminPanel() {
             { id: 'pro-accounts',      icon: '💎', label: 'Comptes PRO',     badge: onlineUsers.filter(u => u.is_pro).length || null },
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
-            { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
+            { id: 'achats',          icon: '💰', label: 'Achats Stratégies', badge: null },
+            { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -7560,6 +7935,16 @@ function AdminPanel() {
             </div>
 
           </div>
+        )}
+
+        {/* ── TAB : VENTE STRATÉGIES ── */}
+        {adminTab === 'vente-strategies' && (
+          <VenteStrategiesPanel
+            strategies={strategies}
+            promoConfigs={promoConfigs}
+            loadPromoConfigs={loadPromoConfigs}
+            stratStats={stratStats}
+          />
         )}
 
         {/* ── TAB : PAIEMENTS ── */}
@@ -11443,6 +11828,152 @@ function AdminPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>)}
+
+        {/* ── IMPORT / EXPORT BASE DE DONNÉES ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(6,182,212,0.45)', marginTop: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">💾</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Import / Export de la base de données</h2>
+              <p className="tg-admin-sub">
+                Sauvegarde ou restaure en un seul fichier JSON :
+                <strong style={{ color: '#22d3ee' }}> utilisateurs</strong> (nom, mail, mot de passe, durée d'abonnement, type de compte) ·
+                <strong style={{ color: '#22d3ee' }}> stratégies</strong> personnalisées et Pro ·
+                <strong style={{ color: '#22d3ee' }}> canaux Telegram</strong> configurés ·
+                <strong style={{ color: '#22d3ee' }}> routage</strong> des stratégies vers les canaux · paramètres clés.
+              </p>
+            </div>
+          </div>
+
+          {/* ── Section Export ── */}
+          <div style={{ borderRadius: 12, background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.2)', padding: '14px 18px', marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#22d3ee', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📤</span> Exporter
+            </div>
+            <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, lineHeight: 1.6 }}>
+              Télécharge un fichier <code style={{ background: 'rgba(6,182,212,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>.json</code> contenant tous les utilisateurs (identifiants, dates d'expiration, types de compte) et toutes les stratégies personnalisées + Pro.
+            </p>
+            <button
+              disabled={dbExportBusy}
+              onClick={async () => {
+                setDbExportBusy(true);
+                try {
+                  const r = await fetch('/api/admin/db-export-data', { credentials: 'include' });
+                  if (!r.ok) { const d = await r.json(); alert('❌ ' + (d.error || 'Erreur export')); return; }
+                  const blob = await r.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  const cd = r.headers.get('Content-Disposition') || '';
+                  const match = cd.match(/filename="([^"]+)"/);
+                  a.download = match ? match[1] : `baccarat-backup-${new Date().toISOString().slice(0,10)}.json`;
+                  document.body.appendChild(a); a.click();
+                  document.body.removeChild(a); URL.revokeObjectURL(url);
+                } catch (e) { alert('❌ Erreur réseau : ' + e.message); }
+                finally { setDbExportBusy(false); }
+              }}
+              style={{
+                padding: '10px 24px', borderRadius: 10, border: 'none',
+                background: dbExportBusy ? 'rgba(6,182,212,0.2)' : 'linear-gradient(135deg,#0891b2,#06b6d4)',
+                color: '#fff', fontWeight: 700, fontSize: 13,
+                cursor: dbExportBusy ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              {dbExportBusy
+                ? <><span style={{ display: 'inline-block', width: 13, height: 13, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Export en cours…</>
+                : <><span>📥</span> Télécharger la sauvegarde</>}
+            </button>
+          </div>
+
+          {/* ── Section Import ── */}
+          <div style={{ borderRadius: 12, background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.2)', padding: '14px 18px' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#c084fc', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📂</span> Importer
+            </div>
+            <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, lineHeight: 1.6 }}>
+              Chargez un fichier de sauvegarde <code style={{ background: 'rgba(168,85,247,0.15)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>.json</code> pour restaurer les utilisateurs et les stratégies. Les utilisateurs déjà existants sont conservés sans modification.
+            </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="file"
+                accept=".json"
+                ref={dbImportRef}
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  setDbImportFile(file || null);
+                  setDbImportMsg(null);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => dbImportRef.current?.click()}
+                style={{
+                  padding: '9px 18px', borderRadius: 10, border: '1px dashed rgba(168,85,247,0.5)',
+                  background: 'rgba(168,85,247,0.08)', color: '#c084fc',
+                  fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                <span>📁</span> {dbImportFile ? dbImportFile.name : 'Choisir un fichier .json'}
+              </button>
+              <button
+                disabled={!dbImportFile || dbImportBusy}
+                onClick={async () => {
+                  if (!dbImportFile) return;
+                  if (!confirm(`📂 Importer "${dbImportFile.name}" ?\n\nLes utilisateurs déjà existants seront conservés sans modification.\nLes stratégies seront remplacées par celles du fichier.\n\nConfirmer ?`)) return;
+                  setDbImportBusy(true);
+                  setDbImportMsg(null);
+                  try {
+                    const text = await dbImportFile.text();
+                    let payload;
+                    try { payload = JSON.parse(text); } catch { setDbImportMsg({ ok: false, text: '❌ Fichier JSON invalide.' }); return; }
+                    const r = await fetch('/api/admin/db-import-data', {
+                      method: 'POST', credentials: 'include',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload),
+                    });
+                    const d = await r.json();
+                    if (r.ok && d.ok) {
+                      setDbImportMsg({ ok: true, text: d.message });
+                      setDbImportFile(null);
+                    } else {
+                      setDbImportMsg({ ok: false, text: '❌ ' + (d.error || 'Erreur import') });
+                    }
+                  } catch (e) {
+                    setDbImportMsg({ ok: false, text: '❌ Erreur réseau : ' + e.message });
+                  } finally {
+                    setDbImportBusy(false);
+                  }
+                }}
+                style={{
+                  padding: '9px 22px', borderRadius: 10, border: 'none',
+                  background: !dbImportFile || dbImportBusy ? '#1e293b' : 'linear-gradient(135deg,#7c3aed,#a855f7)',
+                  color: !dbImportFile || dbImportBusy ? '#475569' : '#fff',
+                  fontWeight: 700, fontSize: 13,
+                  cursor: !dbImportFile || dbImportBusy ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                {dbImportBusy
+                  ? <><span style={{ display: 'inline-block', width: 13, height: 13, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Import en cours…</>
+                  : <><span>🚀</span> Lancer l'import</>}
+              </button>
+            </div>
+            {dbImportMsg && (
+              <div style={{
+                marginTop: 12, padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, lineHeight: 1.6,
+                background: dbImportMsg.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                color: dbImportMsg.ok ? '#4ade80' : '#f87171',
+                border: `1px solid ${dbImportMsg.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+              }}>
+                {dbImportMsg.text}
+              </div>
+            )}
           </div>
         </div>)}
 
