@@ -11925,7 +11925,7 @@ function AdminPanel() {
                 disabled={!dbImportFile || dbImportBusy}
                 onClick={async () => {
                   if (!dbImportFile) return;
-                  if (!confirm(`📂 Importer "${dbImportFile.name}" ?\n\nLes utilisateurs déjà existants seront conservés sans modification.\nLes stratégies seront remplacées par celles du fichier.\n\nConfirmer ?`)) return;
+                  if (!confirm(`📂 Importer "${dbImportFile.name}" ?\n\nFusion intelligente :\n• Les utilisateurs déjà existants sont conservés sans modification\n• Seuls les nouveaux éléments sont ajoutés\n• Aucune donnée existante n'est écrasée\n\nConfirmer ?`)) return;
                   setDbImportBusy(true);
                   setDbImportMsg(null);
                   try {
@@ -11939,7 +11939,7 @@ function AdminPanel() {
                     });
                     const d = await r.json();
                     if (r.ok && d.ok) {
-                      setDbImportMsg({ ok: true, text: d.message });
+                      setDbImportMsg({ ok: true, text: d.message, diff: d.diff || null });
                       setDbImportFile(null);
                     } else {
                       setDbImportMsg({ ok: false, text: '❌ ' + (d.error || 'Erreur import') });
@@ -11965,14 +11965,87 @@ function AdminPanel() {
               </button>
             </div>
             {dbImportMsg && (
-              <div style={{
-                marginTop: 12, padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, lineHeight: 1.6,
-                background: dbImportMsg.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-                color: dbImportMsg.ok ? '#4ade80' : '#f87171',
-                border: `1px solid ${dbImportMsg.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
-              }}>
-                {dbImportMsg.text}
-              </div>
+              <div style={{ marginTop: 12 }}>
+                <div style={{
+                  padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, lineHeight: 1.6,
+                  background: dbImportMsg.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                  color: dbImportMsg.ok ? '#4ade80' : '#f87171',
+                  border: `1px solid ${dbImportMsg.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                }}>
+                  {dbImportMsg.text}
+                </div>
+                {/* ── Diff détaillé ── */}
+                {dbImportMsg.ok && dbImportMsg.diff && (() => {
+                  const { users, strategies, channels, custom_formats, announcements } = dbImportMsg.diff;
+                  const sections = [];
+                  if ((users?.added?.length || 0) + (users?.existing?.length || 0) > 0)
+                    sections.push({ icon: '👤', title: 'Utilisateurs', added: users?.added || [], updated: [], existing: users?.existing || [] });
+                  if ((strategies?.added?.length || 0) + (strategies?.updated?.length || 0) + (strategies?.existing?.length || 0) > 0)
+                    sections.push({ icon: '⚙️', title: 'Stratégies', added: strategies?.added || [], updated: strategies?.updated || [], existing: strategies?.existing || [] });
+                  if ((channels?.added || 0) + (channels?.existing || 0) > 0)
+                    sections.push({ icon: '📲', title: 'Canaux Telegram', added: Array(channels?.added || 0).fill(''), updated: [], existing: Array(channels?.existing || 0).fill('') });
+                  if ((custom_formats?.added || 0) + (custom_formats?.existing || 0) > 0)
+                    sections.push({ icon: '🎨', title: 'Formats TG', added: Array(custom_formats?.added || 0).fill(''), updated: [], existing: Array(custom_formats?.existing || 0).fill('') });
+                  if ((announcements?.added || 0) + (announcements?.existing || 0) > 0)
+                    sections.push({ icon: '📢', title: 'Annonces', added: Array(announcements?.added || 0).fill(''), updated: [], existing: Array(announcements?.existing || 0).fill('') });
+                  if (!sections.length) return null;
+                  return (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {sections.map(sec => (
+                        <div key={sec.title} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '12px 14px' }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 8 }}>{sec.icon} {sec.title}</div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {/* Nouveaux */}
+                            {sec.added.length > 0 && (
+                              <div style={{ flex: 1, minWidth: 120 }}>
+                                <div style={{ fontSize: 10, fontWeight: 800, color: '#4ade80', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>
+                                  ✅ Nouveaux ({sec.added.length})
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  {sec.added.filter(Boolean).map((name, i) => (
+                                    <div key={i} style={{ fontSize: 11, color: '#4ade80', background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 5, padding: '2px 8px' }}>{name}</div>
+                                  ))}
+                                  {sec.added.length > 0 && !sec.added[0] && (
+                                    <div style={{ fontSize: 11, color: '#4ade80' }}>{sec.added.length} élément(s)</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {/* Config TG mise à jour */}
+                            {sec.updated && sec.updated.length > 0 && (
+                              <div style={{ flex: 1, minWidth: 120 }}>
+                                <div style={{ fontSize: 10, fontWeight: 800, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>
+                                  🔄 Config TG mise à jour ({sec.updated.length})
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  {sec.updated.filter(Boolean).map((name, i) => (
+                                    <div key={i} style={{ fontSize: 11, color: '#60a5fa', background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 5, padding: '2px 8px' }}>{name}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* Déjà présents */}
+                            {sec.existing.length > 0 && (
+                              <div style={{ flex: 1, minWidth: 120 }}>
+                                <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>
+                                  ⏭ Déjà à jour ({sec.existing.length})
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  {sec.existing.filter(Boolean).map((name, i) => (
+                                    <div key={i} style={{ fontSize: 11, color: '#64748b', background: 'rgba(100,116,139,0.08)', border: '1px solid rgba(100,116,139,0.2)', borderRadius: 5, padding: '2px 8px' }}>{name}</div>
+                                  ))}
+                                  {sec.existing.length > 0 && !sec.existing[0] && (
+                                    <div style={{ fontSize: 11, color: '#64748b' }}>{sec.existing.length} élément(s)</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}</div>
             )}
           </div>
         </div>)}

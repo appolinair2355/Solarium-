@@ -2,14 +2,70 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const PRICE_USD = 75;
-
 const STATUS_LABEL = {
   awaiting_screenshot: { label: 'En attente de capture', color: '#f59e0b', icon: '📸' },
   pending_admin:       { label: 'En attente de validation', color: '#818cf8', icon: '⏳' },
   validated:           { label: 'Validé — ZIP disponible', color: '#22c55e', icon: '✅' },
   rejected:            { label: 'Refusé', color: '#f87171', icon: '❌' },
 };
+
+const TG_FORMATS = [
+  { value: 1,  label: '#1 — Style Russe' },
+  { value: 2,  label: '#2 — Premium' },
+  { value: 3,  label: '#3 — Baccara Pro' },
+  { value: 4,  label: '#4 — Prédiction' },
+  { value: 5,  label: '#5 — Barre de progression' },
+  { value: 6,  label: '#6 — Classique' },
+  { value: 7,  label: '#7 — Joueur Carte' },
+  { value: 8,  label: '#8 — Banquier / Joueur Pro' },
+  { value: 9,  label: '#9 — Joueur dédié' },
+  { value: 10, label: '#10 — Banquier dédié' },
+  { value: 11, label: '#11 — 📊 Distribution' },
+  { value: 12, label: '#12 — 🃏 Cartes 2/3 Standard' },
+  { value: 13, label: '#13 — 🏆 Victoire Pro' },
+  { value: 14, label: '#14 — 🏆 Victoire Compact' },
+  { value: 15, label: '#15 — 🤝 Match Nul Pro' },
+  { value: 16, label: '#16 — 🤝 Match Nul Compact' },
+  { value: 17, label: '#17 — ⚡ 2+3 Cartes Pro' },
+  { value: 18, label: '#18 — 🃏 Cartes 2/3 Style B' },
+  { value: 19, label: '#19 — 🎯 VIP Casino' },
+  { value: 20, label: '#20 — ⚡ Flash Signal' },
+  { value: 21, label: '#21 — 🃏 Casino Royale' },
+  { value: 22, label: '#22 — 🔔 Signal Pro' },
+  { value: 23, label: '#23 — 🚨 Alert Pro' },
+  { value: 24, label: '#24 — ★ Minimaliste Stars' },
+  { value: 25, label: '#25 — 🏅 Scoreboard Pro' },
+  { value: 26, label: '#26 — ◼️ Dark Prestige' },
+  { value: 27, label: '#27 — 🎯 Signal Ultra Compact' },
+  { value: 28, label: '#28 — 💎 Diamant Style' },
+  { value: 29, label: '#29 — 🟣 Neon Pro' },
+  { value: 30, label: '#30 — 🔥 Feu Signal' },
+  { value: 31, label: '#31 — ⚜ Russian Enhanced' },
+  { value: 32, label: '#32 — 🎯 Deux Lignes Net' },
+  { value: 33, label: '#33 — 🥇 Trophée Pro' },
+  { value: 34, label: '#34 — ⚛️ Atomique' },
+  { value: 35, label: '#35 — ✨ Gold VIP' },
+  { value: 36, label: '#36 — 👑 Couronne Royal' },
+  { value: 37, label: '#37 — 🎖️ Militaire' },
+  { value: 38, label: '#38 — ⚙ Tech Hacker' },
+  { value: 39, label: '#39 — 🐉 Dragon Style' },
+  { value: 40, label: '#40 — 🌹 Luxe Style' },
+  { value: 41, label: '#41 — 🔫 Bullet Speed' },
+  { value: 42, label: '#42 — ⟨⟩ Cyber 2077' },
+  { value: 43, label: '#43 — 🌙 Lune Mystique' },
+  { value: 44, label: '#44 — ░ Matrix' },
+  { value: 45, label: '#45 — 👑 Roi Absolu' },
+  { value: 46, label: '#46 — 🎰 Street Bet' },
+  { value: 47, label: '#47 — 🌟 Ultimate Pro' },
+  { value: 48, label: '#48 — 📊 Analyse Pro' },
+  { value: 49, label: '#49 — ➤ Flèche Direct' },
+  { value: 50, label: '#50 — ⭐ Star Casino' },
+  { value: 51, label: '#51 — 〰️ Whisper Style' },
+  { value: 52, label: '#52 — 🏦 Double Line' },
+  { value: 53, label: '#53 — 💎 Diamant Court' },
+  { value: 54, label: '#54 — 🚀 Fusée Futur' },
+  { value: 55, label: '#55 — 🌊 Cascade Pro' },
+];
 
 export default function Shop() {
   const { user } = useAuth();
@@ -18,13 +74,20 @@ export default function Shop() {
   const [catalog, setCatalog]       = useState([]);
   const [purchases, setPurchases]   = useState([]);
   const [loading, setLoading]       = useState(true);
-  const [tab, setTab]               = useState('boutique'); // boutique | mes-achats
-  const [modal, setModal]           = useState(null);   // { step: 'whatsapp'|'screenshot'|'done', strategy, purchaseId, whatsappLink }
-  const [screenshot, setScreenshot] = useState(null);   // base64
+  const [tab, setTab]               = useState('boutique');
+  const [modal, setModal]           = useState(null);
+  const [screenshot, setScreenshot] = useState(null);
   const [uploading, setUploading]   = useState(false);
   const [uploadMsg, setUploadMsg]   = useState('');
   const [downloading, setDownloading] = useState(null);
   const fileRef = useRef();
+
+  // ── Modal de configuration bot ──────────────────────────────────────
+  const [botConfigModal, setBotConfigModal] = useState(null);
+  // { purchase, step: 'config'|'summary', botConfig: { channel_id, bot_token, format_id } }
+  const [botConfigForm, setBotConfigForm]   = useState({ channel_id: '', bot_token: '', format_id: 1 });
+  const [botConfigErr, setBotConfigErr]     = useState('');
+  const [botDownloading, setBotDownloading] = useState(false);
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -45,7 +108,7 @@ export default function Shop() {
     Promise.all([loadCatalog(), loadPurchases()]).finally(() => setLoading(false));
   }, [loadCatalog, loadPurchases]);
 
-  // ── Achat : créer la demande + ouvrir modal WhatsApp ──────────────
+  // ── Achat : créer la demande + ouvrir modal WhatsApp ──────────────────
   async function handleBuy(item) {
     try {
       const r = await fetch('/api/shop/purchase', {
@@ -55,18 +118,17 @@ export default function Shop() {
       });
       const data = await r.json();
       if (!r.ok) return alert(data.error || 'Erreur');
-
       await loadPurchases();
       if (data.already_exists) {
         const p = data.purchase;
-        setModal({ step: p.status === 'awaiting_screenshot' ? 'whatsapp' : 'screenshot', strategy: item, purchaseId: p.id, whatsappLink: null });
+        setModal({ step: p.status === 'awaiting_screenshot' ? 'whatsapp' : 'screenshot', strategy: item, purchaseId: p.id, whatsappLink: null, price: item.price_usd || 75 });
       } else {
-        setModal({ step: 'whatsapp', strategy: item, purchaseId: data.purchase.id, whatsappLink: data.whatsapp_link });
+        setModal({ step: 'whatsapp', strategy: item, purchaseId: data.purchase.id, whatsappLink: data.whatsapp_link, price: data.amount_usd || 75 });
       }
     } catch (e) { alert('Erreur réseau : ' + e.message); }
   }
 
-  // ── Upload screenshot ──────────────────────────────────────────────
+  // ── Upload screenshot ──────────────────────────────────────────────────
   function handleFileChange(e) {
     const f = e.target.files[0];
     if (!f) return;
@@ -77,8 +139,7 @@ export default function Shop() {
 
   async function submitScreenshot() {
     if (!screenshot || !modal?.purchaseId) return;
-    setUploading(true);
-    setUploadMsg('');
+    setUploading(true); setUploadMsg('');
     try {
       const r = await fetch(`/api/shop/purchase/${modal.purchaseId}/screenshot`, {
         method: 'POST', credentials: 'include',
@@ -86,18 +147,67 @@ export default function Shop() {
         body: JSON.stringify({ screenshot }),
       });
       const data = await r.json();
-      if (r.ok) {
-        await loadPurchases();
-        setModal(m => ({ ...m, step: 'done' }));
-      } else {
-        setUploadMsg(data.error || 'Erreur lors de l\'envoi.');
-      }
+      if (r.ok) { await loadPurchases(); setModal(m => ({ ...m, step: 'done' })); }
+      else setUploadMsg(data.error || 'Erreur lors de l\'envoi.');
     } catch (e) { setUploadMsg('Erreur réseau : ' + e.message); }
     finally { setUploading(false); }
   }
 
-  // ── Télécharger ZIP ────────────────────────────────────────────────
-  async function downloadZip(purchase) {
+  // ── Ouvrir le modal de configuration bot avant téléchargement ───────────
+  function openBotConfig(purchase) {
+    const saved = purchase.bot_config;
+    setBotConfigForm({
+      channel_id: saved?.channel_id || '',
+      bot_token:  saved?.bot_token  || '',
+      format_id:  saved?.format_id  || 1,
+    });
+    setBotConfigErr('');
+    setBotConfigModal({ purchase, step: 'config' });
+  }
+
+  // ── Valider la config bot et passer à l'étape résumé ──────────────────
+  function confirmBotConfig() {
+    const { channel_id, bot_token } = botConfigForm;
+    if (!channel_id.trim()) return setBotConfigErr('L\'ID du canal est requis (ex: -1001234567890 ou @moncanal).');
+    if (!bot_token.trim())  return setBotConfigErr('Le token API du bot est requis (ex: 1234567890:ABC...).');
+    setBotConfigErr('');
+    setBotConfigModal(m => ({ ...m, step: 'summary' }));
+  }
+
+  // ── Lancer le téléchargement configuré ─────────────────────────────────
+  async function downloadConfigured() {
+    if (!botConfigModal?.purchase) return;
+    setBotDownloading(true);
+    try {
+      const r = await fetch(`/api/shop/purchase/${botConfigModal.purchase.id}/download-configured`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(botConfigForm),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setBotConfigErr(d.error || 'Erreur lors du téléchargement.');
+        setBotConfigModal(m => ({ ...m, step: 'config' }));
+        return;
+      }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      const p    = botConfigModal.purchase;
+      a.download = `baccarat-bot-S${p.strategy_id}-${p.strategy_name.replace(/\s+/g,'_')}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      await loadPurchases();
+      setBotConfigModal(null);
+    } catch (e) {
+      setBotConfigErr('Erreur réseau : ' + e.message);
+      setBotConfigModal(m => ({ ...m, step: 'config' }));
+    } finally { setBotDownloading(false); }
+  }
+
+  // ── Télécharger le ZIP brut (sans reconfiguration) ────────────────────
+  async function downloadZipRaw(purchase) {
     setDownloading(purchase.id);
     try {
       const r = await fetch(`/api/shop/purchase/${purchase.id}/download`, { credentials: 'include' });
@@ -113,14 +223,10 @@ export default function Shop() {
     finally { setDownloading(null); }
   }
 
-  // ── Rouvrir une demande en cours ───────────────────────────────────
   function reopenPurchase(p) {
-    const item = catalog.find(c => c.id === p.strategy_id) || { id: p.strategy_id, name: p.strategy_name };
-    if (p.status === 'awaiting_screenshot') {
-      setModal({ step: 'whatsapp', strategy: item, purchaseId: p.id, whatsappLink: null });
-    } else if (p.status === 'pending_admin') {
-      setModal({ step: 'done', strategy: item, purchaseId: p.id });
-    }
+    const item = catalog.find(c => c.id === p.strategy_id) || { id: p.strategy_id, name: p.strategy_name, price_usd: p.amount_usd };
+    if (p.status === 'awaiting_screenshot') setModal({ step: 'whatsapp', strategy: item, purchaseId: p.id, whatsappLink: null, price: p.amount_usd });
+    else if (p.status === 'pending_admin')  setModal({ step: 'done', strategy: item, purchaseId: p.id, price: p.amount_usd });
   }
 
   if (loading) return (
@@ -139,15 +245,13 @@ export default function Shop() {
         <div style={{ flex: 1, textAlign: 'center' }}>
           <span style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>💰 Boutique Stratégies</span>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b' }}>
-          {user?.username}
-        </div>
+        <div style={{ fontSize: 12, color: '#64748b' }}>{user?.username}</div>
       </div>
 
       {/* ── Tabs ── */}
       <div style={{ display: 'flex', borderBottom: '1px solid rgba(100,116,139,0.2)', background: 'rgba(15,23,42,0.7)', padding: '0 24px' }}>
         {[
-          { id: 'boutique', label: '🏪 Boutique', badge: catalog.length },
+          { id: 'boutique',   label: '🏪 Boutique', badge: catalog.length },
           { id: 'mes-achats', label: '🛒 Mes achats', badge: purchases.length || null },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -168,15 +272,14 @@ export default function Shop() {
         {/* ══════════════ TAB BOUTIQUE ══════════════ */}
         {tab === 'boutique' && (
           <div>
-            {/* Bannière info */}
             <div style={{ background: 'linear-gradient(135deg, rgba(250,204,21,0.08), rgba(245,158,11,0.05))', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 14, padding: '16px 20px', marginBottom: 28, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
               <span style={{ fontSize: 24, lineHeight: 1 }}>📦</span>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>Achetez un bot de prédiction déployable</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
                   Chaque stratégie vous donne un <strong style={{ color: '#e2e8f0' }}>fichier ZIP complet</strong> contenant un bot Telegram prêt à déployer.<br />
-                  Configurez votre token et votre canal — le bot envoie automatiquement les prédictions.<br />
-                  Prix fixe : <strong style={{ color: '#fbbf24' }}>{PRICE_USD} $</strong> par stratégie. Paiement via WhatsApp.
+                  Configurez votre <strong style={{ color: '#e2e8f0' }}>ID de canal + token bot</strong> au moment du téléchargement — le bot est pré-configuré, zéro modification de fichier.<br />
+                  Paiement unique · Licence permanente. Paiement via WhatsApp.
                 </div>
               </div>
             </div>
@@ -191,6 +294,7 @@ export default function Shop() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
                 {catalog.map(item => {
                   const promo = item.promo || {};
+                  const price = item.price_usd || 75;
                   const existingPurchase = purchases.find(p => p.strategy_id === item.id && p.status !== 'rejected');
                   const planColor = promo.plan_requis === 'pro' ? '#c084fc' : promo.plan_requis === 'premium' ? '#fbbf24' : '#22c55e';
 
@@ -202,7 +306,6 @@ export default function Shop() {
                       boxShadow: '0 4px 24px rgba(250,204,21,0.08)',
                       display: 'flex', flexDirection: 'column', position: 'relative',
                     }}>
-                      {/* Badge */}
                       {promo.badge && (
                         <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
                           background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.4)',
@@ -211,7 +314,6 @@ export default function Shop() {
                         </div>
                       )}
                       <div style={{ padding: '24px 20px 0' }}>
-                        {/* ID + Plan */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>S{item.id}</span>
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
@@ -220,15 +322,12 @@ export default function Shop() {
                             {promo.plan_requis === 'pro' ? '💼 Pro' : promo.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
                           </span>
                         </div>
-
                         <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 5, lineHeight: 1.3 }}>
                           {promo.titre || item.name}
                         </div>
                         {promo.tagline && (
                           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promo.tagline}</div>
                         )}
-
-                        {/* Arguments */}
                         <div style={{ marginBottom: 16 }}>
                           {[promo.bullet1, promo.bullet2, promo.bullet3].filter(Boolean).map((b, i) => (
                             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 5 }}>
@@ -239,20 +338,18 @@ export default function Shop() {
                         </div>
                       </div>
 
-                      {/* Footer prix + CTA */}
                       <div style={{ marginTop: 'auto', padding: '14px 20px 20px', borderTop: '1px solid rgba(100,116,139,0.15)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                           <div>
                             <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix unique</div>
-                            <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{PRICE_USD} $</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{price} $</div>
                           </div>
-
                           {existingPurchase ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_LABEL[existingPurchase.status]?.color || '#64748b' }}>
                                 {STATUS_LABEL[existingPurchase.status]?.icon} {STATUS_LABEL[existingPurchase.status]?.label}
                               </span>
-                              {(existingPurchase.status === 'awaiting_screenshot') && (
+                              {existingPurchase.status === 'awaiting_screenshot' && (
                                 <button onClick={() => reopenPurchase(existingPurchase)}
                                   style={{ padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                                     background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.35)', color: '#fbbf24' }}>
@@ -260,7 +357,7 @@ export default function Shop() {
                                 </button>
                               )}
                               {existingPurchase.status === 'validated' && (
-                                <button onClick={() => { setTab('mes-achats'); }}
+                                <button onClick={() => setTab('mes-achats')}
                                   style={{ padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                                     background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}>
                                   ⬇️ Télécharger
@@ -300,52 +397,68 @@ export default function Shop() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {purchases.map(p => {
                   const st = STATUS_LABEL[p.status] || { label: p.status, color: '#64748b', icon: '❓' };
+                  const hasBotConfig = !!(p.bot_config?.channel_id && p.bot_config?.bot_token);
                   return (
-                    <div key={p.id} style={{ background: 'rgba(15,23,42,0.8)', border: `1px solid rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':'250,204,21'},0.25)`, borderRadius: 14, padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>S{p.strategy_id}</span>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: '#f1f5f9' }}>{p.strategy_name}</span>
+                    <div key={p.id} style={{ background: 'rgba(15,23,42,0.8)', border: `1px solid rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':'250,204,21'},0.25)`, borderRadius: 14, padding: '18px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>S{p.strategy_id}</span>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: '#f1f5f9' }}>{p.strategy_name}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            Réf. #{p.id} · {new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </div>
+                          {p.admin_note && p.status === 'rejected' && (
+                            <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>Note : {p.admin_note}</div>
+                          )}
                         </div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>
-                          Réf. #{p.id} · {new Date(p.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 16, fontWeight: 900, color: '#fbbf24' }}>{p.amount_usd} $</span>
                         </div>
-                        {p.admin_note && p.status === 'rejected' && (
-                          <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>Note : {p.admin_note}</div>
-                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 100,
+                          background: `rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':p.status==='pending_admin'?'129,140,248':'245,158,11'},0.12)`,
+                          border: `1px solid rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':p.status==='pending_admin'?'129,140,248':'245,158,11'},0.3)` }}>
+                          <span>{st.icon}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: st.color }}>{st.label}</span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {p.status === 'validated' && p.has_zip && (
+                            <button onClick={() => openBotConfig(p)} disabled={downloading === p.id}
+                              style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                                background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(22,163,74,0.15))',
+                                border: '1px solid rgba(34,197,94,0.5)', color: '#22c55e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              ⬇️ Configurer &amp; Télécharger
+                            </button>
+                          )}
+                          {(p.status === 'awaiting_screenshot' || p.status === 'rejected') && (
+                            <button onClick={() => {
+                              const item = catalog.find(c => c.id === p.strategy_id) || { id: p.strategy_id, name: p.strategy_name };
+                              setScreenshot(null); setUploadMsg('');
+                              setModal({ step: 'whatsapp', strategy: item, purchaseId: p.id, whatsappLink: null, price: p.amount_usd });
+                            }}
+                              style={{ padding: '8px 14px', borderRadius: 9, fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                                background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24' }}>
+                              📸 Envoyer capture
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 16, fontWeight: 900, color: '#fbbf24' }}>{p.amount_usd} $</span>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderRadius: 100, background: `rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':p.status==='pending_admin'?'129,140,248':'245,158,11'},0.12)`, border: `1px solid rgba(${p.status==='validated'?'34,197,94':p.status==='rejected'?'239,68,68':p.status==='pending_admin'?'129,140,248':'245,158,11'},0.3)` }}>
-                        <span>{st.icon}</span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: st.color }}>{st.label}</span>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {p.status === 'validated' && p.has_zip && (
-                          <button onClick={() => downloadZip(p)} disabled={downloading === p.id}
-                            style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12, cursor: downloading===p.id ? 'wait' : 'pointer',
-                              background: 'linear-gradient(135deg, rgba(34,197,94,0.25), rgba(22,163,74,0.15))',
-                              border: '1px solid rgba(34,197,94,0.5)', color: '#22c55e' }}>
-                            {downloading === p.id ? '⏳…' : '⬇️ Télécharger ZIP'}
+                      {/* Config bot sauvegardée */}
+                      {p.status === 'validated' && hasBotConfig && (
+                        <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 10, fontSize: 11, color: '#64748b', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span style={{ color: '#4ade80', fontWeight: 700 }}>✅ Config bot enregistrée</span>
+                          <span>Canal : <code style={{ color: '#22d3ee', background: 'rgba(6,182,212,0.1)', padding: '1px 6px', borderRadius: 4 }}>{p.bot_config.channel_id}</code></span>
+                          <span>Format : <code style={{ color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: 4 }}>#{p.bot_config.format_id}</code></span>
+                          <button onClick={() => openBotConfig(p)} style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)', background: 'transparent', color: '#4ade80', cursor: 'pointer', fontWeight: 600 }}>
+                            ✏️ Modifier &amp; Re-télécharger
                           </button>
-                        )}
-                        {(p.status === 'awaiting_screenshot' || p.status === 'rejected') && (
-                          <button onClick={() => {
-                            const item = catalog.find(c => c.id === p.strategy_id) || { id: p.strategy_id, name: p.strategy_name };
-                            setScreenshot(null);
-                            setUploadMsg('');
-                            setModal({ step: 'whatsapp', strategy: item, purchaseId: p.id, whatsappLink: null });
-                          }}
-                            style={{ padding: '8px 14px', borderRadius: 9, fontWeight: 700, fontSize: 12, cursor: 'pointer',
-                              background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24' }}>
-                            📸 Envoyer capture
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -355,7 +468,7 @@ export default function Shop() {
         )}
       </div>
 
-      {/* ══════════════ MODAL ACHAT ══════════════ */}
+      {/* ══════════════ MODAL ACHAT (WhatsApp + screenshot + done) ══════════════ */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}
           onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
@@ -369,40 +482,32 @@ export default function Shop() {
                   <h2 style={{ margin: 0, color: '#fbbf24', fontSize: 18, fontWeight: 800 }}>Étape 1 — Paiement WhatsApp</h2>
                   <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>
                     Cliquez sur le bouton ci-dessous pour nous contacter sur WhatsApp.<br />
-                    Le message avec le nom de la stratégie est <strong style={{ color: '#e2e8f0' }}>pré-rempli automatiquement</strong>.
+                    Le message est <strong style={{ color: '#e2e8f0' }}>pré-rempli automatiquement</strong>.
                   </p>
                 </div>
-
                 <div style={{ background: 'rgba(250,204,21,0.07)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
                   <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6 }}>Récapitulatif</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>{modal.strategy?.promo?.titre || modal.strategy?.name}</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
                     <span style={{ fontSize: 12, color: '#94a3b8' }}>Réf. #{modal.purchaseId}</span>
-                    <span style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24' }}>{PRICE_USD} $</span>
+                    <span style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24' }}>{modal.price || 75} $</span>
                   </div>
                 </div>
-
-                <a href={modal.whatsappLink || `https://wa.me/2290195501564?text=${encodeURIComponent(`Je veux payer la stratégie S${modal.strategy?.id} — ${modal.strategy?.name}. Réf. #${modal.purchaseId}. Prix : ${PRICE_USD}$`)}`}
+                <a href={modal.whatsappLink || `https://wa.me/2290195501564?text=${encodeURIComponent(`Je veux payer la stratégie S${modal.strategy?.id} — ${modal.strategy?.name}. Réf. #${modal.purchaseId}. Prix : ${modal.price || 75}$`)}`}
                   target="_blank" rel="noopener noreferrer"
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '14px', borderRadius: 12, background: 'linear-gradient(135deg, #25d366, #128c7e)', color: '#fff', fontWeight: 800, fontSize: 15, textDecoration: 'none', marginBottom: 16, boxShadow: '0 4px 20px rgba(37,211,102,0.3)' }}>
                   <span style={{ fontSize: 20 }}>💬</span> Payer via WhatsApp
                 </a>
-
                 <div style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 20, fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
                   <strong style={{ color: '#818cf8' }}>Comment ça marche :</strong><br />
-                  1. Cliquez sur "Payer via WhatsApp" pour nous contacter<br />
-                  2. Effectuez le paiement selon les instructions reçues<br />
+                  1. Cliquez sur "Payer via WhatsApp"<br />
+                  2. Effectuez le paiement selon les instructions<br />
                   3. Revenez ici et envoyez votre capture d'écran de confirmation
                 </div>
-
                 <button onClick={() => { setScreenshot(null); setUploadMsg(''); setModal(m => ({ ...m, step: 'screenshot' })); }}
                   style={{ width: '100%', padding: '12px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer',
                     background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24' }}>
                   📸 J'ai payé — Envoyer ma capture d'écran
-                </button>
-
-                <button onClick={() => setModal(null)} style={{ width: '100%', marginTop: 8, padding: '10px', borderRadius: 10, fontWeight: 600, fontSize: 12, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
-                  Fermer
                 </button>
               </>
             )}
@@ -414,14 +519,12 @@ export default function Shop() {
                   <div style={{ fontSize: 36, marginBottom: 8 }}>📸</div>
                   <h2 style={{ margin: 0, color: '#fbbf24', fontSize: 18, fontWeight: 800 }}>Étape 2 — Confirmation de paiement</h2>
                   <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>
-                    Envoyez la capture d'écran de votre confirmation de paiement.<br />
-                    L'administrateur la vérifiera et validera votre accès.
+                    Envoyez la capture d'écran de votre confirmation de paiement.
                   </p>
                 </div>
-
-                {/* Zone d'upload */}
                 <div onClick={() => fileRef.current?.click()}
-                  style={{ border: '2px dashed rgba(250,204,21,0.4)', borderRadius: 12, padding: '28px', textAlign: 'center', cursor: 'pointer', marginBottom: 16, background: screenshot ? 'rgba(34,197,94,0.05)' : 'rgba(250,204,21,0.04)', transition: 'all 0.2s' }}>
+                  style={{ border: '2px dashed rgba(250,204,21,0.4)', borderRadius: 12, padding: '28px', textAlign: 'center', cursor: 'pointer', marginBottom: 16,
+                    background: screenshot ? 'rgba(34,197,94,0.05)' : 'rgba(250,204,21,0.04)' }}>
                   {screenshot ? (
                     <div>
                       <img src={screenshot} alt="capture" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, marginBottom: 8, objectFit: 'contain' }} />
@@ -436,27 +539,27 @@ export default function Shop() {
                   )}
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
-
                 {uploadMsg && (
-                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 12, fontWeight: 600,
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
                     {uploadMsg}
                   </div>
                 )}
-
                 <button onClick={submitScreenshot} disabled={!screenshot || uploading}
-                  style={{ width: '100%', padding: '13px', borderRadius: 11, fontWeight: 800, fontSize: 14, cursor: !screenshot || uploading ? 'not-allowed' : 'pointer', opacity: !screenshot || uploading ? 0.5 : 1,
+                  style={{ width: '100%', padding: '13px', borderRadius: 11, fontWeight: 800, fontSize: 14,
+                    cursor: !screenshot || uploading ? 'not-allowed' : 'pointer', opacity: !screenshot || uploading ? 0.5 : 1,
                     background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', marginBottom: 10 }}>
                   {uploading ? '⏳ Envoi en cours…' : '✅ Envoyer la capture d\'écran'}
                 </button>
-
                 <button onClick={() => setModal(m => ({ ...m, step: 'whatsapp' }))}
-                  style={{ width: '100%', padding: '10px', borderRadius: 10, fontWeight: 600, fontSize: 12, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
+                  style={{ width: '100%', padding: '10px', borderRadius: 10, fontWeight: 600, fontSize: 12, cursor: 'pointer',
+                    background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
                   ← Retour
                 </button>
               </>
             )}
 
-            {/* ── Étape 3 : Confirmation ── */}
+            {/* ── Étape 3 : En attente ── */}
             {modal.step === 'done' && (
               <>
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
@@ -465,25 +568,193 @@ export default function Shop() {
                   <p style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.8, margin: '0 0 20px' }}>
                     Votre capture d'écran a bien été reçue.<br />
                     <strong style={{ color: '#e2e8f0' }}>L'administrateur va la vérifier</strong> et valider votre achat.<br />
-                    Une fois validé, vous pourrez télécharger votre fichier ZIP depuis l'onglet <strong style={{ color: '#fbbf24' }}>Mes achats</strong>.
+                    Une fois validé, vous pourrez télécharger votre ZIP depuis <strong style={{ color: '#fbbf24' }}>Mes achats</strong>.
                   </p>
                   <div style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20, fontSize: 12, color: '#94a3b8', lineHeight: 1.7, textAlign: 'left' }}>
                     <strong style={{ color: '#818cf8' }}>Ce que vous allez recevoir :</strong><br />
-                    📦 Un fichier ZIP avec le bot complet<br />
-                    ⚙️ Configurez votre token Telegram + canal<br />
-                    🚀 Déployez sur n'importe quelle plateforme<br />
+                    📦 Un fichier ZIP avec le bot complet pré-configuré<br />
+                    ⚙️ Votre token Telegram + canal pré-remplis — zéro modification<br />
+                    🚀 Déployez sur Render, Railway, Heroku, VPS…<br />
                     📡 Le bot envoie les prédictions automatiquement
                   </div>
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
                     <button onClick={() => { setModal(null); setTab('mes-achats'); loadPurchases(); }}
-                      style={{ padding: '11px 24px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer', background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24' }}>
+                      style={{ padding: '11px 24px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                        background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24' }}>
                       Voir mes achats
                     </button>
                     <button onClick={() => setModal(null)}
-                      style={{ padding: '11px 24px', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
+                      style={{ padding: '11px 24px', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                        background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
                       Fermer
                     </button>
                   </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ MODAL CONFIG BOT ══════════════ */}
+      {botConfigModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(6px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setBotConfigModal(null); }}>
+          <div style={{ background: 'linear-gradient(145deg, #0f172a, #1a2744)', border: '1.5px solid rgba(34,197,94,0.4)', borderRadius: 22, padding: 28, maxWidth: 520, width: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+
+            {/* ── Config step ── */}
+            {botConfigModal.step === 'config' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 22 }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>⚙️</div>
+                  <h2 style={{ margin: 0, color: '#22c55e', fontSize: 18, fontWeight: 800 }}>Configuration du bot</h2>
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8, lineHeight: 1.6 }}>
+                    Saisissez les informations de votre bot Telegram.<br />
+                    Elles seront <strong style={{ color: '#e2e8f0' }}>pré-remplies dans le ZIP</strong> — aucune modification de fichier nécessaire.
+                  </p>
+                </div>
+
+                <div style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>Stratégie</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>
+                    S{botConfigModal.purchase.strategy_id} — {botConfigModal.purchase.strategy_name}
+                  </div>
+                </div>
+
+                {/* ID Canal */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+                    📡 ID du canal de prédiction <span style={{ color: '#f87171' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={botConfigForm.channel_id}
+                    onChange={e => setBotConfigForm(f => ({ ...f, channel_id: e.target.value }))}
+                    placeholder="-1001234567890  ou  @moncanal"
+                    style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(255,255,255,0.04)', color: '#f1f5f9', fontSize: 14, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                  />
+                  <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
+                    Trouvez l'ID avec @userinfobot · Format : <code style={{ color: '#22d3ee' }}>-1001234567890</code> ou <code style={{ color: '#22d3ee' }}>@nomcanal</code>
+                  </div>
+                </div>
+
+                {/* API Token */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+                    🔑 Token API du bot Telegram <span style={{ color: '#f87171' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={botConfigForm.bot_token}
+                    onChange={e => setBotConfigForm(f => ({ ...f, bot_token: e.target.value }))}
+                    placeholder="1234567890:ABCDefGhIJKlmNoPQRstuVWXyz..."
+                    style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(255,255,255,0.04)', color: '#f1f5f9', fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                  />
+                  <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
+                    Obtenez votre token via <code style={{ color: '#22d3ee' }}>@BotFather</code> → /newbot sur Telegram
+                  </div>
+                </div>
+
+                {/* Format */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+                    🎨 Format des messages de prédiction
+                  </label>
+                  <select
+                    value={botConfigForm.format_id}
+                    onChange={e => setBotConfigForm(f => ({ ...f, format_id: parseInt(e.target.value) }))}
+                    style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.3)', background: '#0f172a', color: '#f1f5f9', fontSize: 13, outline: 'none', cursor: 'pointer' }}>
+                    {TG_FORMATS.map(f => (
+                      <option key={f.value} value={f.value}>{f.label}</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
+                    Choisissez le style visuel des messages envoyés dans votre canal (formats #1-55)
+                  </div>
+                </div>
+
+                {botConfigErr && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 12, fontWeight: 600,
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
+                    ⚠️ {botConfigErr}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={confirmBotConfig}
+                    style={{ flex: 1, padding: '13px', borderRadius: 11, fontWeight: 800, fontSize: 14, cursor: 'pointer',
+                      background: 'linear-gradient(135deg, #22c55e, #16a34a)', border: 'none', color: '#fff',
+                      boxShadow: '0 4px 20px rgba(34,197,94,0.3)' }}>
+                    ✅ Enregistrer ma configuration
+                  </button>
+                  <button onClick={() => setBotConfigModal(null)}
+                    style={{ padding: '13px 18px', borderRadius: 11, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                      background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
+                    Annuler
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── Summary step ── */}
+            {botConfigModal.step === 'summary' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 22 }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>📋</div>
+                  <h2 style={{ margin: 0, color: '#22c55e', fontSize: 18, fontWeight: 800 }}>Récapitulatif de configuration</h2>
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>
+                    Vérifiez les informations avant de télécharger votre bot.
+                  </p>
+                </div>
+
+                <div style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 14, padding: '18px 20px', marginBottom: 20 }}>
+                  {[
+                    { icon: '⚙️', label: 'Stratégie', val: `S${botConfigModal.purchase.strategy_id} — ${botConfigModal.purchase.strategy_name}`, mono: false },
+                    { icon: '📡', label: 'Canal de prédiction', val: botConfigForm.channel_id, mono: true },
+                    { icon: '🔑', label: 'Token bot', val: botConfigForm.bot_token.slice(0,12) + '…' + botConfigForm.bot_token.slice(-6), mono: true },
+                    { icon: '🎨', label: 'Format des messages', val: TG_FORMATS.find(f => f.value === botConfigForm.format_id)?.label || `#${botConfigForm.format_id}`, mono: false },
+                  ].map(({ icon, label, val, mono }) => (
+                    <div key={label} style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: 16, width: 24, flexShrink: 0 }}>{icon}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 2 }}>{label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', fontFamily: mono ? 'monospace' : 'inherit', wordBreak: 'break-all' }}>{val}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 20, fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
+                  <strong style={{ color: '#fbbf24' }}>Ce que contient le ZIP :</strong><br />
+                  ✅ config.js pré-rempli avec vos informations<br />
+                  🚀 index.js — serveur API + envoi Telegram automatique<br />
+                  🧠 predictor.js — moteur de prédiction<br />
+                  📦 package.json + README.md
+                </div>
+
+                {botConfigErr && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 12, fontWeight: 600,
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
+                    ⚠️ {botConfigErr}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={downloadConfigured} disabled={botDownloading}
+                    style={{ flex: 1, padding: '13px', borderRadius: 11, fontWeight: 800, fontSize: 14,
+                      cursor: botDownloading ? 'wait' : 'pointer',
+                      background: botDownloading ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                      border: 'none', color: '#fff', boxShadow: '0 4px 20px rgba(34,197,94,0.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    {botDownloading
+                      ? <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Génération en cours…</>
+                      : <>⬇️ Télécharger le ZIP configuré</>}
+                  </button>
+                  <button onClick={() => setBotConfigModal(m => ({ ...m, step: 'config' }))} disabled={botDownloading}
+                    style={{ padding: '13px 18px', borderRadius: 11, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                      background: 'transparent', border: '1px solid rgba(100,116,139,0.3)', color: '#64748b' }}>
+                    ← Modifier
+                  </button>
                 </div>
               </>
             )}
