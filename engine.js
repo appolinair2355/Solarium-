@@ -3770,6 +3770,14 @@ class Engine {
       }
       delete state._cvWindow;
       delete state._cvSuitCounts;
+      // ── Reset first_card_plus6 (1ère Carte +Décalage) ───────────────────────
+      // CRITIQUE : sans ce reset la file d'attente et le dernier déclenchement
+      // conservent des valeurs de la journée précédente → compteur ne repart pas à 0
+      state.fc_queue            = [];
+      state.fc_last_trigger_gn  = 0;
+      state.fc_last_log         = null;
+      // ── Reset absence_confirmee (feux tricolores) ────────────────────────────
+      state.confirmPending      = {};
       // Reset complet de l'état interne des scripts Pro (stock de prédictions à zéro)
       if (state.scriptState) {
         const cfg = state.config;

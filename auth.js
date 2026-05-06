@@ -13,8 +13,9 @@ function getUserStatus(user) {
 function publicUser(u) {
   return {
     id: u.id, username: u.username, email: u.email,
-    is_admin: u.is_admin, is_approved: u.is_approved, is_premium: u.is_premium || false,
-    is_pro: u.is_pro || false,
+    is_admin: u.is_admin, is_approved: u.is_approved,
+    is_premium: !!(u.is_premium || u.account_type === 'premium'),
+    is_pro: !!(u.is_pro || u.account_type === 'pro'),
     account_type: u.account_type || 'simple',
     promo_code: u.promo_code || null,
     bonus_minutes_earned: u.bonus_minutes_earned || 0,
@@ -23,7 +24,12 @@ function publicUser(u) {
     admin_level: u.admin_level || 2,
     profile_photo: u.profile_photo || null,
     allowed_channels: u.allowed_channels || null,
-    show_counter_channels: u.show_counter_channels || null,
+    show_counter_channels: (() => {
+      const v = u.show_counter_channels;
+      if (!v) return null;
+      if (Array.isArray(v)) return v;
+      try { return JSON.parse(v); } catch { return null; }
+    })(),
     language: u.language || 'fr',
   };
 }

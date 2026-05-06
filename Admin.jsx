@@ -1463,17 +1463,17 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
   const [quickSaving, setQuickSaving] = React.useState(false);
   const [quickMsg, setQuickMsg] = React.useState('');
 
-  // ── Logs Pro par stratégie (live) ──
-  const [proLogsById, setProLogsById] = React.useState({});           // { [id]: [{ts, level, msg}] }
-  const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // id de la stratégie ouverte en grand
+  // ── Compteurs Pro par stratégie (live, remplace les logs) ──
+  const [proCountersById, setProCountersById] = React.useState({});   // { [id]: [{suit, display, count, threshold, ...}] }
+  const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // conservé pour la modale source
   const [proSourceById, setProSourceById] = React.useState({});       // { [id]: 'contenu source' }
 
-  const fetchProLogs = React.useCallback(async (id) => {
+  const fetchProCounter = React.useCallback(async (id) => {
     try {
-      const r = await fetch(`/api/games/pro-logs?channel=S${id}`, { credentials: 'include' });
+      const r = await fetch(`/api/games/absences?channel=S${id}`, { credentials: 'include' });
       if (!r.ok) return;
       const d = await r.json();
-      setProLogsById(prev => ({ ...prev, [id]: Array.isArray(d) ? d : [] }));
+      setProCountersById(prev => ({ ...prev, [id]: Array.isArray(d) ? d : [] }));
     } catch {}
   }, []);
 
@@ -1486,25 +1486,18 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
     } catch {}
   }, [qs]);
 
-  const clearProLogs = async (id) => {
-    try {
-      await fetch(`/api/games/pro-logs?channel=S${id}`, { method: 'DELETE', credentials: 'include' });
-      setProLogsById(prev => ({ ...prev, [id]: [] }));
-    } catch {}
-  };
-
-  // Polling automatique des logs de toutes les stratégies chargées (toutes les 3s)
+  // Polling automatique des compteurs de toutes les stratégies chargées (toutes les 5s)
   React.useEffect(() => {
     if (!stratList.length) return;
     let cancelled = false;
     const tick = () => {
       if (cancelled) return;
-      stratList.forEach(s => fetchProLogs(s.id));
+      stratList.filter(s => s.engine_loaded).forEach(s => fetchProCounter(s.id));
     };
     tick();
-    const iv = setInterval(tick, 3000);
+    const iv = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(iv); };
-  }, [stratList, fetchProLogs]);
+  }, [stratList, fetchProCounter]);
 
   // Charger la liste des comptes Pro pour le sélecteur (admin uniquement)
   React.useEffect(() => {
@@ -1982,7 +1975,7 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
 //   null            →  aucune prédiction ce tour
 //
 // PARAMÈTRES lus automatiquement par le moteur :
-//   name, hand, decalage, max_rattrapage, tg_format
+//   name, hand, decalage, max_rattrapage, tg_format, counter
 // ════════════════════════════════════════════════════════════════
 
 module.exports = {
@@ -1992,6 +1985,15 @@ module.exports = {
   hand:           'joueur',   // 'joueur' ou 'banquier'
   decalage:       2,          // Prédit pour le jeu N+2
   max_rattrapage: 4,          // Max 4 rattrapages si erreur
+
+  // ─── Compteur personnalisé (affiché sur le Dashboard) ──────
+  // Alimenté par state.absences dans processGame() ci-dessous.
+  // label     → titre affiché dans le widget compteur
+  // threshold → valeur seuil : la case devient rouge quand atteinte
+  counter: {
+    label:     'Absences Joueur',  // Titre affiché dans le compteur
+    threshold: 5,                  // Seuil d'alerte (même que SEUIL_ABSENCE)
+  },
 
   // FORMAT DU MESSAGE TELEGRAM
   // Option A : tg_format   → numéro d'un format intégré (1-18) ou personnalisé (19+)
@@ -2021,7 +2023,9 @@ module.exports = {
   processGame(gn, pSuits, bSuits, winner, state) {
 
     // ── 1. Initialisation du state (première exécution) ──────
-    if (!state.absences)      state.absences      = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+    // state.absences alimente le compteur affiché sur le Dashboard.
+    // Chaque clé est un costume, la valeur est le nombre de jeux d'absence.
+    if (!state.absences)       state.absences      = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
     if (!state.serieVictoires) state.serieVictoires = 0;
     if (!state.serieDefaites)  state.serieDefaites  = 0;
     if (!state.dernierWinner)  state.dernierWinner  = null;
@@ -2517,8 +2521,6 @@ export default function StrategieVisualisation({ gameHistory }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {stratList.map(s => {
-                const logs = proLogsById[s.id] || [];
-                const lastLogs = logs.slice(-4);
                 return (
                 <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: 'rgba(15,23,42,0.5)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.15)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2542,32 +2544,39 @@ export default function StrategieVisualisation({ gameHistory }) {
                       style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>🗑</button>
                   </div>
 
-                  {/* Bouton d'ouverture des logs Pro */}
+                  {/* Compteur Pro (remplace les logs) */}
                   {s.engine_loaded === true && (
-                    <button type="button"
-                      onClick={() => { setProLogsExpanded(s.id); fetchProLogs(s.id); fetchProSource(s.id); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                        padding: '10px 14px', borderRadius: 8,
-                        border: '1px solid rgba(168,85,247,0.35)',
-                        background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(99,102,241,0.10))',
-                        color: '#e9d5ff', cursor: 'pointer', fontWeight: 700, fontSize: 12,
-                        textAlign: 'left', width: '100%',
-                      }}
-                      title={`Ouvrir les logs Pro de "${s.strategy_name || s.filename}"`}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ fontSize: 16 }}>📜</span>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Ouvrir les logs Pro de la stratégie <span style={{ color: '#fff', fontWeight: 800 }}>{s.strategy_name || s.filename}</span>
-                        </span>
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', padding: '2px 7px', borderRadius: 5, fontFamily: 'monospace' }}>
-                          {logs.length} ligne{logs.length > 1 ? 's' : ''}
-                        </span>
-                        <span style={{ fontSize: 13 }}>⛶</span>
-                      </span>
-                    </button>
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 8,
+                      border: '1px solid rgba(99,102,241,0.25)',
+                      background: 'rgba(99,102,241,0.07)',
+                    }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+                        📊 Compteur · S{s.id}
+                      </div>
+                      {!proCountersById[s.id] ? (
+                        <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Chargement…</div>
+                      ) : proCountersById[s.id].length === 0 ? (
+                        <div style={{ fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>
+                          Pas de compteur — initialisez <code style={{ color: '#818cf8' }}>state.absences</code> dans votre stratégie
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {proCountersById[s.id].map(a => (
+                            <div key={a.suit} style={{
+                              display: 'flex', alignItems: 'center', gap: 5,
+                              padding: '5px 11px', borderRadius: 8,
+                              background: a.count >= a.threshold ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.12)',
+                              border: `1px solid ${a.count >= a.threshold ? 'rgba(239,68,68,0.45)' : 'rgba(99,102,241,0.25)'}`,
+                            }}>
+                              <span style={{ fontSize: '1rem' }}>{a.display || a.suit}</span>
+                              <span style={{ fontSize: 13, fontWeight: 800, color: a.count >= a.threshold ? '#f87171' : '#a5b4fc', fontFamily: 'monospace' }}>{a.count}</span>
+                              {a.threshold > 0 && <span style={{ fontSize: 10, color: '#475569' }}>/{a.threshold}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
                 );
@@ -2916,101 +2925,6 @@ export default function StrategieVisualisation({ gameHistory }) {
         )}
       </div>
 
-      {/* ── Modal Logs Pro agrandis ───────────────────────────────────── */}
-      {proLogsExpanded !== null && (() => {
-        const s = stratList.find(x => x.id === proLogsExpanded);
-        const logs = proLogsById[proLogsExpanded] || [];
-        const source = proSourceById[proLogsExpanded] || '';
-        return (
-          <div onClick={() => setProLogsExpanded(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-            <div onClick={e => e.stopPropagation()}
-              style={{ background: '#0f172a', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 14, width: '100%', maxWidth: 960, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
-              <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: '#e2e8f0' }}>📜 Logs Pro · S{proLogsExpanded}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: 2 }}>
-                    {s?.filename} {s?.strategy_name ? `· ${s.strategy_name}` : ''}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" onClick={() => fetchProLogs(proLogsExpanded)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)', color: '#a5b4fc', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🔄 Rafraîchir</button>
-                  <button type="button" onClick={() => clearProLogs(proLogsExpanded)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🗑 Vider</button>
-                  <button type="button" onClick={() => setProLogsExpanded(null)}
-                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(100,116,139,0.4)', background: 'transparent', color: '#cbd5e1', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>✕ Fermer</button>
-                </div>
-              </div>
-              {/* Bandeau "idée de la stratégie" : extrait du commentaire en tête du fichier */}
-              {(() => {
-                const headerLines = [];
-                if (source) {
-                  const lines = source.split('\n');
-                  for (const ln of lines) {
-                    const t = ln.trim();
-                    if (t === '' || t === '//' || /^\/\*+/.test(t) || /^\*+\/?$/.test(t)) continue;
-                    const m = t.match(/^(?:\/\/+|#|\*+)\s?(.*)$/);
-                    if (m) {
-                      const cleaned = m[1].replace(/^[=\-─━]+$/, '').trim();
-                      if (cleaned) headerLines.push(cleaned);
-                    } else {
-                      break; // première ligne de code → on s'arrête
-                    }
-                    if (headerLines.length >= 8) break;
-                  }
-                }
-                const info = s?.strategy_info || {};
-                return (
-                  <div style={{ padding: '10px 14px', background: 'rgba(168,85,247,0.06)', borderBottom: '1px solid rgba(168,85,247,0.2)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
-                      💡 Idée de la stratégie
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: headerLines.length ? 8 : 0 }}>
-                      {info.hand && <span style={{ fontSize: 10, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>main : {info.hand}</span>}
-                      {(info.decalage !== undefined) && <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>décalage : +{info.decalage}</span>}
-                      {(info.max_rattrapage !== undefined) && <span style={{ fontSize: 10, color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700 }}>rattrapages max : {info.max_rattrapage}</span>}
-                      {info.entry_fn && <span style={{ fontSize: 10, color: '#a5b4fc', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontFamily: 'monospace' }}>fonction : {info.entry_fn}()</span>}
-                    </div>
-                    {headerLines.length > 0 && (
-                      <div style={{ fontSize: 11.5, color: '#cbd5e1', lineHeight: 1.55, fontStyle: 'italic' }}>
-                        {headerLines.map((l, i) => <div key={i}>· {l}</div>)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'minmax(0,1.2fr) minmax(0,1fr)', gap: 1, background: 'rgba(99,102,241,0.15)' }}>
-                {/* Zone HAUT : logs en direct (la raison des prédictions) */}
-                <div style={{ background: '#0a0f1c', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#0a0f1c', paddingBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span>🔴 Raison des prédictions · logs en direct</span>
-                    <span style={{ color: '#64748b', fontWeight: 700 }}>{logs.length} ligne{logs.length > 1 ? 's' : ''}</span>
-                  </div>
-                  <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, lineHeight: 1.55 }}>
-                    {logs.length === 0 ? (
-                      <div style={{ color: '#475569', fontStyle: 'italic' }}>Aucun log capturé pour l'instant. Les <code>console.log()</code> de votre stratégie apparaîtront ici dès qu'une partie sera traitée.</div>
-                    ) : logs.map((l, i) => (
-                      <div key={i} style={{ color: l.level === 'error' ? '#f87171' : l.level === 'warn' ? '#fbbf24' : '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 3 }}>
-                        <span style={{ color: '#475569', marginRight: 6 }}>{new Date(l.ts).toLocaleTimeString('fr-FR')}</span>{l.msg}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* Zone BAS : règles de prédiction (code source) */}
-                <div style={{ background: '#020617', padding: '12px 16px', overflow: 'auto', minHeight: 0, minWidth: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, position: 'sticky', top: 0, background: '#020617', paddingBottom: 6 }}>
-                    📄 Règles de prédiction · code source de la stratégie
-                  </div>
-                  <pre style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.5, color: '#cbd5e1', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {source || '— code non chargé —'}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
     </div>
   );
@@ -3429,7 +3343,7 @@ function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'strategies', 'bilan', 'config', 'tg-direct'];
+  const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
   const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
   useEffect(() => {
     if (isProOnly && !PRO_ALLOWED_TABS.includes(adminTab)) setAdminTab('config-pro');
@@ -3719,6 +3633,12 @@ function AdminPanel() {
       { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',       map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
       { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
     ],
+    absence_confirmee: [
+      { label: 'Identique',        desc: 'Prédit le même costume confirmé', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+      { label: 'Contraire total',  desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦',        map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Même couleur',     desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',        map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Même forme',       desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',        map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+    ],
     taux_miroir: [
       { label: 'Prédire le retardataire', desc: 'Prédit le costume qui est en retard (identique)', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
       { label: 'Contraire du retardataire', desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
@@ -3786,7 +3706,7 @@ function AdminPanel() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'all', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
     // Mode lecture_passee (lecture de jeux passés depuis cartes_jeu)
     carte_p: 2, carte_h: 32, carte_ecart: 1, carte_position: 1, carte_source_hand: 'joueur',
     // Mode intelligent_cartes (analyse de patterns dans cartes_jeu)
@@ -3798,7 +3718,7 @@ function AdminPanel() {
     // Mode annonce_sequence (Rotateur Promo)
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
     // Mode first_card_plus6
-    proche: 3, banker_card_count: 0,
+    proche: 3, banker_card_count: 0, fc_ecart: 2,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
   };
@@ -3970,11 +3890,13 @@ function AdminPanel() {
   const [editingCounterChannels, setEditingCounterChannels] = useState(null);
   const [counterChannelsEdit, setCounterChannelsEdit] = useState([]);
   const [counterChannelsSaving, setCounterChannelsSaving] = useState(false);
+  const [expandedProUser, setExpandedProUser] = useState(null);
 
   const ALL_MODES_LIST = [
     { value: 'manquants', label: 'Absences' },
     { value: 'apparents', label: 'Apparitions' },
     { value: 'absence_apparition', label: 'Absence → Apparition' },
+    { value: 'absence_confirmee', label: 'Absence Confirmée' },
     { value: 'apparition_absence', label: 'Apparition → Absence' },
     { value: 'taux_miroir', label: 'Taux Miroir' },
     { value: 'compteur_adverse', label: 'Compteur Adverse' },
@@ -3995,7 +3917,7 @@ function AdminPanel() {
   ];
 
   useEffect(() => {
-    if (adminTab !== 'online-users') return;
+    if (!['online-users', 'pro-accounts', 'premium-accounts'].includes(adminTab)) return;
     setOnlineLoading(true);
     fetch('/api/admin/online-users', { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
@@ -4229,7 +4151,7 @@ function AdminPanel() {
 
   const showStratMsg = (text, error = false) => {
     setStratMsg({ text, error });
-    setTimeout(() => setStratMsg(''), 4000);
+    setTimeout(() => setStratMsg(''), 8000);
   };
 
   const showMsg = (msg, isError) => {
@@ -4812,7 +4734,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
     setStratOpen(true);
   };
 
@@ -4829,7 +4751,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -4867,6 +4789,18 @@ function AdminPanel() {
   const saveStrat = async () => {
     console.log('[saveStrat] Bouton cliqué, stratForm:', JSON.stringify(stratForm).substring(0, 300));
     console.log('[saveStrat] stratEditing:', stratEditing);
+    if (!stratForm.name.trim()) {
+      showStratMsg('❌ Veuillez saisir un nom pour la stratégie avant d\'enregistrer.', true);
+      return;
+    }
+    const SUITS_CHECK = ['♠','♥','♦','♣'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6'];
+    if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison' && stratForm.mode !== 'relance') {
+      for (const s of SUITS_CHECK) {
+        const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
+        if (pool.length === 0) { showStratMsg(`❌ Mapping incomplet : sélectionnez au moins 1 costume cible pour ${s}`, true); return; }
+      }
+    }
     setStratSaving(true);
     try {
       const url = stratEditing !== null ? `/api/admin/strategies/${stratEditing}` : '/api/admin/strategies';
@@ -4890,6 +4824,10 @@ function AdminPanel() {
         hand: s?.hand || stratForm.hand,
         visibility: s?.visibility || stratForm.visibility,
         threshold: s?.threshold ?? stratForm.threshold,
+        prediction_offset: s?.prediction_offset ?? stratForm.prediction_offset,
+        proche: s?.proche ?? stratForm.proche,
+        fc_ecart: s?.fc_ecart ?? stratForm.fc_ecart,
+        banker_card_count: s?.banker_card_count ?? stratForm.banker_card_count,
         max_rattrapage: s?.max_rattrapage ?? stratForm.max_rattrapage,
         exceptions: Array.isArray(s?.exceptions) ? s.exceptions : (stratForm.exceptions || []),
         tg_targets: Array.isArray(s?.tg_targets) ? s.tg_targets : (stratForm.tg_targets || []),
@@ -5100,6 +5038,38 @@ function AdminPanel() {
     if (!confirm('Révoquer l\'accès ?')) return;
     const res = await fetch(`/api/admin/users/${uid}/reject`, { method: 'POST', credentials: 'include' });
     if (res.ok) { showMsg('Accès révoqué'); loadUsers(); }
+  };
+
+  const togglePremium = async uid => {
+    const res = await fetch(`/api/admin/users/${uid}/toggle-premium`, { method: 'POST', credentials: 'include' });
+    const d = await res.json();
+    if (res.ok) {
+      showMsg(d.is_premium ? '⭐ Compte passé en PREMIUM' : '👤 Compte repassé en SIMPLE');
+      loadUsers();
+      setOnlineUsers(prev => prev.map(u => u.id === uid ? {
+        ...u,
+        is_premium: d.is_premium,
+        account_type: d.is_premium ? 'premium' : 'simple',
+      } : u));
+    } else {
+      showMsg(d.error || 'Erreur', true);
+    }
+  };
+
+  const togglePro = async uid => {
+    const res = await fetch(`/api/admin/users/${uid}/toggle-pro`, { method: 'POST', credentials: 'include' });
+    const d = await res.json();
+    if (res.ok) {
+      showMsg(d.is_pro ? '💎 Compte passé en PRO' : '👤 Compte repassé en SIMPLE');
+      loadUsers();
+      setOnlineUsers(prev => prev.map(u => u.id === uid ? {
+        ...u,
+        is_pro: d.is_pro,
+        account_type: d.is_pro ? 'pro' : 'simple',
+      } : u));
+    } else {
+      showMsg(d.error || 'Erreur', true);
+    }
   };
 
   const deleteUser = async uid => {
@@ -5559,8 +5529,15 @@ function AdminPanel() {
                 margin: '0 0 18px', animation: 'smFadeUp 0.4s 0.44s ease-out both',
               }}>
                 {[
-                  { icon: '⚖️', label: successModal.mode === 'taux_miroir' ? 'Différence' : 'Seuil B', value: successModal.threshold },
-                  { icon: '🔁', label: 'Rattrapages max', value: `R${successModal.max_rattrapage ?? 20}` },
+                  ...(successModal.mode === 'first_card_plus6' ? [
+                    { icon: '🎯', label: 'Décalage (N+X)', value: `+${successModal.prediction_offset ?? 6}` },
+                    { icon: '📍', label: 'Proche', value: successModal.proche ?? 3 },
+                    { icon: '↔️', label: 'Écart min signaux', value: successModal.fc_ecart ?? 2 },
+                    { icon: '🃏', label: 'Cartes banquier', value: successModal.banker_card_count === 0 ? 'Indifférent' : `${successModal.banker_card_count} cartes` },
+                  ] : [
+                    { icon: '⚖️', label: successModal.mode === 'taux_miroir' ? 'Différence' : 'Seuil B', value: successModal.threshold },
+                    { icon: '🔁', label: 'Rattrapages max', value: `R${successModal.max_rattrapage ?? 20}` },
+                  ]),
                   { icon: '⛔', label: 'Exceptions', value: (successModal.exceptions?.length || 0) === 0 ? 'Aucune' : `${successModal.exceptions.length} règle(s)` },
                   { icon: '✈️', label: 'Canaux Telegram', value: (successModal.tg_targets?.filter(t => t.bot_token && t.channel_id).length || 0) === 0 ? 'Aucun' : `${successModal.tg_targets.filter(t=>t.bot_token&&t.channel_id).length} canal(aux)` },
                 ].map(item => (
@@ -5683,15 +5660,16 @@ function AdminPanel() {
             ? [
                 { id: 'config-pro', icon: '🔷', label: 'Config Pro', highlight: true },
                 { id: 'canaux',     icon: '✈️', label: 'Telegram',     badge: tgChannels.length > 0 ? tgChannels.length : null },
-                { id: 'strategies', icon: '⚙️', label: 'Stratégies',   badge: strategies.filter(s => s.owner_user_id === user?.id).length || null },
                 { id: 'bilan',      icon: '📊', label: 'Bilan' },
                 { id: 'config',     icon: '🔀', label: 'Routage' },
                 { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
               ]
             : [
-            { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
-            { id: 'online-users',   icon: '🟢', label: 'En ligne',       badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
-            { id: 'paiements',      icon: '💳', label: 'Paiements',      badge: pendingPayments.length || null },
+            { id: 'utilisateurs',      icon: '👥', label: 'Utilisateurs',    badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
+            { id: 'online-users',      icon: '🟢', label: 'En ligne',        badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
+            { id: 'pro-accounts',      icon: '💎', label: 'Comptes PRO',     badge: onlineUsers.filter(u => u.is_pro).length || null },
+            { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
+            { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
@@ -6101,6 +6079,13 @@ function AdminPanel() {
                             {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
                             {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
                             {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
+                            {isSuperAdmin && !u.is_pro && (
+                              <button
+                                title={u.is_premium ? 'Retirer le statut Premium' : 'Passer en Premium'}
+                                onClick={() => togglePremium(u.id)}
+                                style={{ fontSize: 10, padding: '1px 6px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, border: u.is_premium ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.12)', background: u.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.05)', color: u.is_premium ? '#fbbf24' : '#64748b' }}
+                              >{u.is_premium ? '⭐ Retirer Premium' : '⭐ Activer Premium'}</button>
+                            )}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
                           {/* Mot de passe configuré — affiché pour TOUS les utilisateurs (simple, pro, premium) */}
@@ -6754,6 +6739,14 @@ function AdminPanel() {
                           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: typeBadge.color, background: typeBadge.bg, border: `1px solid ${typeBadge.border}`, borderRadius: 5, padding: '2px 8px' }}>
                             {typeBadge.icon} {typeBadge.label}
                           </span>
+                          {/* Bouton toggle PREMIUM (super-admin seulement, pas pour PRO) */}
+                          {isSuperAdmin && !isPro && (
+                            <button
+                              title={isPremium ? 'Retirer le statut Premium' : 'Passer en Premium'}
+                              onClick={() => togglePremium(u.id)}
+                              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: isPremium ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.12)', background: isPremium ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)', color: isPremium ? '#fbbf24' : '#64748b' }}
+                            >{isPremium ? '⭐ Retirer Premium' : '⭐ → Premium'}</button>
+                          )}
                           {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>🚫 BANNI</span>}
                           {subExpired && !u.is_banned && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>⏱ EXPIRÉ</span>}
                           <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
@@ -6794,19 +6787,19 @@ function AdminPanel() {
                           </div>
                         )}
 
-                        {/* ── Ligne résumé compteurs (uniquement PRO) ── */}
-                        {isPro && (
+                        {/* ── Ligne résumé compteurs (PRO + PREMIUM) ── */}
+                        {(isPro || isPremium) && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                             <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
                               📊 Compteurs visibles : {counterForUser.length === 0
-                                ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Uniquement ses propres stratégies</span>
-                                : <span style={{ color: '#a78bfa' }}>{counterForUser.join(', ')}</span>}
+                                ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>{isPremium ? 'Aucun canal activé' : 'Uniquement ses propres stratégies'}</span>
+                                : <span style={{ color: isPremium ? '#fbbf24' : '#a78bfa' }}>{counterForUser.join(', ')}</span>}
                             </div>
                             <button onClick={() => {
                               if (isEditingCounter) { setEditingCounterChannels(null); return; }
                               setEditingCounterChannels(u.id); setEditingAllowedChannels(null); setEditingAllowedModes(null);
                               setCounterChannelsEdit(counterForUser.length > 0 ? [...counterForUser] : []);
-                            }} style={{ padding: '4px 10px', background: isEditingCounter ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? '#a78bfa' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            }} style={{ padding: '4px 10px', background: isEditingCounter ? (isPremium ? 'rgba(251,191,36,0.2)' : 'rgba(167,139,250,0.2)') : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? (isPremium ? 'rgba(251,191,36,0.4)' : 'rgba(167,139,250,0.4)') : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? (isPremium ? '#fbbf24' : '#a78bfa') : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                               {isEditingCounter ? '✕ Annuler' : '📊 Compteurs'}
                             </button>
                           </div>
@@ -6819,7 +6812,7 @@ function AdminPanel() {
                               📺 Canaux accessibles pour ce compte {typeBadge.label}
                             </div>
                             <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>
-                              {isPremium ? 'PREMIUM : voit les compteurs de ces canaux.' : isUser ? 'UTILISATEUR : ne voit PAS les compteurs.' : 'PRO : utilisez aussi les canaux assignés.'}
+                              {isPremium ? 'PREMIUM : utilisez le bouton 📊 Compteurs pour activer le compteur par canal.' : isUser ? 'UTILISATEUR : ne voit PAS les compteurs.' : 'PRO : utilisez aussi les canaux assignés.'}
                             </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
                               {ALL_BASE_CHANNELS_LIST.map(ch => {
@@ -6873,10 +6866,10 @@ function AdminPanel() {
                         )}
 
                         {/* ── Panel édition compteurs visibles (PRO uniquement) ── */}
-                        {isEditingCounter && isPro && (
-                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 8 }}>
-                            <div style={{ fontSize: 11, color: '#a78bfa', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce PRO voit les compteurs</div>
-                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Sans sélection = voit uniquement les compteurs de ses propres stratégies créées.</div>
+                        {isEditingCounter && (isPro || isPremium) && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: isPremium ? 'rgba(251,191,36,0.06)' : 'rgba(139,92,246,0.06)', border: `1px solid ${isPremium ? 'rgba(251,191,36,0.25)' : 'rgba(139,92,246,0.25)'}`, borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: isPremium ? '#fbbf24' : '#a78bfa', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce {isPremium ? 'PREMIUM' : 'PRO'} voit les compteurs</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>{isPremium ? 'Cochez les canaux pour lesquels ce Premium verra le compteur d\'absences.' : 'Sans sélection = voit uniquement les compteurs de ses propres stratégies créées.'}</div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
                               {ALL_BASE_CHANNELS_LIST.map(ch => {
                                 const active = counterChannelsEdit.includes(ch.id);
@@ -6907,6 +6900,291 @@ function AdminPanel() {
             )}
           </div>
         )}
+
+        {/* ── TAB : COMPTES PRO ── */}
+        {adminTab === 'pro-accounts' && (() => {
+          const proUsers = onlineUsers.filter(u => u.is_pro);
+          const ALL_BASE_CHANNELS_LIST = [
+            { id: 'C1', label: '♠ Pique Noir' }, { id: 'C2', label: '♥ Cœur Rouge' },
+            { id: 'C3', label: '♦ Carreau Doré' }, { id: 'DC', label: '♣ Double Canal' },
+            ...strategies.filter(s => !s.is_pro_only).map(s => ({ id: `S${s.id}`, label: s.name || `S${s.id}` })),
+          ];
+          const FORMAT_LABELS = { 1: '⚜ Style Russe', 2: '🎲 Premium', 3: '🃏 Baccara Pro', 4: '🎰 Prédiction', 5: '🟦 Barre', 6: '🟣 Compact' };
+          return (
+            <div style={{ padding: '0 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#a78bfa', margin: 0 }}>💎 Gestion des Comptes PRO</h2>
+                <span style={{ fontSize: 12, color: '#a78bfa', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 6, padding: '3px 10px' }}>
+                  {proUsers.length} compte{proUsers.length !== 1 ? 's' : ''}
+                </span>
+                <button onClick={() => setOnlineRefresh(v => v + 1)} style={{ padding: '6px 14px', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 7, color: '#a78bfa', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>↻ Actualiser</button>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16, padding: '10px 14px', background: 'rgba(139,92,246,0.05)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.15)' }}>
+                💎 Pour chaque compte PRO : attribuez les <strong style={{ color: '#fbbf24' }}>modes de stratégie</strong> autorisés et les <strong style={{ color: '#38bdf8' }}>canaux</strong> accessibles. Visualisez les stratégies créées avec leur configuration Telegram.
+              </div>
+              {onlineLoading ? (
+                <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Chargement…</div>
+              ) : proUsers.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 48, textAlign: 'center', background: 'rgba(139,92,246,0.04)', borderRadius: 12, border: '1px dashed rgba(139,92,246,0.2)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>💎</div>
+                  <div>Aucun compte PRO. Activez le statut PRO depuis l'onglet <strong>Utilisateurs</strong> ou <strong>En ligne</strong>.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {proUsers.map(u => {
+                    const isEditingModes = editingAllowedModes === u.id;
+                    const isEditingChannels = editingAllowedChannels === u.id;
+                    const modesForUser = Array.isArray(u.allowed_modes) ? u.allowed_modes : [];
+                    const channelsForUser = Array.isArray(u.allowed_channels) ? u.allowed_channels : [];
+                    const isExpanded = expandedProUser === u.id;
+                    const proStrats = strategies.filter(s => s.is_pro_only && s.owner_user_id === u.id);
+                    const statusDot = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : '🔴';
+                    const lastSeenStr = u.last_seen ? (u.diff_minutes != null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '') : '—';
+                    return (
+                      <div key={u.id} style={{ background: 'rgba(15,23,42,0.65)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: '14px 18px' }}>
+                        {/* Identité */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 16 }}>{statusDot}</span>
+                          <span style={{ fontWeight: 800, color: '#f1f5f9', fontSize: 15 }}>{u.username}</span>
+                          {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#a78bfa', background: 'rgba(139,92,246,0.18)', border: '1px solid rgba(139,92,246,0.45)', borderRadius: 5, padding: '2px 8px' }}>💎 PRO</span>
+                          {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>🚫 BANNI</span>}
+                          {isSuperAdmin && (
+                            <button title="Désactiver le statut PRO" onClick={() => togglePro(u.id)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: '1px solid rgba(139,92,246,0.4)', background: 'rgba(139,92,246,0.08)', color: '#a78bfa' }}>💎 Retirer PRO</button>
+                          )}
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
+                        </div>
+                        {/* Modes */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            ⚙️ Modes autorisés : {!u.allowed_modes ? <span style={{ color: '#22c55e' }}>Tous les modes</span> : modesForUser.length === 0 ? <span style={{ color: '#ef4444' }}>Aucun</span> : <span style={{ color: '#fbbf24' }}>{modesForUser.map(mv => ALL_MODES_LIST.find(m => m.value === mv)?.label || mv).join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingModes) { setEditingAllowedModes(null); return; } setEditingAllowedModes(u.id); setEditingAllowedChannels(null); setAllowedModesEdit(modesForUser.length > 0 ? [...modesForUser] : []); }} style={{ padding: '4px 10px', background: isEditingModes ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingModes ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingModes ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingModes ? '✕ Annuler' : '⚙️ Attribuer Modes'}
+                          </button>
+                        </div>
+                        {/* Canaux */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📺 Canaux : {channelsForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun assigné</span> : <span style={{ color: '#38bdf8' }}>{channelsForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => setExpandedProUser(isExpanded ? null : u.id)} style={{ padding: '4px 10px', background: isExpanded ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isExpanded ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isExpanded ? '#22c55e' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isExpanded ? '▲ Masquer' : `📊 Stratégies (${proStrats.length})`}
+                          </button>
+                          <button onClick={() => { if (isEditingChannels) { setEditingAllowedChannels(null); return; } setEditingAllowedChannels(u.id); setEditingAllowedModes(null); setAllowedChannelsEdit(channelsForUser.length > 0 ? [...channelsForUser] : []); }} style={{ padding: '4px 10px', background: isEditingChannels ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingChannels ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingChannels ? '#38bdf8' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingChannels ? '✕ Annuler' : '📺 Canaux'}
+                          </button>
+                        </div>
+                        {/* Panel modes */}
+                        {isEditingModes && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.22)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>⚙️ Modes de stratégie autorisés</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les modes que ce compte PRO peut utiliser pour créer ses stratégies. Vide = tous les modes.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_MODES_LIST.map(m => {
+                                const active = allowedModesEdit.includes(m.value);
+                                return (
+                                  <button key={m.value} type="button" onClick={() => setAllowedModesEdit(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.05)', border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#fbbf24' : '#64748b' }}>
+                                    {m.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedModesEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedModes(u.id)} disabled={allowedModesSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedModesSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Panel canaux */}
+                        {isEditingChannels && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, marginBottom: 8 }}>📺 Canaux accessibles pour ce compte PRO</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = allowedChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setAllowedChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#38bdf8' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedChannelsEdit(ALL_BASE_CHANNELS_LIST.map(c => c.id))} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout sélectionner</button>
+                              <button onClick={() => setAllowedChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedChannels(u.id)} disabled={allowedChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Surveillance stratégies */}
+                        {isExpanded && (
+                          <div style={{ marginTop: 12, padding: '14px 16px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', marginBottom: 10 }}>📊 Surveillance — Stratégies créées par ce compte PRO</div>
+                            {proStrats.length === 0 ? (
+                              <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', padding: '8px 0' }}>Aucune stratégie créée par ce compte PRO.</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {proStrats.map(s => {
+                                  const mLabel = ALL_MODES_LIST.find(m => m.value === s.mode)?.label || s.mode;
+                                  const tgTargets = (s.tg_targets || []).filter(t => t.channel_id || t.id);
+                                  return (
+                                    <div key={s.id} style={{ padding: '10px 14px', background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.22)', borderRadius: 8 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: tgTargets.length > 0 ? 8 : 0 }}>
+                                        <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 13 }}>{s.name || `S${s.id}`}</span>
+                                        <span style={{ fontSize: 10, color: '#a78bfa', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 4, padding: '1px 6px' }}>S{s.id}</span>
+                                        <span style={{ fontSize: 10, color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 4, padding: '1px 6px' }}>⚙️ {mLabel}</span>
+                                        {s.tg_format && <span style={{ fontSize: 10, color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', borderRadius: 4, padding: '1px 6px' }}>🎨 {FORMAT_LABELS[s.tg_format] || `Format ${s.tg_format}`}</span>}
+                                        <span style={{ fontSize: 10, color: s.enabled ? '#22c55e' : '#ef4444', background: s.enabled ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${s.enabled ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, borderRadius: 4, padding: '1px 6px' }}>{s.enabled ? '▶ Active' : '⏸ Inactive'}</span>
+                                      </div>
+                                      {tgTargets.length > 0 ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                          {tgTargets.map((t, i) => (
+                                            <div key={i} style={{ fontSize: 11, color: '#94a3b8', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                                              <span style={{ color: '#38bdf8' }}>✈️ Canal : <code style={{ background: 'rgba(56,189,248,0.1)', borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace' }}>{t.channel_id || t.id || '—'}</code></span>
+                                              {t.bot_token && <span style={{ color: '#94a3b8' }}>🔑 Token : <code style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace', fontSize: 10 }}>{String(t.bot_token).substring(0, 14)}…</code></span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Pas de canal Telegram configuré</div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── TAB : COMPTES PREMIUM ── */}
+        {adminTab === 'premium-accounts' && (() => {
+          const premiumUsers = onlineUsers.filter(u => u.is_premium && !u.is_pro);
+          const ALL_BASE_CHANNELS_LIST = [
+            { id: 'C1', label: '♠ Pique Noir' }, { id: 'C2', label: '♥ Cœur Rouge' },
+            { id: 'C3', label: '♦ Carreau Doré' }, { id: 'DC', label: '♣ Double Canal' },
+            ...strategies.filter(s => !s.is_pro_only).map(s => ({ id: `S${s.id}`, label: s.name || `S${s.id}` })),
+          ];
+          return (
+            <div style={{ padding: '0 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fbbf24', margin: 0 }}>⭐ Gestion des Comptes PREMIUM</h2>
+                <span style={{ fontSize: 12, color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '3px 10px' }}>
+                  {premiumUsers.length} compte{premiumUsers.length !== 1 ? 's' : ''}
+                </span>
+                <button onClick={() => setOnlineRefresh(v => v + 1)} style={{ padding: '6px 14px', background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 7, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>↻ Actualiser</button>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16, padding: '10px 14px', background: 'rgba(251,191,36,0.05)', borderRadius: 8, border: '1px solid rgba(251,191,36,0.15)' }}>
+                ⭐ Pour chaque compte PREMIUM : attribuez les <strong style={{ color: '#38bdf8' }}>canaux visibles</strong> (📺 Canaux) et activez le <strong style={{ color: '#fbbf24' }}>compteur d'absences</strong> par canal (📊 Compteurs). L'utilisateur verra uniquement les canaux et compteurs configurés ici.
+              </div>
+              {onlineLoading ? (
+                <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Chargement…</div>
+              ) : premiumUsers.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 48, textAlign: 'center', background: 'rgba(251,191,36,0.04)', borderRadius: 12, border: '1px dashed rgba(251,191,36,0.2)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
+                  <div>Aucun compte PREMIUM. Activez le statut PREMIUM depuis l'onglet <strong>Utilisateurs</strong> ou <strong>En ligne</strong>.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {premiumUsers.map(u => {
+                    const isEditingChannels = editingAllowedChannels === u.id;
+                    const isEditingCounter = editingCounterChannels === u.id;
+                    const channelsForUser = Array.isArray(u.allowed_channels) ? u.allowed_channels : [];
+                    const counterForUser = Array.isArray(u.show_counter_channels) ? u.show_counter_channels : [];
+                    const statusDot = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : '🔴';
+                    const lastSeenStr = u.last_seen ? (u.diff_minutes != null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '') : '—';
+                    const subExpired = u.subscription_expires_at && new Date(u.subscription_expires_at) <= new Date();
+                    return (
+                      <div key={u.id} style={{ background: 'rgba(15,23,42,0.65)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 12, padding: '14px 18px' }}>
+                        {/* Identité */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 16 }}>{statusDot}</span>
+                          <span style={{ fontWeight: 800, color: '#f1f5f9', fontSize: 15 }}>{u.username}</span>
+                          {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', background: 'rgba(251,191,36,0.18)', border: '1px solid rgba(251,191,36,0.45)', borderRadius: 5, padding: '2px 8px' }}>⭐ PREMIUM</span>
+                          {subExpired && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>⏱ EXPIRÉ</span>}
+                          {isSuperAdmin && (
+                            <button title="Retirer le statut Premium" onClick={() => togglePremium(u.id)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24' }}>⭐ Retirer PREMIUM</button>
+                          )}
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
+                        </div>
+                        {/* Résumé canaux */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📺 Canaux visibles : {channelsForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun canal assigné</span> : <span style={{ color: '#38bdf8' }}>{channelsForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingChannels) { setEditingAllowedChannels(null); return; } setEditingAllowedChannels(u.id); setEditingCounterChannels(null); setAllowedChannelsEdit(channelsForUser.length > 0 ? [...channelsForUser] : []); }} style={{ padding: '4px 10px', background: isEditingChannels ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingChannels ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingChannels ? '#38bdf8' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingChannels ? '✕ Annuler' : '📺 Canaux'}
+                          </button>
+                        </div>
+                        {/* Résumé compteurs */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📊 Compteurs actifs : {counterForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun compteur activé — l'utilisateur ne voit aucun compteur</span> : <span style={{ color: '#fbbf24' }}>{counterForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingCounter) { setEditingCounterChannels(null); return; } setEditingCounterChannels(u.id); setEditingAllowedChannels(null); setCounterChannelsEdit(counterForUser.length > 0 ? [...counterForUser] : []); }} style={{ padding: '4px 10px', background: isEditingCounter ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingCounter ? '✕ Annuler' : '📊 Compteurs'}
+                          </button>
+                        </div>
+                        {/* Panel canaux */}
+                        {isEditingChannels && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.22)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, marginBottom: 4 }}>📺 Canaux visibles pour ce compte PREMIUM</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les canaux que ce Premium peut voir sur son Dashboard. Utilisez ensuite 📊 Compteurs pour activer le compteur d'absences par canal.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = allowedChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setAllowedChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#38bdf8' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedChannelsEdit(ALL_BASE_CHANNELS_LIST.map(c => c.id))} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout sélectionner</button>
+                              <button onClick={() => setAllowedChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedChannels(u.id)} disabled={allowedChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Panel compteurs */}
+                        {isEditingCounter && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce PREMIUM voit le compteur d'absences</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les canaux pour lesquels ce Premium verra le compteur d'absences en temps réel sur son Dashboard.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = counterChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setCounterChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#fbbf24' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setCounterChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Réinitialiser</button>
+                              <button onClick={() => saveCounterChannels(u.id)} disabled={counterChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{counterChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
@@ -7895,6 +8173,60 @@ function AdminPanel() {
                             </select>
                           </div>
                         </div>
+                        {/* ── Annonce planifiée ─────────────────────────────── */}
+                        {(() => {
+                          const annKey = `pro_ann_${p.id}`;
+                          const annSub = getAnnSub(annKey);
+                          return (
+                            <div style={{ marginTop: 12, border: '1px solid rgba(168,85,247,0.25)', borderRadius: 8, overflow: 'hidden' }}>
+                              <button
+                                type="button"
+                                onClick={() => setAnnSub(annKey, { open: !annSub.open })}
+                                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: annSub.open ? 'rgba(168,85,247,0.14)' : 'rgba(168,85,247,0.06)', border: 'none', cursor: 'pointer', color: '#d8b4fe', fontWeight: 700, fontSize: 12 }}>
+                                <span>📅 Annonce planifiée (optionnel)</span>
+                                <span>{annSub.open ? '▾' : '▸'}</span>
+                              </button>
+                              {annSub.open && (
+                                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(15,23,42,0.4)' }}>
+                                  <textarea
+                                    value={annSub.text}
+                                    onChange={e => setAnnSub(annKey, { text: e.target.value })}
+                                    placeholder="Texte de l'annonce…"
+                                    rows={3}
+                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+                                  />
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>Planification :</span>
+                                    {[{ v: 'interval', l: '⏱ Intervalle' }, { v: 'times', l: '🕐 Horaires fixes' }].map(opt => (
+                                      <button key={opt.v} type="button"
+                                        onClick={() => setAnnSub(annKey, { schedule_type: opt.v })}
+                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid rgba(168,85,247,${annSub.schedule_type === opt.v ? '0.5' : '0.2'})`, background: annSub.schedule_type === opt.v ? 'rgba(168,85,247,0.2)' : 'transparent', color: annSub.schedule_type === opt.v ? '#d8b4fe' : '#94a3b8' }}>
+                                        {opt.l}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  {annSub.schedule_type === 'interval' ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Toutes les</span>
+                                      <input type="number" min="0.25" step="0.25" value={annSub.interval_hours}
+                                        onChange={e => setAnnSub(annKey, { interval_hours: e.target.value })}
+                                        style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                                      />
+                                      <span style={{ fontSize: 11, color: '#94a3b8' }}>heure(s)</span>
+                                    </div>
+                                  ) : (
+                                    <input type="text" value={annSub.times_input}
+                                      onChange={e => setAnnSub(annKey, { times_input: e.target.value })}
+                                      placeholder="ex: 08:00, 12:00, 20:00"
+                                      style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.25)', background: '#0f172a', color: '#e2e8f0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                           <button
                             type="button"
@@ -7903,7 +8235,7 @@ function AdminPanel() {
                           >Annuler</button>
                           <button
                             type="button"
-                            onClick={() => saveProStratTgTarget(p.id)}
+                            onClick={async () => { await saveProStratTgTarget(p.id); saveAnnSub(`pro_ann_${p.id}`, f.bot_token, f.channel_id, p.strategy_name); }}
                             disabled={!!proStratTgSaving[p.id]}
                             style={{ fontSize: 12, padding: '7px 14px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer', fontWeight: 700 }}
                           >
@@ -8001,6 +8333,7 @@ function AdminPanel() {
                           : s.mode === 'abs_3_vers_2' ? '🃏 3→2 Abs'
                           : s.mode === 'abs_3_vers_3' ? '🃏 3→3 Abs'
                           : s.mode === 'absence_victoire' ? '🏆 Abs Victoire'
+                          : s.mode === 'absence_confirmee' ? '✅ Abs Confirmée'
                           : s.mode === 'annonce_sequence' ? '📣 Rotateur Promo'
                           : s.mode;
                         const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence';
@@ -8563,14 +8896,16 @@ function AdminPanel() {
                       ...p,
                       mode: m,
                       ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
+                      ...(m === 'absence_confirmee' ? { threshold: 1, max_rattrapage: 20 } : {}),
                       ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
-                      ...(m === 'first_card_plus6' ? { prediction_offset: 6 } : {}),
+                      ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2 } : {}),
                     }));
                   }}
                     style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
                     <option value="manquants">Manquants — prédit l'absent</option>
                     <option value="apparents">Apparents — prédit le fréquent</option>
                     <option value="absence_apparition">Absence → Apparition</option>
+                    <option value="absence_confirmee">✅ Absence Confirmée (B absences + réapparition)</option>
                     <option value="apparition_absence">Apparition → Absence</option>
                     <option value="distribution">📊 Distribution</option>
                     <option value="carte_3_vers_2">3️⃣ 3 cartes → prédit 2 cartes</option>
@@ -8661,7 +8996,7 @@ function AdminPanel() {
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
                         <div>
                           <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Décalage (N + X)</label>
                           <input type="number" min="1" max="30" value={stratForm.prediction_offset || 6}
@@ -8675,6 +9010,13 @@ function AdminPanel() {
                             onChange={e => setStratForm(prev => ({ ...prev, proche: Math.max(1, parseInt(e.target.value) || 1) }))}
                             style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
                           <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Recommandé : ≤ Décalage</div>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Écart min entre déclenchements</label>
+                          <input type="number" min="1" max="50" value={stratForm.fc_ecart ?? 2}
+                            onChange={e => setStratForm(prev => ({ ...prev, fc_ecart: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                          <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Jeux min entre 2 signaux (déf. 2)</div>
                         </div>
                         <div>
                           <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Nb cartes banquier (0 = indifférent)</label>
@@ -8790,6 +9132,17 @@ function AdminPanel() {
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
                       ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
+                    </div>
+                  )}
+                  {stratForm.mode === 'absence_confirmee' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.35)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>✅ Mode Absence Confirmée — Comment ça fonctionne ?</div>
+                      <div><strong>Phase 1 — Comptage :</strong> le moteur compte les jeux consécutifs où le costume est <em>absent</em>. Dès que le compteur atteint <strong>B</strong>, il passe en attente de confirmation.</div>
+                      <div style={{ marginTop: 6 }}><strong>Phase 2 — Confirmation :</strong> au jeu suivant (B+1), si le costume <em>réapparaît</em> → la prédiction est émise pour le jeu <code style={{ background: 'rgba(16,185,129,0.18)', padding: '1px 5px', borderRadius: 4 }}>B+1 + Décalage</code>. Si le costume est encore absent → reset sans signal.</div>
+                      <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(16,185,129,0.12)', borderRadius: 6, fontFamily: 'monospace', fontSize: 11 }}>
+                        Ex. B=2, Décalage=1 : ♠ absent jeux 1+2 → jeu 3 : ♠ réapparaît ✅ → prédit ♠ au jeu 4
+                      </div>
+                      <div style={{ marginTop: 6, color: '#34d399' }}>✔ Le seuil B, le Décalage et le Rattrapage sont configurables. Configurez les <strong>mappings</strong> pour choisir quel costume prédire à partir du costume confirmé (ex. ♠ confirmé → prédit ♥).</div>
                     </div>
                   )}
                   {stratForm.mode === 'distribution' && (
@@ -9928,18 +10281,25 @@ function AdminPanel() {
               </>}
 
               {/* ── Boutons d'action ── */}
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
-                {stratEditing !== null && (
-                  <button className="btn btn-ghost btn-sm" onClick={cancelStratForm}>✕ Annuler</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
+                {!stratForm.name.trim() && (
+                  <div style={{ textAlign: 'right', fontSize: 12, color: '#fbbf24', padding: '4px 0' }}>
+                    ⚠️ Le champ <strong>Nom de la stratégie</strong> est obligatoire pour enregistrer.
+                  </div>
                 )}
-                <button
-                  className="btn btn-gold btn-sm"
-                  style={{ background: stratEditing !== null ? 'linear-gradient(135deg,#7e22ce,#a855f7)' : 'linear-gradient(135deg,#15803d,#22c55e)', minWidth: 200 }}
-                  onClick={saveStrat}
-                  disabled={stratSaving || !stratForm.name.trim()}
-                >
-                  {stratSaving ? '⏳ Enregistrement…' : stratEditing !== null ? `💾 Mettre à jour S${stratEditing}` : `✅ Créer la stratégie`}
-                </button>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  {stratEditing !== null && (
+                    <button className="btn btn-ghost btn-sm" onClick={cancelStratForm}>✕ Annuler</button>
+                  )}
+                  <button
+                    className="btn btn-gold btn-sm"
+                    style={{ background: stratEditing !== null ? 'linear-gradient(135deg,#7e22ce,#a855f7)' : 'linear-gradient(135deg,#15803d,#22c55e)', minWidth: 200, opacity: (!stratSaving && !stratForm.name.trim()) ? 0.5 : 1 }}
+                    onClick={saveStrat}
+                    disabled={stratSaving}
+                  >
+                    {stratSaving ? '⏳ Enregistrement…' : stratEditing !== null ? `💾 Mettre à jour S${stratEditing}` : `✅ Créer la stratégie`}
+                  </button>
+                </div>
               </div>
 
               </div>{/* fin padding */}
