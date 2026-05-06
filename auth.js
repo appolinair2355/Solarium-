@@ -184,11 +184,16 @@ router.get('/me', async (req, res) => {
     // Sans ça, si l'admin active is_pro / is_admin pendant que l'utilisateur
     // est déjà connecté, sa session conserve l'ancienne valeur et toutes les
     // routes /admin/pro-* renvoient 403 → panneaux Config Pro & Telegram vides.
-    const freshIsAdmin = !!user.is_admin;
-    const freshIsPro   = !!user.is_pro;
-    if (req.session.isAdmin !== freshIsAdmin || req.session.isPro !== freshIsPro) {
-      req.session.isAdmin = freshIsAdmin;
-      req.session.isPro   = freshIsPro;
+    const freshIsAdmin   = !!user.is_admin;
+    const freshIsPro     = !!user.is_pro;
+    const freshIsPremium = !!(user.is_premium || user.account_type === 'premium');
+    const needsSync = req.session.isAdmin   !== freshIsAdmin
+                   || req.session.isPro     !== freshIsPro
+                   || req.session.isPremium !== freshIsPremium;
+    if (needsSync) {
+      req.session.isAdmin   = freshIsAdmin;
+      req.session.isPro     = freshIsPro;
+      req.session.isPremium = freshIsPremium;
       // Persiste immédiatement la session mise à jour avant de répondre
       req.session.save(() => res.json(publicUser(user)));
       return;
