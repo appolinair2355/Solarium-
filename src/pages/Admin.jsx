@@ -3343,7 +3343,7 @@ function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'strategies', 'bilan', 'config', 'tg-direct'];
+  const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
   const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
   useEffect(() => {
     if (isProOnly && !PRO_ALLOWED_TABS.includes(adminTab)) setAdminTab('config-pro');
@@ -3890,6 +3890,7 @@ function AdminPanel() {
   const [editingCounterChannels, setEditingCounterChannels] = useState(null);
   const [counterChannelsEdit, setCounterChannelsEdit] = useState([]);
   const [counterChannelsSaving, setCounterChannelsSaving] = useState(false);
+  const [expandedProUser, setExpandedProUser] = useState(null);
 
   const ALL_MODES_LIST = [
     { value: 'manquants', label: 'Absences' },
@@ -3916,7 +3917,7 @@ function AdminPanel() {
   ];
 
   useEffect(() => {
-    if (adminTab !== 'online-users') return;
+    if (!['online-users', 'pro-accounts', 'premium-accounts'].includes(adminTab)) return;
     setOnlineLoading(true);
     fetch('/api/admin/online-users', { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
@@ -5055,6 +5056,22 @@ function AdminPanel() {
     }
   };
 
+  const togglePro = async uid => {
+    const res = await fetch(`/api/admin/users/${uid}/toggle-pro`, { method: 'POST', credentials: 'include' });
+    const d = await res.json();
+    if (res.ok) {
+      showMsg(d.is_pro ? '💎 Compte passé en PRO' : '👤 Compte repassé en SIMPLE');
+      loadUsers();
+      setOnlineUsers(prev => prev.map(u => u.id === uid ? {
+        ...u,
+        is_pro: d.is_pro,
+        account_type: d.is_pro ? 'pro' : 'simple',
+      } : u));
+    } else {
+      showMsg(d.error || 'Erreur', true);
+    }
+  };
+
   const deleteUser = async uid => {
     if (!confirm('Supprimer définitivement cet utilisateur ?')) return;
     const res = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE', credentials: 'include' });
@@ -5643,15 +5660,16 @@ function AdminPanel() {
             ? [
                 { id: 'config-pro', icon: '🔷', label: 'Config Pro', highlight: true },
                 { id: 'canaux',     icon: '✈️', label: 'Telegram',     badge: tgChannels.length > 0 ? tgChannels.length : null },
-                { id: 'strategies', icon: '⚙️', label: 'Stratégies',   badge: strategies.filter(s => s.owner_user_id === user?.id).length || null },
                 { id: 'bilan',      icon: '📊', label: 'Bilan' },
                 { id: 'config',     icon: '🔀', label: 'Routage' },
                 { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
               ]
             : [
-            { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
-            { id: 'online-users',   icon: '🟢', label: 'En ligne',       badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
-            { id: 'paiements',      icon: '💳', label: 'Paiements',      badge: pendingPayments.length || null },
+            { id: 'utilisateurs',      icon: '👥', label: 'Utilisateurs',    badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
+            { id: 'online-users',      icon: '🟢', label: 'En ligne',        badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
+            { id: 'pro-accounts',      icon: '💎', label: 'Comptes PRO',     badge: onlineUsers.filter(u => u.is_pro).length || null },
+            { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
+            { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
@@ -6882,6 +6900,291 @@ function AdminPanel() {
             )}
           </div>
         )}
+
+        {/* ── TAB : COMPTES PRO ── */}
+        {adminTab === 'pro-accounts' && (() => {
+          const proUsers = onlineUsers.filter(u => u.is_pro);
+          const ALL_BASE_CHANNELS_LIST = [
+            { id: 'C1', label: '♠ Pique Noir' }, { id: 'C2', label: '♥ Cœur Rouge' },
+            { id: 'C3', label: '♦ Carreau Doré' }, { id: 'DC', label: '♣ Double Canal' },
+            ...strategies.filter(s => !s.is_pro_only).map(s => ({ id: `S${s.id}`, label: s.name || `S${s.id}` })),
+          ];
+          const FORMAT_LABELS = { 1: '⚜ Style Russe', 2: '🎲 Premium', 3: '🃏 Baccara Pro', 4: '🎰 Prédiction', 5: '🟦 Barre', 6: '🟣 Compact' };
+          return (
+            <div style={{ padding: '0 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#a78bfa', margin: 0 }}>💎 Gestion des Comptes PRO</h2>
+                <span style={{ fontSize: 12, color: '#a78bfa', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 6, padding: '3px 10px' }}>
+                  {proUsers.length} compte{proUsers.length !== 1 ? 's' : ''}
+                </span>
+                <button onClick={() => setOnlineRefresh(v => v + 1)} style={{ padding: '6px 14px', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 7, color: '#a78bfa', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>↻ Actualiser</button>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16, padding: '10px 14px', background: 'rgba(139,92,246,0.05)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.15)' }}>
+                💎 Pour chaque compte PRO : attribuez les <strong style={{ color: '#fbbf24' }}>modes de stratégie</strong> autorisés et les <strong style={{ color: '#38bdf8' }}>canaux</strong> accessibles. Visualisez les stratégies créées avec leur configuration Telegram.
+              </div>
+              {onlineLoading ? (
+                <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Chargement…</div>
+              ) : proUsers.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 48, textAlign: 'center', background: 'rgba(139,92,246,0.04)', borderRadius: 12, border: '1px dashed rgba(139,92,246,0.2)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>💎</div>
+                  <div>Aucun compte PRO. Activez le statut PRO depuis l'onglet <strong>Utilisateurs</strong> ou <strong>En ligne</strong>.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {proUsers.map(u => {
+                    const isEditingModes = editingAllowedModes === u.id;
+                    const isEditingChannels = editingAllowedChannels === u.id;
+                    const modesForUser = Array.isArray(u.allowed_modes) ? u.allowed_modes : [];
+                    const channelsForUser = Array.isArray(u.allowed_channels) ? u.allowed_channels : [];
+                    const isExpanded = expandedProUser === u.id;
+                    const proStrats = strategies.filter(s => s.is_pro_only && s.owner_user_id === u.id);
+                    const statusDot = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : '🔴';
+                    const lastSeenStr = u.last_seen ? (u.diff_minutes != null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '') : '—';
+                    return (
+                      <div key={u.id} style={{ background: 'rgba(15,23,42,0.65)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: '14px 18px' }}>
+                        {/* Identité */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 16 }}>{statusDot}</span>
+                          <span style={{ fontWeight: 800, color: '#f1f5f9', fontSize: 15 }}>{u.username}</span>
+                          {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#a78bfa', background: 'rgba(139,92,246,0.18)', border: '1px solid rgba(139,92,246,0.45)', borderRadius: 5, padding: '2px 8px' }}>💎 PRO</span>
+                          {u.is_banned && <span style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>🚫 BANNI</span>}
+                          {isSuperAdmin && (
+                            <button title="Désactiver le statut PRO" onClick={() => togglePro(u.id)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: '1px solid rgba(139,92,246,0.4)', background: 'rgba(139,92,246,0.08)', color: '#a78bfa' }}>💎 Retirer PRO</button>
+                          )}
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
+                        </div>
+                        {/* Modes */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            ⚙️ Modes autorisés : {!u.allowed_modes ? <span style={{ color: '#22c55e' }}>Tous les modes</span> : modesForUser.length === 0 ? <span style={{ color: '#ef4444' }}>Aucun</span> : <span style={{ color: '#fbbf24' }}>{modesForUser.map(mv => ALL_MODES_LIST.find(m => m.value === mv)?.label || mv).join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingModes) { setEditingAllowedModes(null); return; } setEditingAllowedModes(u.id); setEditingAllowedChannels(null); setAllowedModesEdit(modesForUser.length > 0 ? [...modesForUser] : []); }} style={{ padding: '4px 10px', background: isEditingModes ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingModes ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingModes ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingModes ? '✕ Annuler' : '⚙️ Attribuer Modes'}
+                          </button>
+                        </div>
+                        {/* Canaux */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📺 Canaux : {channelsForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun assigné</span> : <span style={{ color: '#38bdf8' }}>{channelsForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => setExpandedProUser(isExpanded ? null : u.id)} style={{ padding: '4px 10px', background: isExpanded ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isExpanded ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isExpanded ? '#22c55e' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isExpanded ? '▲ Masquer' : `📊 Stratégies (${proStrats.length})`}
+                          </button>
+                          <button onClick={() => { if (isEditingChannels) { setEditingAllowedChannels(null); return; } setEditingAllowedChannels(u.id); setEditingAllowedModes(null); setAllowedChannelsEdit(channelsForUser.length > 0 ? [...channelsForUser] : []); }} style={{ padding: '4px 10px', background: isEditingChannels ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingChannels ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingChannels ? '#38bdf8' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingChannels ? '✕ Annuler' : '📺 Canaux'}
+                          </button>
+                        </div>
+                        {/* Panel modes */}
+                        {isEditingModes && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.22)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>⚙️ Modes de stratégie autorisés</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les modes que ce compte PRO peut utiliser pour créer ses stratégies. Vide = tous les modes.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_MODES_LIST.map(m => {
+                                const active = allowedModesEdit.includes(m.value);
+                                return (
+                                  <button key={m.value} type="button" onClick={() => setAllowedModesEdit(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.05)', border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#fbbf24' : '#64748b' }}>
+                                    {m.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedModesEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedModes(u.id)} disabled={allowedModesSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedModesSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Panel canaux */}
+                        {isEditingChannels && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, marginBottom: 8 }}>📺 Canaux accessibles pour ce compte PRO</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = allowedChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setAllowedChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#38bdf8' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedChannelsEdit(ALL_BASE_CHANNELS_LIST.map(c => c.id))} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout sélectionner</button>
+                              <button onClick={() => setAllowedChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedChannels(u.id)} disabled={allowedChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Surveillance stratégies */}
+                        {isExpanded && (
+                          <div style={{ marginTop: 12, padding: '14px 16px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e', marginBottom: 10 }}>📊 Surveillance — Stratégies créées par ce compte PRO</div>
+                            {proStrats.length === 0 ? (
+                              <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', padding: '8px 0' }}>Aucune stratégie créée par ce compte PRO.</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {proStrats.map(s => {
+                                  const mLabel = ALL_MODES_LIST.find(m => m.value === s.mode)?.label || s.mode;
+                                  const tgTargets = (s.tg_targets || []).filter(t => t.channel_id || t.id);
+                                  return (
+                                    <div key={s.id} style={{ padding: '10px 14px', background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.22)', borderRadius: 8 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: tgTargets.length > 0 ? 8 : 0 }}>
+                                        <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 13 }}>{s.name || `S${s.id}`}</span>
+                                        <span style={{ fontSize: 10, color: '#a78bfa', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 4, padding: '1px 6px' }}>S{s.id}</span>
+                                        <span style={{ fontSize: 10, color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 4, padding: '1px 6px' }}>⚙️ {mLabel}</span>
+                                        {s.tg_format && <span style={{ fontSize: 10, color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', borderRadius: 4, padding: '1px 6px' }}>🎨 {FORMAT_LABELS[s.tg_format] || `Format ${s.tg_format}`}</span>}
+                                        <span style={{ fontSize: 10, color: s.enabled ? '#22c55e' : '#ef4444', background: s.enabled ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${s.enabled ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, borderRadius: 4, padding: '1px 6px' }}>{s.enabled ? '▶ Active' : '⏸ Inactive'}</span>
+                                      </div>
+                                      {tgTargets.length > 0 ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                          {tgTargets.map((t, i) => (
+                                            <div key={i} style={{ fontSize: 11, color: '#94a3b8', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                                              <span style={{ color: '#38bdf8' }}>✈️ Canal : <code style={{ background: 'rgba(56,189,248,0.1)', borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace' }}>{t.channel_id || t.id || '—'}</code></span>
+                                              {t.bot_token && <span style={{ color: '#94a3b8' }}>🔑 Token : <code style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace', fontSize: 10 }}>{String(t.bot_token).substring(0, 14)}…</code></span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Pas de canal Telegram configuré</div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── TAB : COMPTES PREMIUM ── */}
+        {adminTab === 'premium-accounts' && (() => {
+          const premiumUsers = onlineUsers.filter(u => u.is_premium && !u.is_pro);
+          const ALL_BASE_CHANNELS_LIST = [
+            { id: 'C1', label: '♠ Pique Noir' }, { id: 'C2', label: '♥ Cœur Rouge' },
+            { id: 'C3', label: '♦ Carreau Doré' }, { id: 'DC', label: '♣ Double Canal' },
+            ...strategies.filter(s => !s.is_pro_only).map(s => ({ id: `S${s.id}`, label: s.name || `S${s.id}` })),
+          ];
+          return (
+            <div style={{ padding: '0 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fbbf24', margin: 0 }}>⭐ Gestion des Comptes PREMIUM</h2>
+                <span style={{ fontSize: 12, color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '3px 10px' }}>
+                  {premiumUsers.length} compte{premiumUsers.length !== 1 ? 's' : ''}
+                </span>
+                <button onClick={() => setOnlineRefresh(v => v + 1)} style={{ padding: '6px 14px', background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 7, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>↻ Actualiser</button>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16, padding: '10px 14px', background: 'rgba(251,191,36,0.05)', borderRadius: 8, border: '1px solid rgba(251,191,36,0.15)' }}>
+                ⭐ Pour chaque compte PREMIUM : attribuez les <strong style={{ color: '#38bdf8' }}>canaux visibles</strong> (📺 Canaux) et activez le <strong style={{ color: '#fbbf24' }}>compteur d'absences</strong> par canal (📊 Compteurs). L'utilisateur verra uniquement les canaux et compteurs configurés ici.
+              </div>
+              {onlineLoading ? (
+                <div style={{ color: '#64748b', padding: 32, textAlign: 'center' }}>Chargement…</div>
+              ) : premiumUsers.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 48, textAlign: 'center', background: 'rgba(251,191,36,0.04)', borderRadius: 12, border: '1px dashed rgba(251,191,36,0.2)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
+                  <div>Aucun compte PREMIUM. Activez le statut PREMIUM depuis l'onglet <strong>Utilisateurs</strong> ou <strong>En ligne</strong>.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {premiumUsers.map(u => {
+                    const isEditingChannels = editingAllowedChannels === u.id;
+                    const isEditingCounter = editingCounterChannels === u.id;
+                    const channelsForUser = Array.isArray(u.allowed_channels) ? u.allowed_channels : [];
+                    const counterForUser = Array.isArray(u.show_counter_channels) ? u.show_counter_channels : [];
+                    const statusDot = u.status === 'en_ligne' ? '🟢' : u.status === 'actif' ? '🟡' : '🔴';
+                    const lastSeenStr = u.last_seen ? (u.diff_minutes != null ? (u.diff_minutes < 1 ? 'À l\'instant' : `Il y a ${u.diff_minutes} min`) : '') : '—';
+                    const subExpired = u.subscription_expires_at && new Date(u.subscription_expires_at) <= new Date();
+                    return (
+                      <div key={u.id} style={{ background: 'rgba(15,23,42,0.65)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 12, padding: '14px 18px' }}>
+                        {/* Identité */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 16 }}>{statusDot}</span>
+                          <span style={{ fontWeight: 800, color: '#f1f5f9', fontSize: 15 }}>{u.username}</span>
+                          {(u.first_name || u.last_name) && <span style={{ color: '#94a3b8', fontSize: 12 }}>{[u.first_name, u.last_name].filter(Boolean).join(' ')}</span>}
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', background: 'rgba(251,191,36,0.18)', border: '1px solid rgba(251,191,36,0.45)', borderRadius: 5, padding: '2px 8px' }}>⭐ PREMIUM</span>
+                          {subExpired && <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.15)', borderRadius: 5, padding: '2px 7px', fontWeight: 700 }}>⏱ EXPIRÉ</span>}
+                          {isSuperAdmin && (
+                            <button title="Retirer le statut Premium" onClick={() => togglePremium(u.id)} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24' }}>⭐ Retirer PREMIUM</button>
+                          )}
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>{lastSeenStr}</span>
+                        </div>
+                        {/* Résumé canaux */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📺 Canaux visibles : {channelsForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun canal assigné</span> : <span style={{ color: '#38bdf8' }}>{channelsForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingChannels) { setEditingAllowedChannels(null); return; } setEditingAllowedChannels(u.id); setEditingCounterChannels(null); setAllowedChannelsEdit(channelsForUser.length > 0 ? [...channelsForUser] : []); }} style={{ padding: '4px 10px', background: isEditingChannels ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingChannels ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingChannels ? '#38bdf8' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingChannels ? '✕ Annuler' : '📺 Canaux'}
+                          </button>
+                        </div>
+                        {/* Résumé compteurs */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>
+                            📊 Compteurs actifs : {counterForUser.length === 0 ? <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun compteur activé — l'utilisateur ne voit aucun compteur</span> : <span style={{ color: '#fbbf24' }}>{counterForUser.join(', ')}</span>}
+                          </div>
+                          <button onClick={() => { if (isEditingCounter) { setEditingCounterChannels(null); return; } setEditingCounterChannels(u.id); setEditingAllowedChannels(null); setCounterChannelsEdit(counterForUser.length > 0 ? [...counterForUser] : []); }} style={{ padding: '4px 10px', background: isEditingCounter ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${isEditingCounter ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 6, color: isEditingCounter ? '#fbbf24' : '#94a3b8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            {isEditingCounter ? '✕ Annuler' : '📊 Compteurs'}
+                          </button>
+                        </div>
+                        {/* Panel canaux */}
+                        {isEditingChannels && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.22)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, marginBottom: 4 }}>📺 Canaux visibles pour ce compte PREMIUM</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les canaux que ce Premium peut voir sur son Dashboard. Utilisez ensuite 📊 Compteurs pour activer le compteur d'absences par canal.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = allowedChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setAllowedChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#38bdf8' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setAllowedChannelsEdit(ALL_BASE_CHANNELS_LIST.map(c => c.id))} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout sélectionner</button>
+                              <button onClick={() => setAllowedChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Tout décocher</button>
+                              <button onClick={() => saveAllowedChannels(u.id)} disabled={allowedChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{allowedChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                        {/* Panel compteurs */}
+                        {isEditingCounter && (
+                          <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>📊 Canaux dont ce PREMIUM voit le compteur d'absences</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>Cochez les canaux pour lesquels ce Premium verra le compteur d'absences en temps réel sur son Dashboard.</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                              {ALL_BASE_CHANNELS_LIST.map(ch => {
+                                const active = counterChannelsEdit.includes(ch.id);
+                                return (
+                                  <button key={ch.id} type="button" onClick={() => setCounterChannelsEdit(prev => active ? prev.filter(x => x !== ch.id) : [...prev, ch.id])} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.04)', border: active ? '1px solid rgba(251,191,36,0.5)' : '1px solid rgba(255,255,255,0.1)', color: active ? '#fbbf24' : '#64748b' }}>
+                                    {ch.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => setCounterChannelsEdit([])} style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}>Réinitialiser</button>
+                              <button onClick={() => saveCounterChannels(u.id)} disabled={counterChannelsSaving} style={{ padding: '5px 14px', background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 6, color: '#22c55e', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{counterChannelsSaving ? 'Sauvegarde…' : '✓ Sauvegarder'}</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
