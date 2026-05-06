@@ -1291,6 +1291,36 @@ async function pingLicense(key, ip = null) {
   );
 }
 
+// ── Upsert d'une licence (pour import/restore) ───────────────────────────────
+async function upsertLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO strategy_licenses
+       (purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (license_key) DO UPDATE SET
+       strategy_id   = EXCLUDED.strategy_id,
+       strategy_name = EXCLUDED.strategy_name,
+       status        = EXCLUDED.status,
+       admin_note    = EXCLUDED.admin_note,
+       deploy_count  = EXCLUDED.deploy_count,
+       deploy_ip     = EXCLUDED.deploy_ip
+     RETURNING *`,
+    [
+      purchase_id  || null,
+      user_id      || null,
+      String(strategy_id || ''),
+      strategy_name || '',
+      license_key,
+      status || 'active',
+      admin_note   || null,
+      deploy_count || 0,
+      deploy_ip    || null,
+    ]
+  );
+  return r.rows[0];
+}
+
 async function getStrategyLicenses(strategyId) {
   if (!USE_PG) return [];
   const r = await pgPool.query(
@@ -1341,5 +1371,5 @@ module.exports = {
   createDeployLog, updateDeployLog, getDeployLogs,
   getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
   createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
-  getStrategyLicenses, getUserLicenses,
+  getStrategyLicenses, getUserLicenses, upsertLicense,
 };

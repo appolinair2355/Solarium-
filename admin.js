@@ -1,11 +1,13 @@
-const express = require('express');
-const bcrypt  = require('bcryptjs');
-const fetch   = require('node-fetch');
-const db      = require('./db');
-const router  = express.Router();
-const fs      = require('fs');
-const path    = require('path');
-const { spawn } = require('child_process');
+const express              = require('express');
+const bcrypt               = require('bcryptjs');
+const fetch                = require('node-fetch');
+const crypto               = require('crypto');
+const fs                   = require('fs');
+const path                 = require('path');
+const { spawn }            = require('child_process');
+const db                   = require('./db');
+const { generateStrategyZip } = require('./zip-generator');
+const router               = express.Router();
 
 function genPassword(len = 10) {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -1783,15 +1785,49 @@ async function applyUpdateBlock(type, data) {
   // ── Paramètres globaux bruts ──────────────────────────────────────
   if (type === 'raw_settings') {
     if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet clé→valeur'); return result; }
-    const allowed = ['max_rattrapage', 'tg_msg_format', 'render_external_url', 'render_db_url', 'bot_token'];
+    const allowed = [
+      'max_rattrapage', 'tg_msg_format',
+      'render_external_url', 'render_db_url', 'render_api_key', 'render_service_id',
+      'bot_token', 'bot_admin_tg_id',
+      'site_url', 'admin_signature', 'strategy_promo_config',
+    ];
     for (const [key, val] of Object.entries(data)) {
       if (!allowed.includes(key)) { result.errors.push(`Paramètre "${key}" non autorisé (valides: ${allowed.join(', ')})`); continue; }
       if (val !== null && val !== undefined) {
-        await db.setSetting(key, String(val));
+        const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        await db.setSetting(key, strVal);
         result.applied++;
-        result.detail = (result.detail || '') + `\n• ${key} = ${key.includes('token') || key.includes('url') ? '***' : val}`;
+        const masked = key.includes('token') || key.includes('url') || key.includes('key') ? '***' : strVal;
+        result.detail = (result.detail || '') + `\n• ${key} = ${masked}`;
       }
     }
+    return result;
+  }
+
+  // ── Import des licences ───────────────────────────────────────────────────
+  if (type === 'licenses') {
+    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de licences'); return result; }
+    for (const lic of data) {
+      if (!lic.license_key) { result.errors.push('Licence sans license_key ignorée'); continue; }
+      try {
+        await db.upsertLicense({
+          purchase_id:   lic.purchase_id   || null,
+          user_id:       lic.user_id       || null,
+          strategy_id:   lic.strategy_id   || '',
+          strategy_name: lic.strategy_name || '',
+          license_key:   lic.license_key,
+          status:        lic.status        || 'active',
+          admin_note:    lic.admin_note    || null,
+          deploy_count:  lic.deploy_count  || 0,
+          deploy_ip:     lic.deploy_ip     || null,
+        });
+        result.applied++;
+      } catch (e) {
+        result.errors.push(`Licence ${lic.license_key}: ${e.message}`);
+      }
+    }
+    result.type   = 'licenses';
+    result.detail = `${result.applied} licence(s) importée(s)`;
     return result;
   }
 
@@ -1826,16 +1862,26 @@ async function applyUpdateBlock(type, data) {
       blocks.push({ type: 'styles',            data: data.ui.ui_styles });
     if (data.settings?.tg_msg_format)
       blocks.push({ type: 'format',            data: { format_id: data.settings.tg_msg_format } });
-    // Paramètres bruts (render_db_url, bot_token, etc.)
-    const rawKeys = ['max_rattrapage', 'render_external_url', 'render_db_url', 'bot_token'];
+    // Tous les paramètres bruts (URLs, tokens, liens, clés Render...)
+    const rawKeys = [
+      'max_rattrapage', 'tg_msg_format',
+      'render_external_url', 'render_db_url', 'render_api_key', 'render_service_id',
+      'bot_token', 'bot_admin_tg_id',
+      'site_url', 'admin_signature', 'strategy_promo_config',
+    ];
     const rawData = {};
-    for (const k of rawKeys) { if (data.settings?.[k]) rawData[k] = data.settings[k]; }
+    for (const k of rawKeys) {
+      if (data.settings?.[k] != null) rawData[k] = data.settings[k];
+    }
     if (Object.keys(rawData).length) blocks.push({ type: 'raw_settings', data: rawData });
     // État moteur & bilan
     if (data.bilan_last      && typeof data.bilan_last === 'object')
       blocks.push({ type: 'bilan_last',      data: data.bilan_last });
     if (data.engine_absences && typeof data.engine_absences === 'object')
       blocks.push({ type: 'engine_absences', data: data.engine_absences });
+    // Licences
+    if (Array.isArray(data.licenses) && data.licenses.length)
+      blocks.push({ type: 'licenses', data: data.licenses });
 
     const subResults = [];
     for (const b of blocks) subResults.push(await applyUpdateBlock(b.type, b.data));
@@ -1952,6 +1998,12 @@ router.get('/export-config', requireAdmin, async (req, res) => {
     const renderUrl        = await db.getSetting('render_external_url');
     const renderDbUrl      = await db.getSetting('render_db_url');
     const botToken         = await db.getSetting('bot_token');
+    const botAdminTgId     = await db.getSetting('bot_admin_tg_id');
+    const renderApiKey     = await db.getSetting('render_api_key');
+    const renderServiceId  = await db.getSetting('render_service_id');
+    const siteUrl          = await db.getSetting('site_url');
+    const adminSignature   = await db.getSetting('admin_signature');
+    const stratPromoConfig = await db.getSetting('strategy_promo_config');
 
     // ── Telegram ───────────────────────────────────────────────────────
     const defaultTg        = await db.getSetting('default_strategies_tg');
@@ -1976,14 +2028,17 @@ router.get('/export-config', requireAdmin, async (req, res) => {
     const bilanLast        = await db.getSetting('bilan_last');
     const engineAbsences   = await db.getSetting('engine_absences');
 
+    // ── Licences ───────────────────────────────────────────────────────
+    const licenses = await db.getLicenses().catch(() => []);
+
     const safeParse = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
     const payload = {
       _meta: {
-        version: '3.1',
+        version: '3.2',
         exported_at: new Date().toISOString(),
         project: 'Baccarat Pro',
-        description: 'Export COMPLET de la configuration — peut être réimporté via /admin/apply-update',
+        description: 'Export COMPLET de la configuration + licences — réimportable via /admin/apply-update',
       },
 
       // ── Stratégies ───────────────────────────────────────────────────
@@ -1991,13 +2046,19 @@ router.get('/export-config', requireAdmin, async (req, res) => {
       channels,
       telegram_channels: tgChannels,
 
-      // ── Paramètres ───────────────────────────────────────────────────
+      // ── Paramètres (tous les liens/URLs/tokens) ───────────────────────
       settings: {
-        tg_msg_format:       parseInt(tgFormat)  || 1,
-        max_rattrapage:      parseInt(maxRattrDB) || 2,
-        render_external_url: renderUrl  || null,
-        render_db_url:       renderDbUrl || null,
-        bot_token:           botToken   || null,
+        tg_msg_format:        parseInt(tgFormat)  || 1,
+        max_rattrapage:       parseInt(maxRattrDB) || 2,
+        render_external_url:  renderUrl       || null,
+        render_db_url:        renderDbUrl     || null,
+        bot_token:            botToken        || null,
+        bot_admin_tg_id:      botAdminTgId   || null,
+        render_api_key:       renderApiKey   || null,
+        render_service_id:    renderServiceId || null,
+        site_url:             siteUrl        || null,
+        admin_signature:      adminSignature || null,
+        strategy_promo_config: safeParse(stratPromoConfig, null),
       },
 
       // ── Telegram ─────────────────────────────────────────────────────
@@ -2026,6 +2087,20 @@ router.get('/export-config', requireAdmin, async (req, res) => {
       // ── État moteur & bilan ───────────────────────────────────────────
       bilan_last:       safeParse(bilanLast,       null),
       engine_absences:  safeParse(engineAbsences,  null),
+
+      // ── Licences (strategy_licenses) ─────────────────────────────────
+      licenses: licenses.map(l => ({
+        license_key:   l.license_key,
+        strategy_id:   l.strategy_id,
+        strategy_name: l.strategy_name,
+        user_id:       l.user_id,
+        purchase_id:   l.purchase_id,
+        status:        l.status,
+        admin_note:    l.admin_note    || null,
+        deploy_count:  l.deploy_count  || 0,
+        deploy_ip:     l.deploy_ip     || null,
+        created_at:    l.created_at,
+      })),
     };
 
     res.setHeader('Content-Type', 'application/json');
@@ -2659,7 +2734,7 @@ router.get('/project-backup/zip', requireAdmin, (req, res) => {
     const distDir  = path.join(root, 'dist');
     const distFiles = fs.existsSync(distDir) ? scanDistFiles(distDir, 'dist') : [];
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appolinaire-${date}.zip`;
+    const filename = `baccarat-pro-complet-${date}.zip`;
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -2694,7 +2769,11 @@ const RENDER_INCLUDE_ROOT_FILES = new Set([
   'package.json', 'index.js', 'admin.js', 'auth.js', 'engine.js', 'db.js',
   'games.js', 'render-sync.js', 'tg-history.js', 'tg-direct.js',
   'predictions.js', 'broadcast.js', 'render.yaml', '.nvmrc',
-  'comptages.js',
+  'comptages.js', 'telegram-service.js', 'telegram-route.js', 'bilan.js',
+  'bot-host.js', 'payment-route.js', 'shop.js', 'license-route.js',
+  'zip-generator.js', 'prog.js', 'annonce-sequence.js', 'announcement-sender.js',
+  'cartes-store.js', 'live-broadcast.js', 'system-logs-route.js', 'jsondb.js',
+  'generate-doc.js', 'ine.js', 'ai-route.js',
 ]);
 const RENDER_INCLUDE_DIRS = ['src', 'dist', 'public', 'scripts', 'middleware', 'utils', 'routes', 'lib'];
 const RENDER_EXCLUDE_DIRS = new Set([
@@ -2705,6 +2784,14 @@ const RENDER_EXCLUDE_DIRS = new Set([
 const RENDER_EXCLUDE_PATTERNS = [
   /\.env(\..*)?$/i, /\.log$/i, /\.tar\.gz$/i, /\.zip$/i, /\.map$/i,
   /\.DS_Store$/i, /^\._/, /\.bak$/i, /\.swp$/i, /~$/,
+  // Images
+  /\.(png|jpg|jpeg|gif|webp|svg|ico|bmp|tiff|avif|raw|heic|psd)$/i,
+  // Vidéos & audio
+  /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|mp3|wav|ogg|aac|flac)$/i,
+  // Documents binaires
+  /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i,
+  // Polices
+  /\.(ttf|otf|woff|woff2|eot)$/i,
 ];
 
 function _isExcludedRender(name) {
@@ -2797,7 +2884,7 @@ router.get('/project-backup/zip-render', requireAdmin, (req, res) => {
     });
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appomain-${date}.zip`;
+    const filename = `baccarat-pro-render-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -2846,7 +2933,7 @@ router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
     }
 
     const date     = new Date().toISOString().slice(0, 10);
-    const filename = `appolinaire-diff-${date}.zip`;
+    const filename = `baccarat-pro-diff-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -4491,8 +4578,6 @@ router.get('/strategy-purchases/:id/screenshot', requireAdmin, async (req, res) 
 });
 
 // Valider un achat + générer le ZIP de déploiement
-const { generateStrategyZip } = require('./zip-generator');
-const crypto = require('crypto');
 router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) => {
   const purchaseId = parseInt(req.params.id);
   try {

@@ -343,4 +343,6 @@ router.get('/stream', requireActiveSub, (req, res) => {
   });
 });
 
-module.exports = { router, fetchGames };
+function getGamesCache() { return gamesCache; }
+
+module.exports = { router, fetchGames, getGamesCache };

@@ -10,9 +10,11 @@
  *   5. Configuration bot + Téléchargement du ZIP (POST /api/shop/purchase/:id/download-configured)
  */
 
-const express = require('express');
-const router  = express.Router();
-const db      = require('./db');
+const express                 = require('express');
+const crypto                  = require('crypto');
+const db                      = require('./db');
+const { generateStrategyZip } = require('./zip-generator');
+const router                  = express.Router();
 
 const WHATSAPP_NUMBER = '+2290195501564';
 const WHATSAPP_LINK   = 'https://wa.me/2290195501564';
@@ -209,7 +211,6 @@ router.post('/purchase/:id/download-configured', requireAuth, async (req, res) =
     ).catch(() => {});
 
     // Générer le ZIP avec la config pré-remplie
-    const { generateStrategyZip } = require('./zip-generator');
     const zipBuf = await generateStrategyZip(strat, licenseKey, serverUrl, botConfig);
 
     const filename = `baccarat-bot-S${purchase.strategy_id}-${purchase.strategy_name.replace(/\s+/g, '_')}.zip`;
@@ -248,7 +249,6 @@ router.get('/purchase/:id/download', requireAuth, async (req, res) => {
         ).catch(() => ({ rows: [] }));
         const licenseKey = licRes.rows[0]?.license_key || '';
         const serverUrl  = process.env.APP_URL || (req.protocol + '://' + req.get('host'));
-        const { generateStrategyZip } = require('./zip-generator');
         const zipBuf = await generateStrategyZip(strat, licenseKey, serverUrl, botConfig);
         const filename = `baccarat-bot-S${purchase.strategy_id}-${purchase.strategy_name.replace(/\s+/g, '_')}.zip`;
         res.setHeader('Content-Type', 'application/zip');
