@@ -260,6 +260,7 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS strategy_purchases_user_idx   ON strategy_purchases(user_id);
       CREATE INDEX IF NOT EXISTS strategy_purchases_status_idx ON strategy_purchases(status);
+      ALTER TABLE strategy_purchases ADD COLUMN IF NOT EXISTS bot_config TEXT;
 
       CREATE TABLE IF NOT EXISTS strategy_licenses (
         id              SERIAL PRIMARY KEY,

@@ -7,24 +7,28 @@
  *   2. Achat → lien WhatsApp pré-rempli (POST /api/shop/purchase)
  *   3. Upload capture d'écran (POST /api/shop/purchase/:id/screenshot)
  *   4. Admin valide → ZIP généré (voir admin.js)
- *   5. Téléchargement du ZIP (GET /api/shop/purchase/:id/download)
+ *   5. Configuration bot + Téléchargement du ZIP (POST /api/shop/purchase/:id/download-configured)
  */
 
 const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
 
-const STRATEGY_PRICE_USD = 75;
-const WHATSAPP_NUMBER    = '+2290195501564';
-const WHATSAPP_LINK      = 'https://wa.me/2290195501564';
+const WHATSAPP_NUMBER = '+2290195501564';
+const WHATSAPP_LINK   = 'https://wa.me/2290195501564';
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   next();
 }
 
+// Prix depuis la fiche promo (fallback à 75 $ si non défini)
+function getStrategyPrice(promo) {
+  const p = parseFloat(promo?.price_usd);
+  return Number.isFinite(p) && p > 0 ? p : 75;
+}
+
 // ── Catalogue public (authentification requise) ─────────────────────────────
-// Retourne la liste des stratégies ayant une fiche de vente activée
 router.get('/catalog', requireAuth, async (req, res) => {
   try {
     const raw     = await db.getSetting('strategy_promo_config').catch(() => null);
@@ -36,11 +40,11 @@ router.get('/catalog', requireAuth, async (req, res) => {
     const catalog = strats
       .filter(s => promos[String(s.id)]?.enabled)
       .map(s => ({
-        id:          String(s.id),
-        name:        s.name,
-        mode:        s.mode,
-        promo:       promos[String(s.id)],
-        price_usd:   STRATEGY_PRICE_USD,
+        id:        String(s.id),
+        name:      s.name,
+        mode:      s.mode,
+        promo:     promos[String(s.id)],
+        price_usd: getStrategyPrice(promos[String(s.id)]),
       }));
 
     res.json({ catalog, whatsapp: { number: WHATSAPP_NUMBER, link: WHATSAPP_LINK } });
@@ -66,6 +70,8 @@ router.post('/purchase', requireAuth, async (req, res) => {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Session invalide' });
 
+    const price = getStrategyPrice(promo);
+
     // Vérifier si une demande est déjà en cours pour cette stratégie
     const existing = await db.pool.query(
       `SELECT id, status FROM strategy_purchases
@@ -85,13 +91,13 @@ router.post('/purchase', requireAuth, async (req, res) => {
     const r = await db.pool.query(
       `INSERT INTO strategy_purchases (user_id, strategy_id, strategy_name, amount_usd, status)
        VALUES ($1,$2,$3,$4,'awaiting_screenshot') RETURNING *`,
-      [user.id, String(strategy_id), strat.name, STRATEGY_PRICE_USD]
+      [user.id, String(strategy_id), strat.name, price]
     );
     const purchase = r.rows[0];
 
     const msg =
 `Je veux payer la stratégie ${strat.name} (S${strategy_id}).
-Montant : ${STRATEGY_PRICE_USD} $
+Montant : ${price} $
 Identifiant compte : ${user.username}
 Référence achat : #${purchase.id}
 
@@ -103,7 +109,7 @@ Je suis d'accord pour le prix.`;
       ok: true,
       purchase: { id: purchase.id, status: purchase.status },
       strategy: { id: strategy_id, name: strat.name },
-      amount_usd: STRATEGY_PRICE_USD,
+      amount_usd: price,
       whatsapp_link: whatsappLink,
       whatsapp_number: WHATSAPP_NUMBER,
     });
@@ -113,7 +119,7 @@ Je suis d'accord pour le prix.`;
 // ── Upload capture d'écran de paiement (étape 2) ────────────────────────────
 router.post('/purchase/:id/screenshot', requireAuth, async (req, res) => {
   const purchaseId = parseInt(req.params.id);
-  const { screenshot } = req.body; // base64 data URL
+  const { screenshot } = req.body;
   if (!screenshot) return res.status(400).json({ error: 'screenshot manquant' });
 
   try {
@@ -140,17 +146,83 @@ router.get('/my-purchases', requireAuth, async (req, res) => {
     const r = await db.pool.query(
       `SELECT id, strategy_id, strategy_name, amount_usd, status, admin_note,
               admin_validated_at, created_at,
-              (zip_data IS NOT NULL) AS has_zip
+              (zip_data IS NOT NULL) AS has_zip,
+              bot_config
        FROM strategy_purchases
        WHERE user_id=$1
        ORDER BY created_at DESC`,
       [req.session.userId]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(row => {
+      let botConfig = null;
+      try { botConfig = row.bot_config ? JSON.parse(row.bot_config) : null; } catch {}
+      return { ...row, bot_config: botConfig };
+    }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Télécharger le ZIP (si validé) ──────────────────────────────────────────
+// ── Téléchargement configuré (avec canal + token + format pré-remplis) ───────
+// POST /api/shop/purchase/:id/download-configured
+// Body: { channel_id, bot_token, format_id }
+router.post('/purchase/:id/download-configured', requireAuth, async (req, res) => {
+  const purchaseId = parseInt(req.params.id);
+  const { channel_id, bot_token, format_id } = req.body;
+
+  if (!channel_id?.trim()) return res.status(400).json({ error: 'ID du canal requis' });
+  if (!bot_token?.trim())  return res.status(400).json({ error: 'Token API du bot requis' });
+
+  try {
+    const r = await db.pool.query(
+      'SELECT * FROM strategy_purchases WHERE id=$1 AND user_id=$2',
+      [purchaseId, req.session.userId]
+    );
+    const purchase = r.rows[0];
+    if (!purchase) return res.status(404).json({ error: 'Achat introuvable' });
+    if (purchase.status !== 'validated') return res.status(403).json({ error: 'Achat non encore validé' });
+    if (!purchase.zip_data) return res.status(404).json({ error: 'Fichier de base non disponible — contactez l\'admin' });
+
+    // Récupérer la stratégie
+    const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+    const strats    = rawStrats ? JSON.parse(rawStrats) : [];
+    const strat     = strats.find(s => String(s.id) === String(purchase.strategy_id));
+    if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
+
+    // Récupérer la clé de licence
+    const licRes = await db.pool.query(
+      'SELECT license_key FROM strategy_licenses WHERE purchase_id=$1 LIMIT 1',
+      [purchaseId]
+    ).catch(() => ({ rows: [] }));
+    const licenseKey = licRes.rows[0]?.license_key || '';
+
+    const serverUrl = process.env.APP_URL || (req.protocol + '://' + req.get('host'));
+
+    const botConfig = {
+      channel_id: channel_id.trim(),
+      bot_token:  bot_token.trim(),
+      format_id:  parseInt(format_id) || 1,
+    };
+
+    // Sauvegarder la config en base (pour ré-téléchargement futur)
+    await db.pool.query(
+      'UPDATE strategy_purchases SET bot_config=$1, updated_at=NOW() WHERE id=$2',
+      [JSON.stringify(botConfig), purchaseId]
+    ).catch(() => {});
+
+    // Générer le ZIP avec la config pré-remplie
+    const { generateStrategyZip } = require('./zip-generator');
+    const zipBuf = await generateStrategyZip(strat, licenseKey, serverUrl, botConfig);
+
+    const filename = `baccarat-bot-S${purchase.strategy_id}-${purchase.strategy_name.replace(/\s+/g, '_')}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(zipBuf);
+  } catch (e) {
+    console.error('[download-configured]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Télécharger le ZIP brut (si déjà configuré, régénère avec config sauvegardée) ─
 router.get('/purchase/:id/download', requireAuth, async (req, res) => {
   try {
     const r = await db.pool.query(
@@ -162,6 +234,30 @@ router.get('/purchase/:id/download', requireAuth, async (req, res) => {
     if (purchase.status !== 'validated') return res.status(403).json({ error: 'Achat non encore validé' });
     if (!purchase.zip_data) return res.status(404).json({ error: 'Fichier non disponible' });
 
+    // Si une config bot est sauvegardée, régénérer avec cette config
+    let botConfig = null;
+    try { botConfig = purchase.bot_config ? JSON.parse(purchase.bot_config) : null; } catch {}
+
+    if (botConfig?.channel_id && botConfig?.bot_token) {
+      const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+      const strats    = rawStrats ? JSON.parse(rawStrats) : [];
+      const strat     = strats.find(s => String(s.id) === String(purchase.strategy_id));
+      if (strat) {
+        const licRes = await db.pool.query(
+          'SELECT license_key FROM strategy_licenses WHERE purchase_id=$1 LIMIT 1', [purchase.id]
+        ).catch(() => ({ rows: [] }));
+        const licenseKey = licRes.rows[0]?.license_key || '';
+        const serverUrl  = process.env.APP_URL || (req.protocol + '://' + req.get('host'));
+        const { generateStrategyZip } = require('./zip-generator');
+        const zipBuf = await generateStrategyZip(strat, licenseKey, serverUrl, botConfig);
+        const filename = `baccarat-bot-S${purchase.strategy_id}-${purchase.strategy_name.replace(/\s+/g, '_')}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(zipBuf);
+      }
+    }
+
+    // Fallback : ZIP de base
     const buf = Buffer.from(purchase.zip_data, 'base64');
     const filename = `baccarat-bot-S${purchase.strategy_id}-${purchase.strategy_name.replace(/\s+/g, '_')}.zip`;
     res.setHeader('Content-Type', 'application/zip');

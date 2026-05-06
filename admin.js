@@ -4620,6 +4620,7 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
     const proStrategies   = safeParse(await db.getSetting('pro_strategies'), []);
     const tgChannels      = await db.getTelegramConfigs(false).catch(() => []);
     const strategyRoutes  = await db.getAllStrategyRoutes().catch(() => ({}));
+    const customFormats   = await db.getCustomFormats().catch(() => []);
 
     // Paramètres clés
     const botToken        = await db.getSetting('bot_token').catch(() => null);
@@ -4630,7 +4631,7 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
 
     const payload = {
       _meta: {
-        version: '2.0',
+        version: '2.1',
         exported_at: new Date().toISOString(),
         project: 'Baccarat Pro',
         counts: {
@@ -4639,6 +4640,8 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
           pro_strategies: proStrategies.length,
           telegram_channels: tgChannels.length,
           strategy_routes: Object.keys(strategyRoutes).length,
+          custom_formats: customFormats.length,
+          announcements: announcements.length,
         },
       },
 
@@ -4665,7 +4668,7 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
         created_at:                    u.created_at || null,
       })),
 
-      // ── Stratégies ────────────────────────────────────────────────────────
+      // ── Stratégies (inclut tg_targets, tg_format, relance_*, pred_duration) ─
       strategies,
       pro_strategies: proStrategies,
 
@@ -4677,13 +4680,19 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
       })),
 
       // ── Routage stratégies → canaux ───────────────────────────────────────
-      // Format: { "C1": [{tg_id, channel_name}], "S7": [...], ... }
       strategy_routes: Object.fromEntries(
         Object.entries(strategyRoutes).map(([strat, channels]) => [
           strat,
           channels.map(c => ({ tg_id: c.tg_id, channel_name: c.channel_name })),
         ])
       ),
+
+      // ── Formats Telegram personnalisés ────────────────────────────────────
+      custom_formats: customFormats.map(f => ({
+        name:       f.name,
+        template:   f.template,
+        parse_mode: f.parse_mode || 'HTML',
+      })),
 
       // ── Paramètres importants ─────────────────────────────────────────────
       settings: {
@@ -4707,34 +4716,58 @@ router.get('/db-export-data', requireAdmin, async (req, res) => {
 
 router.post('/db-import-data', requireAdmin, async (req, res) => {
   try {
-    const { users, strategies, pro_strategies, telegram_channels, strategy_routes, settings, _meta } = req.body || {};
+    const { users, strategies, pro_strategies, telegram_channels, strategy_routes, settings, custom_formats, _meta } = req.body || {};
     const results = {
-      users_ok: 0, users_skip: 0,
-      strategies_ok: 0, pro_strategies_ok: 0,
-      channels_ok: 0, routes_ok: 0,
+      users_added:   [],   // Nouveaux utilisateurs importés
+      users_existing:[],   // Utilisateurs déjà présents (non modifiés)
+      users_errors:  [],
+      strategies_added:   [],  // Nouvelles stratégies ajoutées
+      strategies_updated: [],  // Stratégies existantes — config TG mise à jour
+      strategies_existing:[],  // Stratégies déjà présentes (identiques)
+      pro_strategies_ok: 0,
+      channels_added:   0,
+      channels_existing: 0,
+      routes_ok: 0,
       settings_ok: 0,
+      custom_formats_added:    0,
+      custom_formats_existing: 0,
+      announcements_added:    0,
+      announcements_existing: 0,
       errors: [],
     };
 
-    // ── Import utilisateurs ──────────────────────────────────────────────────
+    // ── Import utilisateurs (fusion intelligente — ne touche JAMAIS aux comptes existants) ──
+    const PROTECTED_ADMINS = ['buzzinfluence', 'sossoukouam'];
     if (Array.isArray(users)) {
       for (const u of users) {
         if (!u.username) { results.errors.push(`Utilisateur sans nom ignoré`); continue; }
+        // Admins protégés : jamais écrasés par l'import
+        if (PROTECTED_ADMINS.includes(u.username)) {
+          results.users_existing.push(u.username);
+          continue;
+        }
         try {
+          // Vérifie d'abord si l'utilisateur existe déjà
+          const existing = await db.getUserByUsername(u.username).catch(() => null);
+          if (existing) {
+            results.users_existing.push(u.username);
+            continue; // Ne pas écraser les données existantes
+          }
+          // Nouvel utilisateur — insertion uniquement
           await db.createUser({
-            username:                    u.username,
-            email:                       u.email || null,
-            password_hash:               u.password_hash || await require('bcryptjs').hash(u.plain_password || 'changeme', 10),
-            plain_password:              u.plain_password || null,
-            first_name:                  u.first_name || null,
-            last_name:                   u.last_name || null,
-            is_admin:                    u.is_admin || false,
-            is_approved:                 u.is_approved || false,
-            is_premium:                  u.is_premium || false,
-            subscription_expires_at:     u.subscription_expires_at || null,
+            username:                      u.username,
+            email:                         u.email || null,
+            password_hash:                 u.password_hash || await require('bcryptjs').hash(u.plain_password || 'changeme', 10),
+            plain_password:                u.plain_password || null,
+            first_name:                    u.first_name || null,
+            last_name:                     u.last_name || null,
+            is_admin:                      u.is_admin || false,
+            is_approved:                   u.is_approved || false,
+            is_premium:                    u.is_premium || false,
+            subscription_expires_at:       u.subscription_expires_at || null,
             subscription_duration_minutes: u.subscription_duration_minutes || null,
-            account_type:                u.account_type || 'simple',
-            promo_code:                  u.promo_code || null,
+            account_type:                  u.account_type || 'simple',
+            promo_code:                    u.promo_code || null,
           });
           const saved = await db.getUserByUsername(u.username);
           if (saved) {
@@ -4746,10 +4779,10 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
             if (u.show_counter_channels !== undefined) extras.show_counter_channels = u.show_counter_channels;
             if (Object.keys(extras).length) await db.updateUser(saved.id, extras);
           }
-          results.users_ok++;
+          results.users_added.push(u.username);
         } catch (e) {
           if (e.code === '23505' || (e.message || '').includes('taken')) {
-            results.users_skip++;
+            results.users_existing.push(u.username);
           } else {
             results.errors.push(`Utilisateur "${u.username}" : ${e.message}`);
           }
@@ -4757,11 +4790,55 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
       }
     }
 
-    // ── Import stratégies personnalisées ─────────────────────────────────────
+    // ── Import stratégies personnalisées (fusion intelligente) ───────────────
+    // • Stratégie inconnue → ajoutée
+    // • Stratégie existante → mise à jour de la config TG uniquement
+    //   (tg_targets, tg_format, relance_*, pred_duration_minutes)
     if (Array.isArray(strategies) && strategies.length > 0) {
-      await saveStrategies(strategies);
-      results.strategies_ok = strategies.length;
-      try { require('./engine').reloadCustomStrategies(strategies); } catch {}
+      const rawExisting = await db.getSetting('custom_strategies').catch(() => null);
+      let existingStrats = rawExisting ? JSON.parse(rawExisting) : [];
+      let changed = false;
+
+      // Champs TG/relance à mettre à jour sur les stratégies existantes
+      const TG_FIELDS = ['tg_targets', 'tg_format', 'relance_enabled', 'relance_pertes',
+                         'relance_types', 'relance_nombre', 'pred_duration_minutes'];
+
+      for (const s of strategies) {
+        const nameKey = (s.name || '').toLowerCase();
+        const idKey   = String(s.id || '');
+        // Cherche une stratégie existante par nom OU par id
+        const existIdx = existingStrats.findIndex(e =>
+          e.name?.toLowerCase() === nameKey || (idKey && String(e.id) === idKey)
+        );
+
+        if (existIdx >= 0) {
+          // Stratégie existante : on met à jour uniquement les champs TG/relance
+          const orig = existingStrats[existIdx];
+          let tgUpdated = false;
+          for (const f of TG_FIELDS) {
+            if (s[f] !== undefined && JSON.stringify(s[f]) !== JSON.stringify(orig[f])) {
+              existingStrats[existIdx] = { ...existingStrats[existIdx], [f]: s[f] };
+              tgUpdated = true;
+              changed = true;
+            }
+          }
+          if (tgUpdated) {
+            results.strategies_updated.push(s.name || idKey);
+          } else {
+            results.strategies_existing.push(s.name || idKey);
+          }
+        } else {
+          // Nouvelle stratégie — on l'ajoute
+          existingStrats.push(s);
+          results.strategies_added.push(s.name || idKey);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        await saveStrategies(existingStrats);
+        try { require('./engine').reloadCustomStrategies(existingStrats); } catch {}
+      }
     }
 
     // ── Import stratégies Pro ─────────────────────────────────────────────────
@@ -4770,16 +4847,23 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
       results.pro_strategies_ok = pro_strategies.length;
     }
 
-    // ── Import canaux Telegram ────────────────────────────────────────────────
-    // Upsert chaque canal par son channel_id (identifiant Telegram)
-    const tgIdToDbId = {}; // channel_id (tg) → db id
+    // ── Import canaux Telegram (upsert par channel_id) ────────────────────────
+    const tgIdToDbId = {};
     if (Array.isArray(telegram_channels) && telegram_channels.length > 0) {
+      const existingCh = await db.getTelegramConfigs(false).catch(() => []);
+      const existingChIds = new Set(existingCh.map(c => c.channel_id));
+      for (const ch of existingCh) tgIdToDbId[ch.channel_id] = ch.id;
+
       for (const c of telegram_channels) {
         if (!c.channel_id) continue;
         try {
-          const saved = await db.upsertTelegramConfig({ channel_id: c.channel_id, channel_name: c.channel_name || c.channel_id });
-          if (saved?.id) tgIdToDbId[c.channel_id] = saved.id;
-          results.channels_ok++;
+          if (existingChIds.has(c.channel_id)) {
+            results.channels_existing++;
+          } else {
+            const saved = await db.upsertTelegramConfig({ channel_id: c.channel_id, channel_name: c.channel_name || c.channel_id });
+            if (saved?.id) tgIdToDbId[c.channel_id] = saved.id;
+            results.channels_added++;
+          }
         } catch (e) {
           results.errors.push(`Canal Telegram "${c.channel_id}" : ${e.message}`);
         }
@@ -4787,10 +4871,7 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
     }
 
     // ── Import routage stratégies → canaux ────────────────────────────────────
-    // strategy_routes: { "C1": [{tg_id, channel_name}], ... }
     if (strategy_routes && typeof strategy_routes === 'object') {
-      // Si les canaux n'ont pas encore été importés ci-dessus,
-      // on charge le mapping existant depuis la DB
       if (Object.keys(tgIdToDbId).length === 0) {
         const existing = await db.getTelegramConfigs(false).catch(() => []);
         for (const c of existing) tgIdToDbId[c.channel_id] = c.id;
@@ -4799,46 +4880,94 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
         if (!Array.isArray(channels)) continue;
         const dbIds = channels.map(c => tgIdToDbId[c.tg_id]).filter(Boolean);
         if (dbIds.length > 0) {
+          try { await db.setStrategyRoutes(strat, dbIds); results.routes_ok++; }
+          catch (e) { results.errors.push(`Routage "${strat}" : ${e.message}`); }
+        }
+      }
+    }
+
+    // ── Import formats Telegram personnalisés (fusion par nom) ────────────────
+    if (Array.isArray(custom_formats) && custom_formats.length > 0) {
+      const existingFmts = await db.getCustomFormats().catch(() => []);
+      const existingFmtNames = new Set(existingFmts.map(f => f.name?.toLowerCase()));
+      for (const f of custom_formats) {
+        if (!f.name || !f.template) continue;
+        if (existingFmtNames.has(f.name.toLowerCase())) {
+          results.custom_formats_existing++;
+        } else {
           try {
-            await db.setStrategyRoutes(strat, dbIds);
-            results.routes_ok++;
-          } catch (e) {
-            results.errors.push(`Routage "${strat}" : ${e.message}`);
-          }
+            await db.saveCustomFormat({ name: f.name, template: f.template, parse_mode: f.parse_mode || 'HTML' });
+            results.custom_formats_added++;
+          } catch (e) { results.errors.push(`Format "${f.name}" : ${e.message}`); }
         }
       }
     }
 
     // ── Import paramètres ─────────────────────────────────────────────────────
     if (settings && typeof settings === 'object') {
-      const settingMap = {
-        bot_token:             'bot_token',
-        tg_msg_format:         'tg_msg_format',
-        default_strategies_tg: 'default_strategies_tg',
-        loss_sequences:        'loss_sequences',
-        tg_announcements:      'tg_announcements',
-      };
-      for (const [key, dbKey] of Object.entries(settingMap)) {
+      // bot_token, tg_msg_format, loss_sequences : remplacement direct
+      const simpleKeys = { bot_token: 'bot_token', tg_msg_format: 'tg_msg_format', loss_sequences: 'loss_sequences' };
+      for (const [key, dbKey] of Object.entries(simpleKeys)) {
         if (settings[key] !== undefined && settings[key] !== null) {
           const val = typeof settings[key] === 'object' ? JSON.stringify(settings[key]) : String(settings[key]);
           try { await db.setSetting(dbKey, val); results.settings_ok++; } catch {}
         }
       }
+
+      // default_strategies_tg : fusion (ne pas écraser les canaux déjà configurés)
+      if (settings.default_strategies_tg && typeof settings.default_strategies_tg === 'object') {
+        const rawExistingDtg = await db.getSetting('default_strategies_tg').catch(() => null);
+        const existingDtg = rawExistingDtg ? JSON.parse(rawExistingDtg) : {};
+        const merged = { ...settings.default_strategies_tg, ...existingDtg }; // existant prime
+        await db.setSetting('default_strategies_tg', JSON.stringify(merged));
+        results.settings_ok++;
+      }
+
+      // tg_announcements : fusion par id — n'ajoute que les annonces inconnues
+      if (Array.isArray(settings.tg_announcements) && settings.tg_announcements.length > 0) {
+        const rawExistingAnn = await db.getSetting('tg_announcements').catch(() => null);
+        const existingAnn = rawExistingAnn ? JSON.parse(rawExistingAnn) : [];
+        const existingAnnIds = new Set(existingAnn.map(a => String(a.id || a.name)));
+        for (const ann of settings.tg_announcements) {
+          const key = String(ann.id || ann.name);
+          if (existingAnnIds.has(key)) {
+            results.announcements_existing++;
+          } else {
+            existingAnn.push(ann);
+            existingAnnIds.add(key);
+            results.announcements_added++;
+          }
+        }
+        await db.setSetting('tg_announcements', JSON.stringify(existingAnn));
+        results.settings_ok++;
+      }
     }
 
     const parts = [
-      `${results.users_ok} utilisateur(s) importé(s)`,
-      results.users_skip > 0 ? `${results.users_skip} déjà existant(s)` : null,
-      results.strategies_ok > 0 ? `${results.strategies_ok} stratégie(s) perso` : null,
-      results.pro_strategies_ok > 0 ? `${results.pro_strategies_ok} stratégie(s) Pro` : null,
-      results.channels_ok > 0 ? `${results.channels_ok} canal/canaux Telegram` : null,
-      results.routes_ok > 0 ? `${results.routes_ok} routage(s) restauré(s)` : null,
+      results.users_added.length > 0       ? `${results.users_added.length} utilisateur(s) ajouté(s)` : null,
+      results.users_existing.length > 0    ? `${results.users_existing.length} déjà existant(s)` : null,
+      results.strategies_added.length > 0  ? `${results.strategies_added.length} stratégie(s) ajoutée(s)` : null,
+      results.strategies_updated.length > 0 ? `${results.strategies_updated.length} stratégie(s) config TG mise(s) à jour` : null,
+      results.strategies_existing.length > 0 ? `${results.strategies_existing.length} stratégie(s) déjà à jour` : null,
+      results.pro_strategies_ok > 0        ? `${results.pro_strategies_ok} stratégie(s) Pro` : null,
+      results.channels_added > 0           ? `${results.channels_added} nouveau(x) canal/canaux` : null,
+      results.channels_existing > 0        ? `${results.channels_existing} canal/canaux déjà présent(s)` : null,
+      results.routes_ok > 0               ? `${results.routes_ok} routage(s) restauré(s)` : null,
+      results.custom_formats_added > 0    ? `${results.custom_formats_added} format(s) TG ajouté(s)` : null,
+      results.announcements_added > 0     ? `${results.announcements_added} annonce(s) ajoutée(s)` : null,
     ].filter(Boolean);
 
     res.json({
       ok: true,
       message: `✅ Import terminé : ${parts.join(', ')}.`,
       results,
+      diff: {
+        users:          { added: results.users_added,       existing: results.users_existing },
+        strategies:     { added: results.strategies_added,  updated: results.strategies_updated, existing: results.strategies_existing },
+        channels:       { added: results.channels_added,    existing: results.channels_existing },
+        custom_formats: { added: results.custom_formats_added, existing: results.custom_formats_existing },
+        announcements:  { added: results.announcements_added,  existing: results.announcements_existing },
+      },
     });
   } catch (e) {
     console.error('[db-import-data]', e);
