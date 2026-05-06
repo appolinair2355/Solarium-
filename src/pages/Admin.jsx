@@ -1463,6 +1463,22 @@ function ProConfigPanel({ setProSavedModal, setProErrorModal }) {
   const [quickSaving, setQuickSaving] = React.useState(false);
   const [quickMsg, setQuickMsg] = React.useState('');
 
+  // ── Modes autorisés pour ce compte Pro (null = tous) ──
+  const [allowedModes, setAllowedModes] = React.useState(null);
+  React.useEffect(() => {
+    if (!_isProOnly) return;
+    fetch('/api/admin/my-allowed-modes', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { allowed_modes: null })
+      .then(d => {
+        const modes = Array.isArray(d.allowed_modes) && d.allowed_modes.length > 0 ? d.allowed_modes : null;
+        setAllowedModes(modes);
+        if (modes && modes.length > 0) {
+          setQuickCfg(p => ({ ...p, mode: modes.includes(p.mode) ? p.mode : modes[0] }));
+        }
+      })
+      .catch(() => {});
+  }, [_isProOnly]);
+
   // ── Compteurs Pro par stratégie (live, remplace les logs) ──
   const [proCountersById, setProCountersById] = React.useState({});   // { [id]: [{suit, display, count, threshold, ...}] }
   const [proLogsExpanded, setProLogsExpanded] = React.useState(null); // conservé pour la modale source
@@ -2359,6 +2375,112 @@ export default function StrategieVisualisation({ gameHistory }) {
           </div>
         </div>
       </div>
+
+      {/* ── MODES AUTORISÉS (visible Pro uniquement) ── */}
+      {_isProOnly && (() => {
+        const PRO_MODE_LABELS = {
+          manquants: 'Absences', apparents: 'Apparitions',
+          absence_apparition: 'Absence → Apparition', absence_confirmee: 'Absence Confirmée',
+          apparition_absence: 'Apparition → Absence', taux_miroir: 'Taux Miroir',
+          compteur_adverse: 'Compteur Adverse', victoire_adverse: 'Victoire Adverse',
+          multi_strategy: 'Multi-stratégie', relance: 'Relance', distribution: 'Distribution',
+          carte_3_vers_2: '3 cartes → 2 cartes', carte_2_vers_3: '2 cartes → 3 cartes',
+          abs_3_vers_2: '3→2 Absence', abs_3_vers_3: '3→3 Absence',
+          absence_victoire: 'Absence Victoire', lecture_passee: '📖 Lecture jeux passés',
+          intelligent_cartes: '🧠 Intelligent Cartes', union_enseignes: '🔗 Union Enseignes',
+          carte_valeur: '🃏 Carte Valeur', intersection: '🎯 Intersection',
+          comptages_ecart: '📊 Comptages Écart', aleatoire: '🎲 Aléatoire',
+          first_card_plus6: '🎯 1ère Carte +Décalage', annonce_sequence: '📣 Rotateur Promo',
+        };
+        const ALL_QUICK_MODES = Object.entries(PRO_MODE_LABELS).map(([value, label]) => ({ value, label }));
+        const visibleModes = allowedModes !== null
+          ? ALL_QUICK_MODES.filter(m => allowedModes.includes(m.value))
+          : ALL_QUICK_MODES;
+
+        return (
+          <>
+            {/* Bannière modes autorisés */}
+            {allowedModes !== null && (
+              <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 12, padding: '14px 18px' }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#818cf8', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  ⚙️ Modes de stratégie autorisés par votre administrateur
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {visibleModes.map(m => (
+                    <span key={m.value} style={{ padding: '3px 10px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 20, fontSize: 11, fontWeight: 700, color: '#c7d2fe' }}>
+                      {m.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Formulaire de création rapide */}
+            <div style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 14, padding: 20 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>⚡ Création rapide de stratégie</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Créez une stratégie en quelques secondes — elle sera automatiquement activée dans le moteur.</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Nom */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 5 }}>Nom de la stratégie</label>
+                  <input value={quickCfg.name} onChange={e => setQuickCfg(p => ({ ...p, name: e.target.value }))}
+                    placeholder="ex : Ma Stratégie Absence"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.06)', color: '#e2e8f0', fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
+                {/* Mode */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 5 }}>
+                    Mode
+                    {allowedModes !== null && <span style={{ marginLeft: 8, fontSize: 9, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 5, fontWeight: 700, textTransform: 'none' }}>🔷 Attribué par admin</span>}
+                  </label>
+                  {visibleModes.length === 1 ? (
+                    <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 8, color: '#c7d2fe', fontSize: 13, fontWeight: 700 }}>
+                      🔒 {visibleModes[0].label}
+                    </div>
+                  ) : (
+                    <select value={quickCfg.mode} onChange={e => setQuickCfg(p => ({ ...p, mode: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 13 }}>
+                      {visibleModes.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  )}
+                </div>
+                {/* Main + Seuil sur une ligne */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 5 }}>Main</label>
+                    <select value={quickCfg.hand} onChange={e => setQuickCfg(p => ({ ...p, hand: e.target.value }))}
+                      style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.25)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12 }}>
+                      <option value="joueur">Joueur</option>
+                      <option value="banquier">Banquier</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 5 }}>Seuil (B)</label>
+                    <input type="number" min={1} max={30} value={quickCfg.threshold}
+                      onChange={e => setQuickCfg(p => ({ ...p, threshold: parseInt(e.target.value) || 1 }))}
+                      style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.25)', background: 'rgba(34,197,94,0.06)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 5 }}>Max Rattrap.</label>
+                    <input type="number" min={1} max={20} value={quickCfg.max_rattrapage}
+                      onChange={e => setQuickCfg(p => ({ ...p, max_rattrapage: parseInt(e.target.value) || 1 }))}
+                      style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.25)', background: 'rgba(34,197,94,0.06)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+                {quickMsg && (
+                  <div style={{ padding: '9px 14px', borderRadius: 8, background: quickMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${quickMsg.startsWith('✅') ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`, color: quickMsg.startsWith('✅') ? '#4ade80' : '#f87171', fontSize: 13, fontWeight: 600 }}>
+                    {quickMsg}
+                  </div>
+                )}
+                <button type="button" onClick={applyQuickConfig} disabled={quickSaving}
+                  style={{ padding: '11px 20px', borderRadius: 10, border: 'none', background: quickSaving ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.22)', color: quickSaving ? '#4ade80' : '#22c55e', fontWeight: 800, fontSize: 13, cursor: quickSaving ? 'wait' : 'pointer', transition: 'all 0.18s' }}>
+                  {quickSaving ? '⏳ Création en cours…' : '✅ Créer la stratégie'}
+                </button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* ── SÉLECTEUR ADMIN : choisir le compte Pro à éditer ── */}
       {_isAdmin && (
@@ -3736,6 +3858,9 @@ function AdminPanel() {
   const [strategies, setStrategies] = useState([]);
   const [proStrategies, setProStrategies] = useState([]); // stratégies Pro chargées (S5001+)
 
+  // ── Modes autorisés pour le compte Pro connecté (null = tous) ──────────
+  const [proAllowedModes, setProAllowedModes] = useState(null);
+
   // ── Panneau effacement données d'une stratégie ─────────────────────────────
   const [clearStratId, setClearStratId] = useState('');
   const [clearStratBusy, setClearStratBusy] = useState(false);
@@ -4960,6 +5085,25 @@ function AdminPanel() {
   }, []);
 
   useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
+
+  // ── Charger les modes autorisés pour le compte Pro connecté ────────────
+  useEffect(() => {
+    if (!isProOnly) return;
+    fetch('/api/admin/my-allowed-modes', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { allowed_modes: null })
+      .then(d => {
+        const modes = Array.isArray(d.allowed_modes) && d.allowed_modes.length > 0 ? d.allowed_modes : null;
+        setProAllowedModes(modes);
+        // Réinitialiser le mode du formulaire si le mode actuel n'est pas autorisé
+        if (modes && modes.length > 0) {
+          setStratForm(p => ({
+            ...p,
+            mode: modes.includes(p.mode) ? p.mode : modes[0],
+          }));
+        }
+      })
+      .catch(() => {});
+  }, [isProOnly]);
 
   // Fetch mirrorCounts toutes les 5s pour les stratégies taux_miroir
   useEffect(() => {
@@ -8888,43 +9032,68 @@ function AdminPanel() {
 
                 {/* Mode — masqué pour multi-stratégie */}
                 <div>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
-                  <select value={stratForm.mode} onChange={e => {
-                    const m = e.target.value;
-                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire';
-                    setStratForm(p => ({
-                      ...p,
-                      mode: m,
-                      ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
-                      ...(m === 'absence_confirmee' ? { threshold: 1, max_rattrapage: 20 } : {}),
-                      ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
-                      ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2 } : {}),
-                    }));
-                  }}
-                    style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
-                    <option value="manquants">Manquants — prédit l'absent</option>
-                    <option value="apparents">Apparents — prédit le fréquent</option>
-                    <option value="absence_apparition">Absence → Apparition</option>
-                    <option value="absence_confirmee">✅ Absence Confirmée (B absences + réapparition)</option>
-                    <option value="apparition_absence">Apparition → Absence</option>
-                    <option value="distribution">📊 Distribution</option>
-                    <option value="carte_3_vers_2">3️⃣ 3 cartes → prédit 2 cartes</option>
-                    <option value="carte_2_vers_3">2️⃣ 2 cartes → prédit 3 cartes</option>
-                    <option value="taux_miroir">⚖️ Miroir Taux</option>
-                    <option value="compteur_adverse">🔄 Compteur Adverse</option>
-                    <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
-                    <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
-                    <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
-                    <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
-                    <option value="carte_valeur">🃏 Carte Valeur</option>
-                    <option value="victoire_adverse">🏆 Victoire Adverse</option>
-                    <option value="comptages_ecart">📊 Comptages Écart (seuil dynamique)</option>
-                    <option value="intersection">🎯 Intersection (consensus stratégies)</option>
-                    <option value="relance">🔁 Séquences de Relance</option>
-                    <option value="aleatoire">🎲 Stratégie Aléatoire</option>
-                    <option value="first_card_plus6">🎯 Première Carte +Décalage</option>
-                    <option value="annonce_sequence">📣 Rotateur Promo (annonces séquentielles)</option>
-                  </select>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
+                    Mode
+                    {isProOnly && proAllowedModes !== null && (
+                      <span style={{ marginLeft: 8, fontSize: 10, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 5, fontWeight: 700 }}>
+                        🔷 Mode attribué par l'administrateur
+                      </span>
+                    )}
+                  </label>
+                  {(() => {
+                    const ALL_MODE_OPTS = [
+                      { value: 'manquants',           label: "Manquants — prédit l'absent" },
+                      { value: 'apparents',            label: 'Apparents — prédit le fréquent' },
+                      { value: 'absence_apparition',   label: 'Absence → Apparition' },
+                      { value: 'absence_confirmee',    label: '✅ Absence Confirmée (B absences + réapparition)' },
+                      { value: 'apparition_absence',   label: 'Apparition → Absence' },
+                      { value: 'distribution',         label: '📊 Distribution' },
+                      { value: 'carte_3_vers_2',       label: '3️⃣ 3 cartes → prédit 2 cartes' },
+                      { value: 'carte_2_vers_3',       label: '2️⃣ 2 cartes → prédit 3 cartes' },
+                      { value: 'taux_miroir',          label: '⚖️ Miroir Taux' },
+                      { value: 'compteur_adverse',     label: '🔄 Compteur Adverse' },
+                      { value: 'absence_victoire',     label: '🏆 Absence Victoire (Joueur / Banquier)' },
+                      { value: 'lecture_passee',       label: '📖 Lecture des jeux passés (cartes_jeu)' },
+                      { value: 'intelligent_cartes',   label: '🧠 Intelligent Cartes (analyse de patterns)' },
+                      { value: 'union_enseignes',      label: '🔗 Union Enseignes (accord multi-sources)' },
+                      { value: 'carte_valeur',         label: '🃏 Carte Valeur' },
+                      { value: 'victoire_adverse',     label: '🏆 Victoire Adverse' },
+                      { value: 'comptages_ecart',      label: '📊 Comptages Écart (seuil dynamique)' },
+                      { value: 'intersection',         label: '🎯 Intersection (consensus stratégies)' },
+                      { value: 'relance',              label: '🔁 Séquences de Relance' },
+                      { value: 'aleatoire',            label: '🎲 Stratégie Aléatoire' },
+                      { value: 'first_card_plus6',     label: '🎯 Première Carte +Décalage' },
+                      { value: 'annonce_sequence',     label: '📣 Rotateur Promo (annonces séquentielles)' },
+                    ];
+                    const visibleOpts = isProOnly && proAllowedModes !== null
+                      ? ALL_MODE_OPTS.filter(o => proAllowedModes.includes(o.value))
+                      : ALL_MODE_OPTS;
+                    const isLocked = isProOnly && proAllowedModes !== null && visibleOpts.length === 1;
+                    return isLocked ? (
+                      <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 8, color: '#c7d2fe', fontSize: 13, fontWeight: 700 }}>
+                        🔒 {visibleOpts[0]?.label || stratForm.mode}
+                        <input type="hidden" value={visibleOpts[0]?.value || stratForm.mode} />
+                      </div>
+                    ) : (
+                      <select value={stratForm.mode} onChange={e => {
+                        const m = e.target.value;
+                        const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire';
+                        setStratForm(p => ({
+                          ...p,
+                          mode: m,
+                          ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
+                          ...(m === 'absence_confirmee' ? { threshold: 1, max_rattrapage: 20 } : {}),
+                          ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
+                          ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2 } : {}),
+                        }));
+                      }}
+                        style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
+                        {visibleOpts.map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📖 Mode Lecture des jeux passés</div>
