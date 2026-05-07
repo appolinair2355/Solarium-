@@ -112,10 +112,15 @@ app.use('/api/system-logs', systemLogsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin/comptages', comptages.router);
 app.use('/api/payments', paymentRoutes);
-const shopRoutes    = require('./shop');
-const licenseRoutes = require('./license-route');
-app.use('/api/shop',    shopRoutes);
-app.use('/api/license', licenseRoutes);
+const shopRoutes       = require('./shop');
+const licenseRoutes    = require('./license-route');
+const ideaRoutes       = require('./idea-route');
+const tgAnnounceRoutes = require('./tg-announce-route');
+const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
+app.use('/api/shop',        shopRoutes);
+app.use('/api/license',     licenseRoutes);
+app.use('/api/ideas',       blockExpired, ideaRoutes);
+app.use('/api/tg-announce', tgAnnounceRoutes);
 
 // ── Bilan quotidien ────────────────────────────────────────────────
 const db = require('./db');
@@ -479,6 +484,9 @@ async function initBackgroundServices() {
   setInterval(runAutoBan, 60 * 60 * 1000); // Toutes les heures
   setTimeout(runAutoBan, 5 * 60 * 1000);   // Première vérification après 5 min
   console.log(`[AutoClean] ⏱ Auto-suppression inactivité 48h actif`);
+
+  // ── Planificateur annonces Telegram ──────────────────────────────────────
+  startTgAnnounceScheduler();
 }
 
 main().catch(err => {
