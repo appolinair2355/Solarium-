@@ -18,7 +18,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
       ? { rejectUnauthorized: false }
       : false,
     max: 5,
@@ -282,6 +282,52 @@ async function initDB() {
       ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_id          TEXT;
       ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_api_token   TEXT;
       ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_last_seen   TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS strategy_ideas (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL,
+        description TEXT NOT NULL,
+        is_paid     BOOLEAN DEFAULT FALSE,
+        price_usd   NUMERIC(10,2) DEFAULT 0,
+        enabled     BOOLEAN DEFAULT TRUE,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
+        id                 SERIAL PRIMARY KEY,
+        user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        idea_id            INTEGER REFERENCES strategy_ideas(id) ON DELETE CASCADE,
+        idea_name          TEXT NOT NULL,
+        amount_usd         NUMERIC(10,2) DEFAULT 0,
+        status             TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data    TEXT,
+        admin_note         TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        created_at         TIMESTAMPTZ DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idea_purchases_user_idx ON strategy_idea_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS idea_purchases_status_idx ON strategy_idea_purchases(status);
+
+      CREATE TABLE IF NOT EXISTS tg_announcements (
+        id             SERIAL PRIMARY KEY,
+        name           TEXT NOT NULL,
+        channel_id     TEXT NOT NULL,
+        bot_token      TEXT NOT NULL,
+        message_text   TEXT NOT NULL,
+        media_type     TEXT,
+        media_data     TEXT,
+        media_filename TEXT,
+        schedule_type  TEXT DEFAULT 'interval',
+        interval_hours INTEGER DEFAULT 1,
+        fixed_hours    JSONB DEFAULT '[]',
+        enabled        BOOLEAN DEFAULT TRUE,
+        last_sent_at   TIMESTAMPTZ,
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
