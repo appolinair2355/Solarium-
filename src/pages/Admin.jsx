@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Avatar from '../components/Avatar';
+import AdminIdeas from '../components/AdminIdeas';
+import AdminTgAnnounce from '../components/AdminTgAnnounce';
 
 class AdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -6189,11 +6191,13 @@ function AdminPanel() {
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',          icon: '💰', label: 'Achats Stratégies', badge: null },
+            { id: 'idees-strategies',icon: '💡', label: 'Idées Stratégies',  badge: null },
             { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
+            { id: 'tg-annonces',    icon: '📢', label: 'Annonces TG' },
             { id: 'config',         icon: '🔀', label: 'Routage' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
             { id: 'comptages',      icon: '📈', label: 'Comptages' },
@@ -7710,6 +7714,20 @@ function AdminPanel() {
 
         {/* ── TAB : GESTIONNAIRE DES CARTES ── */}
         {adminTab === 'cartes' && <CartesPanel />}
+
+        {/* ── TAB : IDÉES STRATÉGIES ── */}
+        {adminTab === 'idees-strategies' && (
+          <div style={{ padding: '0 8px' }}>
+            <AdminIdeas />
+          </div>
+        )}
+
+        {/* ── TAB : ANNONCES TELEGRAM ── */}
+        {adminTab === 'tg-annonces' && (
+          <div style={{ padding: '0 8px' }}>
+            <AdminTgAnnounce />
+          </div>
+        )}
 
         {/* ── TAB : ACHATS STRATÉGIES ── */}
         {adminTab === 'achats' && (

@@ -2,6 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+const IDEA_STATUS = {
+  awaiting_screenshot: { label: 'En attente de capture', color: '#f59e0b', icon: '📸' },
+  pending_admin:       { label: 'En attente de validation', color: '#818cf8', icon: '⏳' },
+  validated:           { label: 'Validé — accès accordé', color: '#22c55e', icon: '✅' },
+  rejected:            { label: 'Refusé', color: '#f87171', icon: '❌' },
+};
+
 const STATUS_LABEL = {
   awaiting_screenshot: { label: 'En attente de capture', color: '#f59e0b', icon: '📸' },
   pending_admin:       { label: 'En attente de validation', color: '#818cf8', icon: '⏳' },
@@ -82,6 +89,16 @@ export default function Shop() {
   const [downloading, setDownloading] = useState(null);
   const fileRef = useRef();
 
+  // ── Ideas (idées de stratégies) ─────────────────────────────────────
+  const [ideas, setIdeas]               = useState([]);
+  const [ideaPurchases, setIdeaPurchases] = useState([]);
+  const [ideaModal, setIdeaModal]       = useState(null);
+  const [ideaScreenshot, setIdeaScreenshot] = useState(null);
+  const [ideaUploading, setIdeaUploading] = useState(false);
+  const [ideaUploadMsg, setIdeaUploadMsg] = useState('');
+  const [ideaViewModal, setIdeaViewModal] = useState(null);
+  const ideaFileRef = useRef();
+
   // ── Modal de configuration bot ──────────────────────────────────────
   const [botConfigModal, setBotConfigModal] = useState(null);
   // { purchase, step: 'config'|'summary', botConfig: { channel_id, bot_token, format_id } }
@@ -103,10 +120,77 @@ export default function Shop() {
     } catch {}
   }, []);
 
+  const loadIdeas = useCallback(async () => {
+    try {
+      const r = await fetch('/api/ideas/catalog', { credentials: 'include' });
+      if (r.ok) setIdeas(await r.json());
+    } catch {}
+  }, []);
+
+  const loadIdeaPurchases = useCallback(async () => {
+    try {
+      const r = await fetch('/api/ideas/my-purchases', { credentials: 'include' });
+      if (r.ok) setIdeaPurchases(await r.json());
+    } catch {}
+  }, []);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([loadCatalog(), loadPurchases()]).finally(() => setLoading(false));
-  }, [loadCatalog, loadPurchases]);
+    Promise.all([loadCatalog(), loadPurchases(), loadIdeas(), loadIdeaPurchases()]).finally(() => setLoading(false));
+  }, [loadCatalog, loadPurchases, loadIdeas, loadIdeaPurchases]);
+
+  // ── Ouvrir une idée gratuite (vue directe) ────────────────────────────
+  async function handleOpenIdea(idea) {
+    const r = await fetch(`/api/ideas/${idea.id}/view`, { credentials: 'include' });
+    const d = await r.json();
+    if (r.ok) setIdeaViewModal(d.idea);
+    else alert(d.error || 'Accès refusé');
+  }
+
+  // ── Acheter une idée payante ──────────────────────────────────────────
+  async function handleBuyIdea(idea) {
+    try {
+      const r = await fetch(`/api/ideas/${idea.id}/purchase`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await r.json();
+      if (!r.ok) return alert(data.error || 'Erreur');
+      await loadIdeaPurchases();
+      if (data.already_exists) {
+        const p = data.purchase;
+        if (p.status === 'validated') { handleOpenIdea(idea); return; }
+        setIdeaModal({ step: p.status === 'awaiting_screenshot' ? 'whatsapp' : 'done', idea, purchaseId: p.id, whatsappLink: null, price: idea.price_usd });
+      } else {
+        setIdeaModal({ step: 'whatsapp', idea, purchaseId: data.purchase.id, whatsappLink: data.whatsapp_link, price: data.amount_usd });
+      }
+    } catch (e) { alert('Erreur réseau : ' + e.message); }
+  }
+
+  // ── Upload screenshot idée ────────────────────────────────────────────
+  function handleIdeaFileChange(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => setIdeaScreenshot(ev.target.result);
+    reader.readAsDataURL(f);
+  }
+
+  async function submitIdeaScreenshot() {
+    if (!ideaScreenshot || !ideaModal?.purchaseId) return;
+    setIdeaUploading(true); setIdeaUploadMsg('');
+    try {
+      const r = await fetch(`/api/ideas/purchase/${ideaModal.purchaseId}/screenshot`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ screenshot: ideaScreenshot }),
+      });
+      const d = await r.json();
+      if (r.ok) { await loadIdeaPurchases(); setIdeaModal(m => ({ ...m, step: 'done' })); }
+      else setIdeaUploadMsg(d.error || 'Erreur');
+    } catch (e) { setIdeaUploadMsg('Erreur réseau : ' + e.message); }
+    finally { setIdeaUploading(false); }
+  }
 
   // ── Achat : créer la demande + ouvrir modal WhatsApp ──────────────────
   async function handleBuy(item) {
@@ -252,6 +336,7 @@ export default function Shop() {
       <div style={{ display: 'flex', borderBottom: '1px solid rgba(100,116,139,0.2)', background: 'rgba(15,23,42,0.7)', padding: '0 24px' }}>
         {[
           { id: 'boutique',   label: '🏪 Boutique', badge: catalog.length },
+          { id: 'idees',      label: '💡 Idées', badge: ideas.length || null },
           { id: 'mes-achats', label: '🛒 Mes achats', badge: purchases.length || null },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -466,6 +551,88 @@ export default function Shop() {
             )}
           </div>
         )}
+
+
+        {/* ══════════════ TAB IDÉES ══════════════ */}
+        {tab === 'idees' && (
+          <div>
+            <div style={{ background: 'linear-gradient(135deg,rgba(250,204,21,0.08),rgba(245,158,11,0.04))', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 14, padding: '16px 20px', marginBottom: 28, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 24 }}>💡</span>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>Idées & Stratégies de Baccarat</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
+                  Explorez les idées de stratégies publiées par l'équipe. Les idées <strong style={{ color: '#22c55e' }}>gratuites</strong> sont accessibles directement. Les idées <strong style={{ color: '#fbbf24' }}>payantes</strong> nécessitent un paiement via WhatsApp.
+                </div>
+              </div>
+            </div>
+
+            {ideas.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>💡</div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>Aucune idée disponible pour le moment</div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>Revenez bientôt — l'équipe publie régulièrement de nouvelles idées.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {ideas.map(idea => {
+                  const myPurchase = ideaPurchases.find(p => p.idea_id === idea.id && p.status !== 'rejected');
+                  const isValidated = myPurchase?.status === 'validated';
+
+                  return (
+                    <div key={idea.id} style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 16, overflow: 'hidden' }}>
+                      <div style={{ padding: '20px 22px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: 200 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 16, fontWeight: 800, color: '#f1f5f9' }}>💡 {idea.name}</span>
+                              {idea.is_paid ? (
+                                <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' }}>
+                                  💰 {Number(idea.price_usd).toFixed(0)} $
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                                  🆓 Gratuit
+                                </span>
+                              )}
+                              {isValidated && (
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>✅ Acheté</span>
+                              )}
+                              {myPurchase && !isValidated && (() => {
+                                const s = IDEA_STATUS[myPurchase.status] || {};
+                                return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(129,140,248,0.1)', color: s.color || '#818cf8', border: '1px solid rgba(129,140,248,0.25)' }}>{s.icon} {s.label}</span>;
+                              })()}
+                            </div>
+                            <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 80, overflow: 'hidden' }}>
+                              {idea.description.slice(0, 240)}{idea.description.length > 240 ? '…' : ''}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0, minWidth: 160 }}>
+                            {(!idea.is_paid || isValidated) && (
+                              <button onClick={() => handleOpenIdea(idea)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+                                👁 Voir l'idée complète
+                              </button>
+                            )}
+                            {idea.is_paid && !isValidated && !myPurchase && (
+                              <button onClick={() => handleBuyIdea(idea)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+                                💰 Acheter — {Number(idea.price_usd).toFixed(0)} $
+                              </button>
+                            )}
+                            {idea.is_paid && myPurchase && !isValidated && (
+                              <button onClick={() => setIdeaModal({ step: myPurchase.status === 'awaiting_screenshot' ? 'whatsapp' : 'done', idea, purchaseId: myPurchase.id, whatsappLink: null, price: idea.price_usd })} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                                📸 Envoyer capture
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* ══════════════ MODAL ACHAT (WhatsApp + screenshot + done) ══════════════ */}
@@ -758,6 +925,101 @@ export default function Shop() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ MODAL IDÉE : WhatsApp / Screenshot / Done ══════════════ */}
+      {ideaModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setIdeaModal(null); }}>
+          <div style={{ background: 'linear-gradient(145deg,#0f172a,#1e293b)', border: '1.5px solid rgba(250,204,21,0.4)', borderRadius: 20, padding: 28, maxWidth: 460, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+            {ideaModal.step === 'whatsapp' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 34, marginBottom: 8 }}>💬</div>
+                  <h2 style={{ margin: 0, color: '#fbbf24', fontSize: 18, fontWeight: 800 }}>Étape 1 — Paiement WhatsApp</h2>
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>Cliquez ci-dessous pour nous contacter. Le message est <strong style={{ color: '#e2e8f0' }}>pré-rempli automatiquement</strong>.</p>
+                </div>
+                <div style={{ background: 'rgba(250,204,21,0.07)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>💡 <strong style={{ color: '#f1f5f9' }}>{ideaModal.idea.name}</strong></div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24' }}>{Number(ideaModal.price).toFixed(0)} $</div>
+                </div>
+                <a href={ideaModal.whatsappLink || `https://wa.me/2290195501564`} target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '14px 20px', borderRadius: 12, background: '#25d366', color: '#fff', fontWeight: 800, fontSize: 15, textDecoration: 'none', marginBottom: 16 }}>
+                  💬 Contacter via WhatsApp
+                </a>
+                <button onClick={() => setIdeaModal(m => ({ ...m, step: 'screenshot' }))}
+                  style={{ width: '100%', padding: '12px', borderRadius: 12, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                  J'ai payé → Envoyer ma capture de paiement
+                </button>
+                <button onClick={() => setIdeaModal(null)} style={{ width: '100%', padding: '10px', marginTop: 10, background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 13 }}>Annuler</button>
+              </>
+            )}
+            {ideaModal.step === 'screenshot' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 34, marginBottom: 8 }}>📸</div>
+                  <h2 style={{ margin: 0, color: '#fbbf24', fontSize: 18, fontWeight: 800 }}>Étape 2 — Capture de paiement</h2>
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 8 }}>Envoyez la preuve de paiement pour que l'équipe valide votre accès.</p>
+                </div>
+                <div style={{ border: '2px dashed rgba(250,204,21,0.3)', borderRadius: 12, padding: '24px 16px', textAlign: 'center', marginBottom: 16, cursor: 'pointer' }}
+                  onClick={() => ideaFileRef.current?.click()}>
+                  <input ref={ideaFileRef} type="file" accept="image/*" onChange={handleIdeaFileChange} style={{ display: 'none' }} />
+                  {ideaScreenshot ? (
+                    <img src={ideaScreenshot} alt="Preview" style={{ maxHeight: 200, maxWidth: '100%', borderRadius: 8, objectFit: 'contain' }} />
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>📂</div>
+                      <div style={{ fontSize: 13, color: '#94a3b8' }}>Cliquez pour choisir votre capture</div>
+                    </>
+                  )}
+                </div>
+                {ideaUploadMsg && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 10, textAlign: 'center' }}>{ideaUploadMsg}</div>}
+                <button onClick={submitIdeaScreenshot} disabled={!ideaScreenshot || ideaUploading}
+                  style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: ideaScreenshot ? 'linear-gradient(135deg,#fbbf24,#f59e0b)' : 'rgba(100,116,139,0.2)', color: ideaScreenshot ? '#1a1a1a' : '#64748b', fontWeight: 800, cursor: ideaScreenshot ? 'pointer' : 'not-allowed', fontSize: 14 }}>
+                  {ideaUploading ? '⏳ Envoi…' : '📤 Envoyer la capture'}
+                </button>
+                <button onClick={() => setIdeaModal(m => ({ ...m, step: 'whatsapp' }))} style={{ width: '100%', padding: '9px', marginTop: 10, background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 13 }}>← Retour</button>
+              </>
+            )}
+            {ideaModal.step === 'done' && (
+              <>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 44, marginBottom: 12 }}>⏳</div>
+                  <h2 style={{ margin: 0, color: '#fbbf24', fontSize: 18, fontWeight: 800 }}>Capture reçue !</h2>
+                  <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, lineHeight: 1.7 }}>
+                    Votre capture a été envoyée à l'équipe.<br />
+                    L'accès à l'idée sera accordé après validation manuelle (généralement sous 1–2h).
+                  </p>
+                </div>
+                <button onClick={() => setIdeaModal(null)} style={{ width: '100%', padding: '12px', marginTop: 20, borderRadius: 12, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, cursor: 'pointer', fontSize: 14 }}>
+                  ✅ Compris
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ MODAL VUE IDÉE COMPLÈTE ══════════════ */}
+      {ideaViewModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setIdeaViewModal(null); }}>
+          <div style={{ background: 'linear-gradient(145deg,#0f172a,#1e293b)', border: '1.5px solid rgba(34,197,94,0.5)', borderRadius: 20, padding: 32, maxWidth: 640, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>💡 Idée complète</div>
+                <h2 style={{ margin: 0, color: '#f1f5f9', fontSize: 20, fontWeight: 800 }}>{ideaViewModal.name}</h2>
+              </div>
+              <button onClick={() => setIdeaViewModal(null)} style={{ background: 'rgba(100,116,139,0.15)', border: '1px solid rgba(100,116,139,0.3)', borderRadius: 8, color: '#94a3b8', cursor: 'pointer', fontSize: 16, padding: '4px 10px', fontWeight: 700 }}>✕</button>
+            </div>
+            <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.85, whiteSpace: 'pre-wrap', borderTop: '1px solid rgba(100,116,139,0.15)', paddingTop: 20 }}>
+              {ideaViewModal.description}
+            </div>
+            <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setIdeaViewModal(null)} style={{ padding: '10px 24px', borderRadius: 10, border: '1px solid rgba(100,116,139,0.3)', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 700 }}>Fermer</button>
+            </div>
           </div>
         </div>
       )}
