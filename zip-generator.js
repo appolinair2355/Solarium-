@@ -2,22 +2,24 @@
 /**
  * zip-generator.js — Génère le ZIP de déploiement pour une stratégie achetée.
  *
- * SÉCURITÉ : La stratégie n'est JAMAIS incluse dans le ZIP.
- *   Le bot la télécharge depuis le serveur maître au démarrage via /api/license/strategy.
- *   Si la licence est révoquée → le bot ne peut plus charger la stratégie → arrêt immédiat.
+ * SÉCURITÉ RENFORCÉE :
+ *   - Aucune logique de stratégie dans le ZIP (ni dans predictor.js, ni ailleurs).
+ *   - Le bot se connecte au serveur maître pour récupérer les prédictions déjà calculées.
+ *   - Si la licence est révoquée → le bot s'arrête à la prochaine vérification horaire.
+ *   - La clé de licence est la seule identité du bot dans le ZIP.
  */
 
 const archiver        = require('archiver');
 const { PassThrough } = require('stream');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// config.js — aucune stratégie ici
+// config.js
 // ─────────────────────────────────────────────────────────────────────────────
 function buildConfigJs(botConfig = {}) {
   const channelId   = botConfig.channel_id    || '';
-  const botToken    = botConfig.bot_token     || '';
+  const botToken    = botConfig.bot_token      || '';
   const formatId    = parseInt(botConfig.format_id) || 1;
-  const adminChatId = botConfig.admin_chat_id || '';
+  const adminChatId = botConfig.admin_chat_id  || '';
   const configured  = !!(channelId && botToken);
 
   return `// ═══════════════════════════════════════════════════════════════════
@@ -34,302 +36,7 @@ module.exports = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// predictor.js — logique identique au moteur serveur, stratégie chargée au runtime
-// ─────────────────────────────────────────────────────────────────────────────
-function buildPredictorJs() {
-  return `'use strict';
-/**
- * predictor.js — Moteur de prédiction Baccarat
- * Réplique exacte de la logique engine.js du serveur maître.
- * La stratégie est téléchargée depuis le serveur au démarrage (jamais stockée localement).
- *
- * Modes supportés :
- *   manquants, apparents, absence_confirmee, compteur_adverse,
- *   taux_miroir, absence_apparition, apparition_absence, first_card_plus6
- */
-
-const ALL_SUITS = ['\\u2660','\\u2665','\\u2666','\\u2663']; // ♠ ♥ ♦ ♣
-
-let S     = null;  // stratégie chargée depuis le serveur
-let state = null;  // état interne réinitialisé à chaque chargement
-
-function _initState() {
-  const z = {};
-  for (const s of ALL_SUITS) z[s] = 0;
-  return {
-    counts:        Object.assign({}, z),
-    adverseCounts: Object.assign({}, z),
-    mirrorCounts:  Object.assign({}, z),
-    mirrorLastHour: null,
-    confirmPending: {},
-    history:        [],
-    // Prédiction en attente de résolution (rattrapage)
-    // { suit: '♠', step: 0 }   step=0 → message initial, step>0 → rattrapage
-    pending: null,
-  };
-}
-
-/**
- * Chargement de la stratégie — appelé par index.js après fetchStrategy().
- */
-function loadStrategy(stratObj) {
-  S     = stratObj;
-  state = _initState();
-  console.log(
-    '[PREDICTOR] ✅ Stratégie chargée' +
-    ' | mode:'      + S.mode +
-    ' | seuil B:'   + S.threshold +
-    ' | main:'      + (S.hand || 'joueur') +
-    ' | max-R:'     + S.max_rattrapage
-  );
-}
-
-/** Réinitialise uniquement la prédiction en attente (rattrapage). */
-function reset() {
-  if (state) state.pending = null;
-}
-
-/**
- * Résout le costume prédit via les mappings de la stratégie.
- * Si plusieurs costumes cibles → choix aléatoire (comme engine.js).
- */
-function resolvePredictedSuit(triggerSuit) {
-  const raw  = (S.mappings || {})[triggerSuit];
-  const pool = Array.isArray(raw)
-    ? raw.filter(s => ALL_SUITS.includes(s))
-    : (ALL_SUITS.includes(raw) ? [raw] : []);
-  if (!pool.length) return null;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-/**
- * Extrait les costumes des cartes d'une main (tableau d'objets {R, S}).
- */
-function extractSuits(cards) {
-  if (!Array.isArray(cards)) return [];
-  return cards.map(c => (c && (c.S || c.suit)) || '').filter(s => ALL_SUITS.includes(s));
-}
-
-/**
- * Traite un jeu terminé reçu depuis /api/license/feed.
- *
- * @param {object} game  { game_number, winner, player_cards, banker_cards, player_score, banker_score }
- * @returns {{ suit: string, stepNum: number } | null}
- *   Retourne un objet si une prédiction doit être envoyée sur Telegram, null sinon.
- *   stepNum = 0 → prédiction initiale  |  stepNum >= 1 → rattrapage nᵒN
- */
-function processGame(game) {
-  if (!S || !state) return null;
-
-  const pSuits    = extractSuits(game.player_cards);
-  const bSuits    = extractSuits(game.banker_cards);
-  const handSuits = (S.hand === 'banquier') ? bSuits : pSuits;
-
-  const B      = parseInt(S.threshold)      || 5;
-  const maxR   = (S.max_rattrapage !== undefined && S.max_rattrapage !== null)
-                   ? parseInt(S.max_rattrapage) : 3;
-  const offset = Math.max(1, parseInt(S.prediction_offset) || 1);
-
-  // ── Phase 1 : résoudre la prédiction en attente (rattrapage) ─────────────
-  if (state.pending) {
-    const p   = state.pending;
-    const won = handSuits.includes(p.suit);
-    if (won) {
-      // ✅ Victoire — on réinitialise et on ne renvoie rien
-      reset();
-      return null;
-    }
-    p.step++;
-    if (p.step > maxR) {
-      // ❌ Épuisé tous les rattrapages — abandon
-      reset();
-      return null;
-    }
-    // Rattrapage : renvoyer le même costume avec le nouveau numéro d'étape
-    return { suit: p.suit, stepNum: p.step };
-  }
-
-  // ── Phase 2 : logique de déclenchement selon le mode ─────────────────────
-  let prediction = null;
-  const mode = S.mode;
-
-  if (mode === 'manquants') {
-    // Costume ABSENT pendant B jeux consécutifs → prédit le mapping
-    for (const suit of ALL_SUITS) {
-      if (handSuits.includes(suit)) { state.counts[suit] = 0; continue; }
-      state.counts[suit] = (state.counts[suit] || 0) + 1;
-      if (state.counts[suit] === B) {
-        const ps = resolvePredictedSuit(suit);
-        if (ps && !prediction) prediction = ps;
-        state.counts[suit] = 0;
-      }
-    }
-
-  } else if (mode === 'apparents') {
-    // Costume PRÉSENT pendant B jeux consécutifs → prédit le mapping
-    for (const suit of ALL_SUITS) {
-      if (handSuits.includes(suit)) {
-        state.counts[suit] = (state.counts[suit] || 0) + 1;
-        if (state.counts[suit] === B) {
-          const ps = resolvePredictedSuit(suit);
-          if (ps && !prediction) prediction = ps;
-          state.counts[suit] = 0;
-        }
-      } else {
-        state.counts[suit] = 0;
-      }
-    }
-
-  } else if (mode === 'absence_confirmee') {
-    // Absence B fois → feu jaune → costume suivant réapparaît → feu vert → prédiction
-    if (!state.confirmPending) state.confirmPending = {};
-    for (const suit of ALL_SUITS) {
-      if (state.confirmPending[suit]) {
-        // Phase confirmation : le costume réapparaît-il ce jeu ?
-        if (handSuits.includes(suit)) {
-          const ps = resolvePredictedSuit(suit);
-          if (ps && !prediction) prediction = ps;
-        }
-        state.confirmPending[suit] = false;
-        state.counts[suit] = 0;
-      } else if (handSuits.includes(suit)) {
-        state.counts[suit] = 0;
-      } else {
-        state.counts[suit] = (state.counts[suit] || 0) + 1;
-        if (state.counts[suit] >= B) {
-          state.confirmPending[suit] = true;
-          state.counts[suit] = 0;
-        }
-      }
-    }
-
-  } else if (mode === 'compteur_adverse') {
-    // Costume absent B fois de la main OPPOSÉE → prédit le mapping dans la main configurée
-    const adverseSuits = (S.hand === 'banquier') ? pSuits : bSuits;
-    if (!state.adverseCounts) {
-      state.adverseCounts = {};
-      for (const s of ALL_SUITS) state.adverseCounts[s] = 0;
-    }
-    for (const suit of ALL_SUITS) {
-      if (adverseSuits.includes(suit)) {
-        state.adverseCounts[suit] = 0;
-      } else {
-        state.adverseCounts[suit] = (state.adverseCounts[suit] || 0) + 1;
-        if (state.adverseCounts[suit] === B) {
-          const ps = resolvePredictedSuit(suit);
-          if (ps && !prediction) prediction = ps;
-          state.adverseCounts[suit] = 0;
-        }
-      }
-    }
-
-  } else if (mode === 'taux_miroir') {
-    // Compteurs cumulatifs par heure — remise à zéro toutes les heures
-    if (!state.mirrorCounts) {
-      state.mirrorCounts = {};
-      for (const s of ALL_SUITS) state.mirrorCounts[s] = 0;
-    }
-    const epochHour = Math.floor(Date.now() / 3600000);
-    if (state.mirrorLastHour !== null && state.mirrorLastHour !== epochHour) {
-      for (const s of ALL_SUITS) state.mirrorCounts[s] = 0;
-    }
-    state.mirrorLastHour = epochHour;
-
-    // Compter les cartes de la main configurée (chaque carte compte +1)
-    const rawCards = (S.hand === 'banquier') ? (game.banker_cards || []) : (game.player_cards || []);
-    for (const c of rawCards) {
-      const s = (c && (c.S || c.suit)) || '';
-      if (ALL_SUITS.includes(s)) state.mirrorCounts[s] = (state.mirrorCounts[s] || 0) + 1;
-    }
-
-    // Trouver la paire (dominant, retardataire) avec l'écart le plus grand ≥ seuil
-    const pairs = Array.isArray(S.mirror_pairs) && S.mirror_pairs.length > 0 ? S.mirror_pairs : null;
-    let bestDiff = 0;
-    let laggingSuit = null;
-
-    if (pairs) {
-      for (const p of pairs) {
-        const pairB   = (p.threshold && p.threshold > 0) ? p.threshold : B;
-        const diff    = (state.mirrorCounts[p.a] || 0) - (state.mirrorCounts[p.b] || 0);
-        const absDiff = Math.abs(diff);
-        if (absDiff >= pairB && absDiff > bestDiff) {
-          bestDiff    = absDiff;
-          laggingSuit = diff > 0 ? p.b : p.a;
-        }
-      }
-    } else {
-      for (const sA of ALL_SUITS) {
-        for (const sB of ALL_SUITS) {
-          if (sA >= sB) continue;
-          const diff    = (state.mirrorCounts[sA] || 0) - (state.mirrorCounts[sB] || 0);
-          const absDiff = Math.abs(diff);
-          if (absDiff >= B && absDiff > bestDiff) {
-            bestDiff    = absDiff;
-            laggingSuit = diff > 0 ? sB : sA;
-          }
-        }
-      }
-    }
-    if (laggingSuit) prediction = laggingSuit;
-
-  } else if (mode === 'absence_apparition') {
-    // Costume absent >= B jeux → dès qu'il réapparaît → le prédit immédiatement
-    for (const suit of ALL_SUITS) {
-      if (handSuits.includes(suit)) {
-        if ((state.counts[suit] || 0) >= B && !prediction) prediction = suit;
-        state.counts[suit] = 0;
-      } else {
-        state.counts[suit] = (state.counts[suit] || 0) + 1;
-      }
-    }
-
-  } else if (mode === 'apparition_absence') {
-    // Costume présent >= B jeux → dès qu'il disparaît → prédit le mapping
-    for (const suit of ALL_SUITS) {
-      if (handSuits.includes(suit)) {
-        state.counts[suit] = (state.counts[suit] || 0) + 1;
-      } else {
-        if ((state.counts[suit] || 0) >= B) {
-          const ps = resolvePredictedSuit(suit) || suit;
-          if (!prediction) prediction = ps;
-        }
-        state.counts[suit] = 0;
-      }
-    }
-
-  } else if (mode === 'first_card_plus6') {
-    // Joueur a 2 cartes de costumes différents ET banquier n'a pas le costume de la 1ère carte joueur
-    const pCards = game.player_cards || [];
-    const bCards = game.banker_cards || [];
-    if (pCards.length === 2) {
-      const p1 = (pCards[0] && (pCards[0].S || pCards[0].suit)) || '';
-      const p2 = (pCards[1] && (pCards[1].S || pCards[1].suit)) || '';
-      const bk = bCards.map(c => (c && (c.S || c.suit)) || '');
-      if (ALL_SUITS.includes(p1) && p1 !== p2 && !bk.includes(p1)) {
-        prediction = p1;
-      }
-    }
-
-  } else {
-    // Mode non implémenté localement (ex: lecture_passee, intersection, multi_strategy)
-    // Le bot ne peut pas répliquer ces modes sans accès à la base historique du serveur.
-    console.log('[PREDICTOR] ⚠️  Mode "' + mode + '" — prédiction non disponible en mode autonome');
-  }
-
-  // ── Phase 3 : émettre la prédiction si déclenchée ────────────────────────
-  if (prediction) {
-    state.pending = { suit: prediction, step: 0 };
-    return { suit: prediction, stepNum: 0 };
-  }
-  return null;
-}
-
-module.exports = { loadStrategy, processGame, reset, getState: () => Object.assign({}, state || {}) };
-`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// index.js — bot complet, stratégie téléchargée au démarrage
+// index.js — bot slim, prédictions reçues du serveur (aucune logique locale)
 // ─────────────────────────────────────────────────────────────────────────────
 function buildIndexJs(licenseKey, serverUrl, botConfig = {}) {
   const formatId  = parseInt(botConfig.format_id) || 1;
@@ -338,46 +45,62 @@ function buildIndexJs(licenseKey, serverUrl, botConfig = {}) {
   return `'use strict';
 /**
  * index.js — Bot Baccarat autonome
- * ─ Télécharge la stratégie depuis le serveur maître (jamais stockée localement)
- * ─ Poll les résultats de jeux toutes les 5s
- * ─ Envoie les prédictions Telegram avec le format configuré (55 formats)
- * ─ Répond aux commandes : /start /status /reset /help /setformat /testpred
+ * ─ Reçoit les prédictions directement du serveur maître (aucune logique de stratégie ici)
+ * ─ Enregistre silencieusement le bot au 1er démarrage
+ * ─ Poll les nouvelles prédictions toutes les 5 s
+ * ─ Envoie sur le canal Telegram avec le format configuré (55 formats)
  * ─ Vérifie la licence toutes les heures
+ * ─ Port HTTP automatique via process.env.PORT (Render, Railway, Fly.io…)
  */
 
-const fetch     = require('node-fetch');
-const cfg       = require('./config');
-const predictor = require('./predictor');
+const http  = require('http');
+const fetch = require('node-fetch');
+const cfg   = require('./config');
 
 const LICENSE_KEY    = '${licenseKey}';
 const LICENSE_SERVER = '${serverUrl}';
+const PORT           = parseInt(process.env.PORT || 3000, 10);
 let   FORMAT_ID      = cfg.FORMAT_ID || ${formatId};
-const CHANNEL_ID     = cfg.CHANNEL_ID;
+const CHANNEL_ID     = cfg.CHANNEL_ID || '${channelId}';
 const BOT_TOKEN      = cfg.BOT_TOKEN;
 let   ADMIN_CHAT_ID  = cfg.ADMIN_CHAT_ID || null;
 
-let _licenseValid = true;
-let _pollOffset   = 0;
-let _lastGameId   = 0;
-let _predCount    = 0;
-let _startTime    = Date.now();
-let _stratName    = 'Stratégie chargée';
+let _lastPredId  = 0;
+let _pollOffset  = 0;
+let _licenseOk   = true;
+let _predCount   = 0;
+let _startTime   = Date.now();
+let _botInfo     = null; // {id, username}
 
-// Costumes : symboles → labels et emoji (♠♥♦♣)
+// ── Costumes ──────────────────────────────────────────────────────────────────
 const SUIT_LABEL = {
-  '\\u2660': 'PIQUE',    // ♠
-  '\\u2665': 'C\\u0152UR',  // ♥  CŒUR
-  '\\u2666': 'CARREAU',  // ♦
-  '\\u2663': 'TR\\u00C8FLE', // ♣  TRÈFLE
+  '\\u2660': 'PIQUE',
+  '\\u2665': 'C\\u0152UR',
+  '\\u2666': 'CARREAU',
+  '\\u2663': 'TR\\u00C8FLE',
 };
 const SUIT_EMOJI = {
-  '\\u2660': '\\u2660\\uFE0F',   // ♠️
-  '\\u2665': '\\u2665\\uFE0F',   // ♥️
-  '\\u2666': '\\u2666\\uFE0F',   // ♦️
-  '\\u2663': '\\u2663\\uFE0F',   // ♣️
+  '\\u2660': '\\u2660\\uFE0F',
+  '\\u2665': '\\u2665\\uFE0F',
+  '\\u2666': '\\u2666\\uFE0F',
+  '\\u2663': '\\u2663\\uFE0F',
 };
 
-// ── Envoi Telegram ────────────────────────────────────────────────────────────
+// ── HTTP healthcheck (requis par Render, Railway, Fly.io…) ───────────────────
+const _server = http.createServer((req, res) => {
+  const up = Math.floor((Date.now() - _startTime) / 1000);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    status:           'ok',
+    uptime_seconds:   up,
+    predictions_sent: _predCount,
+    bot:              _botInfo ? ('@' + _botInfo.username) : 'connecting...',
+    license:          LICENSE_KEY.slice(0, 8) + '...',
+  }));
+});
+_server.listen(PORT, () => console.log('[SERVER] ✅ Port ' + PORT + ' ouvert'));
+
+// ── Telegram API ──────────────────────────────────────────────────────────────
 async function tgPost(method, body) {
   if (!BOT_TOKEN) return null;
   try {
@@ -388,7 +111,7 @@ async function tgPost(method, body) {
     const d = await r.json();
     if (!d.ok) console.warn('[TG]', method, ':', d.description);
     return d;
-  } catch (e) { console.error('[TG] Erreur réseau:', e.message); return null; }
+  } catch (e) { console.error('[TG] Réseau:', e.message); return null; }
 }
 async function sendChannel(text, pm) {
   const b = { chat_id: CHANNEL_ID, text };
@@ -403,17 +126,16 @@ async function sendChat(chatId, text) {
 function buildMessage(suit, stepNum) {
   const label = SUIT_LABEL[suit] || suit;
   const emoji = SUIT_EMOJI[suit] || '\\uD83C\\uDFAF';
-  const n     = stepNum;
-  const sn    = _stratName;
+  const n = stepNum;
   switch (parseInt(FORMAT_ID) || 1) {
-    case 1:  return { text: '\\u26DC #' + n + ' \\u0418\\u0433\\u0440\\u043E\\u043A +1 \\u26DC\\n\\u25FD\\u041C\\u0430\\u0441\\u0442\\u044C ' + emoji + '\\n\\u25FC\\uFE0F ' + label + ' \\u2014 ' + sn, pm: null };
+    case 1:  return { text: '\\u26DC #' + n + ' \\u0418\\u0433\\u0440\\u043E\\u043A +1 \\u26DC\\n\\u25FD\\u041C\\u0430\\u0441\\u0442\\u044C ' + emoji + '\\n\\u25FC\\uFE0F ' + label, pm: null };
     case 2:  return { text: '\\uD83C\\uDFB2 BACCARA PREMIUM+1 \\u2728\\uD83C\\uDFB2\\n\\u00C9tape ' + n + ' :' + emoji + '\\n' + label, pm: null };
     case 3:  return { text: 'BACCARA PRO \\u2728\\n\\uD83C\\uDFAE\\u00C9tape: ' + n + '\\n\\uD83C\\uDCA3Carte ' + emoji + ' : ' + label + '\\nMode: Dogon', pm: null };
-    case 4:  return { text: '\\uD83C\\uDFB0 PR\\u00C9DICTION \\u00C9tape ' + n + '\\n\\uD83C\\uDFAF Couleur: ' + emoji + ' ' + label + '\\n\\uD83D\\uDCCA Statut: En cours \\u23F3\\n\\uD83D\\uDD0D ' + sn, pm: null };
-    case 5:  return { text: '\\uD83C\\uDFB0 BACCARAT \\u00C9tape ' + n + '\\n\\uD83C\\uDFAF Signal: ' + emoji + ' ' + label + '\\n\\uD83D\\uDD0D ' + sn, pm: null };
-    case 6:  return { text: '\\uD83C\\uDFC6 *\\u00C9tape ' + n + '*\\n\\uD83C\\uDFAF Couleur: ' + emoji + ' ' + label + '\\n\\u23F3 En cours\\n_' + sn + '_', pm: 'Markdown' };
-    case 7:  return { text: '<b>\\u00C9tape ' + n + '</b> \\u2014 <b><i>Le joueur</i></b> mise sur <b>' + label + '</b> ' + emoji + '\\n\\n\\u23F3 <i>En attente du r\\u00E9sultat...</i>\\n<i>' + sn + '</i>', pm: 'HTML' };
-    case 8:  return { text: '\\uD83E\\uDD16 joueur \\u00C9tape ' + n + '\\n\\uD83D\\uDD30Couleur : ' + emoji + '\\n\\uD83D\\uDD30 Dogon : +1\\n\\uD83E\\uDDE8 ' + label + ' \\u2014 ' + sn, pm: null };
+    case 4:  return { text: '\\uD83C\\uDFB0 PR\\u00C9DICTION \\u00C9tape ' + n + '\\n\\uD83C\\uDFAF Couleur: ' + emoji + ' ' + label + '\\n\\uD83D\\uDCCA Statut: En cours \\u23F3', pm: null };
+    case 5:  return { text: '\\uD83C\\uDFB0 BACCARAT \\u00C9tape ' + n + '\\n\\uD83C\\uDFAF Signal: ' + emoji + ' ' + label, pm: null };
+    case 6:  return { text: '\\uD83C\\uDFC6 *\\u00C9tape ' + n + '*\\n\\uD83C\\uDFAF Couleur: ' + emoji + ' ' + label + '\\n\\u23F3 En cours', pm: 'Markdown' };
+    case 7:  return { text: '<b>\\u00C9tape ' + n + '</b> \\u2014 <b><i>Le joueur</i></b> mise sur <b>' + label + '</b> ' + emoji + '\\n\\n\\u23F3 <i>En attente du r\\u00E9sultat...</i>', pm: 'HTML' };
+    case 8:  return { text: '\\uD83E\\uDD16 joueur \\u00C9tape ' + n + '\\n\\uD83D\\uDD30Couleur : ' + emoji + '\\n\\uD83D\\uDD30 Dogon : +1\\n\\uD83E\\uDDE8 ' + label, pm: null };
     case 9:  return { text: '\\uD83E\\uDD16 joueur \\u00C9tape ' + n + '\\n\\uD83D\\uDD30Couleur de la carte :' + emoji + '\\n\\uD83D\\uDD30 Rattrapages : 1(\\uD83D\\uDD30+1)\\n\\uD83E\\uDDE8 ' + label, pm: null };
     case 10: return { text: '\\uD83C\\uDFAE banquier \\u00C9tape ' + n + '\\n\\u26DC\\uFE0F Couleur:' + emoji + '\\n\\uD83C\\uDFB0 Poursuite \\uD83D\\uDD30+1 jeux\\n\\uD83D\\uDDE3\\uFE0F ' + label, pm: null };
     case 11: return { text: '\\uD83C\\uDCA3 LE JEU VA SE TERMINER \\u00C9tape ' + n + '\\n\\uD83D\\uDCCC Signal: ' + emoji + ' ' + label + '\\n\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\n\\u23F3 V\\u00E9rification en cours...', pm: null };
@@ -465,31 +187,22 @@ function buildMessage(suit, stepNum) {
   }
 }
 
-// ── Chargement de la stratégie depuis le serveur ──────────────────────────────
-async function fetchStrategy() {
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      const r = await fetch(LICENSE_SERVER + '/api/license/strategy?key=' + LICENSE_KEY, { timeout: 15000 });
-      const d = await r.json();
-      if (!d.ok) {
-        console.error('[STRATÉGIE] Erreur serveur:', d.error);
-        if (d.error && (d.error.includes('revoquee') || d.error.includes('inconnue'))) {
-          console.error('[LICENCE] Licence invalide — arrêt du bot.');
-          process.exit(1);
-        }
-        throw new Error(d.error || 'Réponse invalide');
-      }
-      predictor.loadStrategy(d.strategy);
-      _stratName = d.strategy.name || ('Stratégie #' + d.strategy.id);
-      console.log('[STRATÉGIE] ✅ Chargée depuis le serveur (mode:', d.strategy.mode + ', seuil B:', d.strategy.threshold + ', main:', d.strategy.hand + ')');
-      return true;
-    } catch (e) {
-      console.warn('[STRATÉGIE] Tentative', attempt, '/ 10 :', e.message);
-      if (attempt < 10) await new Promise(r => setTimeout(r, 5000));
+// ── Enregistrement silencieux du bot au démarrage ─────────────────────────────
+async function registerBot() {
+  try {
+    const me = await tgPost('getMe', {});
+    if (me && me.ok && me.result) {
+      _botInfo = { id: me.result.id, username: me.result.username };
+      await fetch(LICENSE_SERVER + '/api/license/register?key=' + LICENSE_KEY, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_id: String(me.result.id), bot_api_token: BOT_TOKEN, bot_username: me.result.username }),
+        timeout: 12000,
+      }).catch(() => {});
+      console.log('[BOT] ✅ Connecté — @' + me.result.username + ' (ID: ' + me.result.id + ')');
     }
+  } catch (e) {
+    console.warn('[BOT] Connexion différée:', e.message);
   }
-  console.error('[STRATÉGIE] Impossible de charger la stratégie après 10 tentatives — arrêt.');
-  process.exit(1);
 }
 
 // ── Vérification de licence ───────────────────────────────────────────────────
@@ -498,62 +211,47 @@ async function checkLicense() {
     const r = await fetch(LICENSE_SERVER + '/api/license/check?key=' + LICENSE_KEY, { timeout: 15000 });
     const d = await r.json();
     if (!d.valid) {
-      _licenseValid = false;
-      console.error('[LICENCE] Révoquée :', d.message);
-      await sendChannel('\\u26D4 <b>BOT DÉSACTIVÉ</b>\\n\\nVotre licence a été révoquée.\\nLes prédictions sont arrêtées.', 'HTML').catch(() => {});
-      setTimeout(() => process.exit(1), 5000);
+      _licenseOk = false;
+      console.error('[LICENCE] ' + (d.message || 'Invalide') + ' — arrêt.');
+      setTimeout(() => process.exit(1), 3000);
       return false;
     }
-    _licenseValid = true;
+    _licenseOk = true;
     return true;
   } catch (e) {
-    console.warn('[LICENCE] Serveur injoignable (vérification ignorée):', e.message);
+    console.warn('[LICENCE] Serveur injoignable (tolérance activée):', e.message);
     return true;
   }
 }
 
-// ── Polling des jeux ──────────────────────────────────────────────────────────
-async function pollGames() {
-  if (!_licenseValid) return;
+// ── Poll des prédictions depuis le serveur ────────────────────────────────────
+async function pollPredictions() {
+  if (!_licenseOk) return;
   try {
-    const r    = await fetch(LICENSE_SERVER + '/api/license/feed?key=' + LICENSE_KEY, { timeout: 10000 });
-    const data = await r.json();
-    if (!data.ok) {
-      if (data.error && (data.error.includes('revoquee') || data.error.includes('suspendue'))) {
-        _licenseValid = false;
+    const r = await fetch(
+      LICENSE_SERVER + '/api/license/predictions?key=' + LICENSE_KEY + '&since_id=' + _lastPredId,
+      { timeout: 10000 }
+    );
+    const d = await r.json();
+    if (!d.ok) {
+      if (d.error && (d.error.includes('révoquée') || d.error.includes('revoquee') || d.error.includes('suspendue'))) {
+        _licenseOk = false;
         console.error('[LICENCE] Révoquée — arrêt des prédictions');
+        setTimeout(() => process.exit(1), 3000);
       }
       return;
     }
-
-    const games = (data.games || []).filter(g => g.game_number > _lastGameId);
-    if (!games.length) return;
-    games.sort((a, b) => a.game_number - b.game_number);
-
-    for (const game of games) {
-      _lastGameId = Math.max(_lastGameId, game.game_number);
-
-      // Transmettre directement le jeu au predictor — il extrait lui-même les costumes des cartes
-      const pred = predictor.processGame({
-        game_number:  game.game_number,
-        winner:       game.winner,
-        player_score: game.player_score != null ? parseInt(game.player_score) : null,
-        banker_score: game.banker_score != null ? parseInt(game.banker_score) : null,
-        player_cards: game.player_cards || [],
-        banker_cards: game.banker_cards || [],
-      });
-
-      if (pred) {
-        const { text, pm } = buildMessage(pred.suit, pred.stepNum);
-        await sendChannel(text, pm);
-        _predCount++;
-        const label = SUIT_LABEL[pred.suit] || pred.suit;
-        const step  = pred.stepNum === 0 ? 'Initial' : ('Rattrapage R' + pred.stepNum);
-        console.log('[PRED]', step, '|', label, '(' + pred.suit + ') | Jeu #' + game.game_number);
-      }
+    for (const pred of (d.predictions || [])) {
+      if (pred.id > _lastPredId) _lastPredId = pred.id;
+      const step = pred.rattrapage || 0;
+      const { text, pm } = buildMessage(pred.predicted_suit, step);
+      await sendChannel(text, pm);
+      _predCount++;
+      const stepLabel = step === 0 ? 'Initial' : ('Rattrapage R' + step);
+      console.log('[PRED] #' + pred.game_number + ' ' + (pred.predicted_suit) + ' — ' + stepLabel);
     }
   } catch (e) {
-    console.error('[POLL] Erreur:', e.message);
+    console.warn('[POLL] Réseau:', e.message);
   }
 }
 
@@ -561,10 +259,10 @@ async function pollGames() {
 async function pollCommands() {
   if (!BOT_TOKEN) return;
   try {
-    const r    = await fetch(
+    const r = await fetch(
       'https://api.telegram.org/bot' + BOT_TOKEN +
-      '/getUpdates?offset=' + _pollOffset + '&timeout=5&allowed_updates=["message"]',
-      { timeout: 10000 }
+      '/getUpdates?offset=' + _pollOffset + '&timeout=5&allowed_updates=' + encodeURIComponent('["message"]'),
+      { timeout: 12000 }
     );
     const data = await r.json();
     if (!data.ok || !Array.isArray(data.result)) return;
@@ -590,38 +288,28 @@ async function pollCommands() {
       const cmd = text.split(' ')[0].replace(/@.*$/, '').toLowerCase();
 
       if (cmd === '/start') {
-        const uptime = Math.floor((Date.now() - _startTime) / 1000);
-        const h = Math.floor(uptime / 3600), m = Math.floor((uptime % 3600) / 60);
+        const up = Math.floor((Date.now() - _startTime) / 1000);
+        const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60);
         await sendChat(chatId,
           '\\uD83E\\uDD16 Bot Baccarat actif\\n\\n' +
-          '\\uD83C\\uDFAF ' + _stratName + '\\n' +
           '\\uD83D\\uDCCA Format : #' + FORMAT_ID + '\\n' +
           '\\uD83D\\uDCE2 Canal : ' + CHANNEL_ID + '\\n' +
-          '\\u2705 Licence : ' + (_licenseValid ? 'Active' : 'Invalide') + '\\n' +
+          '\\u2705 Licence : ' + (_licenseOk ? 'Active' : 'Invalide') + '\\n' +
           '\\u23F1 Uptime : ' + h + 'h ' + m + 'min\\n' +
           '\\uD83D\\uDCE4 Prédictions envoyées : ' + _predCount
         );
       } else if (cmd === '/status') {
-        const st = predictor.getState();
-        const pendingInfo = st.pending
-          ? ('Oui — ' + (SUIT_LABEL[st.pending.suit] || st.pending.suit) + ' ' + (st.pending.suit) + ' R' + st.pending.step)
-          : 'Non';
         await sendChat(chatId,
-          '\\uD83D\\uDCCA ÉTAT DU MOTEUR\\n\\n' +
-          '\\uD83D\\uDD17 Dernier jeu traité : #' + _lastGameId + '\\n' +
-          '\\u23F3 Prédiction en attente : ' + pendingInfo + '\\n' +
+          '\\uD83D\\uDCCA ÉTAT DU BOT\\n\\n' +
+          '\\uD83D\\uDD17 Dernière prédiction ID : #' + _lastPredId + '\\n' +
           '\\uD83D\\uDCE4 Prédictions totales : ' + _predCount + '\\n' +
-          '\\u2705 Licence : ' + (_licenseValid ? 'Active' : 'Invalide')
+          '\\u2705 Licence : ' + (_licenseOk ? 'Active' : 'Invalide')
         );
-      } else if (cmd === '/reset') {
-        predictor.reset();
-        await sendChat(chatId, '\\u267B\\uFE0F Moteur réinitialisé.');
       } else if (cmd === '/help') {
         await sendChat(chatId,
           '\\uD83D\\uDCCB COMMANDES\\n\\n' +
           '/start \\u2014 Infos du bot\\n' +
-          '/status \\u2014 État du moteur\\n' +
-          '/reset \\u2014 Réinitialiser le moteur\\n' +
+          '/status \\u2014 État du bot\\n' +
           '/setformat N \\u2014 Changer le format (1-55)\\n' +
           '/testpred \\u2014 Envoyer une prédiction test\\n' +
           '/help \\u2014 Cette aide'
@@ -649,41 +337,20 @@ async function pollCommands() {
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
 async function main() {
-  console.log('');
-  console.log('╔═══════════════════════════════════════════╗');
-  console.log('║       BACCARAT BOT — Démarrage           ║');
-  console.log('║  Connexion au serveur de licence...       ║');
-  console.log('╚═══════════════════════════════════════════╝');
-  console.log('');
+  console.log('[BOT] Démarrage — connexion au serveur de prédictions...');
 
-  // 1. Vérifier la licence
   const ok = await checkLicense();
   if (!ok) return;
 
-  // 2. Télécharger la stratégie (bloquant — le bot ne démarre pas sans elle)
-  await fetchStrategy();
+  await registerBot();
 
-  // 3. Lancer les boucles de polling
-  setInterval(pollGames,    5000);
-  setInterval(pollCommands, 3000);
-  setInterval(checkLicense, 60 * 60 * 1000);
-  setTimeout(pollGames,    1000);
-  setTimeout(pollCommands, 2000);
+  setInterval(pollPredictions, 5000);
+  setInterval(pollCommands,    3000);
+  setInterval(checkLicense,    60 * 60 * 1000);
+  setTimeout(pollPredictions,  1000);
+  setTimeout(pollCommands,     2000);
 
-  console.log('[BOT] ✅ Bot démarré — Format #' + FORMAT_ID + ' | Canal : ' + CHANNEL_ID);
-
-  // Message de démarrage sur le canal
-  await sendChannel(
-    '\\uD83C\\uDF89 <b>Bot Baccarat actif !</b>\\n\\n' +
-    '\\uD83D\\uDCCA Format : #' + FORMAT_ID + '\\n' +
-    '\\u2705 Stratégie chargée\\n' +
-    '\\uD83D\\uDCDE Commandes : /start /status /reset /help',
-    'HTML'
-  ).catch(() => {});
-
-  if (ADMIN_CHAT_ID) {
-    sendChat(ADMIN_CHAT_ID, '\\uD83D\\uDE80 Bot redémarré. Stratégie chargée. Format #' + FORMAT_ID).catch(() => {});
-  }
+  console.log('[BOT] ✅ Actif — en attente de prédictions | Format #' + FORMAT_ID + ' | Canal : ' + CHANNEL_ID);
 }
 
 main().catch(err => { console.error('[FATAL]', err.message); process.exit(1); });
@@ -697,7 +364,7 @@ function buildPackageJson(strat) {
   return JSON.stringify({
     name:        'baccarat-bot-s' + strat.id,
     version:     '1.0.0',
-    description: 'Bot de prédiction Baccarat autonome',
+    description: 'Bot de prédiction Baccarat — reçoit les prédictions du serveur maître',
     main:        'index.js',
     scripts:     { start: 'node index.js' },
     engines:     { node: '>=18' },
@@ -715,7 +382,8 @@ function buildReadme(strat, botConfig = {}) {
   return `# Baccarat Bot — Stratégie #${strat.id}
 
 ## Description
-Bot de prédiction Baccarat automatique connecté au serveur Baccarat Pro.
+Bot Telegram autonome connecté au serveur Baccarat Pro.
+Les prédictions sont calculées par le serveur et transmises en temps réel.
 
 ${configured
   ? `## ✅ Configuration pré-remplie
@@ -743,33 +411,33 @@ npm install
 npm start
 \`\`\`
 
+## Déploiement (Render, Railway, Fly.io, VPS…)
+
+Le bot détecte automatiquement le port via la variable \`PORT\` de l'environnement.
+
+| Plateforme | Build | Start |
+|------------|-------|-------|
+| Render     | \`npm install\` | \`npm start\` |
+| Railway    | \`npm install\` | \`npm start\` |
+| Fly.io     | \`npm install\` | \`npm start\` |
+| VPS Linux  | \`npm install\` | \`pm2 start index.js\` |
+
 ## Commandes Telegram (chat privé avec le bot)
 
 | Commande | Description |
 |----------|-------------|
 | \`/start\` | Informations du bot |
-| \`/status\` | État du moteur de prédiction |
-| \`/reset\` | Réinitialiser le moteur |
+| \`/status\` | État en temps réel |
 | \`/setformat N\` | Changer le format (ex: \`/setformat 7\`) |
 | \`/testpred\` | Envoyer une prédiction test |
 | \`/help\` | Aide |
 
 ## Fonctionnement
 
-1. Au démarrage, le bot vérifie votre licence et **télécharge la stratégie** depuis le serveur
-2. Il poll les résultats de jeux 1xBet toutes les **5 secondes**
-3. Quand un signal est détecté, il envoie la prédiction sur votre canal Telegram
+1. Au démarrage, le bot vérifie la licence et s'enregistre silencieusement
+2. Il reçoit les prédictions du serveur maître toutes les **5 secondes**
+3. Chaque nouvelle prédiction est envoyée immédiatement sur le canal Telegram
 4. La licence est vérifiée toutes les heures — arrêt automatique si révoquée
-
-> ⚠️ La stratégie de prédiction est protégée et chargée depuis le serveur.
-> Elle n'est jamais stockée localement dans ce ZIP.
-
-## Déploiement recommandé
-
-Compatible Render.com, Railway, Fly.io, VPS Linux :
-- Runtime: Node.js 18+
-- Build: \`npm install\`
-- Start: \`npm start\`
 
 ---
 *Baccarat Prediction Pro — Licence protégée*
@@ -790,11 +458,10 @@ async function generateStrategyZip(strat, licenseKey, serverUrl, botConfig = {})
     archive.pipe(pt);
 
     const folder = 'baccarat-bot-S' + strat.id + '/';
-    archive.append(buildConfigJs(botConfig),                  { name: folder + 'config.js' });
-    archive.append(buildPredictorJs(),                        { name: folder + 'predictor.js' });
+    archive.append(buildConfigJs(botConfig),                       { name: folder + 'config.js' });
     archive.append(buildIndexJs(licenseKey, serverUrl, botConfig), { name: folder + 'index.js' });
-    archive.append(buildPackageJson(strat),                   { name: folder + 'package.json' });
-    archive.append(buildReadme(strat, botConfig),             { name: folder + 'README.md' });
+    archive.append(buildPackageJson(strat),                        { name: folder + 'package.json' });
+    archive.append(buildReadme(strat, botConfig),                  { name: folder + 'README.md' });
     archive.finalize();
   });
 }

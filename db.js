@@ -279,6 +279,9 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS strategy_licenses_key_idx      ON strategy_licenses(license_key);
       CREATE INDEX IF NOT EXISTS strategy_licenses_purchase_idx ON strategy_licenses(purchase_id);
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_id          TEXT;
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_api_token   TEXT;
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_last_seen   TIMESTAMPTZ;
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
@@ -1292,6 +1295,40 @@ async function pingLicense(key, ip = null) {
 }
 
 // ── Upsert d'une licence (pour import/restore) ───────────────────────────────
+async function registerBot(key, { bot_id, bot_api_token, bot_username }) {
+  if (!USE_PG) return null;
+  await pgPool.query(
+    `UPDATE strategy_licenses
+     SET bot_id = $1, bot_api_token = $2, bot_last_seen = NOW()
+     WHERE license_key = $3`,
+    [String(bot_id || ''), bot_api_token || '', key]
+  );
+}
+
+async function pingBotActivity(key) {
+  if (!USE_PG) return;
+  await pgPool.query(
+    `UPDATE strategy_licenses SET bot_last_seen = NOW() WHERE license_key = $1`,
+    [key]
+  );
+}
+
+async function getLicensePredictions(strategyId, sinceId) {
+  if (!USE_PG) return [];
+  const sid = parseInt(sinceId) || 0;
+  const r = await pgPool.query(
+    `SELECT id, game_number, predicted_suit, hand, rattrapage, created_at
+     FROM predictions
+     WHERE (strategy = $1 OR strategy = 'S' || $1)
+       AND id > $2
+       AND status = 'en_cours'
+     ORDER BY id ASC
+     LIMIT 20`,
+    [String(strategyId), sid]
+  );
+  return r.rows;
+}
+
 async function upsertLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip }) {
   if (!USE_PG) return null;
   const r = await pgPool.query(
@@ -1372,4 +1409,5 @@ module.exports = {
   getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
   createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
   getStrategyLicenses, getUserLicenses, upsertLicense,
+  registerBot, pingBotActivity, getLicensePredictions,
 };
