@@ -1,20 +1,17 @@
 // announcement-sender.js — Envoi d'annonces Telegram (texte, image, vidéo).
 //
-// Supporte 3 sources de média :
-//   1) media_url   → URL distante (Telegram télécharge depuis cette URL)
-//   2) media_data  → fichier en base64 (téléversé depuis l'admin) — envoyé en multipart
-//   3) Aucun       → message texte simple
-//
-// Pour les fichiers téléversés (media_data), on utilise FormData pour
-// envoyer le fichier en multipart à l'API Telegram (sendPhoto / sendVideo).
+// Deux exports :
+//   sendTelegramMsg(params)  → envoi bas niveau SANS signature
+//   sendAnnouncement(ann)    → envoi AVEC signature (ancien système — onglet Telegram admin)
 
-const axios   = require('axios');
+'use strict';
+const axios    = require('axios');
 const FormData = require('form-data');
 
 function guessMime(filename, fallback) {
   if (!filename) return fallback;
   const ext = String(filename).toLowerCase().split('.').pop();
-  const map = {
+  const map  = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
     webp: 'image/webp', bmp: 'image/bmp',
     mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo',
@@ -23,51 +20,71 @@ function guessMime(filename, fallback) {
   return map[ext] || fallback;
 }
 
-// ── Signature ajoutée automatiquement à chaque annonce ──────────────────────
 const ANNOUNCEMENT_SIGNATURE = `\n\n✨〰️〰️〰️〰️〰️〰️〰️〰️〰️✨\n🏆 <b>Développeur</b> : <b>Sossou Kouamé</b> 🎯\n💎 Prédictions Baccarat Pro\n📲 Pour plus d'informations contactez-moi :\n👉🏻 <a href="https://t.me/Kouamappoloak">t.me/Kouamappoloak</a>\n✨〰️〰️〰️〰️〰️〰️〰️〰️〰️✨`;
 
-function withSignature(text) {
-  return (text || '') + ANNOUNCEMENT_SIGNATURE;
-}
+/**
+ * sendTelegramMsg — envoi bas niveau sans signature
+ * @param {object} p
+ * @param {string} p.bot_token
+ * @param {string} p.channel_id
+ * @param {string} p.text
+ * @param {string} [p.media_type]    'image' | 'video'
+ * @param {string} [p.media_data]    base64
+ * @param {string} [p.media_filename]
+ * @param {string} [p.media_url]     URL distante (fallback)
+ */
+async function sendTelegramMsg(p) {
+  const BASE   = `https://api.telegram.org/bot${p.bot_token}`;
+  const chatId = String(p.channel_id);
+  const text   = (p.text || '').trim();
 
-async function sendAnnouncement(ann) {
-  const BASE = `https://api.telegram.org/bot${ann.bot_token}`;
-  const chatId = ann.channel_id;
-
-  // ── Cas 1 : fichier téléversé (base64) → envoi multipart ──
-  if (ann.media_type && ann.media_data) {
-    const buf = Buffer.from(ann.media_data, 'base64');
-    const filename = ann.media_filename || (ann.media_type === 'video' ? 'video.mp4' : 'image.jpg');
-    const mime = guessMime(filename, ann.media_type === 'video' ? 'video/mp4' : 'image/jpeg');
+  // ── Fichier base64 (multipart) ──
+  if (p.media_type && p.media_data) {
+    const buf      = Buffer.from(p.media_data, 'base64');
+    const filename = p.media_filename || (p.media_type === 'video' ? 'video.mp4' : 'image.jpg');
+    const mime     = guessMime(filename, p.media_type === 'video' ? 'video/mp4' : 'image/jpeg');
+    const field    = p.media_type === 'video' ? 'video' : 'photo';
+    const endpoint = p.media_type === 'video' ? 'sendVideo' : 'sendPhoto';
 
     const form = new FormData();
-    form.append('chat_id', String(chatId));
-    form.append('caption', withSignature(ann.text));
-    form.append('parse_mode', 'HTML');
-    const fieldName = ann.media_type === 'video' ? 'video' : 'photo';
-    form.append(fieldName, buf, { filename, contentType: mime });
+    form.append('chat_id', chatId);
+    if (text) { form.append('caption', text); form.append('parse_mode', 'HTML'); }
+    form.append(field, buf, { filename, contentType: mime });
 
-    const endpoint = ann.media_type === 'video' ? 'sendVideo' : 'sendPhoto';
     await axios.post(`${BASE}/${endpoint}`, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
-      maxBodyLength:   Infinity,
+      maxBodyLength:    Infinity,
+      timeout: 30000,
     });
     return;
   }
 
-  // ── Cas 2 : URL distante ──
-  if (ann.media_type === 'image' && ann.media_url) {
-    await axios.post(`${BASE}/sendPhoto`, { chat_id: chatId, photo: ann.media_url, caption: withSignature(ann.text), parse_mode: 'HTML' });
+  // ── URL distante ──
+  if (p.media_type === 'image' && p.media_url) {
+    await axios.post(`${BASE}/sendPhoto`, { chat_id: chatId, photo: p.media_url, caption: text, parse_mode: 'HTML' }, { timeout: 15000 });
     return;
   }
-  if (ann.media_type === 'video' && ann.media_url) {
-    await axios.post(`${BASE}/sendVideo`, { chat_id: chatId, video: ann.media_url, caption: withSignature(ann.text), parse_mode: 'HTML' });
+  if (p.media_type === 'video' && p.media_url) {
+    await axios.post(`${BASE}/sendVideo`, { chat_id: chatId, video: p.media_url, caption: text, parse_mode: 'HTML' }, { timeout: 15000 });
     return;
   }
 
-  // ── Cas 3 : texte uniquement ──
-  await axios.post(`${BASE}/sendMessage`, { chat_id: chatId, text: withSignature(ann.text), parse_mode: 'HTML' });
+  // ── Texte uniquement ──
+  if (text) {
+    await axios.post(`${BASE}/sendMessage`, { chat_id: chatId, text, parse_mode: 'HTML' }, { timeout: 15000 });
+  }
 }
 
-module.exports = { sendAnnouncement };
+/**
+ * sendAnnouncement — envoi AVEC signature (compatibilité ancien système)
+ * Attend ann.text (pas ann.message_text).
+ */
+async function sendAnnouncement(ann) {
+  return sendTelegramMsg({
+    ...ann,
+    text: (ann.text || '') + ANNOUNCEMENT_SIGNATURE,
+  });
+}
+
+module.exports = { sendAnnouncement, sendTelegramMsg };
