@@ -14,9 +14,13 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
 
-const STRATEGY_PRICE_USD = 75;
-const WHATSAPP_NUMBER    = '+2290195501564';
-const WHATSAPP_LINK      = 'https://wa.me/2290195501564';
+const WHATSAPP_NUMBER = '+2290195501564';
+const WHATSAPP_LINK   = 'https://wa.me/2290195501564';
+
+function getStrategyPrice(promo) {
+  const p = parseFloat(promo?.price_usd);
+  return Number.isFinite(p) && p > 0 ? p : 75;
+}
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
@@ -36,11 +40,11 @@ router.get('/catalog', requireAuth, async (req, res) => {
     const catalog = strats
       .filter(s => promos[String(s.id)]?.enabled)
       .map(s => ({
-        id:          String(s.id),
-        name:        s.name,
-        mode:        s.mode,
-        promo:       promos[String(s.id)],
-        price_usd:   STRATEGY_PRICE_USD,
+        id:        String(s.id),
+        name:      s.name,
+        mode:      s.mode,
+        promo:     promos[String(s.id)],
+        price_usd: getStrategyPrice(promos[String(s.id)]),
       }));
 
     res.json({ catalog, whatsapp: { number: WHATSAPP_NUMBER, link: WHATSAPP_LINK } });
@@ -82,16 +86,18 @@ router.post('/purchase', requireAuth, async (req, res) => {
       });
     }
 
+    const price = getStrategyPrice(promo);
+
     const r = await db.pool.query(
       `INSERT INTO strategy_purchases (user_id, strategy_id, strategy_name, amount_usd, status)
        VALUES ($1,$2,$3,$4,'awaiting_screenshot') RETURNING *`,
-      [user.id, String(strategy_id), strat.name, STRATEGY_PRICE_USD]
+      [user.id, String(strategy_id), strat.name, price]
     );
     const purchase = r.rows[0];
 
     const msg =
 `Je veux payer la stratégie ${strat.name} (S${strategy_id}).
-Montant : ${STRATEGY_PRICE_USD} $
+Montant : ${price} $
 Identifiant compte : ${user.username}
 Référence achat : #${purchase.id}
 
@@ -103,7 +109,7 @@ Je suis d'accord pour le prix.`;
       ok: true,
       purchase: { id: purchase.id, status: purchase.status },
       strategy: { id: strategy_id, name: strat.name },
-      amount_usd: STRATEGY_PRICE_USD,
+      amount_usd: price,
       whatsapp_link: whatsappLink,
       whatsapp_number: WHATSAPP_NUMBER,
     });
