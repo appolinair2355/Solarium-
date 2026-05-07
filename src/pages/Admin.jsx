@@ -7868,6 +7868,10 @@ function AdminPanel() {
                     const lastPing  = lic.last_ping_at
                       ? new Date(lic.last_ping_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                       : '—';
+                    const botOnline = lic.bot_last_seen && (Date.now() - new Date(lic.bot_last_seen).getTime()) < 2 * 60 * 1000;
+                    const botLastSeenStr = lic.bot_last_seen
+                      ? new Date(lic.bot_last_seen).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                      : null;
                     return (
                       <div key={lic.license_key} style={{ background: 'rgba(15,23,42,0.9)', border: `1px solid ${isRevoked ? 'rgba(239,68,68,0.4)' : 'rgba(192,132,252,0.25)'}`, borderRadius: 12, padding: '14px 18px' }}>
                         {/* Header */}
@@ -7893,6 +7897,30 @@ function AdminPanel() {
                         <div style={{ fontSize: 11, color: '#818cf8', background: 'rgba(0,0,0,0.25)', borderRadius: 6, padding: '6px 10px', marginBottom: 10, fontFamily: 'monospace', wordBreak: 'break-all', userSelect: 'all' }}>
                           🔑 {lic.license_key}
                         </div>
+
+                        {/* Statut bot déployé */}
+                        {(lic.bot_id || lic.bot_last_seen) && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: botOnline ? 'rgba(34,197,94,0.06)' : 'rgba(100,116,139,0.08)', border: `1px solid ${botOnline ? 'rgba(34,197,94,0.25)' : 'rgba(100,116,139,0.2)'}` }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: botOnline ? '#4ade80' : '#64748b' }}>
+                              {botOnline ? '🟢 Bot en ligne' : '🔴 Bot hors ligne'}
+                            </span>
+                            {lic.bot_id && (
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                                🤖 ID : <strong style={{ fontFamily: 'monospace', color: '#c084fc' }}>{lic.bot_id}</strong>
+                              </span>
+                            )}
+                            {lic.bot_api_token && (
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                                🔐 Token : <strong style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{lic.bot_api_token.slice(0, 8)}••••••••</strong>
+                              </span>
+                            )}
+                            {botLastSeenStr && (
+                              <span style={{ fontSize: 11, color: '#64748b' }}>
+                                ⏱ Vu : <strong style={{ color: '#94a3b8' }}>{botLastSeenStr}</strong>
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {/* Stats */}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 11, color: '#64748b', marginBottom: 12 }}>
