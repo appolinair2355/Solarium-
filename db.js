@@ -13,7 +13,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
       ? { rejectUnauthorized: false }
       : false,
     max: 5,
