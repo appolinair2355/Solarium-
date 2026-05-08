@@ -408,11 +408,24 @@ export default function Shop() {
                           </span>
                         </div>
                         <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 5, lineHeight: 1.3 }}>
-                          {promo.titre || item.name}
+                          {item.shop_name || promo.titre || item.name}
                         </div>
-                        {promo.tagline && (
+                        {item.shop_desc ? (
+                          <div style={{ marginBottom: 14 }}>
+                            {item.shop_desc.split('\n').map((line, i) => (
+                              <div key={i} style={{
+                                fontSize: 11, lineHeight: 1.65, marginBottom: i < 2 ? 6 : 0,
+                                color: i === 0 ? '#94a3b8' : i === 1 ? '#4ade80' : '#60a5fa',
+                                background: i === 2 ? 'rgba(56,189,248,0.06)' : 'transparent',
+                                border: i === 2 ? '1px solid rgba(56,189,248,0.18)' : 'none',
+                                borderRadius: i === 2 ? 7 : 0,
+                                padding: i === 2 ? '6px 9px' : 0,
+                              }}>{line}</div>
+                            ))}
+                          </div>
+                        ) : promo.tagline ? (
                           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promo.tagline}</div>
-                        )}
+                        ) : null}
                         <div style={{ marginBottom: 16 }}>
                           {[promo.bullet1, promo.bullet2, promo.bullet3].filter(Boolean).map((b, i) => (
                             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 5 }}>
@@ -427,7 +440,7 @@ export default function Shop() {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                           <div>
                             <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix unique</div>
-                            <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{price} $</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{price} €</div>
                           </div>
                           {existingPurchase ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>

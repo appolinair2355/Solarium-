@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import Avatar from '../components/Avatar';
 import AdminIdeas from '../components/AdminIdeas';
 import AdminTgAnnounce from '../components/AdminTgAnnounce';
+import AdminRefresh from '../components/AdminRefresh';
 
 class AdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -3454,7 +3455,7 @@ function ProjectBackupPanel() {
 
 // ── Composant dédié : Gestion de la Boutique (Vente Stratégies) ─────────────
 function VenteStrategiesPanel({ strategies, promoConfigs, loadPromoConfigs, stratStats }) {
-  const BLANK = { enabled: false, titre: '', tagline: '', badge: '🔥', plan_requis: 'standard', prix_texte: '', bullet1: '', bullet2: '', bullet3: '', cta: 'Acheter maintenant' };
+  const BLANK = { enabled: false, titre: '', tagline: '', badge: '🔥', plan_requis: 'standard', prix_texte: '', price_usd: 75, bullet1: '', bullet2: '', bullet3: '', cta: 'Acheter maintenant' };
   const [expandedId, setExpandedId]   = React.useState(null);
   const [forms, setForms]             = React.useState({});
   const [saving, setSaving]           = React.useState({});
@@ -3712,71 +3713,23 @@ function VenteStrategiesPanel({ strategies, promoConfigs, loadPromoConfigs, stra
                 {isOpen && (
                   <div style={{ borderTop: `1px solid ${c1}28`, padding: '20px 20px', background: 'rgba(0,0,0,0.25)' }}>
                     <div style={{ fontSize: 11, fontWeight: 800, color: c1, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 14 }}>
-                      ⚙️ Configuration de la fiche de vente
+                      💶 Prix de vente
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Badge</label>
-                        <select value={form.badge} onChange={e => setField(s.id, 'badge', e.target.value)}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12 }}>
-                          <option value="🔥">🔥 Populaire</option>
-                          <option value="⭐">⭐ Nouveau</option>
-                          <option value="🏆">🏆 Premium</option>
-                          <option value="💎">💎 Exclusif</option>
-                          <option value="🚀">🚀 Puissant</option>
-                          <option value="🎯">🎯 Précis</option>
-                          <option value="🤖">🤖 Auto</option>
-                          <option value="">∅ Aucun</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Plan requis</label>
-                        <select value={form.plan_requis} onChange={e => setField(s.id, 'plan_requis', e.target.value)}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12 }}>
-                          <option value="standard">Standard</option>
-                          <option value="premium">Premium ⭐</option>
-                          <option value="pro">Pro 💼</option>
-                        </select>
-                      </div>
+                    <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 9, background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.15)', fontSize: 11, color: '#38bdf8', lineHeight: 1.6 }}>
+                      ℹ️ Le nom et la description sont générés automatiquement à partir des statistiques de bilan.
                     </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Titre affiché</label>
-                      <input type="text" value={form.titre} maxLength={60} onChange={e => setField(s.id, 'titre', e.target.value)}
-                        placeholder="Ex : Stratégie Miroir Avancée"
-                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Accroche (tagline)</label>
-                      <input type="text" value={form.tagline} maxLength={80} onChange={e => setField(s.id, 'tagline', e.target.value)}
-                        placeholder="Ex : Résultats prouvés, signaux en temps réel"
-                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: `1px solid ${c1}40`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                    {['bullet1','bullet2','bullet3'].map((b, i) => (
-                      <div key={b} style={{ marginBottom: 7 }}>
-                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Argument {i+1}</label>
-                        <input type="text" value={form[b]} maxLength={80} onChange={e => setField(s.id, b, e.target.value)}
-                          placeholder={['Mise à jour en temps réel','Compatible toutes tables','Support inclus 30 jours'][i]}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                      </div>
-                    ))}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8, marginBottom: 12 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix affiché</label>
-                        <input type="text" value={form.prix_texte} maxLength={20} onChange={e => setField(s.id, 'prix_texte', e.target.value)}
-                          placeholder="Ex : 75 $"
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Texte bouton</label>
-                        <input type="text" value={form.cta} maxLength={40} onChange={e => setField(s.id, 'cta', e.target.value)}
-                          placeholder="Acheter maintenant"
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: `1px solid ${c1}30`, borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                      </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'block', fontSize: 10, color: '#64748b', marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix (€) — chiffres uniquement</label>
+                      <input type="number" value={form.price_usd ?? 75} min="1" max="9999"
+                        onChange={e => setField(s.id, 'price_usd', parseFloat(e.target.value) || 75)}
+                        placeholder="75"
+                        style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: `1px solid ${c1}50`, borderRadius: 7, color: '#fbbf24', fontSize: 20, fontWeight: 900, boxSizing: 'border-box', letterSpacing: -0.5 }} />
+                      <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Le symbole € est ajouté automatiquement côté utilisateur.</div>
                     </div>
                     <button onClick={() => saveStrategy(s.id)} disabled={isSaving}
                       style={{ width: '100%', padding: '10px 0', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: isSaving ? 'wait' : 'pointer',
                         background: `linear-gradient(135deg, ${c1}44, ${c2}28)`, border: `1px solid ${c1}60`, color: c1 }}>
-                      {isSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
+                      {isSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder le prix'}
                     </button>
                   </div>
                 )}
@@ -6202,6 +6155,7 @@ function AdminPanel() {
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
             { id: 'comptages',      icon: '📈', label: 'Comptages' },
             { id: 'cartes',         icon: '🎴', label: 'Gestionnaire des cartes' },
+            { id: 'refresh',        icon: '🔄', label: 'Actualiser' },
             ...(canSeeSystem ? [
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
@@ -7726,6 +7680,13 @@ function AdminPanel() {
         {adminTab === 'tg-annonces' && (
           <div style={{ padding: '0 8px' }}>
             <AdminTgAnnounce />
+          </div>
+        )}
+
+        {/* ── TAB : PANNEAU ACTUALISER ── */}
+        {adminTab === 'refresh' && (
+          <div style={{ padding: '0 8px' }}>
+            <AdminRefresh />
           </div>
         )}
 
