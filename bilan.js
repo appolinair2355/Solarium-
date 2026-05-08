@@ -177,6 +177,25 @@ async function sendDailyBilan(dateStr) {
     await db.saveBilanSnapshot(dateStr, bilanData);
     console.log(`[Bilan] Snapshot sauvegardé (${bilanData.length} stratégies)`);
 
+    // ── Mettre à jour les descriptions automatiques pour la boutique ──────────
+    try {
+      const rawShopDesc = await db.getSetting('strategy_shop_desc').catch(() => null);
+      const shopDesc = rawShopDesc ? JSON.parse(rawShopDesc) : {};
+      for (const entry of bilanData) {
+        shopDesc[String(entry.stratId)] = {
+          winRate:   entry.winRate,
+          total:     entry.total,
+          wins:      entry.totalWins,
+          losses:    entry.totalLosses,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      await db.setSetting('strategy_shop_desc', JSON.stringify(shopDesc));
+      console.log(`[Bilan] Descriptions boutique mises à jour (${bilanData.length} stratégie(s))`);
+    } catch (e) {
+      console.error('[Bilan] Erreur mise à jour descriptions boutique:', e.message);
+    }
+
     // ── Envoi séparé pour chaque stratégie ──────────────────────────
     // Chaque stratégie est envoyée indépendamment sur ses propres canaux.
     // Cela garantit qu'aucune stratégie ne se mélange avec une autre.

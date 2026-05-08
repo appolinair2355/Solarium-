@@ -994,6 +994,33 @@ router.post('/clear-predictions', requireAdmin, async (req, res) => {
 // Remet à 0 : engine_absences, bilan_last, pending en mémoire, compteurs absences moteur
 // Conserve : users, telegram_config, strategy_channel_routes, custom_strategies,
 //            tg_msg_format, ui_styles, sessions, render_db_url, broadcast_message
+// ── Actualisation douce du moteur (sans suppression de stats) ──────────────
+router.post('/refresh-site', requireAdmin, async (req, res) => {
+  try {
+    const eng = require('./engine');
+    let predictions_cleared = 0;
+
+    // 1. Nettoyer les prédictions bloquées expirées
+    if (eng.instance?._clearExpiredByTime) {
+      predictions_cleared = await eng.instance._clearExpiredByTime().catch(() => 0) || 0;
+    }
+
+    // 2. Recharger les stratégies personnalisées
+    if (eng.instance?.reloadCustomStrategies) {
+      const db = require('./db');
+      const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+      const strats = rawStrats ? JSON.parse(rawStrats) : [];
+      eng.instance.reloadCustomStrategies(strats);
+    }
+
+    // 3. Réinitialiser les absences moteur
+    if (eng.instance?.resetAbsences) eng.instance.resetAbsences();
+
+    console.log(`[Admin] refresh-site — ${predictions_cleared} prédiction(s) bloquée(s) nettoyée(s)`);
+    res.json({ ok: true, predictions_cleared });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/reset-all-stats', requireAdmin, async (req, res) => {
   try {
     const pool = db.pool;

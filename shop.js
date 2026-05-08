@@ -24,7 +24,17 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// Prix depuis la fiche promo (fallback à 75 $ si non défini)
+// ── Générateur de nom marketing (déterministe par ID stratégie) ──────────────
+const MKTG_PREFIXES = ['Protocole', 'Système', 'Méthode', 'Formule', 'Module', 'Signal'];
+const MKTG_GEMS     = ['Platine', 'Émeraude', 'Saphir', 'Rubis', 'Diamant', 'Cristal', 'Cobalt', 'Ambre', 'Jade', 'Opale', 'Topaze', 'Onyx'];
+const MKTG_SUFFIXES = ['Pro', 'Élite', 'Expert', 'Premium', 'Prestige', 'Master', 'Ultra', 'VIP'];
+
+function generateMarketingName(strategyId) {
+  const id = parseInt(strategyId) || 0;
+  return `${MKTG_PREFIXES[id % MKTG_PREFIXES.length]} ${MKTG_GEMS[(id * 3) % MKTG_GEMS.length]} ${MKTG_SUFFIXES[(id * 7) % MKTG_SUFFIXES.length]}`;
+}
+
+// Prix depuis la fiche promo (fallback à 75 si non défini)
 function getStrategyPrice(promo) {
   const p = parseFloat(promo?.price_usd);
   return Number.isFinite(p) && p > 0 ? p : 75;
@@ -39,15 +49,41 @@ router.get('/catalog', requireAuth, async (req, res) => {
     const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
     const strats    = rawStrats ? JSON.parse(rawStrats) : [];
 
+    const rawShopDesc = await db.getSetting('strategy_shop_desc').catch(() => null);
+    const shopDescs   = rawShopDesc ? JSON.parse(rawShopDesc) : {};
+
     const catalog = strats
       .filter(s => promos[String(s.id)]?.enabled)
-      .map(s => ({
-        id:        String(s.id),
-        name:      s.name,
-        mode:      s.mode,
-        promo:     promos[String(s.id)],
-        price_usd: getStrategyPrice(promos[String(s.id)]),
-      }));
+      .map(s => {
+        const sid  = String(s.id);
+        const desc = shopDescs[sid];
+        let shopDesc = '';
+        if (desc && desc.total > 0) {
+          let updatedLabel = '';
+          if (desc.updatedAt) {
+            const d = new Date(desc.updatedAt);
+            const datePart = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+            const timePart = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            updatedLabel = `le ${datePart} à ${timePart}`;
+          }
+          const lossRate = 100 - desc.winRate;
+          const perf = desc.winRate >= 70 ? 'excellente' : desc.winRate >= 60 ? 'très bonne' : desc.winRate >= 50 ? 'bonne' : 'en progression';
+          shopDesc = [
+            `📊 Au ${updatedLabel || 'dernier bilan'} : taux de réussite de ${desc.winRate}% sur ${desc.total} prédictions vérifiées — ${desc.wins} victoires / ${desc.losses} pertes (${lossRate}% perdus).`,
+            `💰 Performance ${perf} — cette stratégie est rentable et ses résultats sont mis à jour chaque nuit automatiquement.`,
+            `📲 Comment payer : cliquez sur "Acheter maintenant", vous serez redirigé sur WhatsApp (+229 01 95 50 15 64). Envoyez le message pré-rempli + votre capture de paiement. Votre bot sera débloqué après validation.`,
+          ].join('\n');
+        }
+        return {
+          id:        sid,
+          name:      s.name,
+          shop_name: generateMarketingName(s.id),
+          shop_desc: shopDesc,
+          mode:      s.mode,
+          promo:     promos[sid],
+          price_usd: getStrategyPrice(promos[sid]),
+        };
+      });
 
     res.json({ catalog, whatsapp: { number: WHATSAPP_NUMBER, link: WHATSAPP_LINK } });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -73,6 +109,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Session invalide' });
 
     const price = getStrategyPrice(promo);
+    const mktgName = generateMarketingName(strategy_id);
 
     // Vérifier si une demande est déjà en cours pour cette stratégie
     const existing = await db.pool.query(
@@ -93,13 +130,13 @@ router.post('/purchase', requireAuth, async (req, res) => {
     const r = await db.pool.query(
       `INSERT INTO strategy_purchases (user_id, strategy_id, strategy_name, amount_usd, status)
        VALUES ($1,$2,$3,$4,'awaiting_screenshot') RETURNING *`,
-      [user.id, String(strategy_id), strat.name, price]
+      [user.id, String(strategy_id), mktgName, price]
     );
     const purchase = r.rows[0];
 
     const msg =
-`Je veux payer la stratégie ${strat.name} (S${strategy_id}).
-Montant : ${price} $
+`Je veux acheter la stratégie ${mktgName} (S${strategy_id}).
+Montant : ${price} €
 Identifiant compte : ${user.username}
 Référence achat : #${purchase.id}
 
@@ -110,7 +147,7 @@ Je suis d'accord pour le prix.`;
     res.json({
       ok: true,
       purchase: { id: purchase.id, status: purchase.status },
-      strategy: { id: strategy_id, name: strat.name },
+      strategy: { id: strategy_id, name: mktgName },
       amount_usd: price,
       whatsapp_link: whatsappLink,
       whatsapp_number: WHATSAPP_NUMBER,
