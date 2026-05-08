@@ -85,6 +85,7 @@ export default function AdminTgAnnounce() {
   const [saving,   setSaving]   = useState(false);
   const [errMsg,   setErrMsg]   = useState('');
   const [sendState,setSendState]= useState({});          // { [id]: 'loading'|'ok'|'err:...' }
+  const [saveSuccess,setSaveSuccess] = useState(false);  // true après sauvegarde réussie
   const [showToken,setShowToken]= useState(false);
   const fileRef   = useRef();
   const modalRef  = useRef();
@@ -183,7 +184,7 @@ export default function AdminTgAnnounce() {
     if (form.schedule_type === 'fixed' && form.fixed_hours.length === 0)
       return setErrMsg('Sélectionnez au moins une heure fixe');
 
-    setSaving(true); setErrMsg('');
+    setSaving(true); setErrMsg(''); setSaveSuccess(false);
     try {
       const isNew = modal === 'new';
       const url   = isNew ? '/api/tg-announce' : `/api/tg-announce/${modal.ann.id}`;
@@ -211,9 +212,22 @@ export default function AdminTgAnnounce() {
       });
       const d = await r.json();
       if (!r.ok) { setErrMsg(d.error || 'Erreur serveur'); return; }
-      setModal(null);
+
+      // Envoi immédiat sur Telegram après sauvegarde
+      const savedId = isNew ? (d.id ?? d.announce?.id) : modal.ann.id;
+      if (savedId) {
+        try {
+          await fetch(`/api/tg-announce/${savedId}/send-now`, { method: 'POST', credentials: 'include' });
+        } catch {}
+      }
+
       load();
       loadHints();
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        setModal(null);
+      }, 2500);
     } finally { setSaving(false); }
   }
 
@@ -503,12 +517,18 @@ export default function AdminTgAnnounce() {
             )}
 
             {/* Boutons */}
-            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-              <button onClick={handleSave} disabled={saving} style={{ ...S.btnPrim, flex: 1, opacity: saving ? .7 : 1 }}>
-                {saving ? '⏳ Enregistrement…' : isNew ? '✅ Créer l\'annonce' : '✅ Sauvegarder'}
-              </button>
-              <button onClick={() => setModal(null)} style={S.btnGhost}>Annuler</button>
-            </div>
+            {saveSuccess ? (
+              <div style={{ textAlign: 'center', padding: '16px', borderRadius: 12, background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', fontSize: 15, fontWeight: 800, letterSpacing: 0.2 }}>
+                ✅ Enregistrée et envoyée sur Telegram !
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                <button onClick={handleSave} disabled={saving} style={{ ...S.btnPrim, flex: 1, opacity: saving ? .7 : 1 }}>
+                  {saving ? '⏳ Envoi en cours…' : modal === 'new' ? '✅ Créer et envoyer' : '✅ Sauvegarder et envoyer'}
+                </button>
+                <button onClick={() => setModal(null)} style={S.btnGhost}>Annuler</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
