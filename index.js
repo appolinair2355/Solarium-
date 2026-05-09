@@ -122,8 +122,38 @@ app.use('/api/license',     licenseRoutes);
 app.use('/api/ideas',       blockExpired, ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
 
-// ── Bilan quotidien ────────────────────────────────────────────────
+// ── Statut admin en ligne ──────────────────────────────────────────
 const db = require('./db');
+app.get('/api/admin-status', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    let adminUser = null;
+    if (USE_PG && pool) {
+      const { rows } = await pool.query(
+        'SELECT last_seen FROM users WHERE is_admin = true AND last_seen IS NOT NULL ORDER BY last_seen DESC LIMIT 1'
+      );
+      if (rows.length > 0) adminUser = rows[0];
+    } else {
+      const allUsers = await db.getUsers ? db.getUsers() : [];
+      const admins = (Array.isArray(allUsers) ? allUsers : []).filter(u => u.is_admin && u.last_seen);
+      if (admins.length > 0) {
+        admins.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+        adminUser = admins[0];
+      }
+    }
+    if (!adminUser || !adminUser.last_seen) return res.json({ is_online: false, label: 'Hors ligne' });
+    const diff = Date.now() - new Date(adminUser.last_seen).getTime();
+    const isOnline = diff < 5 * 60 * 1000;
+    let label;
+    if (isOnline) label = 'En ligne';
+    else if (diff < 60 * 60 * 1000) label = `Il y a ${Math.round(diff / 60000)} min`;
+    else if (diff < 24 * 60 * 60 * 1000) label = `Il y a ${Math.round(diff / 3600000)}h`;
+    else label = `Il y a ${Math.round(diff / 86400000)} jour(s)`;
+    res.json({ is_online: isOnline, last_seen: adminUser.last_seen, label });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Bilan quotidien ────────────────────────────────────────────────
 app.get('/api/bilan/latest', async (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   try {

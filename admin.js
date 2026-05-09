@@ -676,7 +676,9 @@ router.post('/strategies', requireAdmin, async (req, res) => {
         ? { threshold: 0, mode: 'first_card_plus6', mappings: null,
             proche: Math.max(1, parseInt(req.body.proche) || 3),
             banker_card_count: [0, 2, 3].includes(parseInt(req.body.banker_card_count)) ? parseInt(req.body.banker_card_count) : 0,
-            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
+            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2),
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -858,7 +860,9 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
         ? { threshold: 0, mode: 'first_card_plus6', mappings: null,
             proche: Math.max(1, parseInt(req.body.proche) || 3),
             banker_card_count: [0, 2, 3].includes(parseInt(req.body.banker_card_count)) ? parseInt(req.body.banker_card_count) : 0,
-            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
+            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2),
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -4717,6 +4721,27 @@ router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
     const configs = raw ? JSON.parse(raw) : {};
     configs[String(id)] = req.body;
     await db.setSetting('strategy_promo_config', JSON.stringify(configs));
+
+    // ── Sync nom boutique → nom stratégie ─────────────────────────────────
+    // Si un titre est défini dans la boutique, l'appliquer comme nom de stratégie
+    const newTitle = req.body?.titre;
+    if (newTitle && typeof newTitle === 'string' && newTitle.trim()) {
+      try {
+        const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+        if (rawStrats) {
+          const strats = JSON.parse(rawStrats);
+          const idx = strats.findIndex(s => String(s.id) === String(id));
+          if (idx !== -1 && strats[idx].name !== newTitle.trim()) {
+            strats[idx].name = newTitle.trim();
+            await db.setSetting('custom_strategies', JSON.stringify(strats));
+            console.log(`[Admin] Sync boutique→stratégie #${id}: "${newTitle.trim()}"`);
+          }
+        }
+      } catch (syncErr) {
+        console.error('[Admin] Sync boutique→stratégie erreur:', syncErr.message);
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

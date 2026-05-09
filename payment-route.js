@@ -204,7 +204,7 @@ Je veux le lien de paiement.`;
   }
 });
 
-// ── Upload d'une capture (étape 2) — l'IA analyse + accès temporaire 2 h ──
+// ── Upload d'une capture (étape 2) — Sossou Kouamé assistance analyse + accès temporaire 2 h ──
 router.post('/:id/screenshot', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   const { image_base64, mime_type } = req.body;
@@ -226,19 +226,19 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
     const cleanB64 = String(image_base64).replace(/^data:[^;]+;base64,/, '');
     const mime = mime_type || 'image/jpeg';
 
-    // Analyse IA
+    // Analyse Sossou Kouamé assistance (vision)
     let aiResult = null;
     let aiError  = null;
     try {
       aiResult = await analyzePaymentScreenshot(cleanB64, mime, pr.amount_usd);
     } catch (e) {
       aiError = e.message;
-      console.warn('[Payment] IA Vision indisponible :', e.message);
+      console.warn('[Payment] Sossou Kouamé assistance Vision indisponible :', e.message);
     }
 
-    // Décision : si l'IA valide → on applique la DURÉE COMPLÈTE du plan
+    // Décision : si Sossou Kouamé assistance valide → on applique la DURÉE COMPLÈTE du plan
     // (sous réserve de vérification administrateur). Si l'admin rejette plus tard,
-    // la durée sera retirée. Si l'IA n'est pas sûre → attente admin sans durée.
+    // la durée sera retirée. Si l'analyse n'est pas sûre → attente admin sans durée.
     const isValid = aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 50;
     let provisionalExpiry = null;
     let newStatus = 'pending_admin';
@@ -292,8 +292,8 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       ai_analysis: aiResult || { error: aiError },
       status: newStatus,
       message: isValid
-        ? `✅ Paiement détecté par l'IA — votre durée complète de ${pr.plan_label} a été créditée à votre compte (sous réserve de vérification de l'administrateur).`
-        : `📤 Capture reçue. L'IA n'a pas pu confirmer automatiquement — l'administrateur va la vérifier manuellement.`,
+        ? `✅ Paiement validé par Sossou Kouamé assistance — votre durée complète de ${pr.plan_label} a été créditée à votre compte (sous réserve de vérification de l'administrateur).`
+        : `📤 Capture reçue. Sossou Kouamé assistance va analyser votre capture d'écran — l'administrateur confirmera manuellement.`,
     });
   } catch (e) {
     console.error('payment/screenshot error:', e);

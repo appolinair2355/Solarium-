@@ -600,13 +600,70 @@ router.post('/bot-precheck', requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ── Vision : analyse d'une capture d'écran (image base64) ──────────────────
-// Utilise Gemini 1.5 Flash (multimodal, gratuit). Pas besoin du provider
-// par défaut — on lit directement la clé Gemini en DB si elle existe.
+// ── Vision Groq (Llama 4 Scout) — vérification captures d'écran ────────────
+// Utilise l'API Groq (compatible OpenAI) avec le modèle vision Llama 4 Scout.
+async function callGroqVision(base64Image, mimeType, prompt) {
+  // Priorité : variable d'env GROQ_VISION_KEY → DB 'groq_vision_key' → fallback
+  let key = process.env.GROQ_VISION_KEY || null;
+  if (!key) {
+    try {
+      const k = await db.getSetting('groq_vision_key');
+      if (k && k.trim()) key = k.trim();
+    } catch {}
+  }
+  if (!key) throw new Error('Clé Groq Vision non configurée');
+
+  const mime = mimeType || 'image/jpeg';
+  const dataUrl = `data:${mime};base64,${base64Image}`;
+
+  const body = JSON.stringify({
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    }],
+    max_tokens: 512,
+    temperature: 0.1,
+  });
+
+  return new Promise((resolve, reject) => {
+    const opts = {
+      hostname: 'api.groq.com',
+      port: 443,
+      path: '/openai/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+    const req = https.request(opts, (resp) => {
+      let data = '';
+      resp.on('data', c => data += c);
+      resp.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (resp.statusCode >= 400) {
+            return reject(new Error(`Groq Vision ${resp.statusCode}: ${(json.error?.message || JSON.stringify(json)).slice(0, 300)}`));
+          }
+          const text = json.choices?.[0]?.message?.content || '';
+          resolve(text);
+        } catch (e) { reject(new Error('Réponse Groq Vision invalide : ' + data.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(60_000, () => { req.destroy(); reject(new Error('Timeout Groq Vision (60s)')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ── Vision Gemini — fallback si Groq non disponible ────────────────────────
 async function callGeminiVision(base64Image, mimeType, prompt) {
-  // Récupère la clé Gemini : on prend EN PRIORITÉ la clé dédiée Vision
-  // ('gemini_vision_key', gratuite) ; à défaut, on retombe sur ai_config
-  // si le provider principal est Gemini.
   let key = null;
   try {
     const dedicated = await db.getSetting('gemini_vision_key');
@@ -621,7 +678,9 @@ async function callGeminiVision(base64Image, mimeType, prompt) {
       }
     } catch {}
   }
-  if (!key) throw new Error('Aucune clé Gemini configurée — l\'admin doit configurer la clé gratuite dans "🎁 Clé API gratuite — Vérification des paiements"');
+  // Clé de secours Gemini codée en dur
+  if (!key) key = 'AIzaSyBfCXwFXHedQ5q3Cf9mVrTCv2fPL6tRCM0';
+  if (!key) throw new Error('Aucune clé Gemini configurée');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
   const body = {
@@ -668,41 +727,62 @@ async function callGeminiVision(base64Image, mimeType, prompt) {
 
 async function analyzePaymentScreenshot(base64Image, mimeType, expectedAmountUsd) {
   // Conversion USD → FCFA (~600 par USD)
-  const expectedFcfaMin = Math.round(expectedAmountUsd * 550);
-  const expectedFcfaMax = Math.round(expectedAmountUsd * 700);
+  const expectedFcfaMin = Math.round(expectedAmountUsd * 500);
+  const expectedFcfaMax = Math.round(expectedAmountUsd * 750);
+  // Équivalents crypto approximatifs (USDT ≈ USD, BTC variable)
+  const expectedUsdt = expectedAmountUsd.toFixed(2);
 
-  const prompt = `Tu es un agent qui valide des captures d'écran de paiement (WhatsApp / Mobile Money / MTN Money / Moov Money / virement bancaire / Orange Money).
-On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après, avec ce format:
+  const prompt = `Tu es un agent bienveillant qui valide des captures d'écran de paiement.
+Méthodes de paiement ACCEPTÉES : WhatsApp Pay, Mobile Money (MTN, Moov, Orange, Wave), Fusion Money, CinetPay, virement bancaire, crypto (USDT, BTC, ETH, TRX, MATIC), PayPal, Skrill, Western Union, MoneyGram, ou toute autre preuve de transfert d'argent.
+
+On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après :
 {
   "is_payment_screenshot": true|false,
   "confidence": 0-100,
-  "amount_detected": "montant lisible dans l'image (chiffres uniquement) ou null",
+  "amount_detected": "montant lisible dans l'image ou null",
   "amount_matches_expected": true|false,
-  "currency_detected": "USD|EUR|XOF|FCFA|null",
-  "transaction_id": "ID/référence de la transaction visible ou null",
+  "currency_detected": "USD|EUR|XOF|FCFA|USDT|BTC|ETH|TRX|null",
+  "transaction_id": "ID/hash/référence visible ou null",
   "transaction_date": "date visible (format libre) ou null",
-  "recipient_visible": "nom/numéro destinataire ou null",
+  "recipient_visible": "nom/adresse/numéro destinataire ou null",
   "looks_legit": true|false,
   "reason": "courte phrase en français expliquant la décision"
 }
 
-CRITÈRES pour is_payment_screenshot=true :
-- L'image montre clairement une transaction financière réussie (transfert envoyé/confirmé, reçu de paiement)
-- Un montant ET un destinataire ET (un ID de transaction OU une date) sont visibles
-- Ce n'est PAS une simple photo, ni un meme, ni un screenshot d'interface non-financière
+RÈGLES SOUPLES pour is_payment_screenshot=true :
+- L'image montre UNE preuve de paiement/transfert (confirmé, envoyé, succès, success, réussi, approved)
+- Un montant visible EST suffisant — transaction_id ET destinataire ne sont PAS tous obligatoires
+- Captures acceptées : SMS de confirmation, reçu app mobile, email de confirmation, hash blockchain
+- Fusion Money, Crypto, Wave, CinetPay : acceptés sans restriction
+- Sois PERMISSIF : en cas de doute, mettre is_payment_screenshot=true avec confidence 40-60
 
-CRITÈRES pour amount_matches_expected=true :
-- Montant attendu : ${expectedAmountUsd} USD
-  (équivalent FCFA/XOF entre ${expectedFcfaMin} et ${expectedFcfaMax})
-- Tolérance : ±5% sur le montant exact
-- Le montant détecté dans l'image doit correspondre à cette plage (en USD ou en FCFA)
+MONTANT ATTENDU :
+- ${expectedAmountUsd} USD OU ${expectedUsdt} USDT
+- Équivalent FCFA/XOF : entre ${expectedFcfaMin} et ${expectedFcfaMax}
+- Tolérance : ±10% sur le montant
+- Si le montant est proche → amount_matches_expected=true, confidence ≥ 60
 
-Sois STRICT : si l'image n'est pas une preuve de paiement claire, mets is_payment_screenshot=false.
-Si le montant ne correspond pas à l'attendu, baisse la confidence en dessous de 50.
+Si l'image n'est clairement pas un paiement (selfie, paysage, document sans montant) → is_payment_screenshot=false.
 Réponds UNIQUEMENT le JSON, sans markdown, sans backticks.`;
 
-  const raw = await callGeminiVision(base64Image, mimeType, prompt);
-  // Extraire le premier bloc JSON
+  // Essaie Groq (Llama 4 Scout Vision) en priorité, puis Gemini en fallback
+  let raw = null;
+  try {
+    console.log('[Vision] Tentative Groq (Llama 4 Scout)…');
+    raw = await callGroqVision(base64Image, mimeType, prompt);
+    console.log('[Vision] ✅ Groq répondu');
+  } catch (groqErr) {
+    console.warn('[Vision] Groq échoué (' + groqErr.message + ') → fallback Gemini');
+    try {
+      raw = await callGeminiVision(base64Image, mimeType, prompt);
+      console.log('[Vision] ✅ Gemini répondu (fallback)');
+    } catch (geminiErr) {
+      console.error('[Vision] Gemini aussi échoué:', geminiErr.message);
+      throw new Error('Analyse IA indisponible : ' + geminiErr.message);
+    }
+  }
+
+  // Extraire le premier bloc JSON de la réponse
   let parsed = null;
   try {
     const m = raw.match(/\{[\s\S]*\}/);
@@ -714,4 +794,4 @@ Réponds UNIQUEMENT le JSON, sans markdown, sans backticks.`;
   return parsed;
 }
 
-module.exports = { router, callAI, callGeminiVision, analyzePaymentScreenshot };
+module.exports = { router, callAI, callGeminiVision, callGroqVision, analyzePaymentScreenshot };

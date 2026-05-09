@@ -13,6 +13,7 @@
 const express                 = require('express');
 const crypto                  = require('crypto');
 const db                      = require('./db');
+const { USE_PG }              = require('./db');
 const { generateStrategyZip } = require('./zip-generator');
 const router                  = express.Router();
 
@@ -51,6 +52,28 @@ router.get('/catalog', requireAuth, async (req, res) => {
 
     const rawShopDesc = await db.getSetting('strategy_shop_desc').catch(() => null);
     const shopDescs   = rawShopDesc ? JSON.parse(rawShopDesc) : {};
+
+    // ── Auto-retrait boutique : 2 pertes consécutives ─────────────────
+    if (USE_PG) {
+      const enabledIds = strats.filter(s => promos[String(s.id)]?.enabled).map(s => String(s.id));
+      let promoModified = false;
+      for (const sid of enabledIds) {
+        try {
+          const { rows } = await db.pool.query(
+            `SELECT status FROM predictions WHERE strategy = $1 AND status IN ('gagne','perdu') ORDER BY created_at DESC LIMIT 2`,
+            [`S${sid}`]
+          );
+          if (rows.length >= 2 && rows.every(r => r.status === 'perdu')) {
+            promos[sid].enabled = false;
+            promoModified = true;
+            console.log(`[Shop] Auto-retrait: stratégie ${sid} retirée (2 pertes consécutives)`);
+          }
+        } catch {}
+      }
+      if (promoModified) {
+        await db.setSetting('strategy_promo_config', JSON.stringify(promos)).catch(() => {});
+      }
+    }
 
     const catalog = strats
       .filter(s => promos[String(s.id)]?.enabled)

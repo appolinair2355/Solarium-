@@ -235,7 +235,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {} };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {} };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -361,11 +361,47 @@ class Engine {
         if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
       }
     }
+
+    // ── Stratégies mode='rattrapage_groupe' — récupération automatique ──────
+    for (const [rid, rstate] of Object.entries(this.custom)) {
+      const rcfg = rstate.config;
+      if (!rcfg?.enabled || rcfg.mode !== 'rattrapage_groupe') continue;
+      const monitored = Array.isArray(rcfg.monitored_strategies) ? rcfg.monitored_strategies : [];
+      if (!monitored.includes(stratId)) continue;
+      if (!rstate.rgCounters) rstate.rgCounters = {};
+      if (!rstate.rgCounters[stratId]) rstate.rgCounters[stratId] = { r: 0, totalLosses: 0 };
+      const counter = rstate.rgCounters[stratId];
+      counter.r += 1;
+      counter.totalLosses += 1;
+      const maxR = Math.max(1, parseInt(rcfg.max_rattrapage) || 3);
+      const stopLimit = parseInt(rcfg.rg_stop_limit) || 0;
+      if (stopLimit > 0 && counter.totalLosses >= stopLimit) {
+        console.log(`[RGrp] "${rcfg.name}" → ${stratId} limite stop (${stopLimit}) atteinte → pause`);
+        continue;
+      }
+      if (counter.r <= maxR) {
+        console.log(`[RGrp] "${rcfg.name}" → ${stratId} perte R${counter.r - 1} → rattrapage #${gn + 1} (${counter.r}/${maxR})`);
+        this._forceNextPrediction(stratId, gn + 1, suit);
+      } else {
+        console.log(`[RGrp] "${rcfg.name}" → ${stratId} maxR=${maxR} dépassé → reset compteur`);
+        counter.r = 0;
+      }
+    }
   }
 
   // Réinitialise les streaks de pertes après un gain
   _onStratWin(stratId) {
     this.lossStreaks[stratId] = 0;
+    // Reset compteur de rattrapage pour rattrapage_groupe sur victoire
+    for (const [rid, rstate] of Object.entries(this.custom)) {
+      const rcfg = rstate.config;
+      if (!rcfg?.enabled || rcfg.mode !== 'rattrapage_groupe') continue;
+      const monitored = Array.isArray(rcfg.monitored_strategies) ? rcfg.monitored_strategies : [];
+      if (!monitored.includes(stratId)) continue;
+      if (rstate.rgCounters && rstate.rgCounters[stratId]) {
+        rstate.rgCounters[stratId].r = 0;
+      }
+    }
   }
 
   // Appelé quand une prédiction est gagnée avec N rattrapages
@@ -3278,6 +3314,58 @@ class Engine {
         state.fc_queue.push({ targetGn, suit: p1Suit, triggerGn: gn });
         console.log(`[${channelId}] [FC+6] Distance ${remaining} > proche ${proche} → ajouté à la file (${state.fc_queue.length} élément(s) en attente)`);
       }
+    } else if (mode === 'costume_manquant') {
+      // ── MODE COSTUME MANQUANT (+4) ────────────────────────────────────────
+      // Détecte le costume absent dans une distribution 2+2 (4 cartes au total).
+      // Prédit ce costume pour gn+4. Vérifie à gn+2 : si le costume est apparu → annule.
+      // Émission réelle de la prédiction à gn+3 pour cibler gn+4.
+      if (!state.cmQueue) state.cmQueue = {};
+
+      // Traitement de la file : vérification (+2) et émission (+3 pour cible +4)
+      for (const [trigGnStr, entry] of Object.entries(state.cmQueue)) {
+        const trigGn = parseInt(trigGnStr);
+        if (entry.cancelled) { if (gn > trigGn + 5) delete state.cmQueue[trigGnStr]; continue; }
+
+        // Vérification à trigGn+2 : si le costume manquant est apparu → annuler
+        if (gn === trigGn + 2 && !entry.verified) {
+          entry.verified = true;
+          if (handSuits.includes(entry.suit)) {
+            entry.cancelled = true;
+            console.log(`[${channelId}] [CM] ${entry.suit} apparu au jeu #${gn} (+2) → prédiction #${trigGn + 4} annulée`);
+          } else {
+            console.log(`[${channelId}] [CM] ${entry.suit} toujours absent au jeu #${gn} (+2) → prédiction #${trigGn + 4} confirmée`);
+          }
+        }
+
+        // Émission à trigGn+3 (prédit pour trigGn+4)
+        if (gn === trigGn + 3 && !entry.cancelled && !entry.emitted) {
+          entry.emitted = true;
+          await emitPrediction(trigGn + 4, entry.suit, entry.suit);
+        }
+
+        // Nettoyage des vieilles entrées
+        if (gn > trigGn + 5) delete state.cmQueue[trigGnStr];
+      }
+
+      // Détection du costume manquant dans les jeux à 2+2 cartes
+      const isFull2x2 = Array.isArray(pCards) && Array.isArray(bCards)
+        && pCards.length === 2 && bCards.length === 2;
+      if (isFull2x2) {
+        const presentSuits = new Set(
+          [...pCards, ...bCards]
+            .map(c => normalizeSuit((c && c.S) || ''))
+            .filter(s => ALL_SUITS.includes(s))
+        );
+        const missing = ALL_SUITS.filter(s => !presentSuits.has(s));
+        if (missing.length === 1 && !state.cmQueue[gn]) {
+          state.cmQueue[gn] = { suit: missing[0], verified: false, cancelled: false, emitted: false };
+          console.log(`[${channelId}] [CM] Jeu #${gn}: costume manquant ${missing[0]} → vérif #${gn + 2} → préd #${gn + 4}`);
+        }
+      }
+
+    } else if (mode === 'rattrapage_groupe') {
+      // Ce mode surveille d'autres stratégies via _onStratLoss/_onStratWin.
+      // Il ne génère pas de prédictions propres — traitement uniquement dans les callbacks.
     }
   }
 
