@@ -2823,74 +2823,99 @@ class Engine {
 
     } else if (mode === 'lecture_passee') {
       // ── MODE LECTURE DES JEUX PASSÉS ─────────────────────────────────────
-      // Quand le live arrive sur le jeu N, on prédit pour le jeu (N+p)
-      // le costume de la carte #position (1, 2 ou 3) de la main choisie au
-      // jeu zk = (N+p) - h, lu depuis la 2ème base de données (cartes_jeu).
+      // Maintient une file d'attente de 20 prédictions pré-calculées.
+      // Chaque item : { go, zk, suit, rank } où go = zk + h = live + p.
+      // La prédiction est lancée quand live >= go - 2 (2 jeux avant la cible).
+      // L'écart impose un espacement minimum entre les go consécutifs.
       // Paramètres : carte_p (avance), carte_h (recul), carte_ecart (gap),
       // carte_position (1-3), carte_source_hand ('joueur'|'banquier').
       // ─────────────────────────────────────────────────────────────────────
-      const p        = Math.max(1, parseInt(cfg.carte_p) || 2);
-      const h        = Math.max(1, parseInt(cfg.carte_h) || 32);
-      const ecart    = Math.max(1, parseInt(cfg.carte_ecart) || 1);
-      const position = Math.max(1, Math.min(3, parseInt(cfg.carte_position) || 1));
+      const p          = Math.max(1, parseInt(cfg.carte_p) || 2);
+      const h          = Math.max(1, parseInt(cfg.carte_h) || 32);
+      const ecart      = Math.max(1, parseInt(cfg.carte_ecart) || 1);
+      const position   = Math.max(1, Math.min(3, parseInt(cfg.carte_position) || 1));
       const sourceHand = cfg.carte_source_hand === 'banquier' ? 'banker' : 'player';
+      const prefix     = sourceHand === 'banker' ? 'b' : 'p';
       const sourceLabel = sourceHand === 'banker' ? '🏦 Banquier' : '👤 Joueur';
 
-      const go = gn + p;
-      const zk = go - h;
+      // Stocker le live courant pour l'affichage du compteur
+      state._lectureLiveGn = gn;
 
-      // Toujours mettre à jour l'écart courant pour l'affichage du compteur
-      const lastGo = state._lastLecturePassee || 0;
-      state._lectureGapCurrent = lastGo > 0 ? Math.min(ecart, go - lastGo) : 0;
-      state._lectureGapTotal   = ecart;
+      // Initialiser la file d'attente si nécessaire
+      if (!Array.isArray(state._lectureQueue)) state._lectureQueue = [];
 
-      if (zk <= 0) return; // pas assez d'historique
+      // Supprimer les items déjà dépassés (go <= live courant)
+      state._lectureQueue = state._lectureQueue.filter(item => item.go > gn);
 
-      // Application de l'écart : ne prédire qu'une fois tous les `ecart` jeux
-      // Guard go > lastGo : si go <= lastGo (ex: après reset jeu #1), on laisse passer sans skip
-      if (lastGo > 0 && go > lastGo && (go - lastGo) < ecart) {
-        // Lire le costume même pendant le gap pour mise à jour du compteur
-        try {
-          const rowGap = await cartesStore.byGameNumber(zk);
-          if (rowGap) {
-            const pfx = sourceHand === 'banker' ? 'b' : 'p';
-            const ts  = rowGap[`${pfx}${position}_s`];
-            if (ts && ALL_SUITS.includes(ts)) state._lectureNextCostume = ts;
+      // ── REMPLISSAGE DE LA FILE (max 20 items, max 5 lectures DB par tick) ─
+      const MAX_QUEUE          = 20;
+      const MAX_FETCH_PER_TICK = 5;
+      let fetched = 0;
+      try {
+        // Déterminer le prochain go à ajouter en partant du dernier item en file
+        // ou du dernier go émis + écart
+        const lastGo = state._lastLecturePassee || 0;
+        const lastQueuedGo = state._lectureQueue.length > 0
+          ? state._lectureQueue[state._lectureQueue.length - 1].go
+          : 0;
+        const lastRef = Math.max(lastGo, lastQueuedGo);
+        let nextGo = lastRef > 0 ? lastRef + ecart : gn + p;
+        // Sécurité : ne jamais aller en arrière par rapport au live
+        if (nextGo <= gn) nextGo = gn + p;
+
+        while (state._lectureQueue.length < MAX_QUEUE && fetched < MAX_FETCH_PER_TICK) {
+          const zk = nextGo - h;
+          if (zk > 0) {
+            const row = await cartesStore.byGameNumber(zk);
+            if (row) {
+              const suit = row[`${prefix}${position}_s`];
+              const rank = row[`${prefix}${position}_r`] || '';
+              if (suit && ALL_SUITS.includes(suit)) {
+                state._lectureQueue.push({ go: nextGo, zk, suit, rank });
+                console.log(`[${channelId}] [LecturePassée] 📋 File +go=${nextGo} ← zk=${zk} ${sourceLabel} #${position}=${rank}${suit}`);
+              }
+            }
           }
-        } catch {}
-        console.log(`[${channelId}] [LecturePassée] gap (live=${gn} go=${go}, dernier=${lastGo}, écart=${ecart}) — skip`);
+          nextGo += ecart;
+          fetched++;
+        }
+      } catch (e) {
+        console.warn(`[${channelId}] [LecturePassée] Erreur remplissage file: ${e.message}`);
+      }
+
+      // ── DÉCLENCHEMENT : live >= go - 2 → lancer la prédiction ────────────
+      // On cherche le premier item de la file dont la cible est imminente
+      const toFire = state._lectureQueue.find(item => gn >= item.go - 2);
+      if (!toFire) {
+        const next = state._lectureQueue[0];
+        if (next) {
+          console.log(`[${channelId}] [LecturePassée] live=${gn} → prochain go=${next.go} ${next.suit} (déclenchement dans ${next.go - 2 - gn} jeu(x))`);
+        }
         return;
       }
 
-      try {
-        const row = await cartesStore.byGameNumber(zk);
-        if (!row) {
-          console.log(`[${channelId}] [LecturePassée] zk=${zk} ${sourceLabel} pos=${position} — jeu introuvable dans cartes_jeu`);
-          return;
-        }
-        const prefix = sourceHand === 'banker' ? 'b' : 'p';
-        const targetRank = row[`${prefix}${position}_r`];
-        const targetSuit = row[`${prefix}${position}_s`];
-        // Stocker le costume lu pour l'affichage du compteur
-        if (targetSuit && ALL_SUITS.includes(targetSuit)) state._lectureNextCostume = targetSuit;
-        if (!targetSuit || !ALL_SUITS.includes(targetSuit)) {
-          console.log(`[${channelId}] [LecturePassée] zk=${zk} ${sourceLabel} pos=${position} — costume invalide (${targetSuit})`);
-          return;
-        }
-        console.log(`[${channelId}] [LecturePassée] live=${gn} → go=${go} ← zk=${zk} ${sourceLabel} carte#${position}=${targetRank}${targetSuit} → prédit ${targetSuit}`);
-        // Vérification de l'attente de rattrapage — ne pas consommer l'écart si bloqué
-        // Important : si une prédiction est en cours de rattrapage, on reporte sans marquer lastGo.
-        if (Object.keys(state.pending).length > 0) {
-          console.log(`[${channelId}] [LecturePassée] go=${go} − prédiction en attente (rattrapage?) → skip sans consommer l'écart`);
-          return;
-        }
-        // Vérification des exceptions avant d'émettre — ne met à jour le gap QUE si la prédiction passe
-        if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+      const { go, suit: targetSuit, rank: targetRank } = toFire;
+
+      // Prédiction en attente → reporter sans bloquer
+      if (Object.keys(state.pending).length > 0) {
+        console.log(`[${channelId}] [LecturePassée] go=${go} − prédiction en attente (rattrapage?) → skip`);
+        return;
+      }
+
+      // Vérification des exceptions
+      if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+
+      console.log(`[${channelId}] [LecturePassée] 🔔 live=${gn} ≥ go-2=${go - 2} → déclenche go=${go} ${targetSuit} (${sourceLabel} carte#${position}=${targetRank}${targetSuit})`);
+
+      await emitPrediction(go, targetSuit, targetSuit);
+
+      if (state.pending[go] !== undefined) {
+        // Retirer l'item émis de la file
+        state._lectureQueue = state._lectureQueue.filter(item => item.go !== go);
         state._lastLecturePassee = go;
-        state._lectureGapCurrent = 0;
-        await emitPrediction(go, targetSuit, targetSuit);
-      } catch (e) {
-        console.warn(`[${channelId}] [LecturePassée] échec lecture zk=${zk}: ${e.message}`);
+        console.log(`[${channelId}] [LecturePassée] ✅ go=${go} émis → retiré de la file (${state._lectureQueue.length} restant(s))`);
+      } else {
+        console.log(`[${channelId}] [LecturePassée] ⚠️ emitPrediction bloquée (garde interne) → lastGo inchangé`);
       }
 
     } else if (mode === 'intelligent_cartes') {
@@ -2962,7 +2987,6 @@ class Engine {
         // Anti-spam : ne pas redéclencher pour le même go
         const goN = gn + offset;
         if (state._lastIntelligentGo === goN) return;
-        state._lastIntelligentGo = goN;
 
         const conf = total > 0 ? Math.round((bestCount / total) * 100) : 0;
         // Stocker le dernier costume prédit et la confiance pour l'affichage du compteur
@@ -2971,7 +2995,11 @@ class Engine {
         console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" (${total} occ.) → ${best} (${bestCount}, ${conf}%) → jeu #${goN}`);
         // Vérification des exceptions avant d'émettre
         if (this._checkExceptions(exceptions, best, best, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+        // CORRECTION : ne marquer _lastIntelligentGo qu'après confirmation que la prédiction a été mise en file
         await emitPrediction(goN, best, best);
+        if (state.pending[goN] !== undefined) {
+          state._lastIntelligentGo = goN;
+        }
       } catch (e) {
         console.warn(`[${channelId}] [Intelligent] échec: ${e.message}`);
       }
@@ -3876,6 +3904,8 @@ class Engine {
       delete state._lectureGapTotal;
       delete state._intelligentLastSuit;
       delete state._intelligentLastConf;
+      delete state._lectureQueue;
+      delete state._lectureLiveGn;
       if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
       if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
       // Reset état interne mode carte_valeur
@@ -4286,33 +4316,32 @@ class Engine {
         return [];
       }
 
-      // Mode lecture_passee → compteur d'écart + prochain costume
+      // Mode lecture_passee → file d'attente des prédictions pré-calculées
       if (mode === 'lecture_passee') {
-        const ecartCfg    = Math.max(1, parseInt(entry.config?.carte_ecart) || 1);
-        const nextCostume = entry._lectureNextCostume || null;
-        const gapCurrent  = entry._lectureGapCurrent  || 0;
-        const hasPending  = Object.keys(entry.pending || {}).length > 0;
-        const pendingSuit = hasPending
-          ? (Object.values(entry.pending)[0]?.suit || null)
-          : null;
-        const displaySuit = pendingSuit || nextCostume;
+        const ecartCfg  = Math.max(1, parseInt(entry.config?.carte_ecart) || 1);
+        const queue     = Array.isArray(entry._lectureQueue) ? entry._lectureQueue.slice(0, 20) : [];
+        const liveGn    = entry._lectureLiveGn || 0;
+        const hasPending = Object.keys(entry.pending || {}).length > 0;
+        const pendingEntries = Object.entries(entry.pending || {}).map(([gStr, p]) => ({
+          go: parseInt(gStr), suit: p.suit, rattrapage: p.rattrapage || 0, maxR: p.maxR || 0,
+        }));
         return [{
           isLecturePasse: true,
-          suit:          displaySuit || 'lp',
-          display:       displaySuit ? (SUIT_DISPLAY[displaySuit] || displaySuit) : '📖',
-          count:         gapCurrent,
-          threshold:     ecartCfg,
+          suit:          'lp',
+          display:       '📖',
+          count:         queue.length,
+          threshold:     20,
           mode,
           label:         'Lecture Passée',
           singleCounter: true,
-          nextCostume:   displaySuit,
+          queue,
+          liveGn,
           hasPending,
+          pendingEntries,
           ecart:         ecartCfg,
-          description:   hasPending
-            ? `⏳ Costume en attente : ${SUIT_DISPLAY[pendingSuit] || pendingSuit}`
-            : nextCostume
-            ? `📖 Lu : ${SUIT_DISPLAY[nextCostume] || nextCostume} — Écart : ${gapCurrent}/${ecartCfg}`
-            : `📖 En attente de lecture...`,
+          description:   queue.length > 0
+            ? `📖 ${queue.length} jeu(x) en file d'attente · live #${liveGn}`
+            : '📖 Chargement de la file...',
         }];
       }
 
