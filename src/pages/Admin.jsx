@@ -5188,7 +5188,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10 });
     setStratOpen(true);
   };
 
@@ -5205,7 +5205,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5690,7 +5690,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: '🃏 CM+4', rattrapage_groupe: '🔄 Ratt. Groupé' };
 
   return (
     <>
@@ -7988,7 +7988,7 @@ function AdminPanel() {
                 {pendingPayments.map(p => {
                   const statusInfo = {
                     awaiting_screenshot: { color: '#fbbf24', label: '📤 En attente capture' },
-                    ai_validated: { color: '#22c55e', label: '🤖 IA OK — accès 2 h' },
+                    ai_validated: { color: '#22c55e', label: '✅ Sossou Kouamé assistance — accès 2 h' },
                     pending_admin: { color: '#3b82f6', label: '⏳ À vérifier' },
                   }[p.status] || { color: '#94a3b8', label: p.status };
                   return (
@@ -8095,7 +8095,7 @@ function AdminPanel() {
                       padding: 10, borderRadius: 8, marginBottom: 12,
                       background: 'rgba(59,130,246,0.08)', color: '#93c5fd', fontSize: 12,
                     }}>
-                      <b>🤖 Analyse IA :</b>{' '}
+                      <b>👨‍💼 Sossou Kouamé assistance :</b>{' '}
                       {paymentScreenshot.ai.is_payment_screenshot ? '✅ Capture valide' : '⚠️ Capture suspecte'}
                       {paymentScreenshot.ai.confidence !== undefined && ` (${paymentScreenshot.ai.confidence}%)`}
                       {paymentScreenshot.ai.amount_detected && ` · Montant détecté : ${paymentScreenshot.ai.amount_detected}`}
@@ -9422,6 +9422,66 @@ function AdminPanel() {
                   </div>
                 )}
 
+                {/* ── RATTRAPAGE GROUPÉ : Sélection des stratégies à surveiller ── */}
+                {stratForm.mode === 'rattrapage_groupe' && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ marginBottom: 10, fontSize: 12, color: '#86efac' }}>
+                      Cochez les stratégies dont les pertes déclencheront un rattrapage automatique.
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                      {[
+                        { id: 'C1', label: '♠ Pique Noir' },
+                        { id: 'C2', label: '♥ Cœur Rouge' },
+                        { id: 'C3', label: '♦ Carreau Doré' },
+                        { id: 'DC', label: '♣ Double Canal' },
+                        ...strategies.map(s => ({ id: `S${s.id}`, label: s.name })),
+                      ].map(({ id, label }) => {
+                        const checked = (stratForm.monitored_strategies || []).includes(id);
+                        return (
+                          <button key={id} type="button"
+                            onClick={() => setStratForm(p => ({
+                              ...p,
+                              monitored_strategies: checked
+                                ? (p.monitored_strategies || []).filter(x => x !== id)
+                                : [...(p.monitored_strategies || []), id]
+                            }))}
+                            style={{ padding: '5px 12px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                              border: checked ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.12)',
+                              background: checked ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.04)',
+                              color: checked ? '#4ade80' : '#64748b' }}>
+                            {checked ? '✓ ' : ''}{label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5 }}>Max rattrapages par perte</label>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                          {[1,2,3,4,5,6,7,8,10].map(n => (
+                            <button key={n} type="button" onClick={() => setStratForm(p => ({ ...p, max_rattrapage: n }))}
+                              style={{ width: 34, height: 30, borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                                border: stratForm.max_rattrapage === n ? '2px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+                                background: stratForm.max_rattrapage === n ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.04)',
+                                color: stratForm.max_rattrapage === n ? '#4ade80' : '#6b7280' }}>{n}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5 }}>Limite d'arrêt (0 = illimité)</label>
+                        <input type="number" min="0" max="100" value={stratForm.rg_stop_limit ?? 10}
+                          onChange={e => setStratForm(p => ({ ...p, rg_stop_limit: parseInt(e.target.value) || 0 }))}
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#f1f5f9', fontSize: 13 }} />
+                      </div>
+                    </div>
+                    {(stratForm.monitored_strategies || []).length === 0 && (
+                      <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171' }}>
+                        ⚠️ Cochez au moins une stratégie à surveiller
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Mode — masqué pour multi-stratégie */}
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>
@@ -9456,6 +9516,8 @@ function AdminPanel() {
                       { value: 'aleatoire',            label: '🎲 Stratégie Aléatoire' },
                       { value: 'first_card_plus6',     label: '🎯 Première Carte +Décalage' },
                       { value: 'annonce_sequence',     label: '📣 Rotateur Promo (annonces séquentielles)' },
+                      { value: 'costume_manquant',     label: '🃏 Costume Manquant (+4) — costume absent dans jeu 2+2' },
+                      { value: 'rattrapage_groupe',    label: '🔄 Rattrapage Groupé — surveille plusieurs stratégies' },
                     ];
                     const visibleOpts = isProOnly && proAllowedModes !== null
                       ? ALL_MODE_OPTS.filter(o => proAllowedModes.includes(o.value))
@@ -9476,7 +9538,7 @@ function AdminPanel() {
                           ...(isNew ? { threshold: Math.max(p.threshold, 1), max_rattrapage: 20 } : {}),
                           ...(m === 'absence_confirmee' ? { threshold: 1, max_rattrapage: 20 } : {}),
                           ...(m === 'relance' ? { max_rattrapage: 1 } : {}),
-                          ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2 } : {}),
+                          ...(m === 'first_card_plus6' ? { prediction_offset: 6, proche: 3, banker_card_count: 0, fc_ecart: 2, monitored_strategies: [], rg_stop_limit: 10 } : {}),
                         }));
                       }}
                         style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
@@ -9542,6 +9604,27 @@ function AdminPanel() {
                       <div>Sélectionnez des stratégies existantes et définissez leur <strong>ordre de rotation</strong>. À chaque intervalle configuré, une annonce Telegram promotionnelle est envoyée pour mettre en avant la stratégie courante.</div>
                       <div style={{ marginTop: 6 }}>Chaque message inclut le nom de la stratégie, votre texte personnalisé, le prix (<strong>75$</strong>) et les instructions d'achat complètes.</div>
                       <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>📦 Après paiement : licence personnelle + fichier ZIP prêt à déployer sur Telegram.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'costume_manquant' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Costume Manquant (+4)</div>
+                      <div>Surveille les jeux à <strong>distribution complète 2+2</strong> (2 cartes Joueur + 2 cartes Banquier = 4 cartes totales).</div>
+                      <div style={{ marginTop: 6 }}>Identifie le costume absent des 4 cartes (<strong>exactement 1 costume manquant</strong> parmi ♠♥♦♣).</div>
+                      <div style={{ marginTop: 6 }}>À <strong>Jeu N</strong> : détection du costume manquant → file d'attente.</div>
+                      <div style={{ marginTop: 6 }}>À <strong>Jeu N+2</strong> : vérification — si le costume est apparu, la prédiction est <em>annulée automatiquement</em>.</div>
+                      <div style={{ marginTop: 6 }}>À <strong>Jeu N+4</strong> : si non annulée, la prédiction est émise → <strong>+4 jeux après détection</strong>.</div>
+                      <div style={{ marginTop: 8, color: '#fbbf24', fontWeight: 600 }}>⚠️ Le seuil B n'est pas utilisé dans ce mode. Configurez la main, le max rattrapage et les canaux Telegram.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'rattrapage_groupe' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🔄 Mode Rattrapage Groupé</div>
+                      <div>Sélectionnez les <strong>stratégies à surveiller</strong> (C1, C2, C3, DC ou custom).</div>
+                      <div style={{ marginTop: 6 }}>Quand une stratégie surveillée <strong>perd</strong>, sa prochaine prédiction est automatiquement envoyée comme <em>rattrapage</em> jusqu'à <strong>Max Rattrapages</strong> fois.</div>
+                      <div style={{ marginTop: 6 }}>Sur une <strong>victoire</strong> : le compteur de rattrapages est remis à 0 pour cette stratégie.</div>
+                      <div style={{ marginTop: 6 }}><strong>Limite d'arrêt</strong> : après ce nombre total de pertes, les rattrapages s'arrêtent (0 = illimité).</div>
+                      <div style={{ marginTop: 8, color: '#22c55e', fontWeight: 600 }}>✅ Aucune autre configuration nécessaire — cochez les stratégies et définissez les limites.</div>
                     </div>
                   )}
                   {stratForm.mode === 'first_card_plus6' && (

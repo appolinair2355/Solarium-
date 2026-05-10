@@ -376,6 +376,23 @@ export default function Dashboard() {
     return (Number.isFinite(v) && v >= 0 && v <= 1) ? v : 1.0;
   });
 
+  // ── Statut admin en ligne ─────────────────────────────────────────────────
+  const [adminStatus, setAdminStatus] = useState(null); // { is_online, label }
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const r = await fetch('/api/admin-status', { credentials: 'include' });
+        if (!r.ok || cancelled) return;
+        const d = await r.json();
+        if (!cancelled) setAdminStatus(d);
+      } catch {}
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 60000); // polling toutes les 60s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
   const gamesRef    = useRef(null);
   const knownPredIds = useRef(new Set());
   const voiceGenderRef = useRef(voiceGender);
@@ -720,6 +737,18 @@ export default function Dashboard() {
       <nav className="navbar">
         <Link to="/" className="navbar-brand">🎲 Prediction Baccara Pro</Link>
         <div className="navbar-actions">
+          {/* ── Statut Admin en ligne ── */}
+          {adminStatus && (
+            <div title={`Admin : ${adminStatus.label}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: 'default',
+              background: adminStatus.is_online ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)',
+              border: `1px solid ${adminStatus.is_online ? 'rgba(34,197,94,0.35)' : 'rgba(100,116,139,0.25)'}`,
+              color: adminStatus.is_online ? '#4ade80' : '#94a3b8' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: adminStatus.is_online ? '#22c55e' : '#475569',
+                boxShadow: adminStatus.is_online ? '0 0 6px #22c55e' : 'none',
+                animation: adminStatus.is_online ? 'pulse-dot 1.8s ease-in-out infinite' : 'none' }} />
+              Admin {adminStatus.label}
+            </div>
+          )}
           {/* Sélecteur de voix d'annonce */}
           <div style={{ position: 'relative' }}>
             <button

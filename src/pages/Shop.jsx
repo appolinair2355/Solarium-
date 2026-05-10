@@ -106,10 +106,26 @@ export default function Shop() {
   const [botConfigErr, setBotConfigErr]     = useState('');
   const [botDownloading, setBotDownloading] = useState(false);
 
+  const [stratStats, setStratStats] = useState({});
+
   const loadCatalog = useCallback(async () => {
     try {
       const r = await fetch('/api/shop/catalog', { credentials: 'include' });
-      if (r.ok) setCatalog((await r.json()).catalog || []);
+      if (r.ok) {
+        const data = (await r.json()).catalog || [];
+        setCatalog(data);
+        // Charger les stats bilan pour chaque stratégie en vente
+        const statsR = await fetch('/api/predictions/stats', { credentials: 'include' }).catch(() => null);
+        if (statsR && statsR.ok) {
+          const all = await statsR.json();
+          const map = {};
+          for (const s of all) {
+            const key = s.strategy.startsWith('S') ? parseInt(s.strategy.slice(1)) : null;
+            if (key) map[key] = s;
+          }
+          setStratStats(map);
+        }
+      }
     } catch {}
   }, []);
 
@@ -364,99 +380,159 @@ export default function Shop() {
                 <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
                   Chaque stratégie vous donne un <strong style={{ color: '#e2e8f0' }}>fichier ZIP complet</strong> contenant un bot Telegram prêt à déployer.<br />
                   Configurez votre <strong style={{ color: '#e2e8f0' }}>ID de canal + token bot</strong> au moment du téléchargement — le bot est pré-configuré, zéro modification de fichier.<br />
-                  Paiement unique · Licence permanente. Paiement via WhatsApp.
+                  Paiement unique · Licence permanente · <strong style={{ color: '#e2e8f0' }}>WhatsApp</strong>, <strong style={{ color: '#a5b4fc' }}>MoneyFusion</strong> ou <strong style={{ color: '#fbbf24' }}>BNB crypto</strong>.
                 </div>
               </div>
             </div>
 
             {catalog.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>🏪</div>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Aucune stratégie en vente pour le moment</div>
-                <div style={{ fontSize: 13, marginTop: 6 }}>Revenez bientôt — de nouvelles stratégies seront disponibles.</div>
+              <div style={{ textAlign: 'center', padding: '80px 0', color: '#475569' }}>
+                <div style={{ fontSize: 52, marginBottom: 14 }}>🏪</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#64748b' }}>Aucune stratégie en vente pour le moment</div>
+                <div style={{ fontSize: 13, marginTop: 8, color: '#475569' }}>Revenez bientôt — de nouvelles stratégies seront disponibles.</div>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 24 }}>
                 {catalog.map(item => {
                   const promo = item.promo || {};
                   const price = item.price_usd || 75;
                   const existingPurchase = purchases.find(p => p.strategy_id === item.id && p.status !== 'rejected');
                   const planColor = promo.plan_requis === 'pro' ? '#c084fc' : promo.plan_requis === 'premium' ? '#fbbf24' : '#22c55e';
+                  const st = stratStats[item.id];
+                  const wins = st ? parseInt(st.wins) : null;
+                  const total = st ? parseInt(st.total) : null;
+                  const losses = st ? parseInt(st.losses) : null;
+                  const winPct = total > 0 ? Math.round((wins / total) * 100) : null;
 
                   return (
-                    <div key={item.id} className="shop-card-glow" style={{
-                      borderRadius: 16, overflow: 'hidden',
-                      background: 'linear-gradient(145deg, #0f172a, #1a2744)',
-                      border: '1.5px solid rgba(250,204,21,0.35)',
-                      boxShadow: '0 4px 24px rgba(250,204,21,0.08)',
+                    <div key={item.id} style={{
+                      borderRadius: 20, overflow: 'hidden',
+                      background: 'linear-gradient(160deg, #0d1526 0%, #111827 50%, #0f172a 100%)',
+                      border: '1.5px solid rgba(250,204,21,0.3)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(250,204,21,0.05)',
                       display: 'flex', flexDirection: 'column', position: 'relative',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
                     }}>
+                      {/* Barre déco top */}
+                      <div style={{ height: 3, background: 'linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24)', opacity: 0.7 }} />
+
                       {promo.badge && (
-                        <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
-                          background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.4)',
-                          color: '#fbbf24', padding: '3px 10px', borderRadius: 100 }}>
+                        <div style={{ position: 'absolute', top: 16, right: 16, fontSize: 10, fontWeight: 800,
+                          background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
+                          border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24',
+                          padding: '4px 12px', borderRadius: 100, letterSpacing: 0.5 }}>
                           {promo.badge}
                         </div>
                       )}
-                      <div style={{ padding: '24px 20px 0' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>S{item.id}</span>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
-                            background: promo.plan_requis === 'pro' ? 'rgba(168,85,247,0.15)' : promo.plan_requis === 'premium' ? 'rgba(250,204,21,0.1)' : 'rgba(34,197,94,0.1)',
+
+                      <div style={{ padding: '22px 22px 0' }}>
+                        {/* Tags */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.18)', padding: '3px 9px', borderRadius: 100 }}>S{item.id}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 100,
+                            background: promo.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promo.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
                             color: planColor }}>
                             {promo.plan_requis === 'pro' ? '💼 Pro' : promo.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
                           </span>
                         </div>
-                        <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 5, lineHeight: 1.3 }}>
+
+                        {/* Titre */}
+                        <div style={{ fontSize: 19, fontWeight: 900, color: '#f8fafc', marginBottom: 6, lineHeight: 1.25, letterSpacing: -0.3 }}>
                           {item.shop_name || promo.titre || item.name}
                         </div>
+
+                        {/* Description */}
                         {item.shop_desc ? (
                           <div style={{ marginBottom: 14 }}>
                             {item.shop_desc.split('\n').map((line, i) => (
                               <div key={i} style={{
-                                fontSize: 11, lineHeight: 1.65, marginBottom: i < 2 ? 6 : 0,
+                                fontSize: 12, lineHeight: 1.65, marginBottom: i < 2 ? 6 : 0,
                                 color: i === 0 ? '#94a3b8' : i === 1 ? '#4ade80' : '#60a5fa',
                                 background: i === 2 ? 'rgba(56,189,248,0.06)' : 'transparent',
                                 border: i === 2 ? '1px solid rgba(56,189,248,0.18)' : 'none',
-                                borderRadius: i === 2 ? 7 : 0,
-                                padding: i === 2 ? '6px 9px' : 0,
+                                borderRadius: i === 2 ? 7 : 0, padding: i === 2 ? '7px 10px' : 0,
                               }}>{line}</div>
                             ))}
                           </div>
                         ) : promo.tagline ? (
-                          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promo.tagline}</div>
+                          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.6 }}>{promo.tagline}</div>
                         ) : null}
-                        <div style={{ marginBottom: 16 }}>
-                          {[promo.bullet1, promo.bullet2, promo.bullet3].filter(Boolean).map((b, i) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 5 }}>
-                              <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 13 }}>✓</span>
-                              <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
+
+                        {/* Bullets */}
+                        {[promo.bullet1, promo.bullet2, promo.bullet3].filter(Boolean).length > 0 && (
+                          <div style={{ marginBottom: 16 }}>
+                            {[promo.bullet1, promo.bullet2, promo.bullet3].filter(Boolean).map((b, i) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                <span style={{ color: '#fbbf24', fontWeight: 900, fontSize: 13, marginTop: 1 }}>✦</span>
+                                <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55 }}>{b}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Bilan en temps réel */}
+                        {winPct !== null && total > 0 ? (
+                          <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 12,
+                            background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>📊 Bilan en direct</div>
+                            {/* Barre de progression */}
+                            <div style={{ height: 6, borderRadius: 100, background: 'rgba(255,255,255,0.08)', marginBottom: 10, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', borderRadius: 100, width: `${winPct}%`,
+                                background: winPct >= 70 ? 'linear-gradient(90deg, #22c55e, #4ade80)' : winPct >= 50 ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #ef4444, #f87171)',
+                                transition: 'width 0.5s ease' }} />
                             </div>
-                          ))}
-                        </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', gap: 12 }}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 15, fontWeight: 900, color: '#4ade80', lineHeight: 1 }}>{wins}</div>
+                                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Victoires</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 15, fontWeight: 900, color: '#f87171', lineHeight: 1 }}>{losses}</div>
+                                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Pertes</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 15, fontWeight: 900, color: '#94a3b8', lineHeight: 1 }}>{total}</div>
+                                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Total</div>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 20, fontWeight: 900, color: winPct >= 70 ? '#4ade80' : winPct >= 50 ? '#fbbf24' : '#f87171' }}>
+                                {winPct}%
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+                            background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)',
+                            fontSize: 11, color: '#475569', textAlign: 'center' }}>
+                            📊 Bilan disponible après les premières prédictions
+                          </div>
+                        )}
                       </div>
 
-                      <div style={{ marginTop: 'auto', padding: '14px 20px 20px', borderTop: '1px solid rgba(100,116,139,0.15)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      {/* Footer carte */}
+                      <div style={{ marginTop: 'auto', padding: '16px 22px 22px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                           <div>
-                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prix unique</div>
-                            <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{price} €</div>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Prix unique</div>
+                            <div style={{ fontSize: 26, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5, lineHeight: 1 }}>{price} <span style={{ fontSize: 14, color: '#94a3b8', fontWeight: 600 }}>€</span></div>
+                            <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>Licence permanente · ZIP inclus</div>
                           </div>
                           {existingPurchase ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_LABEL[existingPurchase.status]?.color || '#64748b' }}>
                                 {STATUS_LABEL[existingPurchase.status]?.icon} {STATUS_LABEL[existingPurchase.status]?.label}
                               </span>
                               {existingPurchase.status === 'awaiting_screenshot' && (
                                 <button onClick={() => reopenPurchase(existingPurchase)}
-                                  style={{ padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                  style={{ padding: '8px 16px', borderRadius: 10, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                                     background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.35)', color: '#fbbf24' }}>
                                   📸 Envoyer capture
                                 </button>
                               )}
                               {existingPurchase.status === 'validated' && (
                                 <button onClick={() => setTab('mes-achats')}
-                                  style={{ padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                  style={{ padding: '8px 16px', borderRadius: 10, fontSize: 11, fontWeight: 700, cursor: 'pointer',
                                     background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}>
                                   ⬇️ Télécharger
                                 </button>
@@ -464,10 +540,10 @@ export default function Shop() {
                             </div>
                           ) : (
                             <button onClick={() => handleBuy(item)}
-                              style={{ padding: '10px 20px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer',
+                              style={{ padding: '11px 22px', borderRadius: 12, fontWeight: 900, fontSize: 14, cursor: 'pointer',
                                 background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a',
-                                boxShadow: '0 2px 12px rgba(251,191,36,0.3)' }}>
-                              {promo.cta || 'Acheter maintenant'}
+                                boxShadow: '0 4px 16px rgba(251,191,36,0.4)', letterSpacing: 0.3 }}>
+                              {promo.cta || '🛒 Acheter maintenant'}
                             </button>
                           )}
                         </div>
