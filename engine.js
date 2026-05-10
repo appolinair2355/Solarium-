@@ -382,6 +382,8 @@ class Engine {
       if (counter.r <= maxR) {
         console.log(`[RGrp] "${rcfg.name}" → ${stratId} perte R${counter.r - 1} → rattrapage #${gn + 1} (${counter.r}/${maxR})`);
         this._forceNextPrediction(stratId, gn + 1, suit);
+        // Relayer aussi sur les canaux propres de la stratégie Rattrapage Groupé
+        this._forceNextPrediction(`S${rid}`, gn + 1, suit);
       } else {
         console.log(`[RGrp] "${rcfg.name}" → ${stratId} maxR=${maxR} dépassé → reset compteur`);
         counter.r = 0;
@@ -4334,6 +4336,12 @@ class Engine {
 
   // ── Moniteur intersection : données pour l'admin ──────────────────────────
   // Retourne pour chaque stratégie surveillée ses prédictions actives.
+  getStrategyState(stratId) {
+    if (!stratId || !stratId.startsWith('S')) return null;
+    const id = parseInt(stratId.slice(1));
+    return this.custom[id] || null;
+  }
+
   getIntersectionMonitor(id) {
     const interId  = parseInt(id);
     const interSt  = this.custom[interId];
