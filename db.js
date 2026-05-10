@@ -6,6 +6,9 @@
 // l'environnement (variable Render / Replit), il prend priorité.
 const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
 
+// ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
+const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+
 require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 let USE_PG = !!DB_URL;
@@ -29,6 +32,26 @@ if (USE_PG) {
     console.error('[DB] Erreur pool inattendue:', err.message);
     _notifyAdminDbError(err.message).catch(() => {});
   });
+}
+
+// ── Pool secondaire : base de données des cartes ─────────────────────────────
+let pgPoolCards = null;
+let USE_CARDS_PG = true;
+try {
+  const { Pool } = require('pg');
+  pgPoolCards = new Pool({
+    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPoolCards.on('error', (err) => {
+    console.error('[CARDS-DB] Erreur pool cartes:', err.message);
+  });
+} catch (e) {
+  console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
+  USE_CARDS_PG = false;
 }
 
 const jsondb = require('./jsondb');
@@ -352,6 +375,30 @@ async function initDB() {
       );
     }
     console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
+    // ── Initialisation de la base de données des cartes ─────────────────
+    if (USE_CARDS_PG && pgPoolCards) {
+      try {
+        await pgPoolCards.query(`
+          CREATE TABLE IF NOT EXISTS game_cards (
+            id SERIAL PRIMARY KEY,
+            game_number INTEGER NOT NULL,
+            strategy TEXT NOT NULL,
+            player_cards TEXT,
+            banker_cards TEXT,
+            player_score INTEGER,
+            banker_score INTEGER,
+            winner TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(game_number, strategy)
+          );
+          CREATE INDEX IF NOT EXISTS game_cards_strategy_idx ON game_cards(strategy);
+          CREATE INDEX IF NOT EXISTS game_cards_number_idx ON game_cards(game_number);
+        `);
+        console.log('✅ Base de données des cartes initialisée (les_cartes)');
+      } catch (cardsErr) {
+        console.error('[CARDS-DB] ❌ Échec initialisation:', cardsErr.message);
+      }
+    }
     console.log('✅ Base de données PostgreSQL initialisée');
     } catch (pgErr) {
       console.error('[DB] ❌ Connexion PostgreSQL échouée — bascule en mode JSON local:', pgErr.message);
@@ -1428,8 +1475,132 @@ async function getUserLicenses(userId) {
   return r.rows;
 }
 
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── GESTION DES CARTES (Base secondaire : les_cartes) ────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function saveGameCards({ game_number, strategy, player_cards, banker_cards, player_score, banker_score, winner }) {
+  if (!USE_CARDS_PG || !pgPoolCards) {
+    console.warn('[CARDS-DB] Pool cartes non disponible — cartes non sauvegardées');
+    return null;
+  }
+  try {
+    const r = await pgPoolCards.query(
+      `INSERT INTO game_cards (game_number, strategy, player_cards, banker_cards, player_score, banker_score, winner)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (game_number, strategy) DO UPDATE SET
+         player_cards = EXCLUDED.player_cards,
+         banker_cards = EXCLUDED.banker_cards,
+         player_score = EXCLUDED.player_score,
+         banker_score = EXCLUDED.banker_score,
+         winner = EXCLUDED.winner,
+         created_at = NOW()
+       RETURNING *`,
+      [
+        parseInt(game_number),
+        String(strategy || ''),
+        player_cards ? JSON.stringify(player_cards) : null,
+        banker_cards ? JSON.stringify(banker_cards) : null,
+        player_score !== undefined ? parseInt(player_score) : null,
+        banker_score !== undefined ? parseInt(banker_score) : null,
+        winner || null,
+      ]
+    );
+    return r.rows[0] || null;
+  } catch (e) {
+    console.error('[CARDS-DB] saveGameCards error:', e.message);
+    return null;
+  }
+}
+
+async function getGameCards(game_number, strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return null;
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards WHERE game_number = $1 AND strategy = $2`,
+      [parseInt(game_number), String(strategy || '')]
+    );
+    const row = r.rows[0] || null;
+    if (row) {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+    }
+    return row;
+  } catch (e) {
+    console.error('[CARDS-DB] getGameCards error:', e.message);
+    return null;
+  }
+}
+
+async function getGameCardsByRange(strategy, fromGame, toGame) {
+  if (!USE_CARDS_PG || !pgPoolCards) return [];
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards
+       WHERE strategy = $1 AND game_number >= $2 AND game_number <= $3
+       ORDER BY game_number ASC`,
+      [String(strategy || ''), parseInt(fromGame), parseInt(toGame)]
+    );
+    return r.rows.map(row => {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+      return row;
+    });
+  } catch (e) {
+    console.error('[CARDS-DB] getGameCardsByRange error:', e.message);
+    return [];
+  }
+}
+
+async function getLastGameCards(strategy, limit = 50) {
+  if (!USE_CARDS_PG || !pgPoolCards) return [];
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards WHERE strategy = $1 ORDER BY game_number DESC LIMIT $2`,
+      [String(strategy || ''), parseInt(limit)]
+    );
+    return r.rows.map(row => {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+      return row;
+    }).reverse();
+  } catch (e) {
+    console.error('[CARDS-DB] getLastGameCards error:', e.message);
+    return [];
+  }
+}
+
+async function deleteGameCards(game_number, strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return 0;
+  try {
+    const r = await pgPoolCards.query(
+      `DELETE FROM game_cards WHERE game_number = $1 AND strategy = $2`,
+      [parseInt(game_number), String(strategy || '')]
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[CARDS-DB] deleteGameCards error:', e.message);
+    return 0;
+  }
+}
+
+async function deleteAllGameCards(strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return 0;
+  try {
+    const r = await pgPoolCards.query(
+      `DELETE FROM game_cards WHERE strategy = $1`,
+      [String(strategy || '')]
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[CARDS-DB] deleteAllGameCards error:', e.message);
+    return 0;
+  }
+}
+
 module.exports = {
-  pool, USE_PG, MAIN_DB_URL, initDB, reinitAdmins,
+  pool, USE_PG, MAIN_DB_URL, pgPoolCards, USE_CARDS_PG, initDB, reinitAdmins,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
   updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,
@@ -1456,4 +1627,7 @@ module.exports = {
   createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
   getStrategyLicenses, getUserLicenses, upsertLicense,
   registerBot, pingBotActivity, getLicensePredictions,
+  // ── Cartes (base secondaire les_cartes) ────────────────────────────────
+  saveGameCards, getGameCards, getGameCardsByRange, getLastGameCards,
+  deleteGameCards, deleteAllGameCards,
 };

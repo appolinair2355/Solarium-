@@ -31,7 +31,9 @@
 
 const { Pool } = require('pg');
 
-const URL = process.env.LES_CARTES_DATABASE_URL || null;
+const URL = process.env.LES_CARTES_DATABASE_URL
+  || process.env.CARDS_DATABASE_URL
+  || 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
 
 let pool = null;
 let initialized = false;
