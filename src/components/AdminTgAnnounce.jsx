@@ -213,12 +213,10 @@ export default function AdminTgAnnounce() {
       const d = await r.json();
       if (!r.ok) { setErrMsg(d.error || 'Erreur serveur'); return; }
 
-      // Envoi immédiat sur Telegram après sauvegarde
+      // Envoi immédiat sur Telegram après sauvegarde (fire-and-forget — ne bloque pas l'UI)
       const savedId = isNew ? (d.id ?? d.announce?.id) : modal.ann.id;
       if (savedId) {
-        try {
-          await fetch(`/api/tg-announce/${savedId}/send-now`, { method: 'POST', credentials: 'include' });
-        } catch {}
+        fetch(`/api/tg-announce/${savedId}/send-now`, { method: 'POST', credentials: 'include' }).catch(() => {});
       }
 
       load();
