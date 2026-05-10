@@ -81,10 +81,42 @@ router.get('/predictions', async (req, res) => {
 
     const predictions = await db.getLicensePredictions(license.strategy_id, sinceId);
 
-    return res.json({ ok: true, predictions });
+    // Récupère le max_rattrapage réel de la stratégie
+    let maxRattrapage = 1;
+    try {
+      const raw = await db.getSetting('custom_strategies');
+      if (raw) {
+        const strats = JSON.parse(raw);
+        const sid = String(license.strategy_id);
+        const strat = strats.find(s => String(s.id) === sid);
+        if (strat && strat.max_rattrapage != null) {
+          maxRattrapage = Math.max(1, parseInt(strat.max_rattrapage) || 1);
+        }
+      }
+    } catch (_) {}
+    const predsWithMaxR = predictions.map(p => ({ ...p, max_rattrapage: maxRattrapage }));
+
+    return res.json({ ok: true, predictions: predsWithMaxR });
   } catch (e) {
     console.error('[License/predictions] Erreur:', e.message);
     return res.json({ ok: true, predictions: [] });
+  }
+});
+
+// ── GET /api/license/results ─────────────────────────────────────────────────
+// Retourne les prédictions résolues (gagnées/perdues) pour envoyer les messages de vérification.
+router.get('/results', async (req, res) => {
+  const key     = (req.query.key     || '').trim();
+  const sinceId = parseInt(req.query.since_id) || 0;
+  try {
+    const { ok, error, license } = await _validateLicense(key);
+    if (!ok) return res.json({ ok: false, error });
+
+    const results = await db.getLicenseResults(license.strategy_id, sinceId);
+    return res.json({ ok: true, results });
+  } catch (e) {
+    console.error('[License/results] Erreur:', e.message);
+    return res.json({ ok: true, results: [] });
   }
 });
 

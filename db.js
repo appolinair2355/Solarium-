@@ -1422,6 +1422,23 @@ async function getLicensePredictions(strategyId, sinceId) {
   return r.rows;
 }
 
+async function getLicenseResults(strategyId, sinceId) {
+  if (!USE_PG) return [];
+  const sid = parseInt(sinceId) || 0;
+  const r = await pgPool.query(
+    `SELECT id, game_number, predicted_suit, hand, rattrapage, status, resolved_at
+     FROM predictions
+     WHERE (strategy = $1 OR strategy = 'S' || $1)
+       AND id > $2
+       AND status IN ('gagne', 'perdu')
+       AND resolved_at > NOW() - INTERVAL '4 hours'
+     ORDER BY id ASC
+     LIMIT 30`,
+    [String(strategyId), sid]
+  );
+  return r.rows;
+}
+
 async function upsertLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip }) {
   if (!USE_PG) return null;
   const r = await pgPool.query(
@@ -1626,7 +1643,7 @@ module.exports = {
   getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
   createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
   getStrategyLicenses, getUserLicenses, upsertLicense,
-  registerBot, pingBotActivity, getLicensePredictions,
+  registerBot, pingBotActivity, getLicensePredictions, getLicenseResults,
   // ── Cartes (base secondaire les_cartes) ────────────────────────────────
   saveGameCards, getGameCards, getGameCardsByRange, getLastGameCards,
   deleteGameCards, deleteAllGameCards,
