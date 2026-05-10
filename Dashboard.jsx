@@ -693,6 +693,65 @@ export default function Dashboard() {
                         {absences.length === 0 ? (
                           <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
                         ) : absences.map(a => {
+                          // ── Compteur Lecture Passée (mode lecture_passee) ──────────────
+                          if (a.isLecturePasse) {
+                            const pctGap = a.threshold > 0 ? Math.min(100, (a.count / a.threshold) * 100) : 0;
+                            const gapColor = a.hasPending ? '#f59e0b'
+                              : a.count >= a.threshold ? '#22c55e'
+                              : a.count >= a.threshold - 1 ? '#f59e0b'
+                              : channel.color;
+                            return (
+                              <div key="lecture_passe" style={{ padding: '2px 0' }}>
+                                <div className="absence-row" style={{ alignItems: 'center' }}>
+                                  <span className="absence-suit" style={{ fontSize: '1.2rem', minWidth: 28, textAlign: 'center' }}>
+                                    {a.display}
+                                  </span>
+                                  <div className="absence-bar-wrap">
+                                    <div className="absence-bar-fill" style={{
+                                      width: `${pctGap}%`,
+                                      background: gapColor,
+                                      transition: 'width 0.4s ease, background 0.3s ease',
+                                    }} />
+                                  </div>
+                                  <span className="absence-count" style={{
+                                    color: a.hasPending ? '#f59e0b' : a.count >= a.threshold ? '#22c55e' : '#475569',
+                                    fontWeight: 700,
+                                  }}>
+                                    {a.count}/{a.threshold}
+                                  </span>
+                                </div>
+                                {a.description && (
+                                  <div style={{ fontSize: '0.62rem', color: a.hasPending ? '#f59e0b' : a.nextCostume ? '#94a3b8' : '#475569', paddingLeft: 4, marginTop: 1, fontStyle: 'italic' }}>
+                                    {a.description}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // ── Compteur Intelligent Cartes (mode intelligent_cartes) ──────
+                          if (a.isIntelligent) {
+                            return (
+                              <div key="intelligent" style={{ padding: '2px 0' }}>
+                                <div className="absence-row" style={{ alignItems: 'center' }}>
+                                  <span className="absence-suit" style={{ fontSize: '1.2rem', minWidth: 28, textAlign: 'center' }}>
+                                    {a.display}
+                                  </span>
+                                  <div style={{ flex: 1, paddingLeft: 6 }}>
+                                    <div style={{ fontSize: '0.62rem', color: a.lastSuit ? '#94a3b8' : '#475569', fontStyle: 'italic' }}>
+                                      {a.description}
+                                    </div>
+                                  </div>
+                                  {a.lastSuit && (
+                                    <span className="absence-count" style={{ color: '#6366f1', fontWeight: 700 }}>
+                                      {a.count}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+
                           const isMiroir = a.mode === 'taux_miroir';
                           const isAbsConf = a.mode === 'absence_confirmee';
                           const barColor = isMiroir

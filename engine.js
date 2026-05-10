@@ -2838,12 +2838,26 @@ class Engine {
 
       const go = gn + p;
       const zk = go - h;
+
+      // Toujours mettre à jour l'écart courant pour l'affichage du compteur
+      const lastGo = state._lastLecturePassee || 0;
+      state._lectureGapCurrent = lastGo > 0 ? Math.min(ecart, go - lastGo) : 0;
+      state._lectureGapTotal   = ecart;
+
       if (zk <= 0) return; // pas assez d'historique
 
       // Application de l'écart : ne prédire qu'une fois tous les `ecart` jeux
       // Guard go > lastGo : si go <= lastGo (ex: après reset jeu #1), on laisse passer sans skip
-      const lastGo = state._lastLecturePassee || 0;
       if (lastGo > 0 && go > lastGo && (go - lastGo) < ecart) {
+        // Lire le costume même pendant le gap pour mise à jour du compteur
+        try {
+          const rowGap = await cartesStore.byGameNumber(zk);
+          if (rowGap) {
+            const pfx = sourceHand === 'banker' ? 'b' : 'p';
+            const ts  = rowGap[`${pfx}${position}_s`];
+            if (ts && ALL_SUITS.includes(ts)) state._lectureNextCostume = ts;
+          }
+        } catch {}
         console.log(`[${channelId}] [LecturePassée] gap (live=${gn} go=${go}, dernier=${lastGo}, écart=${ecart}) — skip`);
         return;
       }
@@ -2857,6 +2871,8 @@ class Engine {
         const prefix = sourceHand === 'banker' ? 'b' : 'p';
         const targetRank = row[`${prefix}${position}_r`];
         const targetSuit = row[`${prefix}${position}_s`];
+        // Stocker le costume lu pour l'affichage du compteur
+        if (targetSuit && ALL_SUITS.includes(targetSuit)) state._lectureNextCostume = targetSuit;
         if (!targetSuit || !ALL_SUITS.includes(targetSuit)) {
           console.log(`[${channelId}] [LecturePassée] zk=${zk} ${sourceLabel} pos=${position} — costume invalide (${targetSuit})`);
           return;
@@ -2871,6 +2887,7 @@ class Engine {
         // Vérification des exceptions avant d'émettre — ne met à jour le gap QUE si la prédiction passe
         if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
         state._lastLecturePassee = go;
+        state._lectureGapCurrent = 0;
         await emitPrediction(go, targetSuit, targetSuit);
       } catch (e) {
         console.warn(`[${channelId}] [LecturePassée] échec lecture zk=${zk}: ${e.message}`);
@@ -2948,6 +2965,9 @@ class Engine {
         state._lastIntelligentGo = goN;
 
         const conf = total > 0 ? Math.round((bestCount / total) * 100) : 0;
+        // Stocker le dernier costume prédit et la confiance pour l'affichage du compteur
+        state._intelligentLastSuit = best;
+        state._intelligentLastConf = conf;
         console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" (${total} occ.) → ${best} (${bestCount}, ${conf}%) → jeu #${goN}`);
         // Vérification des exceptions avant d'émettre
         if (this._checkExceptions(exceptions, best, best, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
@@ -3851,6 +3871,11 @@ class Engine {
       // CRITIQUE : sans ce reset, après le jeu #1, go < _lastLecturePassee (ancien) → skip permanent
       delete state._lastLecturePassee;
       delete state._lastIntelligentGo;
+      delete state._lectureNextCostume;
+      delete state._lectureGapCurrent;
+      delete state._lectureGapTotal;
+      delete state._intelligentLastSuit;
+      delete state._intelligentLastConf;
       if (state.mirrorCounts)  for (const s of ALL_SUITS) state.mirrorCounts[s]  = 0;
       if (state.absenceCounts) for (const s of ALL_SUITS) state.absenceCounts[s] = 0;
       // Reset état interne mode carte_valeur
@@ -4254,6 +4279,79 @@ class Engine {
             confirmPending: !!confirmPending[suit],
           };
         });
+      }
+
+      // Modes sans compteur pertinent → tableau vide (évite l'affichage "Absent" inutile)
+      if (['relance', 'aleatoire', 'annonce_sequence', 'multi_strategy', 'union_enseignes'].includes(mode)) {
+        return [];
+      }
+
+      // Mode lecture_passee → compteur d'écart + prochain costume
+      if (mode === 'lecture_passee') {
+        const ecartCfg    = Math.max(1, parseInt(entry.config?.carte_ecart) || 1);
+        const nextCostume = entry._lectureNextCostume || null;
+        const gapCurrent  = entry._lectureGapCurrent  || 0;
+        const hasPending  = Object.keys(entry.pending || {}).length > 0;
+        const pendingSuit = hasPending
+          ? (Object.values(entry.pending)[0]?.suit || null)
+          : null;
+        const displaySuit = pendingSuit || nextCostume;
+        return [{
+          isLecturePasse: true,
+          suit:          displaySuit || 'lp',
+          display:       displaySuit ? (SUIT_DISPLAY[displaySuit] || displaySuit) : '📖',
+          count:         gapCurrent,
+          threshold:     ecartCfg,
+          mode,
+          label:         'Lecture Passée',
+          singleCounter: true,
+          nextCostume:   displaySuit,
+          hasPending,
+          ecart:         ecartCfg,
+          description:   hasPending
+            ? `⏳ Costume en attente : ${SUIT_DISPLAY[pendingSuit] || pendingSuit}`
+            : nextCostume
+            ? `📖 Lu : ${SUIT_DISPLAY[nextCostume] || nextCostume} — Écart : ${gapCurrent}/${ecartCfg}`
+            : `📖 En attente de lecture...`,
+        }];
+      }
+
+      // Mode intelligent_cartes → dernier costume prédit + confiance
+      if (mode === 'intelligent_cartes') {
+        const lastSuit = entry._intelligentLastSuit || null;
+        const lastConf = entry._intelligentLastConf || 0;
+        return [{
+          isIntelligent: true,
+          suit:          lastSuit || 'ic',
+          display:       lastSuit ? (SUIT_DISPLAY[lastSuit] || lastSuit) : '🧠',
+          count:         lastConf,
+          threshold:     100,
+          mode,
+          label:         'Intelligent Cartes',
+          singleCounter: true,
+          lastSuit,
+          description:   lastSuit
+            ? `🧠 Dernier signal : ${SUIT_DISPLAY[lastSuit] || lastSuit} (${lastConf}%)`
+            : `🧠 En analyse du pattern...`,
+        }];
+      }
+
+      // Mode comptages_ecart → streak courant vs seuil dynamique B
+      if (mode === 'comptages_ecart') {
+        const cKey = entry.config?.comptages_key || '';
+        let cur = 0, dynB = 1;
+        try {
+          const sd = require('./comptages').getStreakState(cKey);
+          cur  = sd.cur  || 0;
+          dynB = Math.max(1, Math.ceil(((sd.maxAll || 0) + 3 + (sd.maxPeriod || 0)) / 3));
+        } catch {}
+        return [{
+          suit: 'ce', display: '📊',
+          count: cur, threshold: dynB,
+          mode, label: 'Comptages Écart',
+          singleCounter: true,
+          description: `${cur}/${dynB} jeux (seuil B dynamique)`,
+        }];
       }
 
       return ALL_SUITS.map(suit => {
