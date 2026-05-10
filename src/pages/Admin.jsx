@@ -4211,6 +4211,7 @@ function AdminPanel() {
   const [stratOpen, setStratOpen] = useState(false); // form panel open?
   const [mirrorCountsData, setMirrorCountsData] = useState({}); // { [stratId]: { counts, threshold } }
   const [interMonitorData, setInterMonitorData] = useState({}); // { [stratId]: { startGame, monitored, accordSuits } }
+  const [lectureQueueData, setLectureQueueData] = useState({}); // { [stratId]: counter object (isLecturePasse) }
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -5469,6 +5470,28 @@ function AdminPanel() {
     };
     fetchInterMonitor();
     const iv = setInterval(fetchInterMonitor, 4000);
+    return () => clearInterval(iv);
+  }, [strategies]);
+
+  // Fetch lecture_passee queue toutes les 3s pour les stratégies lecture_passee actives
+  useEffect(() => {
+    const fetchLectureQueues = async () => {
+      const lpStrats = strategies.filter(s => s.mode === 'lecture_passee' && s.enabled);
+      if (!lpStrats.length) return;
+      const updates = {};
+      await Promise.all(lpStrats.map(async s => {
+        try {
+          const r = await fetch(`/api/games/absences?channel=S${s.id}`, { credentials: 'include' });
+          if (r.ok) {
+            const d = await r.json();
+            if (Array.isArray(d) && d.length > 0 && d[0].isLecturePasse) updates[s.id] = d[0];
+          }
+        } catch {}
+      }));
+      if (Object.keys(updates).length) setLectureQueueData(p => ({ ...p, ...updates }));
+    };
+    fetchLectureQueues();
+    const iv = setInterval(fetchLectureQueues, 3000);
     return () => clearInterval(iv);
   }, [strategies]);
 
@@ -8967,6 +8990,43 @@ function AdminPanel() {
                         })}
                       </div>
                     )}
+                    {/* ── File d'attente Lecture jeux passés ── */}
+                    {s.mode === 'lecture_passee' && lectureQueueData[s.id] && (() => {
+                      const { queue = [], liveGn = 0, ecart = 1, hasPending = false, pendingEntries = [] } = lectureQueueData[s.id];
+                      const SUIT_COLOR = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                      return (
+                        <div style={{ marginTop: 5, padding: '6px 10px', borderRadius: 8, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: 0.8, marginBottom: 5, textTransform: 'uppercase' }}>
+                            📖 File d'attente · live #{liveGn} · écart min {ecart}
+                          </div>
+                          {pendingEntries.length > 0 && (
+                            <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>
+                              ⏳ En vérification : {pendingEntries.map(p => `#${p.go} ${p.suit}`).join(', ')} (R{pendingEntries[0]?.rattrapage}/{pendingEntries[0]?.maxR})
+                            </div>
+                          )}
+                          {queue.length === 0 ? (
+                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Chargement de la file...</div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {queue.slice(0, 20).map((item, i) => {
+                                const isNext = liveGn > 0 && liveGn >= item.go - 2;
+                                return (
+                                  <span key={i} style={{
+                                    fontSize: 12, fontWeight: 800, padding: '2px 8px', borderRadius: 8,
+                                    background: isNext ? 'rgba(34,197,94,0.25)' : 'rgba(99,102,241,0.12)',
+                                    color: isNext ? '#4ade80' : (SUIT_COLOR[item.suit] || '#a5b4fc'),
+                                    border: `1px solid ${isNext ? 'rgba(34,197,94,0.5)' : 'rgba(99,102,241,0.25)'}`,
+                                    outline: isNext ? '1px solid rgba(34,197,94,0.6)' : 'none',
+                                  }}>
+                                    #{item.go} {item.suit}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {s.tg_targets?.some(t => t.bot_token && t.channel_id) && (
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                         Canaux : {(s.tg_targets || []).filter(t=>t.channel_id).map(t => t.channel_id).join(', ')}
@@ -10264,7 +10324,7 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'lecture_passee' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>

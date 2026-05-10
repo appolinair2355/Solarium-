@@ -1207,6 +1207,48 @@ export default function Dashboard() {
                               </div>
                             );
                           })()
+                        ) : absences[0]?.isLecturePasse ? (
+                          (() => {
+                          const { queue = [], liveGn = 0, pendingEntries = [], ecart = 1 } = absences[0];
+                          const SUIT_COLOR = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                          return (
+                            <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <div style={{ fontSize: '0.62rem', color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+                                📖 File d'attente · live #{liveGn} · écart {ecart}
+                              </div>
+                              {pendingEntries.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  {pendingEntries.map(p => (
+                                    <div key={p.go} style={{ fontSize: '0.68rem', color: '#fbbf24', fontWeight: 700 }}>
+                                      ⏳ En vérif. : #{p.go} <span style={{ color: SUIT_COLOR[p.suit] || '#e2e8f0' }}>{p.suit}</span> — R{p.rattrapage}/{p.maxR}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {queue.length === 0 ? (
+                                <div style={{ color: '#475569', fontSize: '0.72rem' }}>
+                                  Chargement de la file...
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  {queue.slice(0, 20).map((item, i) => {
+                                    const isNext = liveGn > 0 && liveGn >= item.go - 2;
+                                    return (
+                                      <span key={i} style={{
+                                        fontSize: '0.72rem', fontWeight: 800, padding: '2px 7px', borderRadius: 7,
+                                        background: isNext ? 'rgba(34,197,94,0.25)' : 'rgba(99,102,241,0.12)',
+                                        color: isNext ? '#4ade80' : (SUIT_COLOR[item.suit] || '#a5b4fc'),
+                                        border: `1px solid ${isNext ? 'rgba(34,197,94,0.5)' : 'rgba(99,102,241,0.25)'}`,
+                                      }}>
+                                        #{item.go} {item.suit}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                          })()
                         ) : absences[0]?.isCarteValeur ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingTop: 4 }}>
                             {absences.map(a => {
