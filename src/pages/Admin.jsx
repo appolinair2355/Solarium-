@@ -4149,6 +4149,26 @@ function AdminPanel() {
     { value: '53', label: '#53 — 💎 Diamant Court' },
     { value: '54', label: '#54 — 🚀 Fusée Futur' },
     { value: '55', label: '#55 — 🌊 Cascade Pro' },
+    { value: '56', label: '#56 — 💎 VIP Lounge' },
+    { value: '57', label: '#57 — ⚡ Flash Bet' },
+    { value: '58', label: '#58 — 🔮 Oracle' },
+    { value: '59', label: '#59 — ⚔️ Katana' },
+    { value: '60', label: '#60 — 👻 Phantom' },
+    { value: '61', label: '#61 — 💚 Emerald' },
+    { value: '62', label: '#62 — 🌩️ Thunder' },
+    { value: '63', label: '#63 — ◈ Elite Bordure' },
+    { value: '64', label: '#64 — 🔥 Inferno' },
+    { value: '65', label: '#65 — ❄️ Arctic' },
+    { value: '66', label: '#66 — 🌌 Cosmos' },
+    { value: '67', label: '#67 — 🏆 HTML Premium' },
+    { value: '68', label: '#68 — ♜ Vintage Casino' },
+    { value: '69', label: '#69 — 💓 Pulse' },
+    { value: '70', label: '#70 — ⚔️ Blade' },
+    { value: '71', label: '#71 — ♾️ Zodiac' },
+    { value: '72', label: '#72 — ⛩️ Temple' },
+    { value: '73', label: '#73 — 🟣 Neon Ultra' },
+    { value: '74', label: '#74 — 👑 Crown Ultimate' },
+    { value: '75', label: '#75 — 📡 Sigma Signal' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -4165,6 +4185,8 @@ function AdminPanel() {
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
     // Mode first_card_plus6
     proche: 3, banker_card_count: 0, fc_ecart: 2,
+    // Mode rattrapage_groupe
+    monitored_strategies: [], rg_stop_limit: 10,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
   };
@@ -8499,6 +8521,126 @@ function AdminPanel() {
               result:  `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ✅ ${RE[0]}`,
               perdu:   `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ❌`,
             },
+            {
+              id: 56, label: 'VIP Lounge', icon: '💎',
+              preview: `💎 ━━━━━━━━━━━━━━━━ 💎\n   VIP SIGNAL #N${G}\n   ♠️ PIQUE\n   Dogon : +${maxRattrapage}\n💎 ━━━━━━━━━━━━━━━━ 💎\n⌛`,
+              result:  `💎 ━━━━━━━━━━━━━━━━ 💎\n   VIP SIGNAL #N${G}\n   ♠️ PIQUE\n   Dogon : +${maxRattrapage}\n💎 ━━━━━━━━━━━━━━━━ 💎\n✅ ${RE[0]}`,
+              perdu:   `💎 ━━━━━━━━━━━━━━━━ 💎\n   VIP SIGNAL #N${G}\n   ♠️ PIQUE\n   Dogon : +${maxRattrapage}\n💎 ━━━━━━━━━━━━━━━━ 💎\n❌`,
+            },
+            {
+              id: 57, label: 'Flash Bet', icon: '⚡',
+              preview: `⚡⚡ FLASH BET ⚡⚡\n🎯 Jeu #N${G}  ♠️ Pique\n💥 Dogon +${maxRattrapage}\n⌛`,
+              result:  `⚡⚡ FLASH BET ⚡⚡\n🎯 Jeu #N${G}  ♠️ Pique\n💥 Dogon +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `⚡⚡ FLASH BET ⚡⚡\n🎯 Jeu #N${G}  ♠️ Pique\n💥 Dogon +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 58, label: 'Oracle', icon: '🔮',
+              preview: `🔮 L'ORACLE A PARLÉ 🔮\n═══════════════════\n🌟 Partie #N${G}\n✨ ♠️ PIQUE\n🌙 Retours : +${maxRattrapage}\n⌛`,
+              result:  `🔮 L'ORACLE A PARLÉ 🔮\n═══════════════════\n🌟 Partie #N${G}\n✨ ♠️ PIQUE\n🌙 Retours : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🔮 L'ORACLE A PARLÉ 🔮\n═══════════════════\n🌟 Partie #N${G}\n✨ ♠️ PIQUE\n🌙 Retours : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 59, label: 'Katana', icon: '⚔️',
+              preview: `⚔️ KATANA SIGNAL ⚔️\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n🎴 Étape ${G} | ♠️ Pique\n🗡️ Relance : ×${maxRattrapage}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n⌛`,
+              result:  `⚔️ KATANA SIGNAL ⚔️\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n🎴 Étape ${G} | ♠️ Pique\n🗡️ Relance : ×${maxRattrapage}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n✅ ${RE[0]}`,
+              perdu:   `⚔️ KATANA SIGNAL ⚔️\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n🎴 Étape ${G} | ♠️ Pique\n🗡️ Relance : ×${maxRattrapage}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n❌`,
+            },
+            {
+              id: 60, label: 'Phantom', icon: '👻',
+              preview: `👻 PHANTOM SIGNAL 👻\n░░░░░░░░░░░░░░░░░░\nÉtape ${G} · ♠️ Pique\n░ Dogon : +${maxRattrapage} ░\n⌛`,
+              result:  `👻 PHANTOM SIGNAL 👻\n░░░░░░░░░░░░░░░░░░\nÉtape ${G} · ♠️ Pique\n░ Dogon : +${maxRattrapage} ░\n✅ ${RE[0]}`,
+              perdu:   `👻 PHANTOM SIGNAL 👻\n░░░░░░░░░░░░░░░░░░\nÉtape ${G} · ♠️ Pique\n░ Dogon : +${maxRattrapage} ░\n❌`,
+            },
+            {
+              id: 61, label: 'Emerald', icon: '💚',
+              preview: `💚 EMERALD SIGNAL 💚\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n🎯 Partie : ${G}\n🌿 ♠️ Pique\n🔋 Énergie : +${maxRattrapage}\n⌛`,
+              result:  `💚 EMERALD SIGNAL 💚\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n🎯 Partie : ${G}\n🌿 ♠️ Pique\n🔋 Énergie : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `💚 EMERALD SIGNAL 💚\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n🎯 Partie : ${G}\n🌿 ♠️ Pique\n🔋 Énergie : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 62, label: 'Thunder', icon: '🌩️',
+              preview: `🌩️ THUNDER BET 🌩️\n━━━━━━━━━━━━━━━━━━\n⚡ Étape ${G}\n♠️ PIQUE\n⚡ Relance : +${maxRattrapage}\n⌛`,
+              result:  `🌩️ THUNDER BET 🌩️\n━━━━━━━━━━━━━━━━━━\n⚡ Étape ${G}\n♠️ PIQUE\n⚡ Relance : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🌩️ THUNDER BET 🌩️\n━━━━━━━━━━━━━━━━━━\n⚡ Étape ${G}\n♠️ PIQUE\n⚡ Relance : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 63, label: 'Elite Bordure', icon: '◈',
+              preview: `╔══ ELITE SIGNAL ═══╗\n║ Étape  : ${G}\n║ Mise   : ♠️ Pique\n║ Dogon  : +${maxRattrapage}\n╚══════════════════╝\n⌛`,
+              result:  `╔══ ELITE SIGNAL ═══╗\n║ Étape  : ${G}\n║ Mise   : ♠️ Pique\n║ Dogon  : +${maxRattrapage}\n╚══════════════════╝\n✅ ${RE[0]}`,
+              perdu:   `╔══ ELITE SIGNAL ═══╗\n║ Étape  : ${G}\n║ Mise   : ♠️ Pique\n║ Dogon  : +${maxRattrapage}\n╚══════════════════╝\n❌`,
+            },
+            {
+              id: 64, label: 'Inferno', icon: '🔥',
+              preview: `🔥🔥 INFERNO 🔥🔥\n▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\n🎯 Étape ${G} — ♠️ Pique\n🔥 Poursuite : +${maxRattrapage} feu\n⌛`,
+              result:  `🔥🔥 INFERNO 🔥🔥\n▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\n🎯 Étape ${G} — ♠️ Pique\n🔥 Poursuite : +${maxRattrapage} feu\n✅ ${RE[0]}`,
+              perdu:   `🔥🔥 INFERNO 🔥🔥\n▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\n🎯 Étape ${G} — ♠️ Pique\n🔥 Poursuite : +${maxRattrapage} feu\n❌`,
+            },
+            {
+              id: 65, label: 'Arctic', icon: '❄️',
+              preview: `❄️ ARCTIC SIGNAL ❄️\n▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n🧊 Jeu ${G} | ♠️ Pique\n❄️ Gel : +${maxRattrapage} cycle\n⌛`,
+              result:  `❄️ ARCTIC SIGNAL ❄️\n▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n🧊 Jeu ${G} | ♠️ Pique\n❄️ Gel : +${maxRattrapage} cycle\n✅ ${RE[0]}`,
+              perdu:   `❄️ ARCTIC SIGNAL ❄️\n▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n🧊 Jeu ${G} | ♠️ Pique\n❄️ Gel : +${maxRattrapage} cycle\n❌`,
+            },
+            {
+              id: 66, label: 'Cosmos', icon: '🌌',
+              preview: `🌌 COSMOS BACCARAT 🌌\n✦ ✦ ✦ ✦ ✦ ✦ ✦\n🚀 Étape ${G}\n💫 ♠️ Pique\n🌟 Dogon : +${maxRattrapage} étoile\n⌛`,
+              result:  `🌌 COSMOS BACCARAT 🌌\n✦ ✦ ✦ ✦ ✦ ✦ ✦\n🚀 Étape ${G}\n💫 ♠️ Pique\n🌟 Dogon : +${maxRattrapage} étoile\n✅ ${RE[0]}`,
+              perdu:   `🌌 COSMOS BACCARAT 🌌\n✦ ✦ ✦ ✦ ✦ ✦ ✦\n🚀 Étape ${G}\n💫 ♠️ Pique\n🌟 Dogon : +${maxRattrapage} étoile\n❌`,
+            },
+            {
+              id: 67, label: 'HTML Premium', icon: '🏆',
+              preview: `🏆 PRÉDICTION PREMIUM\n━━━━━━━━━━━━━━━\n🎯 Étape #${G}\n♠️ PIQUE\n🔁 Dogon max : +${maxRattrapage}\n⌛ Résultat en attente...`,
+              result:  `🏆 PRÉDICTION PREMIUM\n━━━━━━━━━━━━━━━\n🎯 Étape #${G}\n♠️ PIQUE\n🔁 Dogon max : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🏆 PRÉDICTION PREMIUM\n━━━━━━━━━━━━━━━\n🎯 Étape #${G}\n♠️ PIQUE\n🔁 Dogon max : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 68, label: 'Vintage Casino', icon: '♜',
+              preview: `♜ CASINO VINTAGE ♜\n┌─────────────────┐\n│ Partie : ${G}\n│ ♠️ PIQUE\n│ Dogon  : +${maxRattrapage}\n└─────────────────┘\n⌛`,
+              result:  `♜ CASINO VINTAGE ♜\n┌─────────────────┐\n│ Partie : ${G}\n│ ♠️ PIQUE\n│ Dogon  : +${maxRattrapage}\n└─────────────────┘\n✅ ${RE[0]}`,
+              perdu:   `♜ CASINO VINTAGE ♜\n┌─────────────────┐\n│ Partie : ${G}\n│ ♠️ PIQUE\n│ Dogon  : +${maxRattrapage}\n└─────────────────┘\n❌`,
+            },
+            {
+              id: 69, label: 'Pulse', icon: '💓',
+              preview: `💓 PULSE SIGNAL 💓\n❤️ Rythme #${G}\n📌 ♠️ Pique\n🩺 Max retour : +${maxRattrapage}\n⌛`,
+              result:  `💓 PULSE SIGNAL 💓\n❤️ Rythme #${G}\n📌 ♠️ Pique\n🩺 Max retour : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `💓 PULSE SIGNAL 💓\n❤️ Rythme #${G}\n📌 ♠️ Pique\n🩺 Max retour : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 70, label: 'Blade', icon: '⚔️',
+              preview: `⚔️ BLADE ▸ Étape ${G}\n♠️ Pique ▸ +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━\n⌛`,
+              result:  `⚔️ BLADE ▸ Étape ${G}\n♠️ Pique ▸ +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━\n✅ ${RE[0]}`,
+              perdu:   `⚔️ BLADE ▸ Étape ${G}\n♠️ Pique ▸ +${maxRattrapage}\n━━━━━━━━━━━━━━━━━━\n❌`,
+            },
+            {
+              id: 71, label: 'Zodiac', icon: '♾️',
+              preview: `♾️ ZODIAC BACCARAT ♾️\n🌙 Signe : ♠️ Pique\n🔮 Étape : ${G}\n✨ Puissance : +${maxRattrapage}\n⌛`,
+              result:  `♾️ ZODIAC BACCARAT ♾️\n🌙 Signe : ♠️ Pique\n🔮 Étape : ${G}\n✨ Puissance : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `♾️ ZODIAC BACCARAT ♾️\n🌙 Signe : ♠️ Pique\n🔮 Étape : ${G}\n✨ Puissance : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 72, label: 'Temple', icon: '⛩️',
+              preview: `⛩️ TEMPLE SIGNAL ⛩️\n🔱 Partie : ${G}\n🌿 ♠️ Pique\n✴ Retour : +${maxRattrapage} fois\n⌛`,
+              result:  `⛩️ TEMPLE SIGNAL ⛩️\n🔱 Partie : ${G}\n🌿 ♠️ Pique\n✴ Retour : +${maxRattrapage} fois\n✅ ${RE[0]}`,
+              perdu:   `⛩️ TEMPLE SIGNAL ⛩️\n🔱 Partie : ${G}\n🌿 ♠️ Pique\n✴ Retour : +${maxRattrapage} fois\n❌`,
+            },
+            {
+              id: 73, label: 'Neon Ultra', icon: '🟣',
+              preview: `🟣━━━━━━━━━━━━━━━━🟣\n NEON ULTRA #${G}\n ♠️ PIQUE · +${maxRattrapage}\n🟣━━━━━━━━━━━━━━━━🟣\n⌛`,
+              result:  `🟣━━━━━━━━━━━━━━━━🟣\n NEON ULTRA #${G}\n ♠️ PIQUE · +${maxRattrapage}\n🟣━━━━━━━━━━━━━━━━🟣\n✅ ${RE[0]}`,
+              perdu:   `🟣━━━━━━━━━━━━━━━━🟣\n NEON ULTRA #${G}\n ♠️ PIQUE · +${maxRattrapage}\n🟣━━━━━━━━━━━━━━━━🟣\n❌`,
+            },
+            {
+              id: 74, label: 'Crown Ultimate', icon: '👑',
+              preview: `👑 ═══ CROWN BET ═══ 👑\n🏆 Étape #${G}\n♠️ Pique\n🔑 Dogon : +${maxRattrapage}\n⌛`,
+              result:  `👑 ═══ CROWN BET ═══ 👑\n🏆 Étape #${G}\n♠️ Pique\n🔑 Dogon : +${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `👑 ═══ CROWN BET ═══ 👑\n🏆 Étape #${G}\n♠️ Pique\n🔑 Dogon : +${maxRattrapage}\n❌`,
+            },
+            {
+              id: 75, label: 'Sigma Signal', icon: '📡',
+              preview: `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n⌛`,
+              result:  `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n✅ ${RE[0]}`,
+              perdu:   `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n❌`,
+            },
           ];
 
           return (
@@ -9906,8 +10048,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6 */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6, costume_manquant */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -10324,7 +10466,7 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'lecture_passee' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'costume_manquant' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
