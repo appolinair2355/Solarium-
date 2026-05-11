@@ -5205,17 +5205,38 @@ router.get('/partner-codes', requireAdmin, async (req, res) => {
 
 router.post('/partner-codes', requireAdmin, async (req, res) => {
   try {
-    const { code, note } = req.body || {};
+    const { code, note, allowed_modes } = req.body || {};
     if (!code || !String(code).trim()) {
       return res.status(400).json({ error: 'Le code est requis' });
     }
-    const entry = await db.createPartnerCode(String(code).trim(), note || '');
+    const modesArr = Array.isArray(allowed_modes) && allowed_modes.length > 0 ? allowed_modes : null;
+    const entry = await db.createPartnerCode(String(code).trim(), note || '', modesArr);
     if (!entry) return res.status(500).json({ error: 'DB JSON non supportée pour les codes partenaires' });
     res.json({ ok: true, code: entry });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Ce code existe déjà' });
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Config Telegram partenaire (par partenaire, isolée) ─────────────────────
+const PARTNER_TG_CFG_KEY = (uid) => `partner_tg_config_${uid}`;
+
+router.get('/partner-tg-config', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    const raw = await db.getSetting(PARTNER_TG_CFG_KEY(req.session.userId));
+    res.json(raw ? JSON.parse(raw) : { bot_token: '', channel_id: '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/partner-tg-config', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    const { bot_token, channel_id } = req.body || {};
+    await db.setSetting(PARTNER_TG_CFG_KEY(req.session.userId), JSON.stringify({ bot_token: bot_token || '', channel_id: channel_id || '' }));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete('/partner-codes/:id', requireAdmin, async (req, res) => {
@@ -5226,5 +5247,43 @@ router.delete('/partner-codes/:id', requireAdmin, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Scheduler auto-pub partenaire (toutes les 2h) ───────────────────────────
+const PARTNER_AD_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 heures
+
+async function sendPartnerAutoAd() {
+  try {
+    const { pool } = require('./db');
+    const axios = require('axios');
+    // Récupère tous les partenaires actifs (account_type = 'partenaire')
+    const { rows: partners } = await pool.query(
+      "SELECT id FROM users WHERE account_type = 'partenaire'"
+    );
+    for (const partner of partners) {
+      try {
+        const cfgRaw = await db.getSetting(PARTNER_TG_CFG_KEY(partner.id));
+        if (!cfgRaw) continue;
+        const cfg = JSON.parse(cfgRaw);
+        if (!cfg.bot_token || !cfg.channel_id) continue;
+        // Récupère un message de pub configuré (ou message par défaut)
+        const adMsgRaw = await db.getSetting(`partner_ad_message_${partner.id}`);
+        const adMsg = adMsgRaw || '🎰 Baccarat Pro — Rejoignez notre canal pour les meilleures prédictions en temps réel ! 🏆';
+        await axios.post(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
+          chat_id: cfg.channel_id,
+          text: adMsg,
+          parse_mode: 'HTML',
+        });
+        console.log(`[PartnerAutoAd] ✅ Pub envoyée pour partenaire #${partner.id}`);
+      } catch (err) {
+        console.warn(`[PartnerAutoAd] ⚠️ Partenaire #${partner.id} — ${err.message}`);
+      }
+    }
+  } catch (e) {
+    console.error('[PartnerAutoAd] Erreur globale :', e.message);
+  }
+}
+
+setInterval(sendPartnerAutoAd, PARTNER_AD_INTERVAL_MS);
+console.log('[PartnerAutoAd] ⏱ Scheduler auto-pub partenaire démarré (toutes les 2h)');
 
 module.exports = router;

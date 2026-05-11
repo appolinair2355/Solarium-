@@ -236,6 +236,18 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       console.warn('[Payment] Sossou Kouamé assistance Vision indisponible :', e.message);
     }
 
+    // Détection de doublon : si un transaction_id a déjà été utilisé → refus
+    if (aiResult && aiResult.transaction_id) {
+      const isDuplicate = await db.checkPaymentRef(aiResult.transaction_id);
+      if (isDuplicate) {
+        return res.status(409).json({
+          error: '⛔ Cette capture a déjà été utilisée pour une autre demande de paiement. Veuillez soumettre une nouvelle capture.',
+          duplicate: true,
+          transaction_id: aiResult.transaction_id,
+        });
+      }
+    }
+
     // Décision : si Sossou Kouamé assistance valide → on applique la DURÉE COMPLÈTE du plan
     // (sous réserve de vérification administrateur). Si l'admin rejette plus tard,
     // la durée sera retirée. Si l'analyse n'est pas sûre → attente admin sans durée.
@@ -281,7 +293,13 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       ai_analysis: aiResult || { error: aiError, is_payment_screenshot: false },
       ai_temp_access_until: provisionalExpiry,
       status: newStatus,
+      transaction_id: aiResult?.transaction_id || null,
     });
+
+    // Enregistrer la référence de transaction pour éviter les doublons futurs
+    if (aiResult?.transaction_id) {
+      await db.addPaymentRef(aiResult.transaction_id, pr.user_id, id);
+    }
 
     res.json({
       ok: true,

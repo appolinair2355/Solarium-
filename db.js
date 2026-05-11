@@ -353,13 +353,27 @@ async function initDB() {
       );
 
       CREATE TABLE IF NOT EXISTS partner_admin_codes (
-        id         SERIAL PRIMARY KEY,
-        code       TEXT UNIQUE NOT NULL,
-        used       BOOLEAN DEFAULT FALSE,
-        used_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        note       TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        id           SERIAL PRIMARY KEY,
+        code         TEXT UNIQUE NOT NULL,
+        used         BOOLEAN DEFAULT FALSE,
+        used_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        note         TEXT,
+        allowed_modes JSONB DEFAULT NULL,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE partner_admin_codes ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
+
+      ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'whatsapp';
+      ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS transaction_id TEXT DEFAULT NULL;
+
+      CREATE TABLE IF NOT EXISTS used_payment_refs (
+        id           SERIAL PRIMARY KEY,
+        transaction_id TEXT NOT NULL,
+        user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        payment_request_id INTEGER,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
@@ -1626,15 +1640,36 @@ async function deleteAllGameCards(strategy) {
 }
 
 // ── Codes admin partenaires ───────────────────────────────────────────────────
-async function createPartnerCode(code, note) {
+async function createPartnerCode(code, note, allowedModes) {
   if (USE_PG) {
+    const modesJson = Array.isArray(allowedModes) && allowedModes.length > 0
+      ? JSON.stringify(allowedModes) : null;
     const r = await pgPool.query(
-      `INSERT INTO partner_admin_codes (code, note) VALUES ($1, $2) RETURNING *`,
-      [code.trim().toUpperCase(), note || null]
+      `INSERT INTO partner_admin_codes (code, note, allowed_modes) VALUES ($1, $2, $3) RETURNING *`,
+      [code.trim().toUpperCase(), note || null, modesJson]
     );
     return r.rows[0];
   }
   return null;
+}
+
+async function checkPaymentRef(transactionId) {
+  if (!USE_PG || !transactionId) return false;
+  const r = await pgPool.query(
+    `SELECT id FROM used_payment_refs WHERE transaction_id = $1`,
+    [String(transactionId).trim()]
+  );
+  return r.rows.length > 0;
+}
+
+async function addPaymentRef(transactionId, userId, paymentRequestId) {
+  if (!USE_PG || !transactionId) return;
+  try {
+    await pgPool.query(
+      `INSERT INTO used_payment_refs (transaction_id, user_id, payment_request_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [String(transactionId).trim(), userId, paymentRequestId]
+    );
+  } catch (_) {}
 }
 
 async function getPartnerCodes() {
@@ -1686,6 +1721,7 @@ module.exports = {
   updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,
   createPartnerCode, getPartnerCodes, getPartnerCodeByCode, markPartnerCodeUsed, deletePartnerCode,
+  checkPaymentRef, addPaymentRef,
   createPaymentRequest, updatePaymentRequest, getPaymentRequest,
   getUserPaymentRequests, getPendingPaymentRequests,
   createUser, updateUser, deleteUser,
