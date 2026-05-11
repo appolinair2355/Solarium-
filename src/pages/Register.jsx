@@ -24,6 +24,7 @@ export default function Register() {
   const [progress, setProgress] = useState(0);
   const [mascotDone, setMascotDone] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [partnerCodeErrorModal, setPartnerCodeErrorModal] = useState(null);
   const progressTimer = useRef(null);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -105,7 +106,16 @@ export default function Register() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur d'inscription");
+      if (!res.ok) {
+        const errMsg = data.error || "Erreur d'inscription";
+        if (form.account_type === 'partenaire' && (errMsg.toLowerCase().includes('code') || errMsg.toLowerCase().includes('partenaire') || errMsg.toLowerCase().includes('invalide') || errMsg.toLowerCase().includes('utilisé'))) {
+          setPartnerCodeErrorModal(errMsg);
+          setLoading(false);
+          setProgress(0);
+          return;
+        }
+        throw new Error(errMsg);
+      }
       setProgress(100);
       setGeneratedPromoCode(data.promo_code || '');
       setReferrerApplied(!!data.referrer_applied);
@@ -217,6 +227,30 @@ export default function Register() {
 
   return (
     <div className="auth-page">
+      {partnerCodeErrorModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)' }}
+          onClick={() => setPartnerCodeErrorModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg,#1a0a0e 0%,#2a1218 100%)',
+            border: '2px solid rgba(239,68,68,0.5)', borderRadius: 20, padding: '36px 30px',
+            maxWidth: 420, width: '90%', textAlign: 'center',
+            boxShadow: '0 0 60px rgba(239,68,68,0.2)',
+          }}>
+            <div style={{ fontSize: 52, marginBottom: 14 }}>🔑</div>
+            <h2 style={{ color: '#fff', margin: '0 0 12px', fontSize: '1.4rem' }}>Code partenaire invalide</h2>
+            <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', fontSize: 13, lineHeight: 1.6, marginBottom: 18 }}>
+              {partnerCodeErrorModal}
+            </div>
+            <p style={{ color: '#64748b', fontSize: 12, margin: '0 0 22px', lineHeight: 1.5 }}>
+              Vérifiez que votre code est correct et qu'il n'a pas déjà été utilisé. Ce code vous est remis par l'administrateur de la plateforme.
+            </p>
+            <button onClick={() => setPartnerCodeErrorModal(null)}
+              style={{ padding: '11px 32px', borderRadius: 10, background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1f2937', fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(251,191,36,0.35)' }}>
+              Réessayer
+            </button>
+          </div>
+        </div>
+      )}
       <div className="auth-bg-orb orb1" />
       <div className="auth-bg-orb orb2" />
 

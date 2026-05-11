@@ -3791,7 +3791,7 @@ function AdminPanel() {
   const [message, setMessage] = useState('');
 
   const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
-  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'bilan', 'comptages'];
+  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'comptages'];
   const [adminTab, setAdminTab] = useState(
     isProOnly ? 'config-pro' : isPartnerOnly ? 'strategies' : 'utilisateurs'
   );
@@ -4244,6 +4244,11 @@ function AdminPanel() {
   const [partnerCodeInput, setPartnerCodeInput] = useState('');
   const [partnerCodeNote, setPartnerCodeNote] = useState('');
   const [partnerCodeMsg, setPartnerCodeMsg] = useState({ text: '', error: false });
+  const [partnerCodeAllowedModes, setPartnerCodeAllowedModes] = useState([]);
+  const [partnerModeRestrictionModal, setPartnerModeRestrictionModal] = useState(null);
+  const [partnerTgCfg, setPartnerTgCfg] = useState({ bot_token: '', channel_id: '' });
+  const [partnerTgSaving, setPartnerTgSaving] = useState(false);
+  const [partnerTgMsg, setPartnerTgMsg] = useState({ text: '', error: false });
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -5446,7 +5451,7 @@ function AdminPanel() {
     } catch {}
   }, []);
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); if (user?.is_admin) loadPartnerCodes(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); if (user?.is_admin) loadPartnerCodes(); if (isPartnerOnly) { fetch('/api/admin/partner-tg-config', { credentials: 'include' }).then(r => r.ok ? r.json() : {}).then(d => setPartnerTgCfg({ bot_token: d.bot_token || '', channel_id: d.channel_id || '' })).catch(() => {}); } }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
 
   const loadPartnerCodes = async () => {
     try {
@@ -5915,6 +5920,42 @@ function AdminPanel() {
         </div>
       )}
 
+      {/* ── Modal restriction mode partenaire ─────────────────────────────── */}
+      {partnerModeRestrictionModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
+          onClick={() => setPartnerModeRestrictionModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #0f172a 0%, #1e1b2e 100%)',
+            border: '2px solid rgba(239,68,68,0.5)', borderRadius: 20, padding: '32px 28px',
+            maxWidth: 440, width: '90%', textAlign: 'center',
+            boxShadow: '0 0 60px rgba(239,68,68,0.25)',
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🔒</div>
+            <h2 style={{ color: '#fff', margin: '0 0 10px', fontSize: '1.3rem' }}>Mode non autorisé</h2>
+            <p style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.6, margin: '0 0 16px' }}>
+              Le mode <b style={{ color: '#f87171' }}>« {partnerModeRestrictionModal.label} »</b> n'est pas inclus dans votre accès partenaire.
+            </p>
+            {partnerModeRestrictionModal.allowed && partnerModeRestrictionModal.allowed.length > 0 && (
+              <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 700, marginBottom: 6 }}>✅ Modes disponibles pour vous :</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, justifyContent: 'center' }}>
+                  {partnerModeRestrictionModal.allowed.map(m => (
+                    <span key={m} style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontSize: 11, fontWeight: 600 }}>{m}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p style={{ color: '#64748b', fontSize: 12, margin: '0 0 20px', lineHeight: 1.5 }}>
+              Contactez l'administrateur pour étendre vos modes autorisés.
+            </p>
+            <button onClick={() => setPartnerModeRestrictionModal(null)}
+              style={{ padding: '10px 28px', borderRadius: 10, background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(239,68,68,0.35)' }}>
+              Compris
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Modale erreur Pro (validation / réseau) ─────────────────────────── */}
       {proErrorModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)' }}
@@ -6192,7 +6233,13 @@ function AdminPanel() {
         <div className="navbar-actions">
           <Link to="/choisir" className="btn btn-ghost btn-sm">⇄ Canaux</Link>
           {user?.admin_level === 1 && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
-          <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
+          {isPartnerOnly
+            ? <span style={{ fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 800, fontSize: 10, padding: '2px 8px', borderRadius: 100, letterSpacing: 0.8, textTransform: 'uppercase' }}>🤝 PARTENAIRE</span>
+                <span style={{ color: 'var(--gold)' }}>{user?.username}</span>
+              </span>
+            : <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
+          }
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
       </nav>
@@ -6221,7 +6268,6 @@ function AdminPanel() {
             : isPartnerOnly ? [
                 { id: 'strategies', icon: '⚙️', label: 'Stratégies', badge: strategies.length > 0 ? strategies.length : null },
                 { id: 'canaux',     icon: '✈️', label: 'Telegram',   badge: tgChannels.length > 0 ? tgChannels.length : null },
-                { id: 'bilan',      icon: '📊', label: 'Bilan' },
                 { id: 'comptages',  icon: '📈', label: 'Comptages' },
               ]
             : [
@@ -8087,18 +8133,48 @@ function AdminPanel() {
                         const r = await fetch('/api/admin/partner-codes', {
                           method: 'POST', credentials: 'include',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ code: partnerCodeInput.trim(), note: partnerCodeNote.trim() }),
+                          body: JSON.stringify({ code: partnerCodeInput.trim(), note: partnerCodeNote.trim(), allowed_modes: partnerCodeAllowedModes.length > 0 ? partnerCodeAllowedModes : null }),
                         });
                         const d = await r.json();
                         if (!r.ok) return setPartnerCodeMsg({ text: d.error || 'Erreur', error: true });
                         setPartnerCodeInput('');
                         setPartnerCodeNote('');
+                        setPartnerCodeAllowedModes([]);
                         setPartnerCodeMsg({ text: '✅ Code créé avec succès', error: false });
                         await loadPartnerCodes();
                       } catch { setPartnerCodeMsg({ text: 'Erreur réseau', error: true }); }
                     }}
                     style={{ padding: '7px 18px', borderRadius: 7, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', cursor: 'pointer', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}
                   >+ Créer</button>
+                </div>
+
+                {/* Modes autorisés pour ce code partenaire */}
+                <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(99,102,241,0.06)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)' }}>
+                  <div style={{ fontSize: 11, color: '#818cf8', fontWeight: 700, marginBottom: 8 }}>🔷 Modes autorisés (optionnel — laisser vide = tous les modes)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {[
+                      { value: 'manquants', label: 'Absences' }, { value: 'apparents', label: 'Apparitions' },
+                      { value: 'absence_apparition', label: 'Abs→App' }, { value: 'apparition_absence', label: 'App→Abs' },
+                      { value: 'distribution', label: 'Distribution' }, { value: 'taux_miroir', label: 'Miroir Taux' },
+                      { value: 'compteur_adverse', label: 'C. Adverse' }, { value: 'absence_victoire', label: 'Abs Victoire' },
+                      { value: 'relance', label: 'Relance' }, { value: 'carte_3_vers_2', label: '3C→2C' },
+                      { value: 'carte_2_vers_3', label: '2C→3C' }, { value: 'lecture_passee', label: 'Lecture Passée' },
+                      { value: 'intelligent_cartes', label: 'Intelligent' }, { value: 'union_enseignes', label: 'Union' },
+                      { value: 'carte_valeur', label: 'Carte Val.' }, { value: 'comptages_ecart', label: 'Cmpt. Écart' },
+                      { value: 'intersection', label: 'Intersection' }, { value: 'first_card_plus6', label: '1ère Carte' },
+                    ].map(m => {
+                      const active = partnerCodeAllowedModes.includes(m.value);
+                      return (
+                        <button key={m.value} type="button"
+                          onClick={() => setPartnerCodeAllowedModes(prev => active ? prev.filter(x => x !== m.value) : [...prev, m.value])}
+                          style={{ padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: `1px solid ${active ? 'rgba(99,102,241,0.6)' : 'rgba(100,116,139,0.3)'}`, background: active ? 'rgba(99,102,241,0.2)' : 'rgba(100,116,139,0.08)', color: active ? '#c7d2fe' : '#64748b', transition: 'all 0.15s' }}
+                        >{m.label}</button>
+                      );
+                    })}
+                  </div>
+                  {partnerCodeAllowedModes.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: '#818cf8' }}>✅ {partnerCodeAllowedModes.length} mode(s) sélectionné(s) — le partenaire sera limité à ces modes</div>
+                  )}
                 </div>
                 {partnerCodeMsg.text && (
                   <div style={{ marginTop: 8, fontSize: 12, color: partnerCodeMsg.error ? '#f87171' : '#4ade80' }}>{partnerCodeMsg.text}</div>
@@ -8125,7 +8201,7 @@ function AdminPanel() {
                         background: c.used ? 'rgba(100,116,139,0.2)' : 'rgba(34,197,94,0.2)',
                         color: c.used ? '#64748b' : '#22c55e',
                       }}>{c.used ? `✓ Utilisé par @${c.used_by_username || c.used_by}` : '● Disponible'}</span>
-                      <span style={{ flex: 1, fontSize: 12, color: '#64748b', fontStyle: c.note ? 'normal' : 'italic' }}>{c.note || '—'}</span>
+                      <span style={{ flex: 1, fontSize: 12, color: '#64748b', fontStyle: c.note ? 'normal' : 'italic' }}>{c.note || '—'} {Array.isArray(c.allowed_modes) && c.allowed_modes.length > 0 && <span style={{ marginLeft: 6, fontSize: 10, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔷 {c.allowed_modes.length} modes</span>}</span>
                       <span style={{ fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>{new Date(c.created_at).toLocaleDateString('fr-FR')}</span>
                       {!c.used && (
                         <button
@@ -8325,8 +8401,74 @@ function AdminPanel() {
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
+        {/* ── TAB : CANAUX — PANNEAU PARTENAIRE ── */}
+        {adminTab === 'canaux' && isPartnerOnly && (
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)', marginBottom: 20 }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">🤝</span>
+              <div style={{ flex: 1 }}>
+                <h2 className="tg-admin-title">Configuration Telegram Partenaire</h2>
+                <p className="tg-admin-sub">Configurez votre bot Telegram pour diffuser les alertes de vos stratégies. Une publicité est envoyée automatiquement toutes les 2 heures.</p>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>🔑 Token du bot</label>
+                <input
+                  value={partnerTgCfg.bot_token}
+                  onChange={e => setPartnerTgCfg(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder="123456:AAF-xxxx…"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>📡 ID Canal</label>
+                <input
+                  value={partnerTgCfg.channel_id}
+                  onChange={e => setPartnerTgCfg(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder="-100xxxxxxxxxx ou @moncanal"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                disabled={partnerTgSaving}
+                onClick={async () => {
+                  setPartnerTgSaving(true);
+                  try {
+                    const r = await fetch('/api/admin/partner-tg-config', {
+                      method: 'POST', credentials: 'include',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ bot_token: partnerTgCfg.bot_token, channel_id: partnerTgCfg.channel_id }),
+                    });
+                    const d = await r.json();
+                    if (r.ok) setPartnerTgMsg({ text: '✅ Configuration sauvegardée', error: false });
+                    else setPartnerTgMsg({ text: d.error || 'Erreur', error: true });
+                  } catch { setPartnerTgMsg({ text: 'Erreur réseau', error: true }); }
+                  finally { setPartnerTgSaving(false); }
+                }}
+                style={{ padding: '9px 22px', borderRadius: 8, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}
+              >{partnerTgSaving ? '⏳…' : '💾 Sauvegarder'}</button>
+              {partnerTgMsg.text && <span style={{ fontSize: 12, color: partnerTgMsg.error ? '#f87171' : '#4ade80' }}>{partnerTgMsg.text}</span>}
+            </div>
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.2)' }}>
+              <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>📢 Auto-publicité toutes les 2h</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6 }}>
+                Message envoyé automatiquement toutes les 2 heures sur votre canal configuré ci-dessus :<br/>
+                <em style={{ color: '#fde68a' }}>
+                  🎯 Rejoignez Baccarat Pro Premium !<br/>
+                  ✅ Prédictions en temps réel · 🔐 Accès partenaire exclusif<br/>
+                  🌐 solarium-1-6a5p.onrender.com
+                </em>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
-        {adminTab === 'canaux' && <>
+        {adminTab === 'canaux' && !isPartnerOnly && <>
+        
 
         {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
         {(() => {
@@ -9909,6 +10051,7 @@ function AdminPanel() {
                       { value: 'costume_manquant',     label: '🃏 Costume Manquant (+4) — costume absent dans jeu 2+2' },
                       { value: 'rattrapage_groupe',    label: '🔄 Rattrapage Groupé — surveille plusieurs stratégies' },
                     ];
+                    const partnerAllowedModesFromUser = isPartnerOnly && Array.isArray(user?.allowed_modes) && user.allowed_modes.length > 0 ? user.allowed_modes : null;
                     const visibleOpts = isProOnly && proAllowedModes !== null
                       ? ALL_MODE_OPTS.filter(o => proAllowedModes.includes(o.value))
                       : ALL_MODE_OPTS;
@@ -9921,6 +10064,11 @@ function AdminPanel() {
                     ) : (
                       <select value={stratForm.mode} onChange={e => {
                         const m = e.target.value;
+                        if (isPartnerOnly && partnerAllowedModesFromUser && !partnerAllowedModesFromUser.includes(m)) {
+                          const modeLabel = ALL_MODE_OPTS.find(o => o.value === m)?.label || m;
+                          setPartnerModeRestrictionModal({ mode: m, label: modeLabel, allowed: partnerAllowedModesFromUser });
+                          return;
+                        }
                         const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire';
                         setStratForm(p => ({
                           ...p,
@@ -9932,9 +10080,14 @@ function AdminPanel() {
                         }));
                       }}
                         style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
-                        {visibleOpts.map(o => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
+                        {visibleOpts.map(o => {
+                          const isRestricted = isPartnerOnly && partnerAllowedModesFromUser && !partnerAllowedModesFromUser.includes(o.value);
+                          return (
+                            <option key={o.value} value={o.value} style={{ color: isRestricted ? '#ef4444' : undefined }}>
+                              {isRestricted ? '🔒 ' : ''}{o.label}
+                            </option>
+                          );
+                        })}
                       </select>
                     );
                   })()}
@@ -13024,7 +13177,7 @@ function AdminPanel() {
         )}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
-        {adminTab === 'canaux' && (
+        {adminTab === 'canaux' && !isPartnerOnly && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.45)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📢</span>
@@ -13496,7 +13649,7 @@ function AdminPanel() {
         {/* ════════════════════════════════════════════════
             ── TAB : CANAUX TELEGRAM ──
         ════════════════════════════════════════════════ */}
-        {adminTab === 'canaux' && <>
+        {adminTab === 'canaux' && !isPartnerOnly && <>
 
         {/* ── SECTION 0 : DIFFUSION LIVE DES JEUX (multi-canaux) ── */}
         <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>

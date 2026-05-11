@@ -25,6 +25,7 @@ export default function Payment() {
   const [result, setResult] = useState(null);
   const [myRequests, setMyRequests] = useState([]);
   const [error, setError] = useState('');
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -109,6 +110,7 @@ export default function Payment() {
     setResult(null);
     setPhase('patience');
     setPatienceLeft(10);
+    setDuplicateWarning(null);
 
     const startedAt = Date.now();
     const tick = setInterval(() => {
@@ -127,20 +129,33 @@ export default function Payment() {
             body: JSON.stringify({ image_base64: imageBase64, mime_type: imageMime }),
           });
           const d = await res.json();
-          if (!res.ok) throw new Error(d.error || autoT("Erreur lors de l'envoi"));
+          if (!res.ok) {
+            if (res.status === 409 && d.duplicate) return { duplicate: true, error: d.error };
+            throw new Error(d.error || autoT("Erreur lors de l'envoi"));
+          }
           return d;
         })(),
         new Promise(r => setTimeout(r, 10_000)),
       ]);
 
       clearInterval(tick);
-      setResult(data);
-      setPhase('result');
-      refreshMyRequests();
-      refreshUser();
+      if (data.duplicate) {
+        setDuplicateWarning(data.error || '⛔ Capture déjà utilisée');
+        setPhase('screenshot');
+      } else {
+        setResult(data);
+        setPhase('result');
+        refreshMyRequests();
+        refreshUser();
+      }
     } catch (e) {
       clearInterval(tick);
-      setError(e.message);
+      if (e.message && e.message.includes('déjà été utilisée')) {
+        setDuplicateWarning(e.message);
+        setPhase('screenshot');
+      } else {
+        setError(e.message);
+      }
       setPhase('screenshot');
     } finally {
       setUploading(false);
@@ -238,6 +253,11 @@ export default function Payment() {
           </div>
         </div>
 
+        {duplicateWarning && (
+          <div style={{ maxWidth: 700, margin: '0 auto 20px', padding: '12px 16px', borderRadius: 12, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.45)', color: '#fca5a5', fontSize: 13, lineHeight: 1.6 }}>
+            ⛔ <b>Capture déjà utilisée :</b> {duplicateWarning}
+          </div>
+        )}
         {error && (
           <div className="alert alert-error" style={{ maxWidth: 700, margin: '0 auto 20px' }}>
             <span>⚠️</span> {error}
