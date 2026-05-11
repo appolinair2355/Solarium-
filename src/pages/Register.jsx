@@ -12,7 +12,7 @@ export default function Register() {
 
   const [form, setForm] = useState({
     username: '', email: '', password: '', confirm: '',
-    account_type: 'simple', promo_code: '', language: lang,
+    account_type: 'simple', promo_code: '', admin_partner_code: '', language: lang,
   });
   const [profilePhoto, setProfilePhoto] = useState('');
   const [photoError, setPhotoError] = useState('');
@@ -98,7 +98,8 @@ export default function Register() {
           email: form.email,
           password: form.password,
           account_type: form.account_type,
-          promo_code: form.promo_code.trim() || undefined,
+          promo_code: form.account_type !== 'partenaire' ? (form.promo_code.trim() || undefined) : undefined,
+          admin_partner_code: form.account_type === 'partenaire' ? (form.admin_partner_code.trim() || undefined) : undefined,
           profile_photo: profilePhoto || undefined,
           language: form.language,
         }),
@@ -130,7 +131,12 @@ export default function Register() {
   // ── SUCCESS SCREEN ──
   if (success) {
     const username = form.username || 'cher utilisateur';
-    const lines = [
+    const isPartner = form.account_type === 'partenaire';
+    const lines = isPartner ? [
+      `Bienvenue, ${username} !`,
+      `Votre compte PARTENAIRE est créé et activé immédiatement.`,
+      `Connectez-vous dès maintenant pour accéder à votre panneau partenaire.`,
+    ] : [
       `${t('auth.success.title')} ${username} !`,
       `Votre compte ${form.account_type === 'premium' ? 'PREMIUM' : 'SIMPLE'} est créé.`,
       `Voici votre code promotionnel personnel : ${generatedPromoCode || 'généré'}.`,
@@ -285,9 +291,44 @@ export default function Register() {
               >
                 <option value="simple">👤 Compte Utilisateur</option>
                 <option value="premium">⭐ Compte Premium</option>
+                <option value="partenaire">🤝 Compte Partenaire</option>
               </select>
             </div>
           </div>
+
+          {/* Code admin partenaire (uniquement pour compte partenaire) */}
+          {form.account_type === 'partenaire' && (
+            <div className="form-group">
+              <label className="form-label">🔑 Code admin partenaire <span style={{ color: '#f87171', fontWeight: 700 }}>*</span></label>
+              <div className="input-wrap">
+                <span className="input-icon">🔑</span>
+                <input
+                  className="form-input has-icon"
+                  type="text"
+                  placeholder="Code fourni par l'administrateur"
+                  value={form.admin_partner_code}
+                  onChange={set('admin_partner_code')}
+                  required
+                  style={{ textTransform: 'uppercase', letterSpacing: 1 }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, marginLeft: 2 }}>
+                Ce code à usage unique vous est remis par l'administrateur de la plateforme.
+              </div>
+            </div>
+          )}
+
+          {/* Code promo parrain (uniquement pour comptes non-partenaires) */}
+          {form.account_type !== 'partenaire' && (
+          <div className="form-group">
+            <label className="form-label">{t('auth.field.promo_code')} <span style={{ color: '#94a3b8', fontWeight: 400 }}>{t('auth.field.promo_optional')}</span></label>
+            <div className="input-wrap">
+              <span className="input-icon">🎁</span>
+              <input className="form-input has-icon" type="text" placeholder={t('auth.placeholder.promo_code')}
+                value={form.promo_code} onChange={set('promo_code')} />
+            </div>
+          </div>
+          )}
 
           {/* Photo de profil */}
           <div className="form-group">
@@ -328,6 +369,7 @@ export default function Register() {
             </div>
           </div>
 
+          {form.account_type !== 'partenaire' && (
           <div className="form-group">
             <label className="form-label">
               {t('auth.field.promo')} <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optionnel)</span>
@@ -348,6 +390,7 @@ export default function Register() {
               {t('auth.field.promo_hint')}
             </div>
           </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">{t('auth.field.password')}</label>

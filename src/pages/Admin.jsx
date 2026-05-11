@@ -3784,17 +3784,22 @@ function AdminPanel() {
   const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const isProOnly = !user?.is_admin && !!user?.is_pro;
+  const isPartnerOnly = !user?.is_admin && !user?.is_pro && user?.account_type === 'partenaire';
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
   const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
-  const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
+  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'bilan', 'comptages'];
+  const [adminTab, setAdminTab] = useState(
+    isProOnly ? 'config-pro' : isPartnerOnly ? 'strategies' : 'utilisateurs'
+  );
   useEffect(() => {
     if (isProOnly && !PRO_ALLOWED_TABS.includes(adminTab)) setAdminTab('config-pro');
+    if (isPartnerOnly && !PARTNER_ALLOWED_TABS.includes(adminTab)) setAdminTab('strategies');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isProOnly]);
+  }, [isProOnly, isPartnerOnly]);
 
   // Duration inputs per user: { userId: { val, unit } }
   const [durInputs, setDurInputs] = useState({});
@@ -4234,6 +4239,11 @@ function AdminPanel() {
   const [mirrorCountsData, setMirrorCountsData] = useState({}); // { [stratId]: { counts, threshold } }
   const [interMonitorData, setInterMonitorData] = useState({}); // { [stratId]: { startGame, monitored, accordSuits } }
   const [lectureQueueData, setLectureQueueData] = useState({}); // { [stratId]: counter object (isLecturePasse) }
+  const [cmMonitorData, setCmMonitorData] = useState({}); // { [stratId]: { count, threshold, lastSuit, lastGame } }
+  const [partnerCodes, setPartnerCodes] = useState([]);
+  const [partnerCodeInput, setPartnerCodeInput] = useState('');
+  const [partnerCodeNote, setPartnerCodeNote] = useState('');
+  const [partnerCodeMsg, setPartnerCodeMsg] = useState({ text: '', error: false });
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -5436,7 +5446,14 @@ function AdminPanel() {
     } catch {}
   }, []);
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); if (user?.is_admin) loadPartnerCodes(); }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
+
+  const loadPartnerCodes = async () => {
+    try {
+      const r = await fetch('/api/admin/partner-codes', { credentials: 'include' });
+      if (r.ok) setPartnerCodes(await r.json());
+    } catch {}
+  };
 
   // ── Charger les modes autorisés pour le compte Pro connecté ────────────
   useEffect(() => {
@@ -5492,6 +5509,25 @@ function AdminPanel() {
     };
     fetchInterMonitor();
     const iv = setInterval(fetchInterMonitor, 4000);
+    return () => clearInterval(iv);
+  }, [strategies]);
+
+  // Fetch costume_manquant monitor toutes les 4s pour les stratégies costume_manquant actives
+  useEffect(() => {
+    const fetchCmMonitor = async () => {
+      const cmStrats = strategies.filter(s => s.mode === 'costume_manquant' && s.enabled);
+      if (!cmStrats.length) return;
+      const updates = {};
+      await Promise.all(cmStrats.map(async s => {
+        try {
+          const r = await fetch(`/api/admin/cm-monitor/${s.id}`, { credentials: 'include' });
+          if (r.ok) { const d = await r.json(); if (!d.error) updates[s.id] = d; }
+        } catch {}
+      }));
+      if (Object.keys(updates).length) setCmMonitorData(p => ({ ...p, ...updates }));
+    };
+    fetchCmMonitor();
+    const iv = setInterval(fetchCmMonitor, 4000);
     return () => clearInterval(iv);
   }, [strategies]);
 
@@ -6182,6 +6218,12 @@ function AdminPanel() {
                 { id: 'config',     icon: '🔀', label: 'Routage' },
                 { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
               ]
+            : isPartnerOnly ? [
+                { id: 'strategies', icon: '⚙️', label: 'Stratégies', badge: strategies.length > 0 ? strategies.length : null },
+                { id: 'canaux',     icon: '✈️', label: 'Telegram',   badge: tgChannels.length > 0 ? tgChannels.length : null },
+                { id: 'bilan',      icon: '📊', label: 'Bilan' },
+                { id: 'comptages',  icon: '📈', label: 'Comptages' },
+              ]
             : [
             { id: 'utilisateurs',      icon: '👥', label: 'Utilisateurs',    badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
             { id: 'online-users',      icon: '🟢', label: 'En ligne',        badge: onlineUsers.filter(u => u.status === 'en_ligne').length || null },
@@ -6190,7 +6232,8 @@ function AdminPanel() {
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',          icon: '💰', label: 'Achats Stratégies', badge: null },
             { id: 'idees-strategies',icon: '💡', label: 'Idées Stratégies',  badge: null },
-            { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
+            { id: 'vente-strategies',   icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
+            { id: 'codes-partenaires', icon: '🤝', label: 'Codes Partenaires', badge: partnerCodes.filter(c => !c.used).length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -7999,6 +8042,112 @@ function AdminPanel() {
           />
         )}
 
+        {/* ── TAB : CODES PARTENAIRES ── */}
+        {adminTab === 'codes-partenaires' && (
+          <div style={{ padding: '0 8px' }}>
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)', marginBottom: 20 }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">🤝</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Codes Admin Partenaires</h2>
+                  <p className="tg-admin-sub">Codes à usage unique permettant de créer un compte partenaire lors de l'inscription.</p>
+                </div>
+                <button onClick={loadPartnerCodes} className="btn btn-ghost btn-sm">🔄 Actualiser</button>
+              </div>
+
+              {/* Créer un nouveau code */}
+              <div style={{ padding: '14px 16px', background: 'rgba(34,197,94,0.05)', borderRadius: 10, border: '1px solid rgba(34,197,94,0.2)', marginBottom: 16 }}>
+                <div style={{ color: '#22c55e', fontWeight: 700, fontSize: 13, marginBottom: 10 }}>➕ Créer un nouveau code</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: 2, minWidth: 140 }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Code (sera mis en majuscules)</div>
+                    <input
+                      type="text"
+                      value={partnerCodeInput}
+                      onChange={e => setPartnerCodeInput(e.target.value.toUpperCase())}
+                      placeholder="Ex: PARTNER2026"
+                      style={{ width: '100%', padding: '7px 10px', background: '#1e1b2e', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, color: '#fff', fontSize: 13, boxSizing: 'border-box', fontFamily: 'monospace', letterSpacing: 1 }}
+                    />
+                  </div>
+                  <div style={{ flex: 3, minWidth: 160 }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Note (optionnel)</div>
+                    <input
+                      type="text"
+                      value={partnerCodeNote}
+                      onChange={e => setPartnerCodeNote(e.target.value)}
+                      placeholder="Ex: Partenaire Afrique 2026"
+                      style={{ width: '100%', padding: '7px 10px', background: '#1e1b2e', border: '1px solid rgba(100,116,139,0.3)', borderRadius: 6, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!partnerCodeInput.trim()) return setPartnerCodeMsg({ text: 'Le code est requis', error: true });
+                      setPartnerCodeMsg({ text: '⏳ Création…', error: false });
+                      try {
+                        const r = await fetch('/api/admin/partner-codes', {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ code: partnerCodeInput.trim(), note: partnerCodeNote.trim() }),
+                        });
+                        const d = await r.json();
+                        if (!r.ok) return setPartnerCodeMsg({ text: d.error || 'Erreur', error: true });
+                        setPartnerCodeInput('');
+                        setPartnerCodeNote('');
+                        setPartnerCodeMsg({ text: '✅ Code créé avec succès', error: false });
+                        await loadPartnerCodes();
+                      } catch { setPartnerCodeMsg({ text: 'Erreur réseau', error: true }); }
+                    }}
+                    style={{ padding: '7px 18px', borderRadius: 7, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', cursor: 'pointer', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}
+                  >+ Créer</button>
+                </div>
+                {partnerCodeMsg.text && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: partnerCodeMsg.error ? '#f87171' : '#4ade80' }}>{partnerCodeMsg.text}</div>
+                )}
+              </div>
+
+              {/* Liste des codes */}
+              {partnerCodes.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#475569', padding: '20px 0', fontStyle: 'italic' }}>
+                  Aucun code créé — utilisez le formulaire ci-dessus
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {partnerCodes.map(c => (
+                    <div key={c.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8,
+                      background: c.used ? 'rgba(100,116,139,0.08)' : 'rgba(34,197,94,0.06)',
+                      border: `1px solid ${c.used ? 'rgba(100,116,139,0.2)' : 'rgba(34,197,94,0.25)'}`,
+                      opacity: c.used ? 0.75 : 1,
+                    }}>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, letterSpacing: 1.5, color: c.used ? '#64748b' : '#4ade80', minWidth: 140 }}>{c.code}</span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12, whiteSpace: 'nowrap',
+                        background: c.used ? 'rgba(100,116,139,0.2)' : 'rgba(34,197,94,0.2)',
+                        color: c.used ? '#64748b' : '#22c55e',
+                      }}>{c.used ? `✓ Utilisé par @${c.used_by_username || c.used_by}` : '● Disponible'}</span>
+                      <span style={{ flex: 1, fontSize: 12, color: '#64748b', fontStyle: c.note ? 'normal' : 'italic' }}>{c.note || '—'}</span>
+                      <span style={{ fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>{new Date(c.created_at).toLocaleDateString('fr-FR')}</span>
+                      {!c.used && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Supprimer le code "${c.code}" ?`)) return;
+                            try {
+                              const r = await fetch(`/api/admin/partner-codes/${c.id}`, { method: 'DELETE', credentials: 'include' });
+                              if (r.ok) { setPartnerCodeMsg({ text: '✅ Code supprimé', error: false }); await loadPartnerCodes(); }
+                              else setPartnerCodeMsg({ text: 'Erreur suppression', error: true });
+                            } catch { setPartnerCodeMsg({ text: 'Erreur réseau', error: true }); }
+                          }}
+                          style={{ padding: '4px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                        >🗑️</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── TAB : PAIEMENTS ── */}
         {adminTab === 'paiements' && (
           <div style={{ padding: '0 8px' }}>
@@ -9147,7 +9296,7 @@ function AdminPanel() {
                             </div>
                           )}
                           {queue.length === 0 ? (
-                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Chargement de la file...</div>
+                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Aucune prédiction en file d'attente</div>
                           ) : (
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                               {queue.slice(0, 20).map((item, i) => {
@@ -9164,6 +9313,45 @@ function AdminPanel() {
                                   </span>
                                 );
                               })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {/* ── Moniteur costume_manquant temps réel ── */}
+                    {s.mode === 'costume_manquant' && cmMonitorData[s.id] && (() => {
+                      const cm = cmMonitorData[s.id];
+                      const { count = 0, threshold = s.threshold || 0, pending: cmPending = [], suit: trigSuit = null, lastGame = null } = cm;
+                      const pct = threshold > 0 ? Math.min(count / threshold, 1) : 0;
+                      return (
+                        <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                          <div style={{ fontSize: 10, color: '#a855f7', fontWeight: 700, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            🃏 COSTUME MANQUANT — Compteur
+                            {lastGame !== null && <span style={{ color: '#64748b', fontWeight: 400 }}>· dernier jeu #{lastGame}</span>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ flex: 1, height: 6, background: 'rgba(168,85,247,0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct * 100}%`, borderRadius: 4,
+                                background: pct >= 1 ? '#22c55e' : pct >= 0.7 ? '#f59e0b' : '#a855f7',
+                                transition: 'width 0.3s ease' }} />
+                            </div>
+                            <span style={{ fontSize: 12, fontWeight: 800, color: pct >= 1 ? '#22c55e' : pct >= 0.7 ? '#fbbf24' : '#c084fc', minWidth: 55 }}>
+                              {count}/{threshold}
+                            </span>
+                          </div>
+                          {trigSuit && (
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                              Costume surveillé : <span style={{ fontWeight: 700, color: '#c084fc' }}>{trigSuit}</span>
+                            </div>
+                          )}
+                          {cmPending.length > 0 && (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                              {cmPending.map((p, i) => (
+                                <span key={i} style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, fontWeight: 800,
+                                  background: 'rgba(34,197,94,0.2)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.4)' }}>
+                                  #{p.targetGame} {p.suit}
+                                </span>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -10931,6 +11119,7 @@ function AdminPanel() {
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                     { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
                     { val: 'consec_same_suit_pred', label: '🚫 Prédictions consécutives même costume', desc: 'Bloquer si le même costume a été prédit N fois de suite. Libération automatique si un autre costume est prédit ou après 20 min.' },
+                    { val: 'decalage_suit_check',  label: '🔄 Vérification costume décalée',         desc: 'À (jeu déclencheur + N), si la main configurée contient le même costume que la prédiction → inverser ou annuler la prédiction en vol.' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause','consec_same_suit_pred'].includes(ex.type);
@@ -10940,6 +11129,7 @@ function AdminPanel() {
                   const needsParity = ex.type === 'game_parity';
                   const needsBadHour = ex.type === 'bad_hour';
                   const needsTriggerPos = ex.type === 'trigger_card_position';
+                  const needsDecalageCheck = ex.type === 'decalage_suit_check';
                   const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
 
                   const INP = { padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 };
@@ -11117,6 +11307,35 @@ function AdminPanel() {
                           </div>
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
                             → bloque si la carte prédite est en position {(Array.isArray(ex.positions) ? ex.positions : [1]).sort((a,b)=>a-b).join(', ')} dans la main choisie du jeu déclencheur
+                          </div>
+                        </div>
+                      )}
+
+                      {needsDecalageCheck && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Décalage N =</label>
+                              <input type="number" min="1" max="20" value={ex.decalage ?? 1}
+                                onChange={e => setEx({ decalage: parseInt(e.target.value) || 1 })}
+                                style={{ width: 60, padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 }} />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Action :</label>
+                              {[{ val: 'inverse', label: '🔄 Inverser le costume' }, { val: 'skip', label: '❌ Annuler la prédiction' }].map(opt => (
+                                <button key={opt.val} type="button" onClick={() => setEx({ action: opt.val })}
+                                  style={{ padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                                    background: (ex.action ?? 'inverse') === opt.val ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.07)',
+                                    border: `1px solid ${(ex.action ?? 'inverse') === opt.val ? 'rgba(239,68,68,0.6)' : 'rgba(239,68,68,0.2)'}`,
+                                    color: (ex.action ?? 'inverse') === opt.val ? '#fca5a5' : '#6b7280',
+                                    fontWeight: (ex.action ?? 'inverse') === opt.val ? 700 : 400 }}>
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → au jeu (déclencheur + {ex.decalage ?? 1}), si même costume dans la main → {(ex.action ?? 'inverse') === 'inverse' ? 'inverser le costume (♠↔♥, ♦↔♣)' : 'annuler la prédiction en vol'}
                           </div>
                         </div>
                       )}
