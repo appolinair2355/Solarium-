@@ -5194,4 +5194,37 @@ router.post('/licenses/:key/activate', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Codes admin partenaires ───────────────────────────────────────────────────
+
+router.get('/partner-codes', requireAdmin, async (req, res) => {
+  try {
+    const codes = await db.getPartnerCodes();
+    res.json(codes);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/partner-codes', requireAdmin, async (req, res) => {
+  try {
+    const { code, note } = req.body || {};
+    if (!code || !String(code).trim()) {
+      return res.status(400).json({ error: 'Le code est requis' });
+    }
+    const entry = await db.createPartnerCode(String(code).trim(), note || '');
+    if (!entry) return res.status(500).json({ error: 'DB JSON non supportée pour les codes partenaires' });
+    res.json({ ok: true, code: entry });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Ce code existe déjà' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/partner-codes/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID invalide' });
+    await db.deletePartnerCode(id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

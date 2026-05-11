@@ -78,8 +78,8 @@ router.post('/register', async (req, res) => {
   if (password.length < 6)
     return res.status(400).json({ error: 'Mot de passe: 6 caractères minimum' });
 
-  // Deux types autorisés à l'inscription : simple / premium
-  const ALLOWED_TYPES = ['simple', 'premium'];
+  // Types autorisés à l'inscription : simple / premium / partenaire
+  const ALLOWED_TYPES = ['simple', 'premium', 'partenaire'];
   const accountType = ALLOWED_TYPES.includes(account_type) ? account_type : 'simple';
 
   // Validation de la photo de profil (optionnelle, max ~600 ko base64 = ~450 ko binaire)
@@ -93,9 +93,25 @@ router.post('/register', async (req, res) => {
     }
   }
 
-  // Validation du code promo (optionnel)
+  // Validation du code admin partenaire (obligatoire pour compte partenaire)
+  const { admin_partner_code } = req.body;
+  let partnerCodeEntry = null;
+  if (accountType === 'partenaire') {
+    if (!admin_partner_code || !String(admin_partner_code).trim()) {
+      return res.status(400).json({ error: 'Un code admin est requis pour créer un compte partenaire' });
+    }
+    partnerCodeEntry = await db.getPartnerCodeByCode(String(admin_partner_code).trim());
+    if (!partnerCodeEntry) {
+      return res.status(400).json({ error: 'Code admin partenaire invalide' });
+    }
+    if (partnerCodeEntry.used) {
+      return res.status(400).json({ error: 'Ce code admin a déjà été utilisé' });
+    }
+  }
+
+  // Validation du code promo (optionnel, seulement pour comptes non-partenaires)
   let referrerUserId = null;
-  if (promo_code && String(promo_code).trim()) {
+  if (accountType !== 'partenaire' && promo_code && String(promo_code).trim()) {
     const referrer = await db.getUserByPromoCode(String(promo_code).trim());
     if (!referrer) {
       return res.status(400).json({ error: 'Code promotionnel invalide' });
@@ -118,17 +134,27 @@ router.post('/register', async (req, res) => {
       account_type: accountType,
       is_premium: accountType === 'premium',
       is_pro: accountType === 'pro',
+      is_approved: accountType === 'partenaire', // partenaires approuvés automatiquement
       promo_code: newPromoCode,
       referrer_user_id: referrerUserId,
       profile_photo: profilePhoto,
       language: userLang,
     });
 
+    // Marquer le code admin partenaire comme utilisé
+    if (partnerCodeEntry) {
+      await db.markPartnerCodeUsed(partnerCodeEntry.code, user.id);
+    }
+
+    const isPartner = accountType === 'partenaire';
     res.json({
-      message: "Inscription réussie. En attente de validation par l'administrateur.",
+      message: isPartner
+        ? 'Compte partenaire créé avec succès. Vous pouvez vous connecter immédiatement.'
+        : "Inscription réussie. En attente de validation par l'administrateur.",
       user: publicUser(user),
       promo_code: newPromoCode,
       referrer_applied: !!referrerUserId,
+      is_partner: isPartner,
     });
   } catch (err) {
     if (err.code === '23505' || err.message === 'username taken' || err.message === 'email taken') {

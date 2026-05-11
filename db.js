@@ -351,6 +351,15 @@ async function initDB() {
         created_at     TIMESTAMPTZ DEFAULT NOW(),
         updated_at     TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS partner_admin_codes (
+        id         SERIAL PRIMARY KEY,
+        code       TEXT UNIQUE NOT NULL,
+        used       BOOLEAN DEFAULT FALSE,
+        used_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        note       TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
     // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
@@ -1616,11 +1625,67 @@ async function deleteAllGameCards(strategy) {
   }
 }
 
+// ── Codes admin partenaires ───────────────────────────────────────────────────
+async function createPartnerCode(code, note) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `INSERT INTO partner_admin_codes (code, note) VALUES ($1, $2) RETURNING *`,
+      [code.trim().toUpperCase(), note || null]
+    );
+    return r.rows[0];
+  }
+  return null;
+}
+
+async function getPartnerCodes() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT pc.*, u.username AS used_by_username
+       FROM partner_admin_codes pc
+       LEFT JOIN users u ON pc.used_by = u.id
+       ORDER BY pc.created_at DESC`
+    );
+    return r.rows;
+  }
+  return [];
+}
+
+async function getPartnerCodeByCode(code) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT * FROM partner_admin_codes WHERE code = $1`,
+      [code.trim().toUpperCase()]
+    );
+    return r.rows[0] || null;
+  }
+  return null;
+}
+
+async function markPartnerCodeUsed(code, userId) {
+  if (USE_PG) {
+    await pgPool.query(
+      `UPDATE partner_admin_codes SET used = TRUE, used_by = $1 WHERE code = $2`,
+      [userId, code.trim().toUpperCase()]
+    );
+    return true;
+  }
+  return false;
+}
+
+async function deletePartnerCode(id) {
+  if (USE_PG) {
+    await pgPool.query(`DELETE FROM partner_admin_codes WHERE id = $1`, [id]);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   pool, USE_PG, MAIN_DB_URL, pgPoolCards, USE_CARDS_PG, initDB, reinitAdmins,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
   updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,
+  createPartnerCode, getPartnerCodes, getPartnerCodeByCode, markPartnerCodeUsed, deletePartnerCode,
   createPaymentRequest, updatePaymentRequest, getPaymentRequest,
   getUserPaymentRequests, getPendingPaymentRequests,
   createUser, updateUser, deleteUser,

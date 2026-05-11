@@ -22,6 +22,7 @@ const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul
 const C1_B = 5;  const C1_MAP = { '♣':'♦','♦':'♣','♠':'♥','♥':'♠' };
 const C2_B = 8;  const C2_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
 const C3_B = 5;  const C3_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
+const SUIT_INVERSE = { '♠':'♥', '♥':'♠', '♦':'♣', '♣':'♦' };
 
 const RAW_TO_SUIT = { '♠️':'♠','♣️':'♣','♦️':'♦','♥️':'♥','❤️':'♥' };
 
@@ -2302,6 +2303,36 @@ class Engine {
       maxR:     stratMaxRForResolve,
     };
 
+    // ── Exception mi-vol : decalage_suit_check ────────────────────────────────
+    // Pour chaque prédiction en attente, si on est au jeu (triggerGame + décalage),
+    // et que la main configurée contient le même costume → on inverse ou annule.
+    if (Object.keys(state.pending).length > 0 && Array.isArray(cfg.exceptions)) {
+      for (const ex of cfg.exceptions) {
+        if (ex.type !== 'decalage_suit_check') continue;
+        const decalage  = Math.max(1, parseInt(ex.decalage) || 1);
+        const action    = ex.action === 'inverse' ? 'inverse' : 'skip';
+        for (const [targetGameStr, pend] of Object.entries(state.pending)) {
+          const tg = pend.triggerGame;
+          if (tg === undefined || gn !== tg + decalage) continue;
+          if (!handSuits.includes(pend.suit)) continue;
+          if (action === 'inverse') {
+            const inv = SUIT_INVERSE[pend.suit] || pend.suit;
+            console.log(`[${channelId}] [decalage_suit_check] Jeu #${gn} = triggerGame(${tg})+${decalage} — même costume ${pend.suit} détecté → inverser en ${inv} pour prédiction #${targetGameStr}`);
+            state.pending[targetGameStr] = { ...pend, suit: inv };
+          } else {
+            console.log(`[${channelId}] [decalage_suit_check] Jeu #${gn} = triggerGame(${tg})+${decalage} — même costume ${pend.suit} détecté → annuler prédiction #${targetGameStr}`);
+            try {
+              await db.updatePrediction(
+                { strategy: channelId, game_number: parseInt(targetGameStr), predicted_suit: pend.suit, status_filter: 'en_cours' },
+                { status: 'expire', rattrapage: 0, resolved_at: new Date().toISOString() }
+              );
+            } catch {}
+            delete state.pending[targetGameStr];
+          }
+        }
+      }
+    }
+
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
       await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
@@ -2412,7 +2443,7 @@ class Engine {
           console.warn(`[${channelId}] Prédiction #${next} déjà existante — Telegram ignoré (doublon évité)`);
         }
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
-      state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve };
+      state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve, triggerGame: gn };
       // Historique des prédictions émises (pour l'exception consec_same_suit_pred)
       if (!state.predHistory) state.predHistory = [];
       state.predHistory.push({ suit: ps, timestamp: Date.now() });
