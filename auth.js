@@ -24,6 +24,12 @@ function publicUser(u) {
     admin_level: u.admin_level || 2,
     profile_photo: u.profile_photo || null,
     allowed_channels: u.allowed_channels || null,
+    allowed_modes: (() => {
+      const v = u.allowed_modes;
+      if (!v) return null;
+      if (Array.isArray(v)) return v;
+      try { return JSON.parse(v); } catch { return null; }
+    })(),
     show_counter_channels: (() => {
       const v = u.show_counter_channels;
       if (!v) return null;
@@ -182,12 +188,13 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Identifiants incorrects' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
-    req.session.userId     = user.id;
-    req.session.username   = user.username;
-    req.session.isAdmin    = user.is_admin;
-    req.session.isPremium  = user.is_premium || false;
-    req.session.isPro      = user.is_pro || false;
-    req.session.adminLevel = user.admin_level || 2;
+    req.session.userId      = user.id;
+    req.session.username    = user.username;
+    req.session.isAdmin     = user.is_admin;
+    req.session.isPremium   = user.is_premium || false;
+    req.session.isPro       = user.is_pro || false;
+    req.session.adminLevel  = user.admin_level || 2;
+    req.session.accountType = user.account_type || 'simple';
     res.json({ user: publicUser(user) });
   } catch (err) {
     console.error('login error:', err);
@@ -208,16 +215,19 @@ router.get('/me', async (req, res) => {
     // Sans ça, si l'admin active is_pro / is_admin pendant que l'utilisateur
     // est déjà connecté, sa session conserve l'ancienne valeur et toutes les
     // routes /admin/pro-* renvoient 403 → panneaux Config Pro & Telegram vides.
-    const freshIsAdmin   = !!user.is_admin;
-    const freshIsPro     = !!user.is_pro;
-    const freshIsPremium = !!(user.is_premium || user.account_type === 'premium');
-    const needsSync = req.session.isAdmin   !== freshIsAdmin
-                   || req.session.isPro     !== freshIsPro
-                   || req.session.isPremium !== freshIsPremium;
+    const freshIsAdmin    = !!user.is_admin;
+    const freshIsPro      = !!user.is_pro;
+    const freshIsPremium  = !!(user.is_premium || user.account_type === 'premium');
+    const freshAccountType = user.account_type || 'simple';
+    const needsSync = req.session.isAdmin    !== freshIsAdmin
+                   || req.session.isPro      !== freshIsPro
+                   || req.session.isPremium  !== freshIsPremium
+                   || req.session.accountType !== freshAccountType;
     if (needsSync) {
-      req.session.isAdmin   = freshIsAdmin;
-      req.session.isPro     = freshIsPro;
-      req.session.isPremium = freshIsPremium;
+      req.session.isAdmin     = freshIsAdmin;
+      req.session.isPro       = freshIsPro;
+      req.session.isPremium   = freshIsPremium;
+      req.session.accountType = freshAccountType;
       // Persiste immédiatement la session mise à jour avant de répondre
       req.session.save(() => res.json(publicUser(user)));
       return;

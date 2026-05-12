@@ -48,6 +48,19 @@ function requireProOrAdmin(req, res, next) {
   next();
 }
 
+// ── Admin OU Partenaire ─────────────────────────────────────────────
+function requireAdminOrPartner(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (!req.session.isAdmin && req.session.accountType !== 'partenaire')
+    return res.status(403).json({ error: 'Accès admin ou partenaire requis' });
+  next();
+}
+
+// Vérifie si la session est un partenaire (non-admin)
+function isPartnerSession(req) {
+  return !req.session.isAdmin && req.session.accountType === 'partenaire';
+}
+
 // Détermine le propriétaire effectif d'une ressource Pro :
 //   - admin : peut passer ?owner_user_id=N (sinon = lui-même)
 //   - Pro   : forcé sur req.session.userId (ignore tout owner_user_id passé)
@@ -571,6 +584,10 @@ router.get('/strategies', async (req, res) => {
   try {
     const list = await getStrategies();
     if (!req.session.isAdmin) {
+      // Partenaire : accès complet à ses propres stratégies uniquement
+      if (isPartnerSession(req)) {
+        return res.json(list.filter(s => s.partner_owner_id === req.session.userId));
+      }
       // Récupérer les stratégies explicitement assignées à cet utilisateur
       const assignedIds = await db.getVisibleStrategies(req.session.userId);
       const assignedSet = new Set(assignedIds.map(id => String(id)));
@@ -583,7 +600,7 @@ router.get('/strategies', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/strategies', requireAdmin, async (req, res) => {
+router.post('/strategies', requireAdminOrPartner, async (req, res) => {
   console.log('[Strategy POST] Requête reçue:', JSON.stringify(req.body).substring(0, 200));
   try {
     const err = validateStrategyBody(req.body);
@@ -711,6 +728,7 @@ router.post('/strategies', requireAdmin, async (req, res) => {
       pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
+      ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
     await saveStrategies(list);
@@ -801,7 +819,7 @@ router.get('/rotation-status/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/strategies/:id', requireAdmin, async (req, res) => {
+router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
   console.log('[Strategy PUT] Requête reçue id=' + req.params.id);
   try {
     const id  = parseInt(req.params.id);
@@ -810,6 +828,9 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
     if (idx === -1) { console.log('[Strategy PUT] Stratégie introuvable id=' + id); return res.status(404).json({ error: 'Stratégie introuvable' }); }
+    // Partenaire : ne peut modifier que ses propres stratégies
+    if (isPartnerSession(req) && list[idx].partner_owner_id !== req.session.userId)
+      return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres stratégies' });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
@@ -960,10 +981,24 @@ router.put('/strategies/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/strategies/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/strategies/:id', requireAdminOrPartner, async (req, res) => {
   try {
     const id   = parseInt(req.params.id);
     let list   = await getStrategies();
+    const target = list.find(s => s.id === id);
+    if (!target) return res.status(404).json({ error: 'Stratégie introuvable' });
+    // Partenaire : ne peut supprimer que ses propres stratégies
+    if (isPartnerSession(req) && target.partner_owner_id !== req.session.userId)
+      return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres stratégies' });
+    // Super admin requis pour supprimer les stratégies système (sans partner_owner_id)
+    if (!isPartnerSession(req) && (req.session.adminLevel || 2) !== 1) {
+      const uname = req.session.username || '';
+      if (uname !== 'buzzinfluence') {
+        const u = await db.getUser(req.session.userId).catch(() => null);
+        if (!u || ((u.admin_level || 2) !== 1 && u.username !== 'buzzinfluence'))
+          return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
+      }
+    }
     const before = list.length;
     list = list.filter(s => s.id !== id);
     if (list.length === before) return res.status(404).json({ error: 'Stratégie introuvable' });
@@ -5235,6 +5270,24 @@ router.post('/partner-tg-config', async (req, res) => {
   try {
     const { bot_token, channel_id } = req.body || {};
     await db.setSetting(PARTNER_TG_CFG_KEY(req.session.userId), JSON.stringify({ bot_token: bot_token || '', channel_id: channel_id || '' }));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Message de pub partenaire (sauvegarde/chargement) ──────────────────────
+router.get('/partner-ad-message', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    const raw = await db.getSetting(`partner_ad_message_${req.session.userId}`);
+    res.json({ message: raw || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/partner-ad-message', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    const { message } = req.body || {};
+    await db.setSetting(`partner_ad_message_${req.session.userId}`, String(message || '').slice(0, 2000));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

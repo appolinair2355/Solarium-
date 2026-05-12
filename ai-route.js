@@ -733,7 +733,7 @@ async function analyzePaymentScreenshot(base64Image, mimeType, expectedAmountUsd
   const expectedUsdt = expectedAmountUsd.toFixed(2);
 
   const prompt = `Tu es un agent bienveillant qui valide des captures d'écran de paiement.
-Méthodes de paiement ACCEPTÉES : WhatsApp Pay, Mobile Money (MTN, Moov, Orange, Wave), Fusion Money, CinetPay, virement bancaire, crypto (USDT, BTC, ETH, TRX, MATIC), PayPal, Skrill, Western Union, MoneyGram, ou toute autre preuve de transfert d'argent.
+Méthodes de paiement ACCEPTÉES : WhatsApp Pay, Mobile Money (MTN, Moov, Orange, Wave), MoneyFusion (my.moneyfusion.net), Fusion Money, CinetPay, virement bancaire, crypto (BNB, USDT, BTC, ETH, TRX, MATIC, BSC), PayPal, Skrill, Western Union, MoneyGram, ou toute autre preuve de transfert d'argent.
 
 On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après :
 {
@@ -741,7 +741,7 @@ On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant 
   "confidence": 0-100,
   "amount_detected": "montant lisible dans l'image ou null",
   "amount_matches_expected": true|false,
-  "currency_detected": "USD|EUR|XOF|FCFA|USDT|BTC|ETH|TRX|null",
+  "currency_detected": "USD|EUR|XOF|FCFA|USDT|BNB|BTC|ETH|TRX|null",
   "transaction_id": "ID/hash/référence visible ou null",
   "transaction_date": "date visible (format libre) ou null",
   "recipient_visible": "nom/adresse/numéro destinataire ou null",
@@ -749,18 +749,22 @@ On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant 
   "reason": "courte phrase en français expliquant la décision"
 }
 
-RÈGLES SOUPLES pour is_payment_screenshot=true :
-- L'image montre UNE preuve de paiement/transfert (confirmé, envoyé, succès, success, réussi, approved)
+RÈGLES TRÈS SOUPLES pour is_payment_screenshot=true :
+- L'image montre UNE preuve de paiement/transfert (confirmé, envoyé, succès, success, réussi, approved, payé, paid)
 - Un montant visible EST suffisant — transaction_id ET destinataire ne sont PAS tous obligatoires
-- Captures acceptées : SMS de confirmation, reçu app mobile, email de confirmation, hash blockchain
-- Fusion Money, Crypto, Wave, CinetPay : acceptés sans restriction
-- Sois PERMISSIF : en cas de doute, mettre is_payment_screenshot=true avec confidence 40-60
+- Captures acceptées : SMS de confirmation, reçu app mobile, email de confirmation, hash blockchain, page de succès MoneyFusion, reçu BNB/BSC, capture MetaMask, Trust Wallet, BNBChain
+- MoneyFusion (my.moneyfusion.net) : toute page montrant "paiement réussi", "succès", "confirmé" → is_payment_screenshot=true
+- Crypto BNB/USDT/BSC : hash de transaction visible ou reçu de portefeuille → is_payment_screenshot=true, confidence=70
+- Fusion Money, Crypto, Wave, CinetPay, MTN MoMo : acceptés sans restriction
+- Sois TRÈS PERMISSIF : en cas de doute, mettre is_payment_screenshot=true avec confidence 50-70
+- Ne refuse QUE les images clairement non-liées (selfies, paysages, documents administratifs sans montant)
 
 MONTANT ATTENDU :
 - ${expectedAmountUsd} USD OU ${expectedUsdt} USDT
 - Équivalent FCFA/XOF : entre ${expectedFcfaMin} et ${expectedFcfaMax}
-- Tolérance : ±10% sur le montant
+- Tolérance : ±15% sur le montant (pour tenir compte des frais de réseau crypto)
 - Si le montant est proche → amount_matches_expected=true, confidence ≥ 60
+- Pour crypto : les frais de réseau (~0.1-1 USD) peuvent modifier légèrement le montant
 
 Si l'image n'est clairement pas un paiement (selfie, paysage, document sans montant) → is_payment_screenshot=false.
 Réponds UNIQUEMENT le JSON, sans markdown, sans backticks.`;
