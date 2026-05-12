@@ -146,11 +146,13 @@ function ProtectedRoute({ children, adminOnly = false, adminOrPro = false, admin
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!user) return <Navigate to="/connexion" replace />;
-  if (!user.is_admin && user.status === 'expired') return <Navigate to="/paiement" replace />;
-  if (!user.is_admin && user.status === 'pending') return <Navigate to="/choisir" replace />;
+  const isPartner = user.account_type === 'partenaire';
+  // Les partenaires ont accès sans restriction d'abonnement (pas d'expiry check)
+  if (!user.is_admin && !isPartner && user.status === 'expired') return <Navigate to="/paiement" replace />;
+  if (!user.is_admin && !isPartner && user.status === 'pending') return <Navigate to="/choisir" replace />;
   if (adminOnly && !user.is_admin) return <Navigate to="/choisir" replace />;
-  if (adminOrPro && !user.is_admin && !user.is_pro) return <Navigate to="/choisir" replace />;
-  if (adminProOrPremium && !user.is_admin && !user.is_pro && !user.is_premium) return <Navigate to="/choisir" replace />;
+  if (adminOrPro && !user.is_admin && !user.is_pro && !isPartner) return <Navigate to="/choisir" replace />;
+  if (adminProOrPremium && !user.is_admin && !user.is_pro && !user.is_premium && !isPartner) return <Navigate to="/choisir" replace />;
   return children;
 }
 
