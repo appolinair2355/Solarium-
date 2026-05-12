@@ -3338,17 +3338,20 @@ function AdminPanel() {
   const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
   const isProOnly = !user?.is_admin && !!user?.is_pro;
+  const isPartner = !user?.is_admin && user?.account_type === 'partenaire';
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
   const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
-  const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : 'utilisateurs');
+  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'bilan'];
+  const [adminTab, setAdminTab] = useState(isProOnly ? 'config-pro' : isPartner ? 'strategies' : 'utilisateurs');
   useEffect(() => {
     if (isProOnly && !PRO_ALLOWED_TABS.includes(adminTab)) setAdminTab('config-pro');
+    if (isPartner && !PARTNER_ALLOWED_TABS.includes(adminTab)) setAdminTab('strategies');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isProOnly]);
+  }, [isProOnly, isPartner]);
 
   // Duration inputs per user: { userId: { val, unit } }
   const [durInputs, setDurInputs] = useState({});
@@ -3844,7 +3847,13 @@ function AdminPanel() {
     } catch (e) { setLbMsg('❌ ' + e.message); }
   };
 
-  useEffect(() => { if (adminTab === 'canaux') loadLbTargets(); }, [adminTab]);
+  useEffect(() => {
+    if (adminTab === 'canaux') {
+      loadLbTargets();
+      loadStrategies();
+      loadStratStats();
+    }
+  }, [adminTab]);
 
   // Hébergement Bots
   const [hostedBots, setHostedBots]           = useState([]);
@@ -5638,7 +5647,7 @@ function AdminPanel() {
         <div className="navbar-actions">
           <Link to="/choisir" className="btn btn-ghost btn-sm">⇄ Canaux</Link>
           {user?.admin_level === 1 && <Link to="/system-logs" className="btn btn-ghost btn-sm" style={{ color: '#22c55e', fontWeight: 700 }}>🖥 Logs</Link>}
-          <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · Admin</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--gold)' }}>{user?.username} · {isPartner ? 'Partenaire' : 'Admin'}</span>
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
         </div>
       </nav>
@@ -5663,6 +5672,12 @@ function AdminPanel() {
                 { id: 'bilan',      icon: '📊', label: 'Bilan' },
                 { id: 'config',     icon: '🔀', label: 'Routage' },
                 { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
+              ]
+            : isPartner
+            ? [
+                { id: 'strategies', icon: '⚙️', label: 'Stratégies', badge: strategies.length > 0 ? strategies.length : null },
+                { id: 'canaux',     icon: '✈️', label: 'Telegram',   badge: tgChannels.length > 0 ? tgChannels.length : null },
+                { id: 'bilan',      icon: '📊', label: 'Bilan' },
               ]
             : [
             { id: 'utilisateurs',      icon: '👥', label: 'Utilisateurs',    badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
@@ -11740,7 +11755,7 @@ function AdminPanel() {
         )}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
-        {adminTab === 'canaux' && (
+        {adminTab === 'canaux' && !isPartner && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.45)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📢</span>
@@ -12215,7 +12230,7 @@ function AdminPanel() {
         {adminTab === 'canaux' && <>
 
         {/* ── SECTION 0 : DIFFUSION LIVE DES JEUX (multi-canaux) ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">🎰</span>
             <div style={{ flex: 1 }}>
@@ -12306,10 +12321,10 @@ function AdminPanel() {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* ── SECTION 1 : CANAUX PRINCIPAUX DU SITE ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">🏛️</span>
             <div style={{ flex: 1 }}>
@@ -12580,10 +12595,9 @@ function AdminPanel() {
               );
             })}
           </div>
-        </div>
+        </div>}
 
         {/* ── SECTION 2 : STRATÉGIES PERSONNALISÉES ── */}
-        {strategies.length > 0 && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">⚙️</span>
@@ -12598,9 +12612,19 @@ function AdminPanel() {
             </span>
           </div>
 
+          {strategies.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '28px 16px', color: '#64748b' }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>⚙️</div>
+              <div style={{ fontWeight: 700, color: '#94a3b8', fontSize: 14, marginBottom: 6 }}>Aucune stratégie créée</div>
+              <div style={{ fontSize: 12 }}>Rendez-vous dans l'onglet <strong style={{ color: '#a855f7' }}>⚙️ Stratégies</strong> pour créer votre première stratégie, puis revenez ici pour la configurer sur Telegram.</div>
+            </div>
+          )}
+
+          {strategies.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginTop: 8 }}>
             {strategies.map((s, idx) => {
               const validTargets = (s.tg_targets || []).filter(t => t.bot_token && t.channel_id);
+              const st = stratStats.find(x => x.strategy === `S${s.id}`) || {};
               const tgt = validTargets[0];
               const isConfigured = validTargets.length > 0;
               const isOpen = stratChOpen === s.id;
@@ -12621,6 +12645,22 @@ function AdminPanel() {
                           </span>
                         ) : (
                           <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>⚠️ Non configuré</span>
+                        )}
+                        {/* ── Compteurs de prédictions ── */}
+                        {(st.wins !== undefined || st.losses !== undefined) && (
+                          <>
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}>
+                              ✅ {st.wins ?? 0} G
+                            </span>
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
+                              ❌ {st.losses ?? 0} P
+                            </span>
+                            {(st.wins || st.losses) ? (
+                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 700, background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}>
+                                {Math.round(((st.wins ?? 0) / ((st.wins ?? 0) + (st.losses ?? 0))) * 100)}%
+                              </span>
+                            ) : null}
+                          </>
                         )}
                       </div>
                       {isConfigured && (
@@ -12880,11 +12920,11 @@ function AdminPanel() {
               );
             })}
           </div>
+          )}
         </div>
-        )}
 
         {/* ── SECTION 2-bis : STRATÉGIES PRO (S5001-S5100) ── */}
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.5)', marginBottom: 20 }}>
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.5)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">🔷</span>
             <div style={{ flex: 1 }}>
@@ -13037,10 +13077,10 @@ function AdminPanel() {
               })}
             </div>
           )}
-        </div>
+        </div>}
 
         {/* ── SECTION 3 : CANAUX TELEGRAM GLOBAUX ── */}
-        <div className="tg-admin-card">
+        {!isPartner && <div className="tg-admin-card">
           <div className="tg-admin-header">
             <span className="tg-admin-icon">✈️</span>
             <div style={{ flex: 1 }}>
@@ -13110,7 +13150,7 @@ function AdminPanel() {
               Nombre maximum de canaux atteint (10/10).
             </div>
           )}
-        </div>
+        </div>}
 
       {/* ── PREMIUM CREDENTIALS MODAL ── */}
       {premiumModal && (
