@@ -834,11 +834,12 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          {(user?.is_admin || user?.is_pro) && (
+          {(user?.is_admin || user?.is_pro || user?.account_type === 'partenaire') && (
             <Link to="/comptages" className="btn btn-ghost btn-sm" style={{ color: '#4ade80', borderColor: 'rgba(34,197,94,0.4)' }}>📈 Comptages</Link>
           )}
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
           {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro</Link>}
+          {!user?.is_admin && user?.account_type === 'partenaire' && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#22d3ee', borderColor: 'rgba(34,211,238,0.4)' }}>🤝 Stratégie & Telegram</Link>}
           {!user?.is_admin && (
             <Link to="/boutique" className="btn btn-ghost btn-sm" style={{ color: '#a78bfa', borderColor: 'rgba(167,139,250,0.4)' }}>🛒 Acheter Stratégie</Link>
           )}
@@ -878,8 +879,9 @@ export default function Dashboard() {
               <span className="db-username-small">{user?.username}</span>
               {user?.is_admin && <span className="db-role-badge admin">Admin</span>}
               {!user?.is_admin && user?.is_pro && <span className="db-role-badge pro">Pro</span>}
+              {!user?.is_admin && user?.account_type === 'partenaire' && <span className="db-role-badge" style={{ background: 'rgba(34,211,238,0.18)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.4)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>🤝 Partenaire</span>}
               {!user?.is_admin && user?.is_premium && !user?.is_pro && <span className="db-role-badge" style={{ background: 'rgba(251,191,36,0.18)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>⭐ Premium</span>}
-              {!user?.is_admin && !user?.is_pro && !user?.is_premium && <span className="db-role-badge user">Joueur</span>}
+              {!user?.is_admin && !user?.is_pro && !user?.is_premium && user?.account_type !== 'partenaire' && <span className="db-role-badge user">Joueur</span>}
             </div>
             {user?.is_admin && (
               <div className="db-timer-row">

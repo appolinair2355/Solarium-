@@ -160,7 +160,8 @@ export default function StrategySelect() {
         <div className="navbar-actions">
           {user?.is_admin && <Link to="/admin" className="btn btn-ghost btn-sm">⚙ Admin</Link>}
           {!user?.is_admin && user?.is_pro && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}>🔷 Config Pro & Telegram</Link>}
-          {!user?.is_admin && user?.is_pro && (
+          {!user?.is_admin && user?.account_type === 'partenaire' && <Link to="/admin" className="btn btn-ghost btn-sm" style={{ color: '#22d3ee', borderColor: 'rgba(34,211,238,0.4)' }}>🤝 Stratégie & Telegram</Link>}
+          {!user?.is_admin && (user?.is_pro || user?.account_type === 'partenaire') && (
             <Link to="/comptages" className="btn btn-ghost btn-sm" style={{ color: '#4ade80', borderColor: 'rgba(34,197,94,0.4)' }}>📈 Comptages</Link>
           )}
           {!user?.is_admin && (
@@ -172,11 +173,11 @@ export default function StrategySelect() {
           {!user?.is_admin && (
             <span style={{
               fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 6,
-              background: user?.is_pro ? 'rgba(99,102,241,0.18)' : user?.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.15)',
-              color: user?.is_pro ? '#818cf8' : user?.is_premium ? '#fbbf24' : '#94a3b8',
-              border: `1px solid ${user?.is_pro ? 'rgba(99,102,241,0.4)' : user?.is_premium ? 'rgba(251,191,36,0.35)' : 'rgba(100,116,139,0.3)'}`,
+              background: user?.account_type === 'partenaire' ? 'rgba(34,211,238,0.18)' : user?.is_pro ? 'rgba(99,102,241,0.18)' : user?.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.15)',
+              color: user?.account_type === 'partenaire' ? '#22d3ee' : user?.is_pro ? '#818cf8' : user?.is_premium ? '#fbbf24' : '#94a3b8',
+              border: `1px solid ${user?.account_type === 'partenaire' ? 'rgba(34,211,238,0.4)' : user?.is_pro ? 'rgba(99,102,241,0.4)' : user?.is_premium ? 'rgba(251,191,36,0.35)' : 'rgba(100,116,139,0.3)'}`,
             }}>
-              {user?.is_pro ? '🔷 PRO' : user?.is_premium ? '⭐ PREMIUM' : '👤 UTILISATEUR'}
+              {user?.account_type === 'partenaire' ? '🤝 PARTENAIRE' : user?.is_pro ? '🔷 PRO' : user?.is_premium ? '⭐ PREMIUM' : '👤 UTILISATEUR'}
             </span>
           )}
           {!user?.is_admin && <ContactAdminModal />}

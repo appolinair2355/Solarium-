@@ -6730,8 +6730,9 @@ function AdminPanel() {
                             <span>{u.username}</span>
                             {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
                             {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
-                            {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
-                            {isSuperAdmin && !u.is_pro && (
+                            {!u.is_pro && !u.is_premium && u.account_type === 'partenaire' && <span title="Compte Partenaire" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(34,211,238,0.15)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.4)', fontWeight: 700 }}>🤝 PARTENAIRE</span>}
+                            {!u.is_pro && !u.is_premium && u.account_type !== 'partenaire' && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
+                            {isSuperAdmin && !u.is_pro && u.account_type !== 'partenaire' && (
                               <button
                                 title={u.is_premium ? 'Retirer le statut Premium' : 'Passer en Premium'}
                                 onClick={() => togglePremium(u.id)}
@@ -6863,7 +6864,11 @@ function AdminPanel() {
                         <td>
                           <div className="approve-form" style={{ flexWrap: 'wrap', gap: 4 }}>
                             {isSuperAdmin && (u.status === 'pending' || u.status === 'expired') && (
-                              <button className="btn btn-success btn-sm" onClick={() => approveUser(u.id)}>✅ Approuver</button>
+                              <button
+                                className="btn btn-success btn-sm"
+                                onClick={() => approveUser(u.id)}
+                                style={u.account_type === 'partenaire' ? { background: 'rgba(34,211,238,0.25)', borderColor: 'rgba(34,211,238,0.6)', color: '#22d3ee' } : {}}
+                              >{u.account_type === 'partenaire' ? '🤝 Activer accès partenaire' : '✅ Approuver'}</button>
                             )}
                             {isSuperAdmin && u.status === 'active' && (
                               <button className="btn btn-ghost btn-sm" onClick={() => extendUser(u.id)}>➕ Prolonger</button>
