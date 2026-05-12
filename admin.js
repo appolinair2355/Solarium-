@@ -61,6 +61,24 @@ function isPartnerSession(req) {
   return !req.session.isAdmin && req.session.accountType === 'partenaire';
 }
 
+// Vérifie si un mode est autorisé pour un partenaire — retourne un message d'erreur ou null
+async function checkPartnerModeAllowed(req, mode) {
+  if (!isPartnerSession(req)) return null; // admin = pas de restriction
+  const u = await db.getUser(req.session.userId);
+  if (!u) return 'Utilisateur introuvable';
+  const allowed = (() => {
+    const v = u.allowed_modes;
+    if (!v) return null;
+    if (Array.isArray(v)) return v;
+    try { return JSON.parse(v); } catch { return null; }
+  })();
+  if (!allowed || allowed.length === 0) return null; // null = tous les modes autorisés
+  if (!allowed.includes(mode)) {
+    return `Mode « ${mode} » non autorisé pour votre compte partenaire. Modes autorisés : ${allowed.join(', ')}`;
+  }
+  return null;
+}
+
 // Détermine le propriétaire effectif d'une ressource Pro :
 //   - admin : peut passer ?owner_user_id=N (sinon = lui-même)
 //   - Pro   : forcé sur req.session.userId (ignore tout owner_user_id passé)
@@ -605,6 +623,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
   try {
     const err = validateStrategyBody(req.body);
     if (err) { console.log('[Strategy POST] Validation échouée:', err); return res.status(400).json({ error: err }); }
+    // Vérification serveur : mode autorisé pour le partenaire
+    const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
+    if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
@@ -831,6 +852,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     // Partenaire : ne peut modifier que ses propres stratégies
     if (isPartnerSession(req) && list[idx].partner_owner_id !== req.session.userId)
       return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres stratégies' });
+    // Vérification serveur : mode autorisé pour le partenaire
+    const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
+    if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);

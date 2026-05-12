@@ -147,9 +147,13 @@ router.post('/register', async (req, res) => {
       language: userLang,
     });
 
-    // Marquer le code admin partenaire comme utilisé
+    // Marquer le code admin partenaire comme utilisé et copier les modes autorisés
     if (partnerCodeEntry) {
       await db.markPartnerCodeUsed(partnerCodeEntry.code, user.id);
+      // Copier les allowed_modes du code partenaire vers l'utilisateur
+      if (Array.isArray(partnerCodeEntry.allowed_modes) && partnerCodeEntry.allowed_modes.length > 0) {
+        await db.updateUser(user.id, { allowed_modes: JSON.stringify(partnerCodeEntry.allowed_modes) });
+      }
     }
 
     const isPartner = accountType === 'partenaire';
