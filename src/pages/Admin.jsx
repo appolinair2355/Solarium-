@@ -4249,6 +4249,10 @@ function AdminPanel() {
   const [partnerTgCfg, setPartnerTgCfg] = useState({ bot_token: '', channel_id: '' });
   const [partnerTgSaving, setPartnerTgSaving] = useState(false);
   const [partnerTgMsg, setPartnerTgMsg] = useState({ text: '', error: false });
+  const [partnerAdMsg, setPartnerAdMsg] = useState('🎯 Rejoignez notre canal Baccarat Pro !\n✅ Prédictions en temps réel\n🔐 Accès exclusif partenaire\n💬 Inscrivez-vous maintenant !');
+  const [partnerAdMsgSaving, setPartnerAdMsgSaving] = useState(false);
+  const [partnerFmtSaving, setPartnerFmtSaving] = useState(false);
+  const [partnerMsgFormat, setPartnerMsgFormat] = useState(1);
 
   // Réponses admin aux messages utilisateurs
   const [replyingId, setReplyingId]     = useState(null);
@@ -5451,7 +5455,11 @@ function AdminPanel() {
     } catch {}
   }, []);
 
-  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); if (user?.is_admin) loadPartnerCodes(); if (isPartnerOnly) { fetch('/api/admin/partner-tg-config', { credentials: 'include' }).then(r => r.ok ? r.json() : {}).then(d => setPartnerTgCfg({ bot_token: d.bot_token || '', channel_id: d.channel_id || '' })).catch(() => {}); } }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
+  useEffect(() => { loadUsers(); loadChannels(); loadTokenInfo(); loadStrategies(); loadStratStats(); loadMsgFormat(); loadMaxR(); loadBotAdminTgId(); loadStrategyRoutes(); loadDefaultStratTg(); loadAnnouncements(); loadRenderDbStatus(); loadUiStyles(); loadCustomCss(); loadModifiedFiles(); loadBroadcastMessage(); loadUserMessages(); loadHostedBots(); loadAiConfig(); if (user?.is_admin) loadPartnerCodes(); if (isPartnerOnly) {
+      fetch('/api/admin/partner-tg-config', { credentials: 'include' }).then(r => r.ok ? r.json() : {}).then(d => setPartnerTgCfg({ bot_token: d.bot_token || '', channel_id: d.channel_id || '' })).catch(() => {});
+      fetch('/api/admin/partner-ad-message', { credentials: 'include' }).then(r => r.ok ? r.json() : {}).then(d => { if (d.message) setPartnerAdMsg(d.message); }).catch(() => {});
+      fetch('/api/admin/msg-format', { credentials: 'include' }).then(r => r.ok ? r.json() : {}).then(d => { if (d.format_id) setPartnerMsgFormat(d.format_id); }).catch(() => {});
+    } }, [loadUsers, loadChannels, loadTokenInfo, loadStrategies, loadStratStats, loadMsgFormat, loadMaxR, loadBotAdminTgId, loadStrategyRoutes, loadDefaultStratTg, loadAnnouncements, loadRenderDbStatus, loadUiStyles, loadCustomCss, loadModifiedFiles, loadBroadcastMessage, loadUserMessages, loadHostedBots, loadAiConfig]);
 
   const loadPartnerCodes = async () => {
     try {
@@ -6245,8 +6253,41 @@ function AdminPanel() {
       </nav>
 
       <div className="admin-content">
+        {/* ── BANNIÈRE COMPTE PARTENAIRE ── */}
+        {isPartnerOnly && (
+          <div style={{
+            marginBottom: 24, padding: '22px 28px', borderRadius: 16,
+            background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(16,185,129,0.08) 50%, rgba(34,197,94,0.05) 100%)',
+            border: '2px solid rgba(34,197,94,0.45)',
+            boxShadow: '0 0 40px rgba(34,197,94,0.12)',
+            display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+          }}>
+            <div style={{ fontSize: 52, lineHeight: 1 }}>🤝</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+                <span style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 900, fontSize: 13, padding: '4px 14px', borderRadius: 100, letterSpacing: 1.2, textTransform: 'uppercase', boxShadow: '0 0 14px rgba(34,197,94,0.4)' }}>🤝 COMPTE PARTENAIRE</span>
+              </div>
+              <h2 style={{ margin: '0 0 4px', fontSize: '1.4rem', fontWeight: 900, color: '#fff', letterSpacing: 0.3 }}>
+                Bienvenue, <span style={{ color: '#4ade80' }}>{user?.username}</span> 👋
+              </h2>
+              <p style={{ margin: 0, color: '#94a3b8', fontSize: 13, lineHeight: 1.6 }}>
+                Vous êtes en partenariat avec <strong style={{ color: '#fbbf24' }}>Sossou Kouamé</strong> — Créez vos stratégies, configurez votre canal Telegram et publiez vos prédictions.
+              </p>
+            </div>
+            {Array.isArray(user?.allowed_modes) && user.allowed_modes.length > 0 && (
+              <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                <div style={{ fontSize: 10, color: '#818cf8', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Modes autorisés</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                  {user.allowed_modes.map(m => (
+                    <span key={m} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', fontWeight: 600 }}>{m}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         <div className="page-header">
-          <h1 className="page-title">Panneau Administration</h1>
+          <h1 className="page-title">{isPartnerOnly ? 'Espace Partenaire' : 'Panneau Administration'}</h1>
         </div>
 
         {message && (
@@ -8401,70 +8442,141 @@ function AdminPanel() {
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
-        {/* ── TAB : CANAUX — PANNEAU PARTENAIRE ── */}
-        {adminTab === 'canaux' && isPartnerOnly && (
-          <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.4)', marginBottom: 20 }}>
-            <div className="tg-admin-header">
-              <span className="tg-admin-icon">🤝</span>
-              <div style={{ flex: 1 }}>
-                <h2 className="tg-admin-title">Configuration Telegram Partenaire</h2>
-                <p className="tg-admin-sub">Configurez votre bot Telegram pour diffuser les alertes de vos stratégies. Une publicité est envoyée automatiquement toutes les 2 heures.</p>
+        {/* ── TAB : CANAUX — PANNEAU PARTENAIRE COMPLET ── */}
+        {adminTab === 'canaux' && isPartnerOnly && (() => {
+          const G = 1234;
+          const SUP = ['⁰','¹','²','³','⁴','⁵'];
+          const RE  = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣'];
+          const sup = SUP[maxRattrapage] ?? maxRattrapage;
+          const barP = '🟦' + '⬜'.repeat(maxRattrapage);
+          const PFMTS = [
+            { id:1, label:'Style Russe', icon:'⚜', preview:`⚜ #N${G} Игрок    +${sup} ⚜\n◽Масть ♠️\n◼️ Результат ⌛` },
+            { id:2, label:'Premium', icon:'🎲', preview:`🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxRattrapage} ✨🎲\nGame ${G} :♠️\nEn cours :⌛` },
+            { id:3, label:'Baccara Pro', icon:'🃏', preview:`𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n🎮GAME: #N${G}\n🃏Carte ♠️:⌛\nMode: Dogon ${maxRattrapage}` },
+            { id:4, label:'Prédiction', icon:'🎰', preview:`🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n📊 Statut: En cours ⏳` },
+            { id:5, label:'Barre', icon:'🟦', preview:`🎰 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n${barP}\n⏳ Analyse...` },
+            { id:6, label:'Classique', icon:'✨', preview:`🏆 PRÉDICTION #${G}\n🎯 Couleur: ♠️ Pique\n⏳ Statut: En cours` },
+          ];
+          return (
+            <>
+            {/* Bloc 1 : Config Bot Telegram */}
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.5)', marginBottom: 18 }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">🤖</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Bot Telegram — Configuration</h2>
+                  <p className="tg-admin-sub">Connectez votre bot Telegram. Les prédictions de vos stratégies seront envoyées vers votre canal.</p>
+                </div>
+                {partnerTgCfg.bot_token && <span className="tg-badge-connected">✅ Connecté</span>}
               </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>🔑 Token du bot</label>
-                <input
-                  value={partnerTgCfg.bot_token}
-                  onChange={e => setPartnerTgCfg(p => ({ ...p, bot_token: e.target.value }))}
-                  placeholder="123456:AAF-xxxx…"
-                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>🔑 Token du bot</label>
+                  <input value={partnerTgCfg.bot_token} onChange={e => setPartnerTgCfg(p => ({ ...p, bot_token: e.target.value }))}
+                    placeholder="123456789:AAF-xxxxxxxxxxxx…"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>📡 ID Canal / @username</label>
+                  <input value={partnerTgCfg.channel_id} onChange={e => setPartnerTgCfg(p => ({ ...p, channel_id: e.target.value }))}
+                    placeholder="-100xxxxxxxxxx ou @moncanal"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                  />
+                </div>
               </div>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>📡 ID Canal</label>
-                <input
-                  value={partnerTgCfg.channel_id}
-                  onChange={e => setPartnerTgCfg(p => ({ ...p, channel_id: e.target.value }))}
-                  placeholder="-100xxxxxxxxxx ou @moncanal"
-                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <button
-                disabled={partnerTgSaving}
-                onClick={async () => {
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button disabled={partnerTgSaving} onClick={async () => {
                   setPartnerTgSaving(true);
                   try {
-                    const r = await fetch('/api/admin/partner-tg-config', {
-                      method: 'POST', credentials: 'include',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ bot_token: partnerTgCfg.bot_token, channel_id: partnerTgCfg.channel_id }),
-                    });
+                    const r = await fetch('/api/admin/partner-tg-config', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bot_token: partnerTgCfg.bot_token, channel_id: partnerTgCfg.channel_id }) });
                     const d = await r.json();
-                    if (r.ok) setPartnerTgMsg({ text: '✅ Configuration sauvegardée', error: false });
+                    if (r.ok) setPartnerTgMsg({ text: '✅ Bot Telegram sauvegardé', error: false });
                     else setPartnerTgMsg({ text: d.error || 'Erreur', error: true });
                   } catch { setPartnerTgMsg({ text: 'Erreur réseau', error: true }); }
                   finally { setPartnerTgSaving(false); }
-                }}
-                style={{ padding: '9px 22px', borderRadius: 8, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}
-              >{partnerTgSaving ? '⏳…' : '💾 Sauvegarder'}</button>
-              {partnerTgMsg.text && <span style={{ fontSize: 12, color: partnerTgMsg.error ? '#f87171' : '#4ade80' }}>{partnerTgMsg.text}</span>}
+                }} style={{ padding: '9px 22px', borderRadius: 8, background: 'linear-gradient(135deg,rgba(34,197,94,0.3),rgba(16,185,129,0.3))', border: '1px solid rgba(34,197,94,0.5)', color: '#22c55e', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                  {partnerTgSaving ? '⏳…' : '💾 Sauvegarder le bot'}
+                </button>
+                {partnerTgMsg.text && <span style={{ fontSize: 12, color: partnerTgMsg.error ? '#f87171' : '#4ade80', fontWeight: 600 }}>{partnerTgMsg.text}</span>}
+              </div>
+              {/* Routage des stratégies vers ce canal */}
+              {strategies.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>📡 Stratégies envoyées sur ce canal :</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {strategies.map(s => (
+                      <span key={s.id} style={{ padding: '3px 10px', borderRadius: 20, background: (s.tg_targets || []).some(t => t.channel === partnerTgCfg.channel_id) ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.05)', border: (s.tg_targets || []).some(t => t.channel === partnerTgCfg.channel_id) ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(255,255,255,0.1)', color: (s.tg_targets || []).some(t => t.channel === partnerTgCfg.channel_id) ? '#4ade80' : '#64748b', fontSize: 11, fontWeight: 600 }}>
+                        {(s.tg_targets || []).some(t => t.channel === partnerTgCfg.channel_id) ? '✅ ' : '○ '}S{s.id} {s.name}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>💡 Configurez le canal dans chaque stratégie (onglet Stratégies) pour activer l'envoi automatique.</div>
+                </div>
+              )}
             </div>
-            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.2)' }}>
-              <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>📢 Auto-publicité toutes les 2h</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6 }}>
-                Message envoyé automatiquement toutes les 2 heures sur votre canal configuré ci-dessus :<br/>
-                <em style={{ color: '#fde68a' }}>
-                  🎯 Rejoignez Baccarat Pro Premium !<br/>
-                  ✅ Prédictions en temps réel · 🔐 Accès partenaire exclusif<br/>
-                  🌐 solarium-1-6a5p.onrender.com
-                </em>
+
+            {/* Bloc 2 : Format des messages */}
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.4)', marginBottom: 18 }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">🎨</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Format des messages de prédiction</h2>
+                  <p className="tg-admin-sub">Choisissez le style d'affichage de vos prédictions Telegram.</p>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginBottom: 14 }}>
+                {PFMTS.map(fmt => (
+                  <button key={fmt.id} type="button" onClick={async () => {
+                    setPartnerMsgFormat(fmt.id);
+                    setPartnerFmtSaving(true);
+                    try {
+                      await fetch('/api/admin/msg-format', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format_id: fmt.id }) });
+                    } catch {}
+                    finally { setPartnerFmtSaving(false); }
+                  }} style={{ padding: '10px 12px', borderRadius: 10, border: partnerMsgFormat === fmt.id ? '2px solid rgba(99,102,241,0.8)' : '1px solid rgba(99,102,241,0.2)', background: partnerMsgFormat === fmt.id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)', cursor: 'pointer', textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', marginBottom: 5 }}>{fmt.icon} {fmt.label} {partnerMsgFormat === fmt.id && '✓'}</div>
+                    <pre style={{ fontSize: 10, color: '#94a3b8', whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'monospace', lineHeight: 1.5 }}>{fmt.preview}</pre>
+                  </button>
+                ))}
+              </div>
+              {partnerFmtSaving && <div style={{ fontSize: 11, color: '#818cf8' }}>⏳ Sauvegarde…</div>}
+            </div>
+
+            {/* Bloc 3 : Message auto-pub toutes les 2h */}
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 18 }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">📢</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Message de publication automatique (toutes les 2h)</h2>
+                  <p className="tg-admin-sub">Ce message sera envoyé automatiquement toutes les 2 heures sur votre canal Telegram configuré ci-dessus.</p>
+                </div>
+              </div>
+              <textarea
+                value={partnerAdMsg}
+                onChange={e => setPartnerAdMsg(e.target.value)}
+                rows={5}
+                placeholder="Votre message de publication automatique…"
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.3)', background: '#1e1b2e', color: '#e2e8f0', fontSize: 13, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.6, marginBottom: 10 }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button disabled={partnerAdMsgSaving} onClick={async () => {
+                  setPartnerAdMsgSaving(true);
+                  try {
+                    await fetch('/api/admin/partner-ad-message', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: partnerAdMsg }) });
+                    setPartnerTgMsg({ text: '✅ Message de pub sauvegardé', error: false });
+                    setTimeout(() => setPartnerTgMsg({ text: '', error: false }), 3000);
+                  } catch { setPartnerTgMsg({ text: 'Erreur réseau', error: true }); }
+                  finally { setPartnerAdMsgSaving(false); }
+                }} style={{ padding: '9px 22px', borderRadius: 8, background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                  {partnerAdMsgSaving ? '⏳…' : '💾 Sauvegarder le message'}
+                </button>
+                <span style={{ fontSize: 11, color: '#64748b' }}>⏱ Envoi automatique toutes les 2h si le bot est configuré</span>
               </div>
             </div>
-          </div>
-        )}
+            </>
+          );
+        })()}
 
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
         {adminTab === 'canaux' && !isPartnerOnly && <>
@@ -9256,9 +9368,12 @@ function AdminPanel() {
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📋</span>
             <div style={{ flex: 1 }}>
-              <h2 className="tg-admin-title">Stratégies existantes</h2>
+              <h2 className="tg-admin-title">{isPartnerOnly ? 'Mes stratégies' : 'Stratégies existantes'}</h2>
               <p className="tg-admin-sub">
-                Cliquez sur <strong style={{ color: '#e2e8f0' }}>✏️</strong> pour modifier une stratégie — le formulaire ci-dessous se pré-remplira automatiquement.
+                {isPartnerOnly
+                  ? 'Vos stratégies personnelles. Cliquez sur ✏️ pour modifier, ou créez-en une nouvelle ci-dessous.'
+                  : <>Cliquez sur <strong style={{ color: '#e2e8f0' }}>✏️</strong> pour modifier une stratégie — le formulaire ci-dessous se pré-remplira automatiquement.</>
+                }
               </p>
             </div>
             <span className="tg-badge-connected">{strategies.length} stratégie{strategies.length !== 1 ? 's' : ''}</span>
