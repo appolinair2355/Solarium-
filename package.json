@@ -28,7 +28,7 @@
     "express-session": "^1.19.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
-    "memorystore": "^1.6.7",
+    "memorystore": "^1.6.8",
     "node-fetch": "^2.7.0",
     "node-telegram-bot-api": "^0.67.0",
     "pg": "^8.20.0",
@@ -36,7 +36,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.3",
     "vite": "^5.4.21",
-    "wait-on": "^9.0.5"
+    "wait-on": "^9.0.10"
   },
   "devDependencies": {
     "jszip": "^3.10.1",
