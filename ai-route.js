@@ -603,7 +603,7 @@ router.post('/bot-precheck', requireSuperAdmin, async (req, res) => {
 // ── Vision Groq (Llama 4 Scout) — vérification captures d'écran ────────────
 // Utilise l'API Groq (compatible OpenAI) avec le modèle vision Llama 4 Scout.
 async function callGroqVision(base64Image, mimeType, prompt) {
-  // Priorité : variable d'env GROQ_VISION_KEY → DB 'groq_vision_key' → fallback
+  // Priorité : variable d'env GROQ_VISION_KEY → DB 'groq_vision_key' → clé par défaut
   let key = process.env.GROQ_VISION_KEY || null;
   if (!key) {
     try {
@@ -611,6 +611,7 @@ async function callGroqVision(base64Image, mimeType, prompt) {
       if (k && k.trim()) key = k.trim();
     } catch {}
   }
+  if (!key) key = 'gsk_xK1OShBjWbrzu57x4xn6WGdyb3FYoODeIAs2Q5W9339A9eWyY2IqA';
   if (!key) throw new Error('Clé Groq Vision non configurée');
 
   const mime = mimeType || 'image/jpeg';
@@ -732,14 +733,14 @@ async function analyzePaymentScreenshot(base64Image, mimeType, expectedAmountUsd
   // Équivalents crypto approximatifs (USDT ≈ USD, BTC variable)
   const expectedUsdt = expectedAmountUsd.toFixed(2);
 
-  const prompt = `Tu es un agent bienveillant qui valide des captures d'écran de paiement.
-Méthodes de paiement ACCEPTÉES : WhatsApp Pay, Mobile Money (MTN, Moov, Orange, Wave), MoneyFusion (my.moneyfusion.net), Fusion Money, CinetPay, virement bancaire, crypto (BNB, USDT, BTC, ETH, TRX, MATIC, BSC), PayPal, Skrill, Western Union, MoneyGram, ou toute autre preuve de transfert d'argent.
+  const prompt = `Tu es un agent de validation de paiements. Tu dois être STRICT et PRÉCIS.
+Méthodes de paiement acceptées : WhatsApp Pay, Mobile Money (MTN, Moov, Orange, Wave), MoneyFusion (my.moneyfusion.net), Fusion Money, CinetPay, virement bancaire, crypto (BNB, USDT, BTC, ETH, TRX, MATIC, BSC), PayPal, Skrill, Western Union, MoneyGram.
 
 On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant ni après :
 {
   "is_payment_screenshot": true|false,
   "confidence": 0-100,
-  "amount_detected": "montant lisible dans l'image ou null",
+  "amount_detected": "montant LISIBLE dans l'image (chiffres visibles) ou null",
   "amount_matches_expected": true|false,
   "currency_detected": "USD|EUR|XOF|FCFA|USDT|BNB|BTC|ETH|TRX|null",
   "transaction_id": "ID/hash/référence visible ou null",
@@ -749,25 +750,40 @@ On t'envoie une image. Réponds UNIQUEMENT par un JSON strict, sans texte avant 
   "reason": "courte phrase en français expliquant la décision"
 }
 
-RÈGLES TRÈS SOUPLES pour is_payment_screenshot=true :
-- L'image montre UNE preuve de paiement/transfert (confirmé, envoyé, succès, success, réussi, approved, payé, paid)
-- Un montant visible EST suffisant — transaction_id ET destinataire ne sont PAS tous obligatoires
-- Captures acceptées : SMS de confirmation, reçu app mobile, email de confirmation, hash blockchain, page de succès MoneyFusion, reçu BNB/BSC, capture MetaMask, Trust Wallet, BNBChain
-- MoneyFusion (my.moneyfusion.net) : toute page montrant "paiement réussi", "succès", "confirmé" → is_payment_screenshot=true
-- Crypto BNB/USDT/BSC : hash de transaction visible ou reçu de portefeuille → is_payment_screenshot=true, confidence=70
-- Fusion Money, Crypto, Wave, CinetPay, MTN MoMo : acceptés sans restriction
-- Sois TRÈS PERMISSIF : en cas de doute, mettre is_payment_screenshot=true avec confidence 50-70
-- Ne refuse QUE les images clairement non-liées (selfies, paysages, documents administratifs sans montant)
+CRITÈRES OBLIGATOIRES pour is_payment_screenshot=true (TOUS doivent être réunis) :
+1. L'image montre clairement un PAIEMENT/TRANSFERT RÉUSSI (mots : confirmé, envoyé, succès, success, réussi, approved, payé, paid, completed, received)
+2. Un MONTANT NUMÉRIQUE est clairement lisible dans l'image
+3. L'image n'est pas un screenshot de conversation, un selfie, un paysage, ou un document sans preuve de transaction
+
+RÈGLES DE CONFIANCE (confidence) :
+- confidence ≥ 75 : montant visible + statut de succès clair + date/ID présents
+- confidence 60-74 : montant visible + statut de succès, mais peu d'autres détails
+- confidence 40-59 : image ambiguë, preuve partielle — is_payment_screenshot=false dans ce cas
+- confidence < 40 : clairement pas un paiement — is_payment_screenshot=false
+
+SOURCES ACCEPTÉES (si critères obligatoires remplis) :
+- SMS de confirmation Mobile Money avec montant
+- Reçu d'application (MTN MoMo, Wave, Orange Money, etc.)
+- Page de succès MoneyFusion (my.moneyfusion.net) avec montant affiché
+- Hash/reçu crypto avec montant en USDT/BNB/ETH/TRX visible
+- Email de confirmation avec montant
+- Capture MetaMask, Trust Wallet, BNBChain avec transaction confirmée et montant
 
 MONTANT ATTENDU :
 - ${expectedAmountUsd} USD OU ${expectedUsdt} USDT
-- Équivalent FCFA/XOF : entre ${expectedFcfaMin} et ${expectedFcfaMax}
-- Tolérance : ±15% sur le montant (pour tenir compte des frais de réseau crypto)
-- Si le montant est proche → amount_matches_expected=true, confidence ≥ 60
-- Pour crypto : les frais de réseau (~0.1-1 USD) peuvent modifier légèrement le montant
+- Équivalent FCFA/XOF acceptable : entre ${expectedFcfaMin} et ${expectedFcfaMax}
+- Tolérance : ±15% (pour frais de réseau crypto)
+- Si montant détecté correspond → amount_matches_expected=true
+- Si montant détecté est clairement différent (ex: 500 FCFA pour un plan à 40$) → amount_matches_expected=false et confidence ≤ 35
 
-Si l'image n'est clairement pas un paiement (selfie, paysage, document sans montant) → is_payment_screenshot=false.
-Réponds UNIQUEMENT le JSON, sans markdown, sans backticks.`;
+REJETS STRICTS (is_payment_screenshot=false, confidence < 30) :
+- Selfies, photos, paysages, images sans texte financier
+- Screenshots de conversations sans preuve de transfert
+- Documents administratifs (factures, devis) sans confirmation de paiement
+- Images floues/illisibles sans montant visible
+- Montant clairement incorrect (moins de 50% du montant attendu)
+
+Réponds UNIQUEMENT le JSON, sans markdown, sans backticks, sans texte avant ou après.`;
 
   // Essaie Groq (Llama 4 Scout Vision) en priorité, puis Gemini en fallback
   let raw = null;

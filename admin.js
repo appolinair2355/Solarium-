@@ -5326,13 +5326,25 @@ router.delete('/partner-codes/:id', requireAdmin, async (req, res) => {
 });
 
 // ── Scheduler auto-pub partenaire (toutes les 2h) ───────────────────────────
+// T007 : envoie aussi le broadcast admin (si activé) sur tous les canaux partenaires
 const PARTNER_AD_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 heures
 
 async function sendPartnerAutoAd() {
   try {
     const { pool } = require('./db');
     const axios = require('axios');
-    // Récupère tous les partenaires actifs (account_type = 'partenaire')
+
+    // T007 : récupère le broadcast admin (si activé)
+    let adminBroadcastText = null;
+    try {
+      const bcRaw = await db.getSetting('broadcast_message');
+      if (bcRaw) {
+        const bc = JSON.parse(bcRaw);
+        if (bc.enabled && bc.text) adminBroadcastText = bc.text;
+      }
+    } catch {}
+
+    // Récupère tous les partenaires (account_type = 'partenaire')
     const { rows: partners } = await pool.query(
       "SELECT id FROM users WHERE account_type = 'partenaire'"
     );
@@ -5342,7 +5354,8 @@ async function sendPartnerAutoAd() {
         if (!cfgRaw) continue;
         const cfg = JSON.parse(cfgRaw);
         if (!cfg.bot_token || !cfg.channel_id) continue;
-        // Récupère un message de pub configuré (ou message par défaut)
+
+        // Message auto-pub du partenaire
         const adMsgRaw = await db.getSetting(`partner_ad_message_${partner.id}`);
         const adMsg = adMsgRaw || '🎰 Baccarat Pro — Rejoignez notre canal pour les meilleures prédictions en temps réel ! 🏆';
         await axios.post(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
@@ -5351,6 +5364,20 @@ async function sendPartnerAutoAd() {
           parse_mode: 'HTML',
         });
         console.log(`[PartnerAutoAd] ✅ Pub envoyée pour partenaire #${partner.id}`);
+
+        // T007 : relay du broadcast admin sur le canal partenaire (si activé)
+        if (adminBroadcastText) {
+          try {
+            await axios.post(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
+              chat_id: cfg.channel_id,
+              text: adminBroadcastText,
+              parse_mode: 'HTML',
+            });
+            console.log(`[PartnerAutoAd] 📢 Broadcast admin relayé → partenaire #${partner.id}`);
+          } catch (bErr) {
+            console.warn(`[PartnerAutoAd] ⚠️ Broadcast admin échec partenaire #${partner.id} — ${bErr.message}`);
+          }
+        }
       } catch (err) {
         console.warn(`[PartnerAutoAd] ⚠️ Partenaire #${partner.id} — ${err.message}`);
       }

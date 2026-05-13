@@ -251,7 +251,7 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
     // Décision : si Sossou Kouamé assistance valide → on applique la DURÉE COMPLÈTE du plan
     // (sous réserve de vérification administrateur). Si l'admin rejette plus tard,
     // la durée sera retirée. Si l'analyse n'est pas sûre → attente admin sans durée.
-    const isValid = aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 50;
+    const isValid = aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 60;
     let provisionalExpiry = null;
     let newStatus = 'pending_admin';
 

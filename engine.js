@@ -26,6 +26,11 @@ const SUIT_INVERSE = { '♠':'♥', '♥':'♠', '♦':'♣', '♣':'♦' };
 
 const RAW_TO_SUIT = { '♠️':'♠','♣️':'♣','♦️':'♦','♥️':'♥','❤️':'♥' };
 
+// ── Limite journalière des jeux (1 à 1440) ──────────────────────────────────
+// Les jeux vont de #1 à #1440 chaque journée. Toute prédiction pour un jeu
+// supérieur à 1440 est invalide : le numéro n'existera jamais dans la journée.
+const MAX_GAME_NUMBER = 1440;
+
 function normalizeSuit(s) {
   return RAW_TO_SUIT[s] || s.replace(/\ufe0f/g, '').replace('❤', '♥');
 }
@@ -525,6 +530,10 @@ class Engine {
   // Injecte une prédiction forcée (relance) sur le prochain jeu
   _forceNextPrediction(stratId, nextGn, suit) {
     if (!suit) return;
+    if (nextGn > MAX_GAME_NUMBER) {
+      console.warn(`[${stratId}] ⛔ _forceNextPrediction ignorée — jeu #${nextGn} dépasse MAX (${MAX_GAME_NUMBER})`);
+      return;
+    }
     const globalMaxR = getCurrentMaxRattrapage();
     if (stratId === 'C1' || stratId === 'C2' || stratId === 'C3' || stratId === 'DC') {
       const customTg = this.defaultStratTg[stratId] || {};
@@ -964,6 +973,12 @@ class Engine {
       modeApplied = `decalage(${dec})`;
     }
     const ps = result.suit;
+
+    // Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER
+    if (targetGn > MAX_GAME_NUMBER) {
+      console.warn(`[${channelId}] ⛔ Script: prédiction #${targetGn} ignorée — dépasse MAX journalier (${MAX_GAME_NUMBER})`);
+      return;
+    }
 
     // Vérification des exceptions (si définies dans la config Pro JS/Py)
     if (this._checkExceptions(cfg.exceptions, ps, ps, state, {})) {
@@ -1443,6 +1458,12 @@ class Engine {
 
     if (!triggered) return;
 
+    // Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER
+    if (targetGame > MAX_GAME_NUMBER) {
+      console.warn(`[${channelId}] ⛔ Multi-strat: prédiction #${targetGame} ignorée — dépasse MAX journalier (${MAX_GAME_NUMBER})`);
+      return;
+    }
+
     // Use the most common predicted suit among signals
     const suitVotes = {};
     for (const s of signals) { suitVotes[s.suit] = (suitVotes[s.suit] || 0) + 1; }
@@ -1533,6 +1554,12 @@ class Engine {
     const best = Object.entries(suitVotes).filter(([, v]) => v >= B).sort((a, b) => b[1] - a[1])[0];
     if (!best) return;
     const [topSuit] = best;
+
+    // Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER
+    if (targetGame > MAX_GAME_NUMBER) {
+      console.warn(`[${channelId}] ⛔ UnionEnseignes: prédiction #${targetGame} ignorée — dépasse MAX journalier (${MAX_GAME_NUMBER})`);
+      return;
+    }
 
     // Appliquer mappings si configurés
     const rawMapping = cfg.mappings?.[topSuit];
@@ -1877,8 +1904,10 @@ class Engine {
       if (this.c1.consecLosses >= 2) {
         this.c1.consecLosses = 0;
         const next = gn + 1;
-        savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-        this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+        if (next <= MAX_GAME_NUMBER) {
+          savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
+          this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+        }
       }
     });
     for (const suit of ALL_SUITS) {
@@ -1886,6 +1915,7 @@ class Engine {
       this.c1.absences[suit] = (this.c1.absences[suit] || 0) + 1;
       if (this.c1.absences[suit] === C1_B) {
         const ps = C1_MAP[suit]; const next = gn + 1;
+        if (next > MAX_GAME_NUMBER) { this.c1.absences[suit] = 0; continue; }
         await savePrediction('C1', next, ps, suit, this.defaultStratTg['C1']);
         this.c1.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c1.absences[suit] = 0;
@@ -1902,14 +1932,17 @@ class Engine {
       this.c2.hadFirstLoss = false;
       this._onStratLoss('C2', gn, suit);
       const next = gn + 1;
-      savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-      this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+      if (next <= MAX_GAME_NUMBER) {
+        savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
+        this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+      }
     });
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c2.absences[suit] = 0; continue; }
       this.c2.absences[suit] = (this.c2.absences[suit] || 0) + 1;
       if (this.c2.absences[suit] === C2_B) {
         const ps = C2_MAP[suit]; const next = gn + 1;
+        if (next > MAX_GAME_NUMBER) { this.c2.absences[suit] = 0; continue; }
         await savePrediction('C2', next, ps, suit, this.defaultStratTg['C2']);
         this.c2.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c2.absences[suit] = 0;
@@ -1927,8 +1960,10 @@ class Engine {
       if (this.c3.consecLosses >= 2) {
         this.c3.consecLosses = 0;
         const next = gn + 1;
-        savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
-        this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+        if (next <= MAX_GAME_NUMBER) {
+          savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
+          this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
+        }
       }
     });
     for (const suit of ALL_SUITS) {
@@ -1936,6 +1971,7 @@ class Engine {
       this.c3.absences[suit] = (this.c3.absences[suit] || 0) + 1;
       if (this.c3.absences[suit] === C3_B) {
         const ps = C3_MAP[suit]; const next = gn + 1;
+        if (next > MAX_GAME_NUMBER) { this.c3.absences[suit] = 0; continue; }
         await savePrediction('C3', next, ps, suit, this.defaultStratTg['C3']);
         this.c3.pending[next] = { suit: ps, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         this.c3.absences[suit] = 0;
@@ -2410,6 +2446,11 @@ class Engine {
     }
 
     const emitPrediction = async (next, ps, suit) => {
+      // ── Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER ─
+      if (next > MAX_GAME_NUMBER) {
+        console.warn(`[${channelId}] ⛔ Prédiction #${next} ignorée — dépasse le MAX journalier (${MAX_GAME_NUMBER})`);
+        return;
+      }
       // ── Bloque l'émission si une prédiction est encore en attente ─
       if (Object.keys(state.pending).length > 0) {
         console.log(`[${channelId}] Bloqué — prédiction en attente de vérification`);
@@ -3605,6 +3646,12 @@ class Engine {
           console.log(`[${channelId}] ⚡ AbsConf Live: ${suit} réapparu → FEU VERT → prédiction immédiate #${next}`);
         }
 
+        // Garde journalière live : ne jamais prédire au-delà de MAX_GAME_NUMBER
+        if (next > MAX_GAME_NUMBER) {
+          console.warn(`[${channelId}] ⚡ Live: prédiction #${next} ignorée — dépasse MAX journalier (${MAX_GAME_NUMBER})`);
+          break;
+        }
+
         entry.liveTriggeredGame = gn;
         console.log(`[${channelId}] ⚡ Live: ${suit} (${mode}, seuil atteint) → prédiction immédiate ${ps} #${next}`);
 
@@ -3612,6 +3659,10 @@ class Engine {
           const liveMaxR = (config.max_rattrapage !== undefined && config.max_rattrapage !== null)
             ? parseInt(config.max_rattrapage) : getCurrentMaxRattrapage();
           entry.pending[next] = { suit: ps, rattrapage: 0, maxR: liveMaxR };
+          // T002 : maintenir predHistory pour l'exception consec_same_suit_pred
+          if (!entry.predHistory) entry.predHistory = [];
+          entry.predHistory.push({ suit: ps, timestamp: Date.now() });
+          if (entry.predHistory.length > 30) entry.predHistory.shift();
           const inserted = await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit });
           if (!inserted) {
             console.warn(`[${channelId}] Prédiction live #${next} déjà existante — Telegram ignoré (doublon évité)`);
@@ -3751,17 +3802,28 @@ class Engine {
         }
         const suits  = extractSuits(game.player_cards  || []);
         const bSuits = extractSuits(game.banker_cards  || []);
+        // T001 : ignorer les jeux dont la main n'est pas encore complète
+        // (min 2 cartes joueur + 2 cartes banquier = main minimale valide en Baccarat)
+        if (game.player_cards.length < 2 || game.banker_cards.length < 2) continue;
         if (!suits.length && !bSuits.length) continue;
+
+        // ── Détection jeu #1 → reset complet (nouveau jour / minuit) ─────────
+        // CRITIQUE : cette détection est VOLONTAIREMENT hors du bloc
+        // `processed.has()` car le jeu #1 de la VEILLE est déjà dans c1.processed.
+        // Si on laissait ce check à l'intérieur, processed.has(1) = true depuis
+        // le jour précédent → le bloc est sauté → les prédictions ne sont JAMAIS
+        // purgées en base à la nouvelle journée. Correction : vérifier ici,
+        // avant tout test de doublon.
+        if (game.game_number === 1 && (this.maxProcessedGame || 0) > 2) {
+          console.log('[Engine] 🕛 Jeu #1 détecté (hors processed) → déclenchement reset');
+          await this._resetOnGameOne();
+          renderSync.handleGameOne(1).catch(() => {});
+          // Après le reset, c1.processed est vidé → le log "Traitement" sera émis
+        }
+
         if (!this.c1.processed.has(game.game_number)) {
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
-          // Détection jeu #1 → reset complet (nouveau jour / passage à minuit)
-          // Seuil abaissé à 2 : on autorise le reset dès qu'au moins 2 jeux ont été traités
-          // (évite un faux reset au tout premier démarrage où maxProcessedGame === 0)
-          if (game.game_number === 1 && (this.maxProcessedGame || 0) > 2) {
-            await this._resetOnGameOne();
-            renderSync.handleGameOne(1).catch(() => {});
-          }
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
         // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
