@@ -13297,21 +13297,28 @@ function AdminPanel() {
         )}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
-        {adminTab === 'canaux' && !isPartnerOnly && (
+        {adminTab === 'canaux' && (() => {
+          const partnerChannelIds = isPartnerOnly
+            ? strategies.flatMap(s => (s.tg_targets || []).map(t => t.channel_id)).filter(Boolean)
+            : null;
+          const visibleAnnouncements = isPartnerOnly
+            ? announcements.filter(a => partnerChannelIds.includes(a.channel_id))
+            : announcements;
+          return (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.45)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📢</span>
             <div style={{ flex: 1 }}>
               <h2 className="tg-admin-title">Annonces planifiées Telegram</h2>
-              <p className="tg-admin-sub">Envoyez automatiquement un message (texte + image ou vidéo) dans un canal Telegram à intervalles réguliers ou à des heures fixes.</p>
+              <p className="tg-admin-sub">{isPartnerOnly ? 'Gérez vos messages automatiques planifiés pour vos canaux Telegram.' : 'Envoyez automatiquement un message (texte + image ou vidéo) dans un canal Telegram à intervalles réguliers ou à des heures fixes.'}</p>
             </div>
-            {announcements.length > 0 && <span className="tg-badge-connected">{announcements.length} annonce{announcements.length > 1 ? 's' : ''}</span>}
+            {visibleAnnouncements.length > 0 && <span className="tg-badge-connected">{visibleAnnouncements.length} annonce{visibleAnnouncements.length > 1 ? 's' : ''}</span>}
           </div>
 
           {/* Liste des annonces existantes */}
-          {announcements.length > 0 && (
+          {visibleAnnouncements.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-              {announcements.map(ann => (
+              {visibleAnnouncements.map(ann => (
                 <div key={ann.id} style={{
                   padding: '14px 16px', borderRadius: 12,
                   background: ann.enabled ? 'rgba(251,191,36,0.06)' : 'rgba(255,255,255,0.03)',
@@ -13575,21 +13582,52 @@ function AdminPanel() {
                   style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
               </div>
 
+              {/* Sélecteur canal partenaire */}
+              {isPartnerOnly && (() => {
+                const pTargets = strategies.flatMap(s =>
+                  (s.tg_targets || []).filter(t => t.bot_token && t.channel_id).map(t => ({ stratName: s.name, ...t }))
+                );
+                if (pTargets.length === 0) return (
+                  <div style={{ gridColumn: '1 / -1', padding: '12px 16px', borderRadius: 10, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                    ⚠️ Configurez d'abord un canal Telegram dans vos stratégies pour créer une annonce.
+                  </div>
+                );
+                return (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>📡 Canal Telegram (depuis vos stratégies)</label>
+                    <select
+                      value={annForm.channel_id}
+                      onChange={e => {
+                        const tgt = pTargets.find(t => t.channel_id === e.target.value);
+                        if (tgt) setAnnForm(p => ({ ...p, bot_token: tgt.bot_token, channel_id: tgt.channel_id }));
+                      }}
+                      required
+                      style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}>
+                      <option value="">— Choisir un canal —</option>
+                      {pTargets.map((t, i) => (
+                        <option key={i} value={t.channel_id}>{t.stratName} · {t.channel_id}</option>
+                      ))}
+                    </select>
+                    {annForm.channel_id && <div style={{ marginTop: 5, fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>🤖 Token : {annForm.bot_token.slice(0, 22)}…</div>}
+                  </div>
+                );
+              })()}
+
               {/* Bot Token */}
-              <div>
+              {!isPartnerOnly && <div>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>🤖 Bot Token Telegram</label>
                 <input value={annForm.bot_token} required onChange={e => setAnnForm(p => ({ ...p, bot_token: e.target.value }))}
                   placeholder="1234567890:ABCdef..."
                   style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-              </div>
+              </div>}
 
               {/* Channel ID */}
-              <div>
+              {!isPartnerOnly && <div>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>📡 ID du canal Telegram</label>
                 <input value={annForm.channel_id} required onChange={e => setAnnForm(p => ({ ...p, channel_id: e.target.value }))}
                   placeholder="-100123456789"
                   style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-              </div>
+              </div>}
 
               {/* Texte */}
               <div style={{ gridColumn: '1 / -1' }}>
@@ -13764,7 +13802,9 @@ function AdminPanel() {
               </div>
             </form>
           )}
-        </div>)}
+        </div>
+        );
+        })()}
 
         {/* ════════════════════════════════════════════════
             ── TAB : CANAUX TELEGRAM ──
@@ -14439,6 +14479,100 @@ function AdminPanel() {
           </div>
         </div>
         )}
+
+        {/* ── SECTION 2-ter : PUBLICATIONS AUTO TELEGRAM (partenaires uniquement) ── */}
+        {isPartnerOnly && (() => {
+          const stratsWithCh = strategies.filter(s => (s.tg_targets || []).some(t => t.bot_token && t.channel_id));
+          return (
+            <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
+              <div className="tg-admin-header">
+                <span className="tg-admin-icon">📢</span>
+                <div style={{ flex: 1 }}>
+                  <h2 className="tg-admin-title">Publications automatiques Telegram</h2>
+                  <p className="tg-admin-sub">Envoyez automatiquement un message toutes les <strong style={{ color: '#fbbf24' }}>2 heures</strong> dans le canal Telegram de chaque stratégie configurée.</p>
+                </div>
+                {stratsWithCh.length > 0 && <span className="tg-badge-connected" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>{stratsWithCh.length} stratégie{stratsWithCh.length !== 1 ? 's' : ''}</span>}
+              </div>
+
+              {stratsWithCh.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '22px 16px', color: '#64748b' }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>📢</div>
+                  <div style={{ fontSize: 12 }}>Configurez d'abord un canal Telegram pour vos stratégies (section ci-dessus), puis revenez ici pour programmer des publications automatiques.</div>
+                </div>
+              )}
+
+              {stratsWithCh.map(s => {
+                const tgt = (s.tg_targets || []).find(t => t.bot_token && t.channel_id);
+                const annKey = `strat_${s.id}`;
+                const ann = getAnnSub(annKey);
+                const isOpen = ann.open;
+                return (
+                  <div key={s.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', padding: '14px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 38, height: 38, borderRadius: 9, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>📢</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 13 }}>{s.name}</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          ✈️ <span style={{ fontFamily: 'monospace', color: '#a78bfa' }}>{tgt?.channel_id}</span>
+                          {ann.text?.trim() ? (
+                            <span style={{ marginLeft: 8, color: '#fbbf24', fontWeight: 600 }}>⏱ toutes les {ann.interval_hours}h · {ann.text.slice(0, 40)}{ann.text.length > 40 ? '…' : ''}</span>
+                          ) : (
+                            <span style={{ marginLeft: 8, color: '#475569', fontStyle: 'italic' }}>Aucune publication configurée</span>
+                          )}
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => setAnnSub(annKey, { open: !isOpen })}
+                        style={{ fontSize: 11, padding: '6px 13px', borderRadius: 7, cursor: 'pointer', fontWeight: 700, flexShrink: 0,
+                          background: isOpen ? 'rgba(255,255,255,0.06)' : ann.text?.trim() ? 'rgba(251,191,36,0.15)' : 'rgba(168,85,247,0.12)',
+                          color: isOpen ? '#94a3b8' : ann.text?.trim() ? '#fbbf24' : '#a855f7',
+                          border: `1px solid ${isOpen ? 'rgba(255,255,255,0.1)' : ann.text?.trim() ? 'rgba(251,191,36,0.35)' : 'rgba(168,85,247,0.3)'}`,
+                        }}>{isOpen ? '✕ Fermer' : ann.text?.trim() ? '✏️ Modifier' : '➕ Configurer'}</button>
+                    </div>
+
+                    {isOpen && (
+                      <div style={{ marginTop: 12, padding: '16px', background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid rgba(251,191,36,0.2)' }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>💬 Texte du message</label>
+                          <textarea rows={4} value={ann.text} onChange={e => setAnnSub(annKey, { text: e.target.value })}
+                            placeholder={`Ex: 🎯 Nouvelle prédiction disponible pour ${s.name} !`}
+                            style={{ width: '100%', padding: '10px 12px', background: '#1e1b2e', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
+                          <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>HTML supporté : &lt;b&gt;gras&lt;/b&gt; · &lt;i&gt;italique&lt;/i&gt; · &lt;a href="…"&gt;lien&lt;/a&gt;</div>
+                        </div>
+                        <div style={{ marginBottom: 14 }}>
+                          <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>⏱ Intervalle (heures)</label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <input type="number" min="0.5" step="0.5" value={ann.interval_hours ?? 2}
+                              onChange={e => setAnnSub(annKey, { interval_hours: e.target.value, schedule_type: 'interval' })}
+                              style={{ width: 90, padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: '#1e1b2e', color: '#fbbf24', fontSize: 13, fontWeight: 700 }} />
+                            <span style={{ fontSize: 12, color: '#94a3b8' }}>heure(s) · défaut recommandé : <strong style={{ color: '#fbbf24' }}>2h</strong></span>
+                            {[1, 2, 3, 6, 12].map(h => (
+                              <button key={h} type="button" onClick={() => setAnnSub(annKey, { interval_hours: h, schedule_type: 'interval' })}
+                                style={{ padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                  border: `1px solid ${ann.interval_hours == h ? 'rgba(251,191,36,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                                  background: ann.interval_hours == h ? 'rgba(251,191,36,0.2)' : 'transparent',
+                                  color: ann.interval_hours == h ? '#fbbf24' : '#64748b',
+                                }}>{h}h</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button type="button" onClick={() => setAnnSub(annKey, { open: false })}
+                            style={{ fontSize: 12, padding: '7px 14px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>Annuler</button>
+                          <button type="button"
+                            onClick={async () => { setAnnSub(annKey, { schedule_type: 'interval' }); await saveAnnSub(annKey, tgt.bot_token, tgt.channel_id, s.name); setAnnSub(annKey, { open: false }); }}
+                            disabled={!ann.text?.trim()}
+                            style={{ fontSize: 12, padding: '7px 14px', borderRadius: 7, border: 'none', background: '#ca8a04', color: '#fff', cursor: 'pointer', fontWeight: 700, opacity: !ann.text?.trim() ? 0.5 : 1 }}>
+                            💾 Enregistrer
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* ── SECTION 2-bis : STRATÉGIES PRO (S5001-S5100) ── */}
         <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.5)', marginBottom: 20 }}>
