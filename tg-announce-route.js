@@ -10,6 +10,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireAdminOrPartner(req, res, next) {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  if (!req.session?.isAdmin && req.session?.accountType !== 'partenaire')
+    return res.status(403).json({ error: 'Accès admin ou partenaire requis' });
+  next();
+}
+
 function parseFixedHours(val) {
   if (Array.isArray(val)) return val.map(Number);
   if (typeof val === 'string') { try { return JSON.parse(val).map(Number); } catch { return []; } }
@@ -25,7 +32,7 @@ function sanitizeRow(row) {
 }
 
 // ── GET /api/tg-announce ─────────────────────────────────────────────────────
-router.get('/', requireAdmin, async (req, res) => {
+router.get('/', requireAdminOrPartner, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM tg_announcements ORDER BY created_at DESC');
     res.json(r.rows.map(sanitizeRow));
@@ -35,7 +42,7 @@ router.get('/', requireAdmin, async (req, res) => {
 // ── GET /api/tg-announce/channels-hint ───────────────────────────────────────
 // Retourne les paires (channel_id, bot_token, label) déjà configurées ailleurs,
 // pour remplissage automatique dans le formulaire.
-router.get('/channels-hint', requireAdmin, async (req, res) => {
+router.get('/channels-hint', requireAdminOrPartner, async (req, res) => {
   try {
     const hints = [];
     const seen  = new Set();
@@ -79,7 +86,7 @@ router.get('/channels-hint', requireAdmin, async (req, res) => {
 });
 
 // ── POST /api/tg-announce ────────────────────────────────────────────────────
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireAdminOrPartner, async (req, res) => {
   try {
     const {
       name, channel_id, bot_token, message_text,
@@ -120,7 +127,7 @@ router.post('/', requireAdmin, async (req, res) => {
 });
 
 // ── PUT /api/tg-announce/:id ─────────────────────────────────────────────────
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireAdminOrPartner, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
@@ -179,7 +186,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
 });
 
 // ── DELETE /api/tg-announce/:id ──────────────────────────────────────────────
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireAdminOrPartner, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });
@@ -190,7 +197,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 });
 
 // ── POST /api/tg-announce/:id/send-now ──────────────────────────────────────
-router.post('/:id/send-now', requireAdmin, async (req, res) => {
+router.post('/:id/send-now', requireAdminOrPartner, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' });

@@ -7,6 +7,7 @@ const path                 = require('path');
 const { spawn }            = require('child_process');
 const db                   = require('./db');
 const { generateStrategyZip } = require('./zip-generator');
+const { autoUpdateStrategyAnnouncement } = require('./strategy-auto-announce');
 const router               = express.Router();
 
 function genPassword(len = 10) {
@@ -4834,6 +4835,9 @@ router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
     const configs = raw ? JSON.parse(raw) : {};
     configs[String(id)] = req.body;
     await db.setSetting('strategy_promo_config', JSON.stringify(configs));
+
+    // ── Auto-publication Telegram ──────────────────────────────────────────
+    autoUpdateStrategyAnnouncement().catch(e => console.warn('[Admin] AutoAnnounce erreur:', e.message));
 
     // ── Sync nom boutique → nom stratégie ─────────────────────────────────
     // Si un titre est défini dans la boutique, l'appliquer comme nom de stratégie

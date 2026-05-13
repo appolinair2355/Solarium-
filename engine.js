@@ -981,7 +981,7 @@ class Engine {
     }
 
     // Vérification des exceptions (si définies dans la config Pro JS/Py)
-    if (this._checkExceptions(cfg.exceptions, ps, ps, state, {})) {
+    if (this._checkExceptions(cfg.exceptions, ps, ps, state, {}, gn)) {
       console.log(`[${channelId}] Prédiction #${targetGn} ${SUIT_DISPLAY[ps]||ps} bloquée par exception`);
       return;
     }
@@ -1569,7 +1569,7 @@ class Engine {
 
     // Vérifier exception
     const exceptions = cfg.exceptions || [];
-    if (this._checkExceptions(exceptions, ps, topSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+    if (this._checkExceptions(exceptions, ps, topSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
 
     let inserted = false;
     try {
@@ -1693,7 +1693,7 @@ class Engine {
 
     // ── Vérifier exceptions ──
     const exceptions = cfg.exceptions || [];
-    if (this._checkExceptions(exceptions, ps, chosenSuit, state, { pCards, bCards, hand })) return;
+    if (this._checkExceptions(exceptions, ps, chosenSuit, state, { pCards, bCards, hand }, gn)) return;
 
     let inserted = false;
     try {
@@ -2009,7 +2009,7 @@ class Engine {
    * @param {object} state        - État de la stratégie custom (history, lastOutcomes, pending)
    * @returns {boolean} true = prédiction bloquée
    */
-  _checkExceptions(exceptions, predictedSuit, triggerSuit, state, triggerCards = {}) {
+  _checkExceptions(exceptions, predictedSuit, triggerSuit, state, triggerCards = {}, gn = null) {
     if (!Array.isArray(exceptions) || exceptions.length === 0) return false;
 
     for (const ex of exceptions) {
@@ -2176,7 +2176,7 @@ class Engine {
         // ── 14. Parité du numéro de jeu ───────────────────────────────
         case 'game_parity': {
           const parity = ex.parity || 'even';
-          const gNum   = state.history.length;
+          const gNum   = gn !== null ? gn : state.history.length;
           const isEven = (gNum % 2 === 0);
           if ((parity === 'even' && isEven) || (parity === 'odd' && !isEven)) {
             console.log(`[Exception] game_parity(${parity}): jeu #${gNum} → bloqué`);
@@ -2354,6 +2354,15 @@ class Engine {
           if (action === 'inverse') {
             const inv = SUIT_INVERSE[pend.suit] || pend.suit;
             console.log(`[${channelId}] [decalage_suit_check] Jeu #${gn} = triggerGame(${tg})+${decalage} — même costume ${pend.suit} détecté → inverser en ${inv} pour prédiction #${targetGameStr}`);
+            // Mise à jour DB : changer predicted_suit pour que la résolution retrouve la bonne entrée
+            try {
+              await db.pool.query(
+                `UPDATE predictions SET predicted_suit=$1 WHERE strategy=$2 AND game_number=$3 AND predicted_suit=$4 AND status='en_cours'`,
+                [inv, channelId, parseInt(targetGameStr), pend.suit]
+              );
+            } catch (dbErr) {
+              console.warn(`[${channelId}] [decalage_suit_check] Erreur update DB: ${dbErr.message}`);
+            }
             state.pending[targetGameStr] = { ...pend, suit: inv };
           } else {
             console.log(`[${channelId}] [decalage_suit_check] Jeu #${gn} = triggerGame(${tg})+${decalage} — même costume ${pend.suit} détecté → annuler prédiction #${targetGameStr}`);
@@ -2466,7 +2475,7 @@ class Engine {
       // ── Bloqueur automatique de mauvaises prédictions ─────────────
       if (this._isBadPredBlocked(channelId, gn, state)) return;
       // ── Vérification des exceptions avant d'émettre ───────────────
-      if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+      if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
 
       let inserted = false;
       try {
@@ -2975,7 +2984,7 @@ class Engine {
       }
 
       // Vérification des exceptions
-      if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+      if (this._checkExceptions(exceptions, targetSuit, targetSuit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
 
       console.log(`[${channelId}] [LecturePassée] 🔔 live=${gn} ≥ go-2=${go - 2} → déclenche go=${go} ${targetSuit} (${sourceLabel} carte#${position}=${targetRank}${targetSuit})`);
 
@@ -3066,7 +3075,7 @@ class Engine {
         state._intelligentLastConf = conf;
         console.log(`[${channelId}] [Intelligent] ${handLabel} pattern "${currentKey}" (${total} occ.) → ${best} (${bestCount}, ${conf}%) → jeu #${goN}`);
         // Vérification des exceptions avant d'émettre
-        if (this._checkExceptions(exceptions, best, best, state, { pCards, bCards, hand: cfg.hand || 'joueur' })) return;
+        if (this._checkExceptions(exceptions, best, best, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
         // CORRECTION : ne marquer _lastIntelligentGo qu'après confirmation que la prédiction a été mise en file
         await emitPrediction(goN, best, best);
         if (state.pending[goN] !== undefined) {
@@ -3633,7 +3642,7 @@ class Engine {
         const ps = resolveLivePs(suit);
 
         // Vérification des exceptions avant déclenchement live
-        if (this._checkExceptions(config.exceptions, ps, suit, entry, {})) {
+        if (this._checkExceptions(config.exceptions, ps, suit, entry, {}, gn)) {
           console.log(`[${channelId}] ⚡ Live: prédiction ${SUIT_DISPLAY[ps]||ps} bloquée par exception (déclencheur ${suit})`);
           continue;
         }
