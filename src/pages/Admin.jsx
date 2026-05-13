@@ -3791,7 +3791,7 @@ function AdminPanel() {
   const [message, setMessage] = useState('');
 
   const PRO_ALLOWED_TABS = ['config-pro', 'canaux', 'bilan', 'config', 'tg-direct'];
-  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'comptages'];
+  const PARTNER_ALLOWED_TABS = ['strategies', 'canaux', 'comptages', 'tg-annonces'];
   const [adminTab, setAdminTab] = useState(
     isProOnly ? 'config-pro' : isPartnerOnly ? 'strategies' : 'utilisateurs'
   );
@@ -6307,9 +6307,10 @@ function AdminPanel() {
                 { id: 'tg-direct',  icon: '📨', label: 'Canal Direct' },
               ]
             : isPartnerOnly ? [
-                { id: 'strategies', icon: '⚙️', label: 'Stratégies', badge: strategies.length > 0 ? strategies.length : null },
-                { id: 'canaux',     icon: '✈️', label: 'Telegram',   badge: tgChannels.length > 0 ? tgChannels.length : null },
-                { id: 'comptages',  icon: '📈', label: 'Comptages' },
+                { id: 'strategies',  icon: '⚙️', label: 'Stratégies', badge: strategies.length > 0 ? strategies.length : null },
+                { id: 'canaux',      icon: '✈️', label: 'Telegram',   badge: tgChannels.length > 0 ? tgChannels.length : null },
+                { id: 'tg-annonces', icon: '📢', label: 'Annonces TG' },
+                { id: 'comptages',   icon: '📈', label: 'Comptages' },
               ]
             : [
             { id: 'utilisateurs',      icon: '👥', label: 'Utilisateurs',    badge: isSuperAdmin ? ((nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null) : null },
