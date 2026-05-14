@@ -421,6 +421,7 @@ const VALID_EXCEPTION_TYPES = [
   'bad_hour', 'double_suit_last', 'loss_streak_pause',
   'trigger_card_position',
   'consec_same_suit_pred',
+  'decalage_suit_check',
 ];
 
 function parseExceptions(raw) {
@@ -462,6 +463,12 @@ function parseExceptions(raw) {
         const rawPos = Array.isArray(e.positions) ? e.positions : [];
         out.positions = rawPos.map(Number).filter(p => p >= 1 && p <= 6);
         if (!out.positions.length) out.positions = [1];
+        delete out.value;
+        delete out.window;
+      }
+      if (e.type === 'decalage_suit_check') {
+        out.decalage = Math.max(1, parseInt(e.decalage) || 1);
+        out.action   = ['inverse', 'skip'].includes(e.action) ? e.action : 'inverse';
         delete out.value;
         delete out.window;
       }
@@ -533,10 +540,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -648,7 +655,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
     const isRattrapageGroupe  = mode === 'rattrapage_groupe';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe) ? null : normalizeMappings(mappings);
+    const isCompteurParite    = mode === 'compteur_parite';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -877,7 +885,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
     const isRattrapageGroupe  = mode === 'rattrapage_groupe';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe) ? null : normalizeMappings(mappings);
+    const isCompteurParite    = mode === 'compteur_parite';
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];

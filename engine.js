@@ -16,7 +16,20 @@ const renderSync = require('./render-sync');
 const cartesStore = require('./cartes-store');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
-const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
+const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣', 'pair': '🟢 Pair', 'impair': '🔴 Impair' };
+
+// ── Helpers score Baccarat (pour mode compteur_parite) ─────────────────────
+function baccaratCardValue(c) {
+  const r = String(c?.R ?? c?.r ?? '');
+  if (r === 'A' || r === 'a' || r === '1') return 1;
+  if (['10','J','Q','K','j','q','k'].includes(r)) return 0;
+  const n = parseInt(r);
+  return isNaN(n) ? 0 : Math.min(n, 9);
+}
+function baccaratHandScore(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return null;
+  return cards.reduce((acc, c) => acc + baccaratCardValue(c), 0) % 10;
+}
 const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
 
 const C1_B = 5;  const C1_MAP = { '♣':'♦','♦':'♣','♠':'♥','♥':'♠' };
@@ -241,7 +254,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {} };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false } };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -594,6 +607,9 @@ class Engine {
           // Reset confirmPending (absence_confirmee)
           const cp = this.custom[cfg.id].confirmPending;
           if (cp) for (const s of ALL_SUITS) cp[s] = false;
+          // Reset parityCounts/parityPending (compteur_parite)
+          if (this.custom[cfg.id].parityCounts)  { this.custom[cfg.id].parityCounts.pair  = 0; this.custom[cfg.id].parityCounts.impair  = 0; }
+          if (this.custom[cfg.id].parityPending) { this.custom[cfg.id].parityPending.pair = false; this.custom[cfg.id].parityPending.impair = false; }
           // Reset histoire (basée sur la main surveillée)
           this.custom[cfg.id].history = [];
           // Reset lastHour pour forcer la réinitialisation de mirrorLastHour
@@ -2378,9 +2394,16 @@ class Engine {
       }
     }
 
+    // ── Pour compteur_parite : résolution sur parité du score, pas sur costume ──
+    let resolveHandSuits = handSuits;
+    if (cfg.mode === 'compteur_parite') {
+      const rScore = baccaratHandScore(cfg.hand === 'banquier' ? bCards : pCards);
+      resolveHandSuits = rScore !== null ? [rScore % 2 === 0 ? 'pair' : 'impair'] : [];
+    }
+
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
+      await this._resolvePending(state.pending, channelId, gn, resolveHandSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
         if (won) {
@@ -3106,6 +3129,63 @@ class Engine {
       } else if (hasTwoCards) {
         state.counts['abs3'] = (state.counts['abs3'] || 0) + 1;
         console.log(`[${channelId}] [Abs3→${predictCard}] 2 cartes (absence) compteur=${state.counts['abs3']}/${B}`);
+      }
+
+    } else if (mode === 'compteur_parite') {
+      // ── MODE COMPTEUR PARITÉ ─────────────────────────────────────────────
+      // Compte les ABSENCES consécutives de pair/impair dans le score Baccarat
+      // de la main choisie (joueur ou banquier).
+      // Score 0,2,4,6,8 = pair | Score 1,3,5,7,9 = impair
+      //
+      // Phase 1 (comptage) :
+      //   - Si le score est pair → pair est présent → reset compteur pair
+      //                         → impair est absent → impair compteur++
+      //   - Si le score est impair → inverse
+      //   Quand compteur[parity] >= B → feu JAUNE, reset compteur
+      //
+      // Phase 2 (confirmation) :
+      //   Jeu suivant : si la parity réapparaît → feu VERT → prédiction (gn + offset)
+      //                 sinon → feu ROUGE, reset sans prédiction
+      // ────────────────────────────────────────────────────────────────────
+      const score = baccaratHandScore(cfg.hand === 'banquier' ? bCards : pCards);
+      if (score === null) {
+        console.warn(`[${channelId}] [CompteurParité] Jeu #${gn} — score indisponible (cartes sans rank), jeu ignoré`);
+      } else {
+        if (!state.parityCounts)  state.parityCounts  = { pair: 0, impair: 0 };
+        if (!state.parityPending) state.parityPending  = { pair: false, impair: false };
+
+        const isCurPair   = score % 2 === 0;
+        const isCurImpair = !isCurPair;
+        const logP = `[${channelId}] [CompteurParité]`;
+
+        for (const [parity, isCurrent] of [['pair', isCurPair], ['impair', isCurImpair]]) {
+          if (state.parityPending[parity]) {
+            // Phase 2 : confirmation — cette parity réapparaît-elle ?
+            if (isCurrent) {
+              console.log(`${logP} ✅ ${parity} confirmé (feu VERT) score=${score} après B=${B} absence(s) → prédiction jeu #${gn + offset}`);
+              await emitPrediction(gn + offset, parity, parity);
+            } else {
+              console.log(`${logP} ❌ ${parity} absent à la confirmation (B=${B}) → feu rouge, reset`);
+            }
+            state.parityPending[parity] = false;
+            state.parityCounts[parity]  = 0;
+          } else if (isCurrent) {
+            // Parité présente (hors phase confirmation) → reset son compteur d'absence
+            if ((state.parityCounts[parity] || 0) > 0) {
+              console.log(`${logP} ${parity} réapparu (score=${score}) après ${state.parityCounts[parity]} absence(s) < B=${B} → reset`);
+            }
+            state.parityCounts[parity] = 0;
+          } else {
+            // Parité absente → incrémenter compteur
+            state.parityCounts[parity] = (state.parityCounts[parity] || 0) + 1;
+            console.log(`${logP} ${parity} absent (score=${score}) — compteur=${state.parityCounts[parity]} / seuil B=${B}`);
+            if (state.parityCounts[parity] >= B) {
+              console.log(`${logP} ${parity} seuil B=${B} atteint → feu JAUNE → compteur=0, attente confirmation jeu #${gn + 1}`);
+              state.parityPending[parity] = true;
+              state.parityCounts[parity]  = 0;
+            }
+          }
+        }
       }
 
     } else if (mode === 'carte_valeur') {
@@ -4025,6 +4105,9 @@ class Engine {
       state.fc_last_log         = null;
       // ── Reset absence_confirmee (feux tricolores) ────────────────────────────
       state.confirmPending      = {};
+      // ── Reset compteur_parite ────────────────────────────────────────────────
+      if (state.parityCounts)  { state.parityCounts.pair  = 0; state.parityCounts.impair  = 0; }
+      if (state.parityPending) { state.parityPending.pair = false; state.parityPending.impair = false; }
       // Reset complet de l'état interne des scripts Pro (stock de prédictions à zéro)
       if (state.scriptState) {
         const cfg = state.config;
