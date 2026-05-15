@@ -4095,6 +4095,13 @@ function AdminPanel() {
       { label: 'Contraire du retardataire', desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦', map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
       { label: 'Même couleur',              desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥', map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
     ],
+    costume_manquant: [
+      { label: 'Identique (défaut)', desc: 'Prédit le costume absent lui-même', map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+      { label: 'Contraire total',   desc: '♠→♥ · ♥→♠ · ♦→♣ · ♣→♦',       map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+      { label: 'Même couleur',      desc: '♠→♣ · ♣→♠ · ♥→♦ · ♦→♥',       map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+      { label: 'Même forme',        desc: '♠→♦ · ♦→♠ · ♥→♣ · ♣→♥',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+      { label: 'Rotation ↻',        desc: '♠→♥→♦→♣→♠',                    map: { '♠':['♥'],'♥':['♦'],'♦':['♣'],'♣':['♠'] } },
+    ],
   };
   // Formats de message Telegram (partagé dans tout l'admin)
   const TG_FORMATS = [
@@ -8451,7 +8458,7 @@ function AdminPanel() {
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
         {/* ── TAB : CANAUX — PANNEAU PARTENAIRE COMPLET ── */}
-        {adminTab === 'canaux' && isPartnerOnly && (() => {
+        {adminTab === 'canaux' && false && (() => {
           const G = 1234;
           const SUP = ['⁰','¹','²','³','⁴','⁵'];
           const sup = SUP[maxRattrapage] ?? maxRattrapage;
@@ -8653,7 +8660,7 @@ function AdminPanel() {
         })()}
 
         {/* ── TAB : CANAUX — section Token + Formats (partie 1/2) ── */}
-        {adminTab === 'canaux' && !isPartnerOnly && <>
+        {adminTab === 'canaux' && <>
         
 
         {/* ── FORMAT DES MESSAGES TELEGRAM ── */}
@@ -9117,6 +9124,66 @@ function AdminPanel() {
               preview: `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n⌛`,
               result:  `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n✅ ${RE[0]}`,
               perdu:   `📡 SIGMA SIGNAL 📡\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\nÉtape ${G} · ♠️ Pique\nDogon ·· +${maxRattrapage}\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n❌`,
+            },
+            {
+              id: 76, label: 'Atomic Signal', icon: '☢️',
+              preview: `☢️ ATOMIC SIGNAL\n▶️ Jeu #N${G} · ♠️ Pique\n▶️ Puissance ×${maxRattrapage}\n▶️ ⌛`,
+              result:  `☢️ ATOMIC SIGNAL\n▶️ Jeu #N${G} · ♠️ Pique\n▶️ Puissance ×${maxRattrapage}\n▶️ ✅ ${RE[0]}`,
+              perdu:   `☢️ ATOMIC SIGNAL\n▶️ Jeu #N${G} · ♠️ Pique\n▶️ Puissance ×${maxRattrapage}\n▶️ ❌`,
+            },
+            {
+              id: 77, label: 'Royal Pro', icon: '👑',
+              preview: `👑 ROYAL PRO BACCARAT 👑\n═══════════════════════\n🎴 Jeu #N${G}\n🎴 ♠️ Pique\n🎴 Dogon max : ×${maxRattrapage}\n═══════════════════════\n⌛`,
+              result:  `👑 ROYAL PRO BACCARAT 👑\n═══════════════════════\n🎴 Jeu #N${G}\n🎴 ♠️ Pique\n🎴 Dogon max : ×${maxRattrapage}\n═══════════════════════\n✅ ${RE[0]}`,
+              perdu:   `👑 ROYAL PRO BACCARAT 👑\n═══════════════════════\n🎴 Jeu #N${G}\n🎴 ♠️ Pique\n🎴 Dogon max : ×${maxRattrapage}\n═══════════════════════\n❌`,
+            },
+            {
+              id: 78, label: 'Dragon Ball', icon: '🐉',
+              preview: `🐉 DRAGON BACCARAT 🐉\n🔥 Jeu #N${G} — ♠️ Pique\n💫 Rattrapage ×${maxRattrapage}\n⌛`,
+              result:  `🐉 DRAGON BACCARAT 🐉\n🔥 Jeu #N${G} — ♠️ Pique\n💫 Rattrapage ×${maxRattrapage}\n✅ ${RE[0]}`,
+              perdu:   `🐉 DRAGON BACCARAT 🐉\n🔥 Jeu #N${G} — ♠️ Pique\n💫 Rattrapage ×${maxRattrapage}\n❌`,
+            },
+            {
+              id: 79, label: 'Black Diamond', icon: '🖤',
+              preview: `🖤◆ BLACK DIAMOND ◆🖤\n  #N${G} · ♠️ Pique · ×${maxRattrapage}\n  ⌛`,
+              result:  `🖤◆ BLACK DIAMOND ◆🖤\n  #N${G} · ♠️ Pique · ×${maxRattrapage}\n  ✅ ${RE[0]}`,
+              perdu:   `🖤◆ BLACK DIAMOND ◆🖤\n  #N${G} · ♠️ Pique · ×${maxRattrapage}\n  ❌`,
+            },
+            {
+              id: 80, label: 'Speed Bet', icon: '🏎️',
+              preview: `🏎️ SPEED BET #N${G}\n♠️ Pique ×${maxRattrapage} ⌛`,
+              result:  `🏎️ SPEED BET #N${G}\n♠️ Pique ×${maxRattrapage} ✅ ${RE[0]}`,
+              perdu:   `🏎️ SPEED BET #N${G}\n♠️ Pique ×${maxRattrapage} ❌`,
+            },
+            {
+              id: 81, label: 'Master Class', icon: '🎓',
+              preview: `🎓 MASTER CLASS BACCARAT\n┌─────────────────────┐\n│ Jeu : #N${G}\n│ Signe : ♠️ Pique\n│ Dogon : ×${maxRattrapage}\n│ Résultat : ⌛\n└─────────────────────┘`,
+              result:  `🎓 MASTER CLASS BACCARAT\n┌─────────────────────┐\n│ Jeu : #N${G}\n│ Signe : ♠️ Pique\n│ Dogon : ×${maxRattrapage}\n│ Résultat : ✅ ${RE[0]}\n└─────────────────────┘`,
+              perdu:   `🎓 MASTER CLASS BACCARAT\n┌─────────────────────┐\n│ Jeu : #N${G}\n│ Signe : ♠️ Pique\n│ Dogon : ×${maxRattrapage}\n│ Résultat : ❌\n└─────────────────────┘`,
+            },
+            {
+              id: 82, label: 'Galaxy Pro', icon: '🌌',
+              preview: `🌌 GALAXY PRO 🌌\n🌟 Tour #N${G}\n🌟 ♠️ Pique · ×${maxRattrapage}\n🌟 ⌛`,
+              result:  `🌌 GALAXY PRO 🌌\n🌟 Tour #N${G}\n🌟 ♠️ Pique · ×${maxRattrapage}\n🌟 ✅ ${RE[0]}`,
+              perdu:   `🌌 GALAXY PRO 🌌\n🌟 Tour #N${G}\n🌟 ♠️ Pique · ×${maxRattrapage}\n🌟 ❌`,
+            },
+            {
+              id: 83, label: 'Night Club', icon: '🌙',
+              preview: `🌙 NIGHT CLUB SIGNAL 🌙\n🎵 #N${G} · ♠️ Pique\n🎵 Dogon ×${maxRattrapage} · ⌛`,
+              result:  `🌙 NIGHT CLUB SIGNAL 🌙\n🎵 #N${G} · ♠️ Pique\n🎵 Dogon ×${maxRattrapage} · ✅ ${RE[0]}`,
+              perdu:   `🌙 NIGHT CLUB SIGNAL 🌙\n🎵 #N${G} · ♠️ Pique\n🎵 Dogon ×${maxRattrapage} · ❌`,
+            },
+            {
+              id: 84, label: 'Pair/Impair Style A', icon: '🟢',
+              preview: `🟢 PRÉDICTION PARITÉ 🟢\n━━━━━━━━━━━━━━━━━━━━\n📌 Jeu #N${G}\n🎯 Résultat attendu : PAIR\n🔁 Dogon max : ×${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━\n⌛ En analyse...`,
+              result:  `🟢 PRÉDICTION PARITÉ 🟢\n━━━━━━━━━━━━━━━━━━━━\n📌 Jeu #N${G}\n🎯 Résultat attendu : PAIR\n🔁 Dogon max : ×${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━\n✅ PAIR CONFIRMÉ ${RE[0]}`,
+              perdu:   `🔴 PRÉDICTION PARITÉ 🔴\n━━━━━━━━━━━━━━━━━━━━\n📌 Jeu #N${G}\n🎯 Résultat attendu : IMPAIR\n🔁 Dogon max : ×${maxRattrapage}\n━━━━━━━━━━━━━━━━━━━━\n❌ IMPAIR RATÉ`,
+            },
+            {
+              id: 85, label: 'Pair/Impair Compact', icon: '🔴',
+              preview: `🟢 #N${G} — PAIR\nDogon ×${maxRattrapage} · ⌛`,
+              result:  `🟢 #N${G} — PAIR\nDogon ×${maxRattrapage} · ✅ ${RE[0]}`,
+              perdu:   `🔴 #N${G} — IMPAIR\nDogon ×${maxRattrapage} · ❌`,
             },
           ];
 
@@ -9652,37 +9719,38 @@ function AdminPanel() {
                     {/* ── Moniteur costume_manquant temps réel ── */}
                     {s.mode === 'costume_manquant' && cmMonitorData[s.id] && (() => {
                       const cm = cmMonitorData[s.id];
-                      const { count = 0, threshold = s.threshold || 0, pending: cmPending = [], suit: trigSuit = null, lastGame = null } = cm;
-                      const pct = threshold > 0 ? Math.min(count / threshold, 1) : 0;
+                      const { count = 0, queue = [], lastGame = null, lastSuit = null } = cm;
                       return (
                         <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
                           <div style={{ fontSize: 10, color: '#a855f7', fontWeight: 700, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            🃏 COSTUME MANQUANT — Compteur
+                            🃏 COSTUME MANQUANT — File d&apos;attente
+                            <span style={{ background: count > 0 ? 'rgba(168,85,247,0.25)' : 'rgba(100,100,120,0.2)', color: count > 0 ? '#c084fc' : '#6b7280', borderRadius: 10, padding: '0px 7px', fontSize: 11, fontWeight: 800 }}>
+                              {count} détection{count !== 1 ? 's' : ''} active{count !== 1 ? 's' : ''}
+                            </span>
                             {lastGame !== null && <span style={{ color: '#64748b', fontWeight: 400 }}>· dernier jeu #{lastGame}</span>}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ flex: 1, height: 6, background: 'rgba(168,85,247,0.15)', borderRadius: 4, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${pct * 100}%`, borderRadius: 4,
-                                background: pct >= 1 ? '#22c55e' : pct >= 0.7 ? '#f59e0b' : '#a855f7',
-                                transition: 'width 0.3s ease' }} />
-                            </div>
-                            <span style={{ fontSize: 12, fontWeight: 800, color: pct >= 1 ? '#22c55e' : pct >= 0.7 ? '#fbbf24' : '#c084fc', minWidth: 55 }}>
-                              {count}/{threshold}
-                            </span>
-                          </div>
-                          {trigSuit && (
-                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                              Costume surveillé : <span style={{ fontWeight: 700, color: '#c084fc' }}>{trigSuit}</span>
-                            </div>
+                          {queue.length === 0 && (
+                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Aucune détection en cours — en attente d&apos;une distribution 2+2 avec 1 costume absent.</div>
                           )}
-                          {cmPending.length > 0 && (
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                              {cmPending.map((p, i) => (
-                                <span key={i} style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, fontWeight: 800,
-                                  background: 'rgba(34,197,94,0.2)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.4)' }}>
-                                  #{p.targetGame} {p.suit}
-                                </span>
-                              ))}
+                          {queue.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {queue.map((entry, i) => {
+                                const isVerified = entry.verified && !entry.emitted;
+                                const isEmitted = entry.emitted;
+                                const statusColor = isEmitted ? '#22c55e' : isVerified ? '#f59e0b' : '#a855f7';
+                                const statusLabel = isEmitted ? '✅ émis' : isVerified ? '⏳ vérifié' : '🔍 vérif. #' + entry.verifyAt;
+                                return (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: `1px solid ${statusColor}30` }}>
+                                    <span style={{ fontSize: 15, minWidth: 22 }}>{entry.suit}</span>
+                                    <span style={{ fontSize: 10, color: '#94a3b8' }}>détecté #<strong style={{ color: '#e2e8f0' }}>{entry.trigGn}</strong></span>
+                                    <span style={{ fontSize: 10, color: '#64748b' }}>→</span>
+                                    <span style={{ fontSize: 10, color: statusColor, fontWeight: 700 }}>{statusLabel}</span>
+                                    {!isEmitted && (
+                                      <span style={{ fontSize: 10, color: '#6366f1', marginLeft: 'auto' }}>préd. #<strong>{entry.predictAt}</strong></span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -13366,7 +13434,7 @@ function AdminPanel() {
         )}
 
         {/* ── ANNONCES PLANIFIÉES TELEGRAM ── */}
-        {adminTab === 'canaux' && !isPartnerOnly && (
+        {adminTab === 'canaux' && (
         <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.45)', marginTop: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📢</span>
@@ -13838,7 +13906,7 @@ function AdminPanel() {
         {/* ════════════════════════════════════════════════
             ── TAB : CANAUX TELEGRAM ──
         ════════════════════════════════════════════════ */}
-        {adminTab === 'canaux' && !isPartnerOnly && <>
+        {adminTab === 'canaux' && <>
 
         {/* ── SECTION 0 : DIFFUSION LIVE DES JEUX (multi-canaux) ── */}
         <div className="tg-admin-card" style={{ borderColor: 'rgba(168,85,247,0.4)', marginBottom: 20 }}>
