@@ -2490,14 +2490,17 @@ class Engine {
         return;
       }
       // ── Garde 10 min : vérifie aussi en DB (résiste aux redémarrages) ─
-      if (!(await canEmitNewPrediction(channelId))) return;
+      // force=true contourne ce garde (CM+4 : la vérification N+2 garantit l'émission N+4)
+      if (!force && !(await canEmitNewPrediction(channelId))) return;
       // ── Bloque si le live trigger a déjà émis pour ce jeu (évite le doublon) ─
-      if (state.liveTriggeredGame === gn) {
+      // force=true contourne ce garde (la cible CM+4 est un jeu futur, pas le jeu courant)
+      if (!force && state.liveTriggeredGame === gn) {
         console.log(`[${channelId}] Bloqué — déjà déclenché en live pour jeu #${gn}`);
         return;
       }
       // ── Bloqueur automatique de mauvaises prédictions ─────────────
-      if (this._isBadPredBlocked(channelId, gn, state)) return;
+      // force=true contourne ce garde (CM+4 a déjà attendu la vérification N+2)
+      if (!force && this._isBadPredBlocked(channelId, gn, state)) return;
       // ── Vérification des exceptions avant d'émettre ───────────────
       if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
 
@@ -2543,7 +2546,7 @@ class Engine {
 
     // Résout le pool de cartes cibles + rotation cyclique par index
     const resolvePredictedSuit = (suit) => {
-      const raw = mappings[suit];
+      const raw = (mappings || {})[suit];
       // Supporte l'ancien format (string) et le nouveau (array)
       const pool = Array.isArray(raw) ? raw.filter(s => ALL_SUITS.includes(s))
                                       : (ALL_SUITS.includes(raw) ? [raw] : []);

@@ -7,13 +7,12 @@
  *   2. Backend crée une payment_request "awaiting_screenshot" et renvoie
  *      le lien WhatsApp + l'id de la requête
  *   3. Utilisateur paie via WhatsApp puis upload une capture d'écran
- *   4. L'IA Gemini Vision analyse l'image :
- *        - Si valide → status='ai_validated', accès temporaire 2 h
- *        - Sinon    → status='pending_admin', pas d'accès temporaire
- *   5. L'admin voit la liste des paiements en attente, valide ou rejette
- *   6. À l'approbation : la durée du plan est ajoutée à l'abonnement,
- *      les canaux sont assignés selon account_type (simple/premium),
- *      et le bonus 20 % est crédité au parrain (1ère fois seulement)
+ *   4. L'IA Gemini/Groq Vision analyse l'image :
+ *        - Si valide (confidence ≥ 60) → APPROBATION AUTOMATIQUE COMPLÈTE
+ *          status='approved', durée créditée, canaux assignés, bonus parrain traité
+ *        - Sinon → status='pending_admin', attente manuelle admin
+ *   5. L'admin peut toujours voir les paiements et rejeter si nécessaire
+ *   6. L'admin peut aussi approuver manuellement les cas rejetés par l'IA
  */
 
 const express = require('express');
@@ -93,9 +92,8 @@ function plansFor(accountType) {
 const WHATSAPP_NUMBER = '+2290195501564';
 const WHATSAPP_LINK   = 'https://wa.me/2290195501564';
 
-const REFERRAL_BONUS_PERCENT = 20;       // % de durée pour le parrain
-const REFERRAL_DISCOUNT_PERCENT = 20;    // % de remise pour l'utilisateur
-const AI_TEMP_HOURS = 2;                 // accès temporaire si IA valide
+const REFERRAL_BONUS_PERCENT   = 20;
+const REFERRAL_DISCOUNT_PERCENT = 20;
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
@@ -106,6 +104,119 @@ function requireAdmin(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   if (!req.session?.isAdmin) return res.status(403).json({ error: 'Admin requis' });
   next();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  FONCTION PARTAGÉE : approbation complète (IA ou admin)
+//  - Étend l'abonnement
+//  - Assigne les canaux par défaut
+//  - Traite le bonus parrain (1ère fois seulement)
+//  - Envoie une notification système à l'utilisateur
+//  - Met à jour le statut de la payment_request
+// ══════════════════════════════════════════════════════════════════════
+async function doApprovePayment(pr, user, { approvedBy = 'ai', note = null, adminUserId = null } = {}) {
+  const accountType = user.account_type || 'simple';
+  const isPremium   = accountType === 'premium';
+  const isPro       = accountType === 'pro';
+
+  // Calculer la nouvelle date d'expiration
+  const baseDate = user.subscription_expires_at && new Date(user.subscription_expires_at) > new Date()
+    ? new Date(user.subscription_expires_at) : new Date();
+  const newExpiry = new Date(baseDate.getTime() + pr.duration_minutes * 60 * 1000);
+
+  // Mettre à jour l'abonnement de l'utilisateur
+  await db.updateUser(user.id, {
+    is_approved: true,
+    is_premium:  isPremium,
+    is_pro:      isPro,
+    subscription_expires_at:       newExpiry.toISOString(),
+    subscription_duration_minutes: (user.subscription_duration_minutes || 0) + pr.duration_minutes,
+  });
+
+  // Assigner les canaux par défaut C1/C2/C3/DC
+  if (db.pool) {
+    try {
+      for (const sid of ['C1', 'C2', 'C3', 'DC']) {
+        await db.pool.query(
+          'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [user.id, sid]
+        );
+      }
+    } catch (_) {}
+  }
+
+  // ── Bonus parrain : 20 % de la durée, 1ère fois seulement ──
+  let referrerBonus = 0;
+  if (user.referrer_user_id && !user.referral_bonus_used) {
+    referrerBonus = Math.round(pr.duration_minutes * REFERRAL_BONUS_PERCENT / 100);
+    const ref = await db.getUser(user.referrer_user_id);
+    if (ref) {
+      const refBase = ref.subscription_expires_at && new Date(ref.subscription_expires_at) > new Date()
+        ? new Date(ref.subscription_expires_at) : new Date();
+      const refExpiry   = new Date(refBase.getTime() + referrerBonus * 60 * 1000);
+      const newTotalBonus = (ref.bonus_minutes_earned || 0) + referrerBonus;
+
+      await db.updateUser(ref.id, {
+        is_approved: true,
+        subscription_expires_at:       refExpiry.toISOString(),
+        subscription_duration_minutes: (ref.subscription_duration_minutes || 0) + referrerBonus,
+        bonus_minutes_earned:          newTotalBonus,
+      });
+
+      const remainingMin = Math.max(0, Math.floor((refExpiry - new Date()) / 60000));
+      const notifRef =
+`🎁 BONUS PARRAIN REÇU !
+
+Félicitations ! Votre filleul ${user.username} vient de souscrire à un abonnement (${pr.plan_label}).
+
+✅ +${fmtMinutes(referrerBonus)} ont été ajoutés à votre abonnement.
+
+📅 Votre abonnement expire désormais le :
+   ${fmtDate(refExpiry)}
+
+⏱️ Durée totale restante : ${fmtMinutes(remainingMin)}
+
+🏆 Total bonus parrain gagné à ce jour : ${fmtMinutes(newTotalBonus)}
+
+Continuez à partager votre code promo pour gagner encore plus de temps !`;
+
+      await sendSystemMessage(ref.id, notifRef);
+      console.log(`[Payment] 🎁 Parrain ${ref.username} crédité de ${referrerBonus} min grâce à ${user.username}`);
+    }
+    await db.updateUser(user.id, { referral_bonus_used: true });
+  }
+
+  // ── Notification système à l'utilisateur ──
+  const remainingMin = Math.max(0, Math.floor((newExpiry - new Date()) / 60000));
+  const byLabel = approvedBy === 'ai' ? '🤖 Validation automatique IA' : '✅ Validation administrateur';
+  const notifUser =
+`${byLabel}
+
+Votre paiement pour l'abonnement ${pr.plan_label} a été validé avec succès !
+
+✅ Durée ajoutée : ${fmtMinutes(pr.duration_minutes)}
+
+📅 Votre abonnement expire le :
+   ${fmtDate(newExpiry)}
+
+⏱️ Durée totale restante : ${fmtMinutes(remainingMin)}
+
+Profitez bien de Baccarat Pro !`;
+
+  await sendSystemMessage(user.id, notifUser);
+
+  // ── Mettre à jour la payment_request ──
+  await db.updatePaymentRequest(pr.id, {
+    status:              'approved',
+    admin_validated_at:  new Date(),
+    admin_validated_by:  adminUserId || null,
+    referrer_bonus_minutes: referrerBonus,
+    admin_note:          note,
+  });
+
+  console.log(`[Payment] ✅ ${user.username} — ${pr.plan_label} approuvé par ${approvedBy} → expire ${fmtDate(newExpiry)}`);
+
+  return { newExpiry, accountType, referrerBonus };
 }
 
 // ── Liste des plans (renvoie le tarif adapté au type de compte connecté) ──
@@ -121,7 +232,6 @@ router.get('/plans', async (req, res) => {
     account_type: accountType,
     surcharge_percent: Math.round((TYPE_SURCHARGE[accountType] ?? 0) * 100),
     plans: plansFor(accountType),
-    // Prix de base + tarifs par type pour affichage comparatif
     pricing_grid: Object.values(BASE_PLANS).map(p => ({
       id: p.id, label: p.label, duration_minutes: p.duration_minutes,
       simple:  priceForType(p.base_usd, 'simple'),
@@ -146,13 +256,10 @@ router.post('/request', requireAuth, async (req, res) => {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Session invalide' });
 
-    // Le type est défini à l'inscription — on l'utilise tel quel
     const accountType = user.account_type || 'simple';
     const fullPrice = priceForType(basePlan.base_usd, accountType);
 
-    // Remise 20 % si l'utilisateur a un parrain ET n'a jamais utilisé son bonus
-    // Anti-abus : vérifier qu'il n'existe pas déjà une demande en attente avec remise
-    let amount = fullPrice;
+    let amount   = fullPrice;
     let discount = false;
     if (user.referrer_user_id && !user.referral_bonus_used) {
       let alreadyHasDiscountPending = false;
@@ -172,16 +279,15 @@ router.post('/request', requireAuth, async (req, res) => {
     }
 
     const pr = await db.createPaymentRequest({
-      user_id: user.id,
-      plan_id: basePlan.id,
-      plan_label: basePlan.label,
-      amount_usd: amount,
+      user_id:          user.id,
+      plan_id:          basePlan.id,
+      plan_label:       basePlan.label,
+      amount_usd:       amount,
       duration_minutes: basePlan.duration_minutes,
-      status: 'awaiting_screenshot',
+      status:           'awaiting_screenshot',
       discount_applied: discount,
     });
 
-    // Message pré-rempli pour WhatsApp (format demandé par l'utilisateur)
     const typeLabel = accountType === 'premium' ? 'PREMIUM' : accountType === 'pro' ? 'PRO' : 'SIMPLE';
     const msg =
 `Je veux payer l'abonnement ${basePlan.label}.
@@ -197,18 +303,18 @@ Je veux le lien de paiement.`;
     res.json({
       ok: true,
       request: {
-        id: pr.id,
-        plan_id: pr.plan_id,
-        plan_label: pr.plan_label,
-        amount_usd: amount,
-        full_price_usd: fullPrice,
-        base_usd: basePlan.base_usd,
-        account_type: accountType,
+        id:               pr.id,
+        plan_id:          pr.plan_id,
+        plan_label:       pr.plan_label,
+        amount_usd:       amount,
+        full_price_usd:   fullPrice,
+        base_usd:         basePlan.base_usd,
+        account_type:     accountType,
         duration_minutes: pr.duration_minutes,
         discount_applied: discount,
-        status: pr.status,
+        status:           pr.status,
       },
-      whatsapp_link: whatsappLink,
+      whatsapp_link:   whatsappLink,
       whatsapp_number: WHATSAPP_NUMBER,
     });
   } catch (e) {
@@ -217,12 +323,11 @@ Je veux le lien de paiement.`;
   }
 });
 
-// ── Upload d'une capture (étape 2) — Sossou Kouamé assistance analyse + accès temporaire 2 h ──
+// ── Upload d'une capture (étape 2) — analyse IA + approbation automatique ──
 router.post('/:id/screenshot', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   const { image_base64, mime_type } = req.body;
   if (!image_base64) return res.status(400).json({ error: 'image_base64 requis' });
-  // Limite raisonnable : 8 Mo de base64 (~6 Mo binaire)
   if (String(image_base64).length > 8 * 1024 * 1024) {
     return res.status(413).json({ error: 'Image trop volumineuse (max 6 Mo)' });
   }
@@ -235,21 +340,21 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Demande déjà traitée' });
     }
 
-    // Stocker la capture (base64 brut, sans header data:)
     const cleanB64 = String(image_base64).replace(/^data:[^;]+;base64,/, '');
-    const mime = mime_type || 'image/jpeg';
+    const mime     = mime_type || 'image/jpeg';
 
-    // Analyse Sossou Kouamé assistance (vision)
+    // ── Analyse IA Vision ──────────────────────────────────────────
     let aiResult = null;
     let aiError  = null;
     try {
       aiResult = await analyzePaymentScreenshot(cleanB64, mime, pr.amount_usd);
+      console.log(`[Payment] IA analyse demande #${id} — confidence=${aiResult?.confidence} is_payment=${aiResult?.is_payment_screenshot} amount_ok=${aiResult?.amount_matches_expected}`);
     } catch (e) {
       aiError = e.message;
-      console.warn('[Payment] Sossou Kouamé assistance Vision indisponible :', e.message);
+      console.warn('[Payment] IA Vision indisponible :', e.message);
     }
 
-    // Détection de doublon : si un transaction_id a déjà été utilisé → refus
+    // ── Détection de doublon ───────────────────────────────────────
     if (aiResult && aiResult.transaction_id) {
       const isDuplicate = await db.checkPaymentRef(aiResult.transaction_id);
       if (isDuplicate) {
@@ -261,71 +366,54 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       }
     }
 
-    // Décision : si Sossou Kouamé assistance valide → on applique la DURÉE COMPLÈTE du plan
-    // (sous réserve de vérification administrateur). Si l'admin rejette plus tard,
-    // la durée sera retirée. Si l'analyse n'est pas sûre → attente admin sans durée.
-    const isValid = aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 60;
-    let provisionalExpiry = null;
-    let newStatus = 'pending_admin';
+    // ── Décision ──────────────────────────────────────────────────
+    // Validation complète si : capture reconnue + confidence ≥ 60
+    const isValid = !!(aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 60);
 
-    if (isValid) {
-      newStatus = 'ai_validated';
-      // Étendre l'abonnement de la durée complète du plan
-      const u = await db.getUser(pr.user_id);
-      const baseDate = u.subscription_expires_at && new Date(u.subscription_expires_at) > new Date()
-        ? new Date(u.subscription_expires_at) : new Date();
-      provisionalExpiry = new Date(baseDate.getTime() + pr.duration_minutes * 60 * 1000);
-
-      const accountType = u.account_type || 'simple';
-      const isPremium   = accountType === 'premium';
-      const isPro       = accountType === 'pro';
-
-      await db.updateUser(pr.user_id, {
-        is_approved: true,
-        is_premium: isPremium,
-        is_pro: isPro,
-        subscription_expires_at: provisionalExpiry.toISOString(),
-        subscription_duration_minutes: (u.subscription_duration_minutes || 0) + pr.duration_minutes,
-      });
-
-      // Assigner les canaux par défaut si pas encore fait
-      if (db.pool) {
-        try {
-          for (const sid of ['C1', 'C2', 'C3', 'DC']) {
-            await db.pool.query(
-              'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-              [pr.user_id, sid]
-            );
-          }
-        } catch (_) {}
-      }
-    }
-
+    // Sauvegarder la capture et l'analyse IA dans tous les cas
     await db.updatePaymentRequest(id, {
       screenshot_data: cleanB64,
-      ai_analysis: aiResult || { error: aiError, is_payment_screenshot: false },
-      ai_temp_access_until: provisionalExpiry,
-      status: newStatus,
-      transaction_id: aiResult?.transaction_id || null,
+      ai_analysis:     aiResult || { error: aiError, is_payment_screenshot: false },
+      status:          isValid ? 'approved' : 'pending_admin',
+      transaction_id:  aiResult?.transaction_id || null,
     });
 
-    // Enregistrer la référence de transaction pour éviter les doublons futurs
+    // Enregistrer la référence pour éviter les doublons futurs
     if (aiResult?.transaction_id) {
       await db.addPaymentRef(aiResult.transaction_id, pr.user_id, id);
     }
 
-    res.json({
-      ok: true,
-      ai_validated: isValid,
-      ai_temp_access_until: provisionalExpiry,
-      provisional_expiry: provisionalExpiry,
-      duration_minutes: pr.duration_minutes,
-      ai_analysis: aiResult || { error: aiError },
-      status: newStatus,
-      message: isValid
-        ? `✅ Paiement validé par Sossou Kouamé assistance — votre durée complète de ${pr.plan_label} a été créditée à votre compte (sous réserve de vérification de l'administrateur).`
-        : `📤 Capture reçue. Sossou Kouamé assistance va analyser votre capture d'écran — l'administrateur confirmera manuellement.`,
-    });
+    if (isValid) {
+      // ── APPROBATION AUTOMATIQUE COMPLÈTE ──────────────────────
+      const u = await db.getUser(pr.user_id);
+      // Recharger pr après la mise à jour du statut
+      const prUpdated = await db.getPaymentRequest(id);
+      const { newExpiry } = await doApprovePayment(prUpdated, u, { approvedBy: 'ai' });
+
+      res.json({
+        ok:               true,
+        ai_validated:     true,
+        approved:         true,
+        new_expiry:       newExpiry,
+        duration_minutes: pr.duration_minutes,
+        ai_analysis:      aiResult,
+        status:           'approved',
+        message:          `✅ Paiement vérifié et validé automatiquement par l'IA ! Votre abonnement ${pr.plan_label} est maintenant actif jusqu'au ${fmtDate(newExpiry)}.`,
+      });
+    } else {
+      // ── ATTENTE ADMIN ─────────────────────────────────────────
+      const reason = aiResult?.reason || (aiError ? `Erreur IA : ${aiError}` : 'Analyse non concluante');
+      console.log(`[Payment] ⏳ Demande #${id} en attente admin — raison : ${reason}`);
+
+      res.json({
+        ok:           true,
+        ai_validated: false,
+        approved:     false,
+        ai_analysis:  aiResult || { error: aiError },
+        status:       'pending_admin',
+        message:      `📤 Capture reçue. L'IA n'a pas pu valider automatiquement votre paiement (${reason}). Un administrateur va vérifier manuellement dans les plus brefs délais.`,
+      });
+    }
   } catch (e) {
     console.error('payment/screenshot error:', e);
     res.status(500).json({ error: e.message });
@@ -344,10 +432,9 @@ router.get('/my-requests', requireAuth, async (req, res) => {
 router.get('/admin/pending', requireAdmin, async (req, res) => {
   try {
     const list = await db.getPendingPaymentRequests();
-    // Ne pas envoyer la capture en pleine taille dans la liste — juste un flag
     res.json(list.map(p => ({
       ...p,
-      has_screenshot: !!p.screenshot_data,
+      has_screenshot:  !!p.screenshot_data,
       screenshot_data: undefined,
     })));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -362,7 +449,7 @@ router.get('/admin/:id/screenshot', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── ADMIN : valider une demande ─────────────────────────────────────
+// ── ADMIN : valider manuellement une demande ─────────────────────────
 router.post('/admin/:id/approve', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
@@ -373,93 +460,17 @@ router.post('/admin/:id/approve', requireAdmin, async (req, res) => {
     const user = await db.getUser(pr.user_id);
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
-    // Étendre l'abonnement à partir d'aujourd'hui (ou de l'expiration actuelle si encore valide)
-    const baseDate = user.subscription_expires_at && new Date(user.subscription_expires_at) > new Date()
-      ? new Date(user.subscription_expires_at) : new Date();
-    const newExpiry = new Date(baseDate.getTime() + pr.duration_minutes * 60 * 1000);
-
-    // Le type est FIXE depuis l'inscription — l'admin ne peut pas le changer
-    const accountType = user.account_type || 'simple';
-    const isPremium   = accountType === 'premium';
-    const isPro       = accountType === 'pro';
-
-    await db.updateUser(user.id, {
-      is_approved: true,
-      is_premium: isPremium,
-      is_pro: isPro,
-      // account_type reste inchangé : c'est le choix de l'utilisateur à l'inscription
-      subscription_expires_at: newExpiry.toISOString(),
-      subscription_duration_minutes: (user.subscription_duration_minutes || 0) + pr.duration_minutes,
-    });
-
-    // Auto-assignation des canaux par défaut C1/C2/C3/DC
-    if (db.pool) {
-      try {
-        for (const sid of ['C1', 'C2', 'C3', 'DC']) {
-          await db.pool.query(
-            'INSERT INTO user_strategy_visible (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-            [user.id, sid]
-          );
-        }
-      } catch (_) {}
-    }
-
-    // ── Bonus parrain : 20 % de la durée du plan, 1ère fois seulement ──
-    let referrerBonus = 0;
-    if (user.referrer_user_id && !user.referral_bonus_used) {
-      referrerBonus = Math.round(pr.duration_minutes * REFERRAL_BONUS_PERCENT / 100);
-      const ref = await db.getUser(user.referrer_user_id);
-      if (ref) {
-        const refBase = ref.subscription_expires_at && new Date(ref.subscription_expires_at) > new Date()
-          ? new Date(ref.subscription_expires_at) : new Date();
-        const refExpiry = new Date(refBase.getTime() + referrerBonus * 60 * 1000);
-        const newTotalBonus = (ref.bonus_minutes_earned || 0) + referrerBonus;
-
-        await db.updateUser(ref.id, {
-          is_approved: true,
-          subscription_expires_at: refExpiry.toISOString(),
-          subscription_duration_minutes: (ref.subscription_duration_minutes || 0) + referrerBonus,
-          bonus_minutes_earned: newTotalBonus,
-        });
-
-        // ── Notification système dans la boîte du parrain ──────────────
-        const remainingMs = refExpiry - new Date();
-        const remainingMin = Math.max(0, Math.floor(remainingMs / 60000));
-        const notifText =
-`🎁 BONUS PARRAIN REÇU !
-
-Félicitations ! Votre filleul ${user.username} vient de souscrire à un abonnement (${pr.plan_label}).
-
-✅ +${fmtMinutes(referrerBonus)} ont été ajoutés à votre abonnement.
-
-📅 Votre abonnement expire désormais le :
-   ${fmtDate(refExpiry)}
-
-⏱️ Durée totale restante : ${fmtMinutes(remainingMin)}
-
-🏆 Total bonus parrain gagné à ce jour : ${fmtMinutes(newTotalBonus)}
-
-Continuez à partager votre code promo pour gagner encore plus de temps !`;
-
-        await sendSystemMessage(ref.id, notifText);
-        console.log(`[Payment] 🎁 Parrain ${ref.username} crédité de ${referrerBonus} min grâce à ${user.username} — notification envoyée`);
-      }
-      await db.updateUser(user.id, { referral_bonus_used: true });
-    }
-
-    await db.updatePaymentRequest(id, {
-      status: 'approved',
-      admin_validated_at: new Date(),
-      admin_validated_by: req.session.userId,
-      referrer_bonus_minutes: referrerBonus,
-      admin_note: req.body?.note || null,
+    const { newExpiry, accountType, referrerBonus } = await doApprovePayment(pr, user, {
+      approvedBy:  'admin',
+      note:        req.body?.note || null,
+      adminUserId: req.session.userId,
     });
 
     res.json({
-      ok: true,
-      message: `Abonnement activé pour ${user.username} (${pr.plan_label})`,
-      new_expiry: newExpiry,
-      account_type: accountType,
+      ok:                     true,
+      message:                `Abonnement activé pour ${user.username} (${pr.plan_label})`,
+      new_expiry:             newExpiry,
+      account_type:           accountType,
       referrer_bonus_minutes: referrerBonus,
     });
   } catch (e) {
@@ -475,35 +486,41 @@ router.post('/admin/:id/reject', requireAdmin, async (req, res) => {
     const pr = await db.getPaymentRequest(id);
     if (!pr) return res.status(404).json({ error: 'Demande introuvable' });
 
-    // Si l'IA avait accordé un accès provisoire (ai_validated), le révoquer proprement
-    if (pr.status === 'ai_validated' || pr.ai_temp_access_until) {
+    // Si le paiement avait été approuvé (par IA ou admin), révoquer l'accès
+    if (pr.status === 'approved' || pr.status === 'ai_validated') {
       const u = await db.getUser(pr.user_id);
       if (u && u.subscription_expires_at) {
-        // Soustraire les minutes accordées provisoirement pour restaurer l'abonnement précédent
         const currentExpiry  = new Date(u.subscription_expires_at);
         const restoredExpiry = new Date(currentExpiry.getTime() - pr.duration_minutes * 60 * 1000);
         const updates = {
           subscription_duration_minutes: Math.max(0, (u.subscription_duration_minutes || 0) - pr.duration_minutes),
         };
         if (restoredExpiry <= new Date()) {
-          // L'abonnement restauré serait expiré → révoquer complètement
           updates.subscription_expires_at = null;
           updates.is_approved = false;
           updates.is_premium  = false;
           updates.is_pro      = false;
         } else {
-          // L'utilisateur avait un abonnement pré-existant valide → le restaurer
           updates.subscription_expires_at = restoredExpiry.toISOString();
         }
         await db.updateUser(pr.user_id, updates);
       }
+
+      // Notification de rejet à l'utilisateur
+      await sendSystemMessage(pr.user_id,
+`❌ Paiement rejeté par l'administrateur
+
+Votre paiement pour le plan ${pr.plan_label} a été rejeté.
+
+Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support ou soumettre une nouvelle capture d'écran.`
+      );
     }
 
     await db.updatePaymentRequest(id, {
-      status: 'rejected',
+      status:             'rejected',
       admin_validated_at: new Date(),
       admin_validated_by: req.session.userId,
-      admin_note: req.body?.note || 'Rejetée par l\'administrateur',
+      admin_note:         req.body?.note || "Rejetée par l'administrateur",
     });
 
     res.json({ ok: true, message: 'Demande rejetée' });
