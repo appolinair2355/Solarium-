@@ -4184,7 +4184,7 @@ function AdminPanel() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'all', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [],
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'all', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [], vente_enabled: false, annonce_enabled: true,
     // Mode lecture_passee (lecture de jeux passés depuis cartes_jeu)
     carte_p: 2, carte_h: 32, carte_ecart: 1, carte_position: 1, carte_source_hand: 'joueur',
     // Mode intelligent_cartes (analyse de patterns dans cartes_jeu)
@@ -4588,7 +4588,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', absence_confirmee:'✅ Abs Confirmée', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', aleatoire:'Aléatoire', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', compteur_parite:'Compteur Parité', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'🃏 CM+4', rattrapage_groupe:'🔄 Ratt. Groupé' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -5239,7 +5239,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: s.vente_enabled ?? false, annonce_enabled: s.annonce_enabled !== false });
     setStratOpen(true);
   };
 
@@ -5256,7 +5256,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '' });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: false, annonce_enabled: s.annonce_enabled !== false });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5793,7 +5793,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: '🃏 CM+4', rattrapage_groupe: '🔄 Ratt. Groupé' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', absence_confirmee: '✅ Abs Conf.', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', compteur_parite: 'C. Parité', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: '🃏 CM+4', rattrapage_groupe: '🔄 Ratt. Groupé' };
 
   return (
     <>
@@ -11805,6 +11805,37 @@ function AdminPanel() {
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Prix &amp; Annonce Telegram</span>
               </div>
 
+              {/* ── Toggles Vente & Annonces ── */}
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                {/* Toggle Mise en vente */}
+                <div
+                  onClick={() => setStratForm(p => ({ ...p, vente_enabled: !p.vente_enabled }))}
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 10, background: stratForm.vente_enabled ? 'rgba(34,197,94,0.08)' : 'rgba(100,116,139,0.05)', border: `1.5px solid ${stratForm.vente_enabled ? 'rgba(34,197,94,0.4)' : 'rgba(100,116,139,0.18)'}`, cursor: 'pointer', userSelect: 'none', transition: 'all 0.2s' }}
+                >
+                  <div style={{ width: 38, height: 22, borderRadius: 11, background: stratForm.vente_enabled ? '#22c55e' : '#334155', position: 'relative', flexShrink: 0, transition: 'background 0.25s' }}>
+                    <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.vente_enabled ? 19 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: stratForm.vente_enabled ? '#4ade80' : '#64748b' }}>🛒 Mise en vente</div>
+                    <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>{stratForm.vente_enabled ? 'Visible dans la boutique' : 'Non publiée en boutique'}</div>
+                  </div>
+                </div>
+
+                {/* Toggle Envoyer annonces */}
+                <div
+                  onClick={() => setStratForm(p => ({ ...p, annonce_enabled: !p.annonce_enabled }))}
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 10, background: stratForm.annonce_enabled ? 'rgba(57,169,219,0.08)' : 'rgba(100,116,139,0.05)', border: `1.5px solid ${stratForm.annonce_enabled ? 'rgba(57,169,219,0.35)' : 'rgba(100,116,139,0.18)'}`, cursor: 'pointer', userSelect: 'none', transition: 'all 0.2s' }}
+                >
+                  <div style={{ width: 38, height: 22, borderRadius: 11, background: stratForm.annonce_enabled ? '#39a9db' : '#334155', position: 'relative', flexShrink: 0, transition: 'background 0.25s' }}>
+                    <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.annonce_enabled ? 19 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: stratForm.annonce_enabled ? '#39a9db' : '#64748b' }}>📣 Envoyer les annonces</div>
+                    <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>{stratForm.annonce_enabled ? 'Annonces envoyées toutes les 2h' : 'Aucune annonce Telegram'}</div>
+                  </div>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 16, alignItems: 'start' }}>
 
                 {/* ── Prix ── */}
@@ -11823,18 +11854,60 @@ function AdminPanel() {
                 </div>
 
                 {/* ── Annonce ── */}
-                <div style={{ padding: '14px 16px', borderRadius: 10, background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                <div style={{ padding: '14px 16px', borderRadius: 10, background: stratForm.annonce_enabled ? 'rgba(251,191,36,0.04)' : 'rgba(100,116,139,0.04)', border: `1px solid ${stratForm.annonce_enabled ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.12)'}`, opacity: stratForm.annonce_enabled ? 1 : 0.6, transition: 'all 0.2s' }}>
+                {!stratForm.annonce_enabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.2)', marginBottom: 10 }}>
+                    <span style={{ fontSize: 16 }}>🔕</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Annonces désactivées</div>
+                      <div style={{ fontSize: 10, color: '#475569' }}>Activez le toggle "Envoyer les annonces" ci-dessus pour configurer et envoyer des annonces Telegram.</div>
+                    </div>
+                  </div>
+                )}
+                {stratForm.annonce_enabled && <>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <label style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8 }}>📣 Annonce Telegram</label>
                     <button
                       type="button"
                       onClick={() => {
-                        const ML = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: 'Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: 'CM+4', rattrapage_groupe: 'Ratt. Groupé' };
+                        const ML = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Abs→App', apparition_absence:'App→Abs', miroir_taux:'Miroir Taux', aleatoire:'Aléatoire', relance:'Relance', multi_strategy:'Combinaison', distribution:'Distribution', carte_3_vers_2:'3C→2C', carte_2_vers_3:'2C→3C', taux_miroir:'Miroir Taux', compteur_adverse:'C. Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Abs', abs_3_vers_3:'3→3 Abs', absence_victoire:'Abs Victoire', union_enseignes:'Union Ens.', carte_valeur:'Carte Val.', intersection:'Intersection', comptages_ecart:'Cmpt. Écart', annonce_sequence:'Rotateur', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'CM+4', rattrapage_groupe:'Ratt. Groupé' };
                         const modeLabel = ML[stratForm.mode] || stratForm.mode;
-                        const nom = stratForm.name?.trim() || 'Stratégie';
+                        // Nom : titre boutique > nom auto-marketing > nom stratégie
+                        const PFXS = ['Protocole','Système','Méthode','Formule','Module','Signal'];
+                        const GEMS  = ['Platine','Émeraude','Saphir','Rubis','Diamant','Cristal','Cobalt','Ambre','Jade','Opale','Topaze','Onyx'];
+                        const SFXS  = ['Pro','Élite','Expert','Premium','Prestige','Master','Ultra','VIP'];
+                        const sid = stratEditing != null ? stratEditing : 0;
+                        const autoMktg = `${PFXS[sid%6]} ${GEMS[(sid*3)%12]} ${SFXS[(sid*7)%8]}`;
+                        const promo    = stratEditing != null ? (promoConfigs[String(stratEditing)] || {}) : {};
+                        const nom      = promo.titre?.trim() || autoMktg;
+                        const badge    = promo.badge || '🎯';
+                        const tagline  = promo.tagline?.trim() || '';
                         const px = stratForm.prix ?? 0;
-                        const auto = `🎯 ${nom}\n📊 Mode : ${modeLabel}\n\n📈 Bilan : — W / — L\n\n💰 Prix : ${px} $ / mois\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Rejoignez-nous pour recevoir les prédictions en temps réel !`;
-                        setStratForm(p => ({ ...p, annonce_strat: auto }));
+                        // Stats live depuis stratStats
+                        const st = stratEditing != null ? (stratStats.find(x => x.strategy === `S${stratEditing}`) || null) : null;
+                        const wins   = st ? (parseInt(st.wins)   || 0) : 0;
+                        const losses = st ? (parseInt(st.losses) || 0) : 0;
+                        const resolved = wins + losses;
+                        const winRate  = resolved > 0 ? Math.round(wins / resolved * 100) : null;
+                        let bilanStr;
+                        if (winRate === null) {
+                          bilanStr = '— (données en cours de collecte)';
+                        } else {
+                          const trend = winRate >= 80 ? ' 🔥' : winRate >= 65 ? ' 📈' : winRate >= 50 ? ' ✅' : ' ⚠️';
+                          bilanStr = `${wins} ✅ / ${losses} ❌  •  ${winRate}%${trend}`;
+                        }
+                        const lines = [
+                          `${badge} <b>${nom}</b>`,
+                          tagline ? `💬 <i>${tagline}</i>` : null,
+                          ``,
+                          `📊 Mode : ${modeLabel}`,
+                          `📈 Bilan : ${bilanStr}`,
+                          px > 0 ? `💰 Prix : <b>${px}$</b> / mois` : null,
+                          ``,
+                          `━━━━━━━━━━━━━━━━━`,
+                          `📲 Rejoignez-nous pour recevoir les prédictions en temps réel !`,
+                        ].filter(l => l !== null).join('\n');
+                        setStratForm(p => ({ ...p, annonce_strat: lines }));
                       }}
                       style={{ fontSize: 10, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(251,191,36,0.45)', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', cursor: 'pointer', fontWeight: 700 }}
                     >⚡ Générer</button>
@@ -11842,15 +11915,43 @@ function AdminPanel() {
                   <textarea
                     value={stratForm.annonce_strat || ''}
                     onChange={e => setStratForm(p => ({ ...p, annonce_strat: e.target.value }))}
-                    placeholder={`Ex:\n🎯 ${stratForm.name || 'Nom de la stratégie'}\n📊 Mode : CM+4\n📈 Bilan : 80 W / 20 L\n💰 Prix : ${stratForm.prix ?? 0}$ / mois`}
+                    placeholder={`Cliquez sur ⚡ Générer pour créer automatiquement l'annonce avec le nom boutique, le mode et le bilan en temps réel.`}
                     rows={6}
                     style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, color: '#f1f5f9', fontSize: 12, resize: 'vertical', lineHeight: 1.6, fontFamily: 'monospace', boxSizing: 'border-box' }}
                   />
-                  <div style={{ fontSize: 10, marginTop: 5, color: (stratForm.tg_targets || []).some(t => t.bot_token && t.channel_id) ? '#4ade80' : '#64748b' }}>
+
+                  {/* ── Aperçu Telegram ── */}
+                  {stratForm.annonce_strat?.trim() && (
+                    <div style={{ marginTop: 10, borderRadius: 10, overflow: 'hidden', background: '#0e1621', border: '1px solid rgba(57,169,219,0.2)' }}>
+                      <div style={{ padding: '5px 12px', background: 'rgba(57,169,219,0.1)', borderBottom: '1px solid rgba(57,169,219,0.18)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 11 }}>📱</span>
+                        <span style={{ fontSize: 10, fontWeight: 800, color: '#39a9db', letterSpacing: 0.6, textTransform: 'uppercase' }}>Aperçu Telegram — envoi toutes les 2h</span>
+                        <span style={{ marginLeft: 'auto', fontSize: 9, color: '#475569', fontStyle: 'italic' }}>Format réel du message</span>
+                      </div>
+                      <div style={{ padding: '12px 16px', background: '#17212b' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#2b5278,#1d3d5c)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🤖</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, color: '#39a9db', fontWeight: 700, marginBottom: 4 }}>Baccarat Pro Bot</div>
+                            <div style={{ background: '#2b5278', borderRadius: '4px 12px 12px 12px', padding: '9px 13px', display: 'inline-block', maxWidth: '100%' }}>
+                              <div
+                                style={{ color: '#e8f4fd', fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                                dangerouslySetInnerHTML={{ __html: stratForm.annonce_strat.replace(/\n/g, '<br/>') }}
+                              />
+                            </div>
+                            <div style={{ fontSize: 9, color: '#475569', marginTop: 3, textAlign: 'right' }}>envoi auto ✓✓</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 10, marginTop: 6, color: (stratForm.tg_targets || []).some(t => t.bot_token && t.channel_id) ? '#4ade80' : '#64748b' }}>
                     {(stratForm.tg_targets || []).some(t => t.bot_token && t.channel_id)
-                      ? `✅ Envoyée dans ${(stratForm.tg_targets || []).filter(t => t.bot_token && t.channel_id).length} canal(aux) Telegram lors de l'ajout du canal`
+                      ? `✅ Envoyée automatiquement dans ${(stratForm.tg_targets || []).filter(t => t.bot_token && t.channel_id).length} canal(aux) Telegram — bilan mis à jour à chaque envoi`
                       : '⚠️ Configurez un canal Telegram (token + ID canal) pour activer l\'envoi automatique'}
                   </div>
+                </>}
                 </div>
               </div>
 
