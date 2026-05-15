@@ -1278,7 +1278,84 @@ export default function Dashboard() {
                               );
                             })}
                           </div>
-                        ) : absences[0]?.isFC6 ? (() => {
+                        ) : absences[0]?.isCM ? (() => {
+                          const { queue = [] } = absences[0];
+                          const ALL_CM = ['♠','♥','♦','♣'];
+                          const SUIT_COLOR_CM = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                          const SUIT_NAME_CM  = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
+                          const activeEntry = queue.find(e => !e.emitted) || null;
+                          return (
+                            <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {/* En-tête */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#a855f7', letterSpacing: '0.06em', textTransform: 'uppercase' }}>🃏 CM+4</span>
+                                <span style={{ background: queue.length > 0 ? 'rgba(168,85,247,0.3)' : 'rgba(80,80,100,0.2)', color: queue.length > 0 ? '#e9d5ff' : '#6b7280', borderRadius: 10, padding: '1px 7px', fontSize: '0.6rem', fontWeight: 800 }}>
+                                  {queue.length} en attente
+                                </span>
+                              </div>
+
+                              {queue.length === 0 ? (
+                                <div style={{ color: '#475569', fontSize: '0.72rem', fontStyle: 'italic' }}>
+                                  Attend une distribution 2+2 avec 1 costume absent…
+                                </div>
+                              ) : (
+                                <>
+                                  {/* Distribution 2/2 */}
+                                  {activeEntry && (
+                                    <div>
+                                      <div style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Distribution 2/2 :</div>
+                                      <div style={{ display: 'flex', gap: 4 }}>
+                                        {ALL_CM.map(suit => {
+                                          const isMissing = suit === activeEntry.suit;
+                                          return (
+                                            <div key={suit} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 2px', borderRadius: 6, background: isMissing ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.03)', border: `1px solid ${isMissing ? '#a855f7' : 'rgba(255,255,255,0.07)'}`, opacity: isMissing ? 1 : 0.4 }}>
+                                              <span style={{ fontSize: '0.9rem', color: isMissing ? '#e9d5ff' : (SUIT_COLOR_CM[suit] || '#94a3b8') }}>{suit}</span>
+                                              <span style={{ fontSize: '0.52rem', color: isMissing ? '#c084fc' : '#374151', fontWeight: isMissing ? 700 : 400 }}>{isMissing ? 'absent' : '✓'}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Vérification N+2 */}
+                                  {activeEntry && !activeEntry.verified && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.28)' }}>
+                                      <span style={{ fontSize: '0.58rem', color: '#818cf8', fontWeight: 700, whiteSpace: 'nowrap' }}>Vérif. N+2 :</span>
+                                      <span style={{ fontSize: '0.82rem', color: '#a5b4fc', fontWeight: 900 }}>#{activeEntry.verifyAt}</span>
+                                      <span style={{ fontSize: '0.55rem', color: '#4b5563', marginLeft: 'auto', whiteSpace: 'nowrap' }}>→ préd. #{activeEntry.predictAt}</span>
+                                    </div>
+                                  )}
+                                  {activeEntry && activeEntry.verified && !activeEntry.emitted && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                                      <span style={{ fontSize: '0.6rem', color: '#fbbf24', fontWeight: 700 }}>✅ Vérif. passée</span>
+                                      <span style={{ fontSize: '0.58rem', color: '#78350f', marginLeft: 'auto' }}>→ préd. #<strong style={{ color: '#fbbf24' }}>{activeEntry.predictAt}</strong></span>
+                                    </div>
+                                  )}
+
+                                  {/* File d'attente */}
+                                  <div>
+                                    <div style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 700, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>File d'attente :</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                      {queue.map((entry, i) => {
+                                        const sc = SUIT_COLOR_CM[entry.suit] || '#e2e8f0';
+                                        return (
+                                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 7px', borderRadius: 6, background: entry.emitted ? 'rgba(34,197,94,0.07)' : 'rgba(168,85,247,0.08)', border: `1px solid ${entry.emitted ? 'rgba(34,197,94,0.2)' : 'rgba(168,85,247,0.2)'}` }}>
+                                            <span style={{ fontSize: '0.58rem', color: '#7c3aed', fontWeight: 800, minWidth: 48 }}>Attente {i + 1}</span>
+                                            <span style={{ fontSize: '0.75rem', color: '#e2e8f0', fontWeight: 800 }}>#{entry.predictAt}</span>
+                                            <span style={{ fontSize: '0.9rem', color: sc, fontWeight: 700, lineHeight: 1 }}>{entry.suit}</span>
+                                            <span style={{ fontSize: '0.58rem', color: '#94a3b8' }}>{SUIT_NAME_CM[entry.suit]}</span>
+                                            {entry.emitted && <span style={{ fontSize: '0.58rem', color: '#22c55e', marginLeft: 'auto', fontWeight: 700 }}>✅ émis</span>}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })() : absences[0]?.isFC6 ? (() => {
                           const { lastLog: ll, queue: fc6Queue, deferred, proche, pending: fc6Pending } = absences[0];
                           const SUIT_COLOR = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
                           const Row = ({ ok, label }) => (

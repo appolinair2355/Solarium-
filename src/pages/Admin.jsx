@@ -4201,6 +4201,8 @@ function AdminPanel() {
     monitored_strategies: [], rg_stop_limit: 10,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
+    // Prix et annonce Telegram
+    prix: 0, annonce_strat: '',
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -5237,7 +5239,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '' });
     setStratOpen(true);
   };
 
@@ -5254,7 +5256,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '' });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -9719,39 +9721,81 @@ function AdminPanel() {
                     {/* ── Moniteur costume_manquant temps réel ── */}
                     {s.mode === 'costume_manquant' && cmMonitorData[s.id] && (() => {
                       const cm = cmMonitorData[s.id];
-                      const { count = 0, queue = [], lastGame = null, lastSuit = null } = cm;
+                      const { count = 0, queue = [] } = cm;
+                      const ALL_SUITS_CM = ['♠', '♥', '♦', '♣'];
+                      const SUIT_NAMES_CM = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
+                      const SUIT_COLOR_CM = { '♠': '#e2e8f0', '♥': '#f87171', '♦': '#f87171', '♣': '#e2e8f0' };
+                      const activeEntry = queue.find(e => !e.emitted) || null;
                       return (
-                        <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.2)' }}>
-                          <div style={{ fontSize: 10, color: '#a855f7', fontWeight: 700, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            🃏 COSTUME MANQUANT — File d&apos;attente
-                            <span style={{ background: count > 0 ? 'rgba(168,85,247,0.25)' : 'rgba(100,100,120,0.2)', color: count > 0 ? '#c084fc' : '#6b7280', borderRadius: 10, padding: '0px 7px', fontSize: 11, fontWeight: 800 }}>
-                              {count} détection{count !== 1 ? 's' : ''} active{count !== 1 ? 's' : ''}
+                        <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 9, background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.25)', fontSize: 12 }}>
+
+                          {/* ── En-tête ── */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 800, color: '#a855f7', letterSpacing: 0.8, textTransform: 'uppercase' }}>🃏 CM+4</span>
+                            <span style={{ background: count > 0 ? 'rgba(168,85,247,0.3)' : 'rgba(80,80,100,0.25)', color: count > 0 ? '#e9d5ff' : '#6b7280', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 800 }}>
+                              {count} en attente
                             </span>
-                            {lastGame !== null && <span style={{ color: '#64748b', fontWeight: 400 }}>· dernier jeu #{lastGame}</span>}
                           </div>
-                          {queue.length === 0 && (
-                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Aucune détection en cours — en attente d&apos;une distribution 2+2 avec 1 costume absent.</div>
-                          )}
-                          {queue.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {queue.map((entry, i) => {
-                                const isVerified = entry.verified && !entry.emitted;
-                                const isEmitted = entry.emitted;
-                                const statusColor = isEmitted ? '#22c55e' : isVerified ? '#f59e0b' : '#a855f7';
-                                const statusLabel = isEmitted ? '✅ émis' : isVerified ? '⏳ vérifié' : '🔍 vérif. #' + entry.verifyAt;
-                                return (
-                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: `1px solid ${statusColor}30` }}>
-                                    <span style={{ fontSize: 15, minWidth: 22 }}>{entry.suit}</span>
-                                    <span style={{ fontSize: 10, color: '#94a3b8' }}>détecté #<strong style={{ color: '#e2e8f0' }}>{entry.trigGn}</strong></span>
-                                    <span style={{ fontSize: 10, color: '#64748b' }}>→</span>
-                                    <span style={{ fontSize: 10, color: statusColor, fontWeight: 700 }}>{statusLabel}</span>
-                                    {!isEmitted && (
-                                      <span style={{ fontSize: 10, color: '#6366f1', marginLeft: 'auto' }}>préd. #<strong>{entry.predictAt}</strong></span>
-                                    )}
+
+                          {queue.length === 0 ? (
+                            <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>Aucune détection — attend une distribution 2+2 avec 1 costume absent.</div>
+                          ) : (
+                            <>
+                              {/* ── Distribution 2/2 ── */}
+                              {activeEntry && (
+                                <div style={{ marginBottom: 8 }}>
+                                  <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 }}>Distribution 2/2 :</div>
+                                  <div style={{ display: 'flex', gap: 5 }}>
+                                    {ALL_SUITS_CM.map(suit => {
+                                      const isMissing = suit === activeEntry.suit;
+                                      return (
+                                        <div key={suit} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '5px 4px', borderRadius: 7, background: isMissing ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.04)', border: `1px solid ${isMissing ? '#a855f7' : 'rgba(255,255,255,0.07)'}`, opacity: isMissing ? 1 : 0.45 }}>
+                                          <span style={{ fontSize: 18, color: isMissing ? '#e9d5ff' : SUIT_COLOR_CM[suit] }}>{suit}</span>
+                                          <span style={{ fontSize: 9, color: isMissing ? '#c084fc' : '#374151', marginTop: 2, fontWeight: isMissing ? 700 : 400 }}>{isMissing ? 'absent' : '✓'}</span>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
-                                );
-                              })}
-                            </div>
+                                </div>
+                              )}
+
+                              {/* ── Vérification N+2 ── */}
+                              {activeEntry && !activeEntry.verified && (
+                                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.28)' }}>
+                                  <span style={{ fontSize: 10, color: '#818cf8', fontWeight: 700, whiteSpace: 'nowrap' }}>Vérification N+2 :</span>
+                                  <span style={{ fontSize: 14, color: '#a5b4fc', fontWeight: 900 }}>#{activeEntry.verifyAt}</span>
+                                  <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 'auto', whiteSpace: 'nowrap' }}>→ si absent : préd. #{activeEntry.predictAt}</span>
+                                </div>
+                              )}
+                              {activeEntry && activeEntry.verified && !activeEntry.emitted && (
+                                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                                  <span style={{ fontSize: 10, color: '#fbbf24', fontWeight: 700 }}>✅ Vérif. N+2 passée</span>
+                                  <span style={{ fontSize: 10, color: '#78350f', marginLeft: 'auto' }}>→ prédiction ciblée #<strong style={{ color: '#fbbf24' }}>{activeEntry.predictAt}</strong></span>
+                                </div>
+                              )}
+
+                              {/* ── File d'attente ── */}
+                              <div>
+                                <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>File d&apos;attente :</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                  {queue.map((entry, i) => {
+                                    const isEmitted = entry.emitted;
+                                    const sc = SUIT_COLOR_CM[entry.suit] || '#e2e8f0';
+                                    return (
+                                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 7, background: isEmitted ? 'rgba(34,197,94,0.07)' : 'rgba(168,85,247,0.09)', border: `1px solid ${isEmitted ? 'rgba(34,197,94,0.25)' : 'rgba(168,85,247,0.22)'}` }}>
+                                        <span style={{ fontSize: 10, color: '#7c3aed', fontWeight: 800, minWidth: 56 }}>Attente {i + 1}</span>
+                                        <span style={{ fontSize: 10, color: '#64748b' }}>Jeu</span>
+                                        <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 800 }}>#{entry.predictAt}</span>
+                                        <span style={{ fontSize: 17, color: sc, fontWeight: 700, lineHeight: 1 }}>{entry.suit}</span>
+                                        <span style={{ fontSize: 10, color: '#94a3b8' }}>{SUIT_NAMES_CM[entry.suit]}</span>
+                                        {isEmitted && <span style={{ fontSize: 10, color: '#22c55e', marginLeft: 'auto', fontWeight: 700 }}>✅ émis</span>}
+                                        {!isEmitted && <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 'auto' }}>détecté #<strong style={{ color: '#6b7280' }}>{entry.trigGn}</strong></span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </>
                           )}
                         </div>
                       );
@@ -11360,7 +11404,7 @@ function AdminPanel() {
               </>}
 
               {/* ══════════════ SECTION 4 — MAPPINGS ══════════════ */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -11368,7 +11412,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -11389,7 +11433,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -11754,6 +11798,61 @@ function AdminPanel() {
                 })}
               </div>
               </>}
+
+              {/* ══════════════ SECTION 6 — PRIX & ANNONCE TELEGRAM ══════════════ */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                <span style={{ fontSize: 13 }}>💰</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Prix &amp; Annonce Telegram</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 16, alignItems: 'start' }}>
+
+                {/* ── Prix ── */}
+                <div style={{ padding: '14px 16px', borderRadius: 10, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)', minWidth: 160 }}>
+                  <label style={{ display: 'block', color: '#fbbf24', fontSize: 11, fontWeight: 800, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.8 }}>💰 Prix de la stratégie</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number" min="0" max="9999" step="0.5"
+                      value={stratForm.prix ?? 0}
+                      onChange={e => setStratForm(p => ({ ...p, prix: Math.max(0, parseFloat(e.target.value) || 0) }))}
+                      style={{ width: 90, padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(251,191,36,0.45)', borderRadius: 8, color: '#fbbf24', fontSize: 16, fontWeight: 800, textAlign: 'center' }}
+                    />
+                    <span style={{ color: '#92400e', fontSize: 13, fontWeight: 700 }}>$ / mois</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#78350f', marginTop: 6 }}>Affiché dans l'annonce</div>
+                </div>
+
+                {/* ── Annonce ── */}
+                <div style={{ padding: '14px 16px', borderRadius: 10, background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <label style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8 }}>📣 Annonce Telegram</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ML = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: 'Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: 'CM+4', rattrapage_groupe: 'Ratt. Groupé' };
+                        const modeLabel = ML[stratForm.mode] || stratForm.mode;
+                        const nom = stratForm.name?.trim() || 'Stratégie';
+                        const px = stratForm.prix ?? 0;
+                        const auto = `🎯 ${nom}\n📊 Mode : ${modeLabel}\n\n📈 Bilan : — W / — L\n\n💰 Prix : ${px} $ / mois\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Rejoignez-nous pour recevoir les prédictions en temps réel !`;
+                        setStratForm(p => ({ ...p, annonce_strat: auto }));
+                      }}
+                      style={{ fontSize: 10, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(251,191,36,0.45)', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', cursor: 'pointer', fontWeight: 700 }}
+                    >⚡ Générer</button>
+                  </div>
+                  <textarea
+                    value={stratForm.annonce_strat || ''}
+                    onChange={e => setStratForm(p => ({ ...p, annonce_strat: e.target.value }))}
+                    placeholder={`Ex:\n🎯 ${stratForm.name || 'Nom de la stratégie'}\n📊 Mode : CM+4\n📈 Bilan : 80 W / 20 L\n💰 Prix : ${stratForm.prix ?? 0}$ / mois`}
+                    rows={6}
+                    style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, color: '#f1f5f9', fontSize: 12, resize: 'vertical', lineHeight: 1.6, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: 10, marginTop: 5, color: (stratForm.tg_targets || []).some(t => t.bot_token && t.channel_id) ? '#4ade80' : '#64748b' }}>
+                    {(stratForm.tg_targets || []).some(t => t.bot_token && t.channel_id)
+                      ? `✅ Envoyée dans ${(stratForm.tg_targets || []).filter(t => t.bot_token && t.channel_id).length} canal(aux) Telegram lors de l'ajout du canal`
+                      : '⚠️ Configurez un canal Telegram (token + ID canal) pour activer l\'envoi automatique'}
+                  </div>
+                </div>
+              </div>
 
               {/* ── Boutons d'action ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
