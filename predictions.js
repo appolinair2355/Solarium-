@@ -41,7 +41,8 @@ function formatPrediction(p) {
 router.get('/', checkSubscription, async (req, res) => {
   const { strategy, limit = 50 } = req.query;
   try {
-    const rows = await db.getPredictions({ strategy: strategy || undefined, limit: parseInt(limit) || 50 });
+    const safeLimit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
+    const rows = await db.getPredictions({ strategy: strategy || undefined, limit: safeLimit });
     res.json(rows.map(formatPrediction));
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });

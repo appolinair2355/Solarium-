@@ -151,11 +151,24 @@ router.post('/request', requireAuth, async (req, res) => {
     const fullPrice = priceForType(basePlan.base_usd, accountType);
 
     // Remise 20 % si l'utilisateur a un parrain ET n'a jamais utilisé son bonus
+    // Anti-abus : vérifier qu'il n'existe pas déjà une demande en attente avec remise
     let amount = fullPrice;
     let discount = false;
     if (user.referrer_user_id && !user.referral_bonus_used) {
-      amount = Math.round(amount * (1 - REFERRAL_DISCOUNT_PERCENT / 100) * 100) / 100;
-      discount = true;
+      let alreadyHasDiscountPending = false;
+      if (db.pool) {
+        try {
+          const chk = await db.pool.query(
+            `SELECT id FROM payment_requests WHERE user_id=$1 AND discount_applied=TRUE AND status NOT IN ('rejected') LIMIT 1`,
+            [user.id]
+          );
+          alreadyHasDiscountPending = chk.rows.length > 0;
+        } catch {}
+      }
+      if (!alreadyHasDiscountPending) {
+        amount = Math.round(amount * (1 - REFERRAL_DISCOUNT_PERCENT / 100) * 100) / 100;
+        discount = true;
+      }
     }
 
     const pr = await db.createPaymentRequest({
@@ -462,12 +475,27 @@ router.post('/admin/:id/reject', requireAdmin, async (req, res) => {
     const pr = await db.getPaymentRequest(id);
     if (!pr) return res.status(404).json({ error: 'Demande introuvable' });
 
-    // Si l'IA avait accordé un accès temporaire, le retirer
-    if (pr.ai_temp_access_until) {
+    // Si l'IA avait accordé un accès provisoire (ai_validated), le révoquer proprement
+    if (pr.status === 'ai_validated' || pr.ai_temp_access_until) {
       const u = await db.getUser(pr.user_id);
-      if (u && u.subscription_expires_at &&
-          new Date(u.subscription_expires_at).getTime() === new Date(pr.ai_temp_access_until).getTime()) {
-        await db.updateUser(pr.user_id, { subscription_expires_at: null });
+      if (u && u.subscription_expires_at) {
+        // Soustraire les minutes accordées provisoirement pour restaurer l'abonnement précédent
+        const currentExpiry  = new Date(u.subscription_expires_at);
+        const restoredExpiry = new Date(currentExpiry.getTime() - pr.duration_minutes * 60 * 1000);
+        const updates = {
+          subscription_duration_minutes: Math.max(0, (u.subscription_duration_minutes || 0) - pr.duration_minutes),
+        };
+        if (restoredExpiry <= new Date()) {
+          // L'abonnement restauré serait expiré → révoquer complètement
+          updates.subscription_expires_at = null;
+          updates.is_approved = false;
+          updates.is_premium  = false;
+          updates.is_pro      = false;
+        } else {
+          // L'utilisateur avait un abonnement pré-existant valide → le restaurer
+          updates.subscription_expires_at = restoredExpiry.toISOString();
+        }
+        await db.updateUser(pr.user_id, updates);
       }
     }
 

@@ -6,10 +6,14 @@
  *   - interval : toutes les X heures aux heures rondes (0h, Xh, 2Xh…)
  *   - fixed    : à des heures précises (12, 17, 19…) pile à l'heure
  *
+ * Avant chaque envoi d'une annonce AUTO_STRAT_S*, le bilan est rafraîchi depuis
+ * la DB pour que les stats soient toujours à jour au moment de l'envoi.
+ *
  * Utilise sendTelegramMsg() de announcement-sender.js (envoi sans signature).
  */
 
-const { sendTelegramMsg } = require('./announcement-sender');
+const { sendTelegramMsg }    = require('./announcement-sender');
+const { getStratWinRate, injectBilan } = require('./strategy-auto-announce');
 let _timer = null;
 
 /**
@@ -48,6 +52,33 @@ function _shouldSend(ann, nowDate) {
   return false;
 }
 
+/**
+ * Pour les annonces AUTO_STRAT_S{id}_*, rafraîchit le bilan depuis la DB
+ * juste avant l'envoi → le message envoyé a toujours les stats les plus récentes.
+ */
+async function _refreshStratBilan(ann, pool) {
+  const match = ann.name?.match(/^AUTO_STRAT_S(\d+)_/);
+  if (!match) return ann;
+
+  const stratId = parseInt(match[1]);
+  try {
+    const stats = await getStratWinRate(stratId);
+    if (!stats) return ann;
+
+    const refreshedText = injectBilan(ann.message_text || '', stats);
+    if (refreshedText !== ann.message_text) {
+      await pool.query(
+        `UPDATE tg_announcements SET message_text=$1, updated_at=NOW() WHERE id=$2`,
+        [refreshedText, ann.id]
+      );
+      return { ...ann, message_text: refreshedText };
+    }
+  } catch (e) {
+    console.warn(`[TgAnnounce] Impossible de rafraîchir le bilan pour ${ann.name}: ${e.message}`);
+  }
+  return ann;
+}
+
 // ── Tick principal — déclenché toutes les 60 secondes ───────────────────────
 async function _tick() {
   let pool;
@@ -58,9 +89,12 @@ async function _tick() {
     const now = new Date();
     const r   = await pool.query('SELECT * FROM tg_announcements WHERE enabled = TRUE');
 
-    for (const ann of r.rows) {
+    for (let ann of r.rows) {
       if (!_shouldSend(ann, now)) continue;
       try {
+        // Rafraîchir le bilan live pour les annonces par stratégie
+        ann = await _refreshStratBilan(ann, pool);
+
         await sendAnnouncementNow(ann);
         await pool.query('UPDATE tg_announcements SET last_sent_at = NOW() WHERE id = $1', [ann.id]);
         console.log(`[TgAnnounce] ✅ "${ann.name}" → canal ${ann.channel_id}`);

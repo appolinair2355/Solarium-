@@ -760,12 +760,30 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         ? new Date().toISOString() : null,
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
+      vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
+      annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
+    // Sync vente_enabled → strategy_promo_config
+    try {
+      const rawPromo = await db.getSetting('strategy_promo_config').catch(() => null);
+      const promos   = rawPromo ? JSON.parse(rawPromo) : {};
+      const sid      = String(strat.id);
+      promos[sid]    = { ...(promos[sid] || {}), enabled: strat.vente_enabled };
+      await db.setSetting('strategy_promo_config', JSON.stringify(promos));
+    } catch {}
+    // Sync annonce_enabled → désactiver les annonces auto si nécessaire
+    if (!strat.annonce_enabled && db.pool) {
+      db.pool.query(
+        `UPDATE tg_announcements SET enabled=FALSE WHERE name LIKE $1`,
+        [`AUTO_STRAT_S${strat.id}_%`]
+      ).catch(() => {});
+    }
+    require('./strategy-auto-announce').autoUpdateStrategyAnnouncement().catch(() => {});
     // Message de bienvenue pour chaque canal Telegram nouvellement configuré
     if (tg_targets.length > 0) {
       const { sendRawMessage } = require('./telegram-service');
@@ -1007,10 +1025,33 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       })(),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
+      vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
+      annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
+    // Sync vente_enabled → strategy_promo_config
+    try {
+      const rawPromo = await db.getSetting('strategy_promo_config').catch(() => null);
+      const promos   = rawPromo ? JSON.parse(rawPromo) : {};
+      const sid      = String(list[idx].id);
+      promos[sid]    = { ...(promos[sid] || {}), enabled: list[idx].vente_enabled };
+      await db.setSetting('strategy_promo_config', JSON.stringify(promos));
+    } catch {}
+    // Sync annonce_enabled → désactiver les annonces auto si nécessaire
+    if (!list[idx].annonce_enabled && db.pool) {
+      db.pool.query(
+        `UPDATE tg_announcements SET enabled=FALSE WHERE name LIKE $1`,
+        [`AUTO_STRAT_S${list[idx].id}_%`]
+      ).catch(() => {});
+    } else if (list[idx].annonce_enabled && db.pool) {
+      db.pool.query(
+        `UPDATE tg_announcements SET enabled=TRUE WHERE name LIKE $1`,
+        [`AUTO_STRAT_S${list[idx].id}_%`]
+      ).catch(() => {});
+    }
+    require('./strategy-auto-announce').autoUpdateStrategyAnnouncement().catch(() => {});
     // Message de bienvenue pour les canaux Telegram nouvellement ajoutés
     const addedTargets = tg_targets.filter(nt =>
       !oldTgTargets.some(ot => ot.channel_id === nt.channel_id && ot.bot_token === nt.bot_token)
