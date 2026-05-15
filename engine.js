@@ -4587,6 +4587,31 @@ class Engine {
         ];
       }
 
+      // Mode Costume Manquant (CM+4) → retourner la file d'attente
+      if (mode === 'costume_manquant') {
+        const cmQueue = entry.cmQueue || {};
+        const queue = Object.entries(cmQueue).map(([trigGnStr, e]) => ({
+          trigGn:    parseInt(trigGnStr),
+          suit:      e.suit,
+          verified:  e.verified,
+          emitted:   e.emitted,
+          cancelled: e.cancelled,
+          verifyAt:  parseInt(trigGnStr) + 2,
+          predictAt: parseInt(trigGnStr) + 4,
+        })).filter(e => !e.cancelled);
+        return [{
+          isCM:          true,
+          suit:          'cm',
+          display:       '🃏',
+          count:         queue.length,
+          threshold:     1,
+          mode,
+          label:         'CM+4',
+          singleCounter: true,
+          queue,
+        }];
+      }
+
       // Mode comptages_ecart → streak courant vs seuil dynamique B
       if (mode === 'comptages_ecart') {
         const cKey = entry.config?.comptages_key || '';

@@ -758,6 +758,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
+      prix: Math.max(0, parseFloat(req.body.prix) || 0),
+      annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1003,6 +1005,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
         return oldPredDurationStartedAt;
       })(),
+      prix: Math.max(0, parseFloat(req.body.prix) || 0),
+      annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
