@@ -2477,14 +2477,15 @@ class Engine {
       }
     }
 
-    const emitPrediction = async (next, ps, suit) => {
+    const emitPrediction = async (next, ps, suit, { force = false } = {}) => {
       // ── Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER ─
       if (next > MAX_GAME_NUMBER) {
         console.warn(`[${channelId}] ⛔ Prédiction #${next} ignorée — dépasse le MAX journalier (${MAX_GAME_NUMBER})`);
         return;
       }
       // ── Bloque l'émission si une prédiction est encore en attente ─
-      if (Object.keys(state.pending).length > 0) {
+      // (force=true contourne ce garde pour les modes avec vérification différée, ex: costume_manquant)
+      if (!force && Object.keys(state.pending).length > 0) {
         console.log(`[${channelId}] Bloqué — prédiction en attente de vérification`);
         return;
       }
@@ -3537,21 +3538,21 @@ class Engine {
         const trigGn = parseInt(trigGnStr);
         if (entry.cancelled) { if (gn > trigGn + 5) delete state.cmQueue[trigGnStr]; continue; }
 
-        // Vérification à trigGn+2 : si le costume manquant est apparu → annuler
+        // Vérification à trigGn+2 : si le costume manquant est apparu (main configurée) → annuler
+        // Sinon → émettre immédiatement la prédiction pour trigGn+4
         if (gn === trigGn + 2 && !entry.verified) {
           entry.verified = true;
           if (handSuits.includes(entry.suit)) {
             entry.cancelled = true;
-            console.log(`[${channelId}] [CM] ${entry.suit} apparu au jeu #${gn} (+2) → prédiction #${trigGn + 4} annulée`);
+            console.log(`[${channelId}] [CM] ${entry.suit} apparu au jeu #${gn} (+2) dans la main configurée → prédiction #${trigGn + 4} annulée`);
           } else {
-            console.log(`[${channelId}] [CM] ${entry.suit} toujours absent au jeu #${gn} (+2) → prédiction #${trigGn + 4} confirmée`);
+            // Appliquer les mappings (comme les autres modes) ; retomber sur le costume manquant si pas de mapping
+            const cmPs = resolvePredictedSuit(entry.suit) || entry.suit;
+            console.log(`[${channelId}] [CM] ${entry.suit} toujours absent au jeu #${gn} (+2) → prédiction #${trigGn + 4} émise (→ ${SUIT_DISPLAY[cmPs] || cmPs})`);
+            entry.emitted = true;
+            // force=true : contourne le garde "pending" — la vérif N+2 garantit l'émission
+            await emitPrediction(trigGn + 4, cmPs, entry.suit, { force: true });
           }
-        }
-
-        // Émission à trigGn+3 (prédit pour trigGn+4)
-        if (gn === trigGn + 3 && !entry.cancelled && !entry.emitted) {
-          entry.emitted = true;
-          await emitPrediction(trigGn + 4, entry.suit, entry.suit);
         }
 
         // Nettoyage des vieilles entrées
@@ -4548,6 +4549,42 @@ class Engine {
             ? `🧠 Dernier signal : ${SUIT_DISPLAY[lastSuit] || lastSuit} (${lastConf}%)`
             : `🧠 En analyse du pattern...`,
         }];
+      }
+
+      // Mode Compteur Parité → afficher les compteurs pair/impair
+      if (mode === 'compteur_parite') {
+        const pc = entry.parityCounts || { pair: 0, impair: 0 };
+        const pp = entry.parityPending || { pair: false, impair: false };
+        return [
+          {
+            suit: 'pair',
+            display: SUIT_DISPLAY['pair'] || '🟢 Pair',
+            count: pc.pair || 0,
+            threshold,
+            mode,
+            label: 'Parité',
+            isLive: false,
+            singleCounter: false,
+            confirmPending: !!pp.pair,
+            description: pp.pair
+              ? `⏳ Seuil atteint — attend confirmation Pair`
+              : `${pc.pair || 0}/${threshold} absences Pair`,
+          },
+          {
+            suit: 'impair',
+            display: SUIT_DISPLAY['impair'] || '🔴 Impair',
+            count: pc.impair || 0,
+            threshold,
+            mode,
+            label: 'Parité',
+            isLive: false,
+            singleCounter: false,
+            confirmPending: !!pp.impair,
+            description: pp.impair
+              ? `⏳ Seuil atteint — attend confirmation Impair`
+              : `${pc.impair || 0}/${threshold} absences Impair`,
+          },
+        ];
       }
 
       // Mode comptages_ecart → streak courant vs seuil dynamique B

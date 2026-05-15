@@ -824,7 +824,16 @@ router.get('/cm-monitor/:id', requireAdmin, async (req, res) => {
       if (g.suit_p) dist.joueur.push(g.suit_p);
       if (g.suit_b) dist.banquier.push(g.suit_b);
     }
-    res.json({ active: true, queue, recentJoueur: dist.joueur.slice(-5), recentBanquier: dist.banquier.slice(-5) });
+    const lastEntry = queue.length > 0 ? queue[queue.length - 1] : null;
+    res.json({
+      active: true,
+      queue,
+      count: queue.length,
+      lastGame: lastEntry ? lastEntry.trigGn : null,
+      lastSuit: lastEntry ? lastEntry.suit : null,
+      recentJoueur: dist.joueur.slice(-5),
+      recentBanquier: dist.banquier.slice(-5),
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
