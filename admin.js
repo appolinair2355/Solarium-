@@ -762,6 +762,17 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
       annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
+      // CM+t paramètres
+      cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
+      cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
+      // Planification des prédictions
+      pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
+      pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
+      pred_schedule_hours: Array.isArray(req.body.pred_schedule_hours) ? req.body.pred_schedule_hours.map(Number).filter(h => h >= 0 && h <= 23) : [],
+      pred_schedule_interval: Math.max(1, parseInt(req.body.pred_schedule_interval) || 1),
+      pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
+      pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
+      pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1027,6 +1038,17 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
       annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
+      // CM+t paramètres
+      cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
+      cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
+      // Planification des prédictions
+      pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
+      pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
+      pred_schedule_hours: Array.isArray(req.body.pred_schedule_hours) ? req.body.pred_schedule_hours.map(Number).filter(h => h >= 0 && h <= 23) : [],
+      pred_schedule_interval: Math.max(1, parseInt(req.body.pred_schedule_interval) || 1),
+      pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
+      pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
+      pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);

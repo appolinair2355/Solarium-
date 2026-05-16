@@ -611,7 +611,7 @@ async function callGroqVision(base64Image, mimeType, prompt) {
       if (k && k.trim()) key = k.trim();
     } catch {}
   }
-  if (!key) key = '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';
+  if (!key) key = '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';
   if (!key) throw new Error('Clé Groq Vision non configurée');
 
   const mime = mimeType || 'image/jpeg';
