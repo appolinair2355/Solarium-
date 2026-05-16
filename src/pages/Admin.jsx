@@ -4203,6 +4203,13 @@ function AdminPanel() {
     pred_duration_minutes: 0,
     // Prix et annonce Telegram
     prix: 0, annonce_strat: '',
+    // CM+t paramètres
+    cm_t: 2, cm_check_inverse: false,
+    // Planification des prédictions
+    pred_schedule_enabled: false, pred_schedule_type: 'hours',
+    pred_schedule_hours: [], pred_schedule_interval: 1,
+    pred_schedule_annonce_reprise: '', pred_schedule_annonce_fin: '',
+    pred_schedule_annonce_enabled: false,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -4405,6 +4412,7 @@ function AdminPanel() {
     { value: 'apparition_absence', label: 'Apparition → Absence' },
     { value: 'taux_miroir', label: 'Taux Miroir' },
     { value: 'compteur_adverse', label: 'Compteur Adverse' },
+    { value: 'compteur_parite', label: 'Compteur Parité' },
     { value: 'victoire_adverse', label: 'Victoire Adverse' },
     { value: 'multi_strategy', label: 'Multi-stratégie' },
     { value: 'relance', label: 'Relance' },
@@ -5239,7 +5247,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: s.vente_enabled ?? false, annonce_enabled: s.annonce_enabled !== false });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: s.vente_enabled ?? false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false });
     setStratOpen(true);
   };
 
@@ -5256,7 +5264,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: false, annonce_enabled: s.annonce_enabled !== false });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5299,7 +5307,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','compteur_parite'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison' && stratForm.mode !== 'relance') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -8214,7 +8222,7 @@ function AdminPanel() {
                       { value: 'manquants', label: 'Absences' }, { value: 'apparents', label: 'Apparitions' },
                       { value: 'absence_apparition', label: 'Abs→App' }, { value: 'apparition_absence', label: 'App→Abs' },
                       { value: 'distribution', label: 'Distribution' }, { value: 'taux_miroir', label: 'Miroir Taux' },
-                      { value: 'compteur_adverse', label: 'C. Adverse' }, { value: 'absence_victoire', label: 'Abs Victoire' },
+                      { value: 'compteur_adverse', label: 'C. Adverse' }, { value: 'compteur_parite', label: 'C. Parité' }, { value: 'absence_victoire', label: 'Abs Victoire' },
                       { value: 'relance', label: 'Relance' }, { value: 'carte_3_vers_2', label: '3C→2C' },
                       { value: 'carte_2_vers_3', label: '2C→3C' }, { value: 'lecture_passee', label: 'Lecture Passée' },
                       { value: 'intelligent_cartes', label: 'Intelligent' }, { value: 'union_enseignes', label: 'Union' },
@@ -9586,7 +9594,7 @@ function AdminPanel() {
                           : s.mode === 'absence_confirmee' ? '✅ Abs Confirmée'
                           : s.mode === 'annonce_sequence' ? '📣 Rotateur Promo'
                           : s.mode;
-                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence';
+                        const isAutoMode = s.mode === 'absence_apparition' || s.mode === 'apparition_absence' || s.mode === 'distribution' || s.mode === 'carte_3_vers_2' || s.mode === 'carte_2_vers_3' || s.mode === 'victoire_adverse' || s.mode === 'abs_3_vers_2' || s.mode === 'abs_3_vers_3' || s.mode === 'absence_victoire' || s.mode === 'annonce_sequence' || s.mode === 'compteur_parite';
                         if (s.mode === 'annonce_sequence') {
                           const n = (s.annonce_sequence_ids || []).length;
                           const dur = parseInt(s.annonce_duration) || 120;
@@ -10337,6 +10345,7 @@ function AdminPanel() {
                       { value: 'carte_2_vers_3',       label: '2️⃣ 2 cartes → prédit 3 cartes' },
                       { value: 'taux_miroir',          label: '⚖️ Miroir Taux' },
                       { value: 'compteur_adverse',     label: '🔄 Compteur Adverse' },
+                      { value: 'compteur_parite',      label: '⚖️ Compteur Parité (pair / impair)' },
                       { value: 'absence_victoire',     label: '🏆 Absence Victoire (Joueur / Banquier)' },
                       { value: 'lecture_passee',       label: '📖 Lecture des jeux passés (cartes_jeu)' },
                       { value: 'intelligent_cartes',   label: '🧠 Intelligent Cartes (analyse de patterns)' },
@@ -10451,15 +10460,67 @@ function AdminPanel() {
                     </div>
                   )}
                   {stratForm.mode === 'costume_manquant' && (
+                    <>
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Costume Manquant (+4)</div>
-                      <div>Surveille les jeux à <strong>distribution complète 2+2</strong> (2 cartes Joueur + 2 cartes Banquier = 4 cartes totales).</div>
-                      <div style={{ marginTop: 6 }}>Identifie le costume absent des 4 cartes (<strong>exactement 1 costume manquant</strong> parmi ♠♥♦♣).</div>
-                      <div style={{ marginTop: 6 }}>À <strong>Jeu N</strong> : détection du costume manquant → file d'attente.</div>
-                      <div style={{ marginTop: 6 }}>À <strong>Jeu N+2</strong> : vérification — si le costume est apparu, la prédiction est <em>annulée automatiquement</em>.</div>
-                      <div style={{ marginTop: 6 }}>À <strong>Jeu N+4</strong> : si non annulée, la prédiction est émise → <strong>+4 jeux après détection</strong>.</div>
-                      <div style={{ marginTop: 8, color: '#fbbf24', fontWeight: 600 }}>⚠️ Le seuil B n'est pas utilisé dans ce mode. Configurez la main, le max rattrapage et les canaux Telegram.</div>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Costume Manquant (+t)</div>
+                      <div>Surveille les jeux à <strong>distribution complète 2+2</strong> (4 cartes totales). Identifie le costume absent.</div>
+                      <div style={{ marginTop: 6 }}>À <strong>Jeu N</strong> : détection → file d'attente. À <strong>N+1</strong> : vérification — apparu → annulé. À <strong>N+t</strong> : prédiction émise.</div>
+                      <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>⚠️ Le seuil B n'est pas utilisé. Configurez t, la main et le max rattrapage.</div>
                     </div>
+                    {/* ── Paramètres CM+t ── */}
+                    <div style={{ marginTop: 10, padding: '14px', borderRadius: 10, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Paramètres CM+t</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        {/* t configurable */}
+                        <div>
+                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Décalage t (N+t)</label>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {[1,2,3,4,5,6].map(n => {
+                              const active = (stratForm.cm_t ?? 2) === n;
+                              return (
+                                <button key={n} type="button"
+                                  onClick={() => setStratForm(p => ({ ...p, cm_t: n }))}
+                                  style={{ width: 40, height: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 14, border: active ? '2px solid #fbbf24' : '1px solid rgba(251,191,36,0.3)', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(251,191,36,0.05)', color: active ? '#fbbf24' : '#78350f', transition: 'all 0.15s' }}>
+                                  {n}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#92400e', marginTop: 4 }}>
+                            Prédiction émise au jeu <strong style={{ color: '#fbbf24' }}>N+{stratForm.cm_t ?? 2}</strong> après détection
+                          </div>
+                        </div>
+
+                        {/* Option vérification inversion N+1/N+2 */}
+                        <div>
+                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🔀 Vérification N+1/N+2 (inversion)</label>
+                          <div
+                            onClick={() => setStratForm(p => ({ ...p, cm_check_inverse: !p.cm_check_inverse }))}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, cursor: 'pointer', userSelect: 'none', background: stratForm.cm_check_inverse ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.07)', border: `1.5px solid ${stratForm.cm_check_inverse ? 'rgba(34,197,94,0.4)' : 'rgba(100,116,139,0.2)'}`, transition: 'all 0.2s' }}
+                          >
+                            <div style={{ width: 34, height: 19, borderRadius: 10, background: stratForm.cm_check_inverse ? '#22c55e' : '#334155', position: 'relative', flexShrink: 0, transition: 'background 0.25s' }}>
+                              <div style={{ width: 13, height: 13, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.cm_check_inverse ? 18 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: stratForm.cm_check_inverse ? '#4ade80' : '#64748b' }}>
+                                {stratForm.cm_check_inverse ? 'Activé' : 'Désactivé'}
+                              </div>
+                              <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>
+                                Si costume apparu N+1 <strong>ET</strong> N+2 → prédit l'inverse
+                              </div>
+                            </div>
+                          </div>
+                          {stratForm.cm_check_inverse && (
+                            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 10, color: '#86efac', lineHeight: 1.6 }}>
+                              ♦️ ↔ ♠️ · ♣️ ↔ ❤️<br/>
+                              Apparu N+1 seulement → prédiction normale.<br/>
+                              Apparu N+1 <strong>ET</strong> N+2 → prédiction inversée.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    </>
                   )}
                   {stratForm.mode === 'rattrapage_groupe' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -10651,6 +10712,12 @@ function AdminPanel() {
                   {stratForm.mode === 'compteur_adverse' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', fontSize: 12, color: '#d8b4fe', lineHeight: 1.6 }}>
                       🔄 Compte les costumes <strong>manquants de la main ADVERSE</strong> (opposée à la main choisie). Dès qu'un costume est absent depuis ≥ B jeux dans la main adverse → prédit le costume défini dans le mapping pour la main sélectionnée. Ex : main=Joueur, seuil=5 → observe les absences du Banquier.
+                    </div>
+                  )}
+                  {stratForm.mode === 'compteur_parite' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
+                      ⚖️ Compte les <strong>absences consécutives de pair / impair</strong> dans le score de la main choisie. Score pair (0,2,4,6,8) = 🟢 Pair · Score impair (1,3,5,7,9) = 🔴 Impair.<br />
+                      Dès qu'un type est absent depuis ≥ B jeux consécutifs → prédit son retour. Ex : seuil=5, aucun score pair depuis 5 jeux → prédit <strong>🟢 Pair</strong>.
                     </div>
                   )}
                   {stratForm.mode === 'apparition_absence' && (
@@ -11870,7 +11937,7 @@ function AdminPanel() {
                     <button
                       type="button"
                       onClick={() => {
-                        const ML = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Abs→App', apparition_absence:'App→Abs', miroir_taux:'Miroir Taux', aleatoire:'Aléatoire', relance:'Relance', multi_strategy:'Combinaison', distribution:'Distribution', carte_3_vers_2:'3C→2C', carte_2_vers_3:'2C→3C', taux_miroir:'Miroir Taux', compteur_adverse:'C. Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Abs', abs_3_vers_3:'3→3 Abs', absence_victoire:'Abs Victoire', union_enseignes:'Union Ens.', carte_valeur:'Carte Val.', intersection:'Intersection', comptages_ecart:'Cmpt. Écart', annonce_sequence:'Rotateur', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'CM+4', rattrapage_groupe:'Ratt. Groupé' };
+                        const ML = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Abs→App', apparition_absence:'App→Abs', miroir_taux:'Miroir Taux', aleatoire:'Aléatoire', relance:'Relance', multi_strategy:'Combinaison', distribution:'Distribution', carte_3_vers_2:'3C→2C', carte_2_vers_3:'2C→3C', taux_miroir:'Miroir Taux', compteur_adverse:'C. Adverse', compteur_parite:'C. Parité', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Abs', abs_3_vers_3:'3→3 Abs', absence_victoire:'Abs Victoire', union_enseignes:'Union Ens.', carte_valeur:'Carte Val.', intersection:'Intersection', comptages_ecart:'Cmpt. Écart', annonce_sequence:'Rotateur', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'CM+4', rattrapage_groupe:'Ratt. Groupé' };
                         const modeLabel = ML[stratForm.mode] || stratForm.mode;
                         // Nom : titre boutique > nom auto-marketing > nom stratégie
                         const PFXS = ['Protocole','Système','Méthode','Formule','Module','Signal'];
@@ -11902,7 +11969,7 @@ function AdminPanel() {
                           ``,
                           `📊 Mode : ${modeLabel}`,
                           `📈 Bilan : ${bilanStr}`,
-                          px > 0 ? `💰 Prix : <b>${px}$</b> / mois` : null,
+                          px > 0 ? `💰 Accès : <b>${px}$</b>` : null,
                           ``,
                           `━━━━━━━━━━━━━━━━━`,
                           `📲 Rejoignez-nous pour recevoir les prédictions en temps réel !`,
@@ -11953,6 +12020,136 @@ function AdminPanel() {
                   </div>
                 </>}
                 </div>
+              </div>
+
+              {/* ── Planification des prédictions ── */}
+              <div style={{ marginTop: 20, padding: '16px', borderRadius: 12, background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#818cf8', textTransform: 'uppercase', letterSpacing: 1 }}>🕐 Planification des prédictions</div>
+                  <div
+                    onClick={() => setStratForm(p => ({ ...p, pred_schedule_enabled: !p.pred_schedule_enabled }))}
+                    style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    <div style={{ width: 36, height: 20, borderRadius: 10, background: stratForm.pred_schedule_enabled ? '#6366f1' : '#334155', position: 'relative', transition: 'background 0.25s', flexShrink: 0 }}>
+                      <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.pred_schedule_enabled ? 19 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: stratForm.pred_schedule_enabled ? '#a5b4fc' : '#475569', fontWeight: 700 }}>{stratForm.pred_schedule_enabled ? 'Activée' : 'Désactivée'}</span>
+                  </div>
+                </div>
+
+                {!stratForm.pred_schedule_enabled && (
+                  <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>
+                    Désactivée — la stratégie prédit à tout moment. Activez pour restreindre à des horaires précis.
+                  </div>
+                )}
+
+                {stratForm.pred_schedule_enabled && (
+                  <>
+                    {/* Type : horaires ou intervalle */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                      {[{ v: 'hours', label: '🕐 Horaires précis', desc: 'cochez les heures actives' }, { v: 'interval', label: '⏱ Par intervalle', desc: 'toutes les N heures' }].map(opt => (
+                        <button key={opt.v} type="button"
+                          onClick={() => setStratForm(p => ({ ...p, pred_schedule_type: opt.v }))}
+                          style={{ flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 11, border: `1.5px solid ${stratForm.pred_schedule_type === opt.v ? 'rgba(99,102,241,0.6)' : 'rgba(99,102,241,0.2)'}`, background: stratForm.pred_schedule_type === opt.v ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.04)', color: stratForm.pred_schedule_type === opt.v ? '#c7d2fe' : '#64748b', transition: 'all 0.15s' }}>
+                          {opt.label}
+                          <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2, opacity: 0.7 }}>{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {stratForm.pred_schedule_type === 'hours' && (
+                      <div>
+                        <div style={{ fontSize: 10, color: '#818cf8', marginBottom: 8, fontWeight: 600 }}>
+                          Cochez les heures où la stratégie doit prédire (00h → 23h) :
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 5 }}>
+                          {Array.from({ length: 24 }, (_, h) => {
+                            const active = (stratForm.pred_schedule_hours || []).includes(h);
+                            return (
+                              <button key={h} type="button"
+                                onClick={() => setStratForm(p => {
+                                  const cur = p.pred_schedule_hours || [];
+                                  return { ...p, pred_schedule_hours: active ? cur.filter(x => x !== h) : [...cur, h].sort((a,b)=>a-b) };
+                                })}
+                                style={{ padding: '5px 2px', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 11, border: `1.5px solid ${active ? 'rgba(99,102,241,0.6)' : 'rgba(99,102,241,0.15)'}`, background: active ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.04)', color: active ? '#c7d2fe' : '#475569', transition: 'all 0.12s' }}>
+                                {String(h).padStart(2,'0')}h
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 10, color: '#6366f1' }}>
+                          {(stratForm.pred_schedule_hours || []).length === 0
+                            ? '⚠️ Aucune heure sélectionnée — cochez au moins une heure'
+                            : `✓ ${(stratForm.pred_schedule_hours || []).length} heure(s) active(s) : ${(stratForm.pred_schedule_hours || []).map(h => `${String(h).padStart(2,'0')}h`).join(', ')}`}
+                        </div>
+                      </div>
+                    )}
+
+                    {stratForm.pred_schedule_type === 'interval' && (
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 6, fontWeight: 600 }}>Prédire toutes les N heures</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {[1,2,3,4,6,8,12,24].map(n => {
+                            const active = (stratForm.pred_schedule_interval || 1) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, pred_schedule_interval: n }))}
+                                style={{ padding: '5px 12px', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 11, border: `1.5px solid ${active ? 'rgba(99,102,241,0.6)' : 'rgba(99,102,241,0.2)'}`, background: active ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.04)', color: active ? '#c7d2fe' : '#64748b', transition: 'all 0.12s' }}>
+                                {n}h
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 5, fontSize: 10, color: '#6366f1' }}>
+                          Intervalle sélectionné : <strong>toutes les {stratForm.pred_schedule_interval || 1}h</strong>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Annonces reprise / fin */}
+                    <div style={{ marginTop: 14, padding: '12px', borderRadius: 8, background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.15)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#d8b4fe' }}>📣 Annonces automatiques (reprise / fin)</div>
+                        <div
+                          onClick={() => setStratForm(p => ({ ...p, pred_schedule_annonce_enabled: !p.pred_schedule_annonce_enabled }))}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}
+                        >
+                          <div style={{ width: 30, height: 17, borderRadius: 9, background: stratForm.pred_schedule_annonce_enabled ? '#a855f7' : '#334155', position: 'relative', transition: 'background 0.25s', flexShrink: 0 }}>
+                            <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.pred_schedule_annonce_enabled ? 16 : 3, transition: 'left 0.25s' }} />
+                          </div>
+                          <span style={{ fontSize: 10, color: stratForm.pred_schedule_annonce_enabled ? '#d8b4fe' : '#475569', fontWeight: 700 }}>{stratForm.pred_schedule_annonce_enabled ? 'Activées' : 'Désactivées'}</span>
+                        </div>
+                      </div>
+                      {stratForm.pred_schedule_annonce_enabled && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div>
+                            <label style={{ display: 'block', color: '#a78bfa', fontSize: 10, marginBottom: 4, fontWeight: 700 }}>▶️ Annonce reprise des prédictions</label>
+                            <textarea
+                              value={stratForm.pred_schedule_annonce_reprise || ''}
+                              onChange={e => setStratForm(p => ({ ...p, pred_schedule_annonce_reprise: e.target.value }))}
+                              placeholder="Ex: 🟢 Les prédictions reprennent ! Restez attentifs..."
+                              rows={3}
+                              style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, color: '#f1f5f9', fontSize: 11, resize: 'vertical', lineHeight: 1.5, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', color: '#a78bfa', fontSize: 10, marginBottom: 4, fontWeight: 700 }}>⏸️ Annonce fin des prédictions</label>
+                            <textarea
+                              value={stratForm.pred_schedule_annonce_fin || ''}
+                              onChange={e => setStratForm(p => ({ ...p, pred_schedule_annonce_fin: e.target.value }))}
+                              placeholder="Ex: 🔕 Prédictions suspendues jusqu'à la prochaine session."
+                              rows={3}
+                              style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 7, color: '#f1f5f9', fontSize: 11, resize: 'vertical', lineHeight: 1.5, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {!stratForm.pred_schedule_annonce_enabled && (
+                        <div style={{ fontSize: 10, color: '#475569', fontStyle: 'italic' }}>Activez pour configurer les messages envoyés au début et à la fin de chaque session.</div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* ── Boutons d'action ── */}
