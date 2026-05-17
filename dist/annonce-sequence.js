@@ -1,0 +1,334 @@
+'use strict';
+/**
+ * annonce-sequence.js — Rotateur Promo
+ *
+ * Logique complète :
+ *  1. L'admin définit combien de temps (annonce_duration) chaque stratégie est active.
+ *  2. Quand une stratégie change → envoi immédiat d'un message "🚀 Démarrage de la stratégie [Nom]".
+ *  3. Pendant son activité → envoi d'annonces promotionnelles toutes les annonce_interval minutes.
+ *  4. La rotation suit l'ordre : S1 → S2 → S3 → … → S1 → …
+ */
+
+const db = require('./db');
+const { getStratWinRate, formatBilanStr } = require('./strategy-auto-announce');
+
+let _timer = null;
+// État par rotateur : { currentIndex, stratStartedAt, lastPromoSentAt, initialized }
+let _state = {};
+// Compteur de prédictions par stratégie enfant : { seqStratId: { childStratId: count } }
+let _predCounts = {};
+
+// ── Persistance de l'état de rotation en DB ──────────────────────────────────
+async function _saveRotationState(stratId, currentIndex, stratStartedAt) {
+  try {
+    await db.setSetting(`annonce_rot_state_${stratId}`, JSON.stringify({ currentIndex, stratStartedAt }));
+  } catch (e) { console.warn(`[AnnonceSeq] Impossible de sauvegarder l'état S${stratId}:`, e.message); }
+}
+
+async function _loadRotationState(stratId) {
+  try {
+    const v = await db.getSetting(`annonce_rot_state_${stratId}`);
+    if (!v) return null;
+    return JSON.parse(v);
+  } catch { return null; }
+}
+
+function incrementPredCount(seqStratId, childStratId) {
+  const k = String(seqStratId);
+  if (!_predCounts[k]) _predCounts[k] = {};
+  const ck = String(childStratId);
+  _predCounts[k][ck] = (_predCounts[k][ck] || 0) + 1;
+}
+
+function getPredCounts(seqStratId) {
+  return _predCounts[String(seqStratId)] || {};
+}
+
+// ── Message de DÉMARRAGE — envoyé lors d'un changement de stratégie ──────────
+function buildStartMessage(feat, orderNum, totalCount, durationMin) {
+  const name = (feat?.name || 'Stratégie').trim();
+  const durStr = durationMin >= 1440
+    ? `${Math.round(durationMin / 1440)} jour(s)`
+    : durationMin >= 60
+      ? `${Math.round(durationMin / 60)} heure(s)`
+      : `${durationMin} minute(s)`;
+
+  const lines = [
+    `🚀 *CHANGEMENT DE STRATÉGIE — ROTATION PROMO*`,
+    ``,
+    `La rotation vient de changer. La nouvelle stratégie active est :`,
+    ``,
+    `🎯 *${name}*`,
+    ``,
+    `Cette stratégie prend maintenant le relais et génère les prédictions dans vos canaux Baccarat 1xBet.`,
+    ``,
+    `⏱ *Durée d'activité :* ${durStr}`,
+  ];
+  if (totalCount > 1) {
+    lines.push(`📌 Position *${orderNum} / ${totalCount}* dans la rotation`);
+  }
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`📲 *Suivez les signaux en temps réel sur notre plateforme !*`);
+  return lines.join('\n');
+}
+
+// ── Message PROMOTIONNEL — envoyé à chaque intervalle ────────────────────────
+function buildPromoMessage(feat, customText, orderNum, totalCount, stats = null) {
+  const name = (feat?.name || 'Stratégie').trim();
+  const price = parseFloat(feat?.price_usd) > 0 ? feat.price_usd : 75;
+  const lines = [
+    `🔥 *STRATÉGIE EN VEDETTE — ${name}*`,
+    ``,
+    `✨ *${name}* est la stratégie active de la rotation. Elle prédit actuellement avec la plus grande précision sur la plateforme Baccarat 1xBet.`,
+    `Elle analyse les jeux en temps réel et génère des signaux fiables pour vous aider à maximiser vos gains.`,
+  ];
+
+  if (customText && customText.trim()) {
+    lines.push(``);
+    lines.push(`📝 ${customText.trim()}`);
+  }
+
+  // Bilan live
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
+  if (stats) {
+    const bilanStr = formatBilanStr(stats);
+    lines.push(`📈 *Bilan en direct :* ${bilanStr}`);
+  } else {
+    lines.push(`📈 *Bilan en direct :* — (données en cours de collecte)`);
+  }
+
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`💰 *COMMENT ACQUÉRIR CETTE STRATÉGIE ?*`);
+  lines.push(``);
+  lines.push(`💵 *${price}$/mois* pour avoir votre fichier qui prédit dans vos canaux — déployable sur n'importe quelle plateforme`);
+  lines.push(`📦 Après paiement : vous recevez votre *licence personnelle* + le *fichier ZIP* complet et prêt à déployer`);
+  lines.push(`🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux`);
+  lines.push(``);
+  lines.push(`👉 *Étapes pour acheter :*`);
+  lines.push(`1️⃣ Inscrivez-vous sur notre plateforme`);
+  lines.push(`2️⃣ Allez dans la section *"Acheter Stratégie"*`);
+  lines.push(`3️⃣ Sélectionnez *${name}* et soumettez votre capture de paiement`);
+  lines.push(`4️⃣ Après validation par l'administrateur, téléchargez votre licence et votre ZIP`);
+  lines.push(``);
+  lines.push(`🔒 Licence unique — liée à votre compte`);
+  if (totalCount > 1) {
+    lines.push(`📌 Stratégie ${orderNum} / ${totalCount} dans la rotation`);
+  }
+  return lines.join('\n');
+}
+
+// ── Vérifie si la durée de prédiction de ce rotateur est expirée ─────────────
+function _isPredDurationExpired(strat) {
+  const dur = parseInt(strat.pred_duration_minutes) || 0;
+  if (dur <= 0 || !strat.pred_duration_started_at) return false;
+  const expiresAt = new Date(strat.pred_duration_started_at).getTime() + dur * 60000;
+  return Date.now() > expiresAt;
+}
+
+// ── Envoi Telegram vers tous les canaux cibles ───────────────────────────────
+async function _sendToChannels(seqStrat, text) {
+  const fetch   = (...a) => import('node-fetch').then(m => m.default(...a));
+  const TOKEN   = await db.getSetting('bot_token').catch(() => null);
+  const custom  = Array.isArray(seqStrat.tg_targets)
+    ? seqStrat.tg_targets.filter(t => t.bot_token && t.channel_id)
+    : [];
+
+  if (custom.length > 0) {
+    for (const t of custom) {
+      try {
+        await fetch(`https://api.telegram.org/bot${t.bot_token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: t.channel_id, text, parse_mode: 'Markdown' }),
+        });
+      } catch (e) { console.warn(`[AnnonceSeq] Erreur canal custom ${t.channel_id}:`, e.message); }
+    }
+  } else if (TOKEN) {
+    const cfgs = await db.getTelegramConfigs().catch(() => []);
+    for (const c of cfgs) {
+      if (!c.tg_id) continue;
+      try {
+        await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: c.tg_id, text, parse_mode: 'Markdown' }),
+        });
+      } catch (e) { console.warn(`[AnnonceSeq] Erreur canal global ${c.tg_id}:`, e.message); }
+    }
+  } else {
+    console.warn(`[AnnonceSeq] S${seqStrat.id} : aucun token/canal configuré`);
+  }
+}
+
+// ── Tick principal — appelé toutes les 60 secondes ───────────────────────────
+async function _tick() {
+  try {
+    const raw       = await db.getSetting('custom_strategies').catch(() => null);
+    const strats    = raw ? JSON.parse(raw) : [];
+    const seqStrats = strats.filter(s => s.mode === 'annonce_sequence' && s.enabled);
+
+    for (const seqStrat of seqStrats) {
+      try {
+        // ── Durée de prédiction expirée → bloquer TOUS les messages de ce rotateur ──
+        if (_isPredDurationExpired(seqStrat)) {
+          console.log(`[AnnonceSeq] S${seqStrat.id} — durée de prédiction expirée, tous les messages bloqués`);
+          continue;
+        }
+
+        const seqIds = Array.isArray(seqStrat.annonce_sequence_ids) ? seqStrat.annonce_sequence_ids : [];
+        if (seqIds.length === 0) continue;
+
+        // Résolution des stratégies de la séquence
+        const ordered = seqIds.map(id => strats.find(s => String(s.id) === String(id))).filter(Boolean);
+        if (ordered.length === 0) continue;
+
+        const stateKey    = String(seqStrat.id);
+        const durationMin = Math.max(1, parseInt(seqStrat.annonce_duration) || 120);
+        const intervalMin = Math.max(1, parseInt(seqStrat.annonce_interval) || 60);
+        const now         = Date.now();
+
+        // ── Initialisation / Restauration après redémarrage ────────────────
+        if (!_state[stateKey]?.initialized) {
+          // Tenter de restaurer l'état persisté en DB
+          const saved = await _loadRotationState(seqStrat.id);
+          let idx           = 0;
+          let stratStartedAt = now;
+          let isResume      = false;
+
+          if (saved && typeof saved.currentIndex === 'number') {
+            idx           = Math.min(saved.currentIndex, ordered.length - 1);
+            stratStartedAt = saved.stratStartedAt || now;
+            isResume      = true;
+          }
+
+          _state[stateKey] = {
+            currentIndex:    idx,
+            stratStartedAt,
+            lastPromoSentAt: 0,
+            initialized:     true,
+          };
+
+          // Si la durée est déjà écoulée depuis la sauvegarde → on ira en rotation au prochain check
+          const alreadyElapsed = (now - stratStartedAt) / 60000;
+          if (isResume) {
+            console.log(`[AnnonceSeq] S${seqStrat.id} → Reprise : "${ordered[idx].name}" (pos ${idx + 1}/${ordered.length}, écoulé ${Math.round(alreadyElapsed)}min/${durationMin}min)`);
+          } else {
+            // Première initialisation : envoyer message de départ
+            const feat     = ordered[idx];
+            const startMsg = buildStartMessage(feat, idx + 1, ordered.length, durationMin);
+            await _sendToChannels(seqStrat, startMsg);
+            await _saveRotationState(seqStrat.id, idx, stratStartedAt);
+            console.log(`[AnnonceSeq] S${seqStrat.id} → Démarrage initial : "${feat.name}" (durée ${durationMin}min)`);
+          }
+          continue; // attendre le prochain tick
+        }
+
+        const st             = _state[stateKey];
+        const elapsedDurMin  = (now - st.stratStartedAt)  / 60000;
+        const elapsedPromin  = (now - st.lastPromoSentAt) / 60000;
+
+        // ── La durée de la stratégie active est écoulée → rotation ─────────
+        if (elapsedDurMin >= durationMin) {
+          const newIdx = (st.currentIndex + 1) % ordered.length;
+          const feat   = ordered[newIdx];
+
+          _state[stateKey].currentIndex    = newIdx;
+          _state[stateKey].stratStartedAt  = now;
+          _state[stateKey].lastPromoSentAt = now;
+
+          // Persister le nouvel état en DB
+          await _saveRotationState(seqStrat.id, newIdx, now);
+
+          const startMsg = buildStartMessage(feat, newIdx + 1, ordered.length, durationMin);
+          await _sendToChannels(seqStrat, startMsg);
+          console.log(`[AnnonceSeq] S${seqStrat.id} → Rotation vers "${feat.name}" (${newIdx + 1}/${ordered.length})`);
+          continue; // pas de promo sur ce même tick
+        }
+
+        // ── L'intervalle promo est écoulé → envoyer annonce promotionnelle ─
+        if (elapsedPromin >= intervalMin) {
+          const idx   = st.currentIndex;
+          const feat  = ordered[idx];
+          const stats = await getStratWinRate(feat.id).catch(() => null);
+          const text  = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length, stats);
+          await _sendToChannels(seqStrat, text);
+          _state[stateKey].lastPromoSentAt = now;
+          console.log(`[AnnonceSeq] S${seqStrat.id} → Promo "${feat.name}" (pos ${idx + 1}/${ordered.length})`);
+        }
+
+      } catch (e) {
+        console.error(`[AnnonceSeq] Erreur stratégie S${seqStrat.id}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[AnnonceSeq] Erreur tick:', e.message);
+  }
+}
+
+// ── API publique ─────────────────────────────────────────────────────────────
+
+function startAnnonceSequenceScheduler() {
+  if (_timer) return;
+  // Premier tick immédiat pour restaurer l'état depuis la DB sans attendre 60s
+  _tick().catch(e => console.error('[AnnonceSeq] Erreur tick initial:', e.message));
+  _timer = setInterval(_tick, 60 * 1000);
+  console.log('[AnnonceSeq] Rotateur Promo démarré (vérification toutes les 60s)');
+}
+
+function stopAnnonceSequenceScheduler() {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+}
+
+/**
+ * Envoi immédiat depuis le bouton admin "Envoyer maintenant".
+ * Envoie le message promotionnel pour la stratégie courante.
+ */
+async function sendNow(stratId) {
+  const raw    = await db.getSetting('custom_strategies').catch(() => null);
+  const strats = raw ? JSON.parse(raw) : [];
+  const seqStrat = strats.find(s => String(s.id) === String(stratId));
+  if (!seqStrat || seqStrat.mode !== 'annonce_sequence') throw new Error('Stratégie introuvable ou mode incorrect');
+
+  // Bloquer si la durée de prédiction est expirée
+  if (_isPredDurationExpired(seqStrat)) {
+    throw new Error('Durée de prédiction expirée — envoi bloqué');
+  }
+
+  const seqIds  = Array.isArray(seqStrat.annonce_sequence_ids) ? seqStrat.annonce_sequence_ids : [];
+  const ordered = seqIds.map(id => strats.find(s => String(s.id) === String(id))).filter(Boolean);
+  if (ordered.length === 0) throw new Error('Aucune stratégie dans la séquence');
+
+  const stateKey    = String(stratId);
+  const idx         = (_state[stateKey]?.currentIndex ?? 0) % ordered.length;
+  const feat        = ordered[idx];
+  const stats       = await getStratWinRate(feat.id).catch(() => null);
+  const text        = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length, stats);
+  await _sendToChannels(seqStrat, text);
+  if (_state[stateKey]) _state[stateKey].lastPromoSentAt = Date.now();
+  console.log(`[AnnonceSeq] sendNow S${stratId} → promo "${feat.name}"`);
+}
+
+/**
+ * Réinitialise l'état d'un rotateur (force le redémarrage depuis S1 au prochain tick).
+ * Efface aussi l'état persisté en DB.
+ */
+function resetState(stratId) {
+  delete _state[String(stratId)];
+  db.setSetting(`annonce_rot_state_${stratId}`, '').catch(() => {});
+  console.log(`[AnnonceSeq] État S${stratId} réinitialisé (DB + mémoire)`);
+}
+
+/**
+ * Retourne l'index courant de la rotation pour un rotateur donné.
+ * Utilisé par le moteur de prédiction pour déléguer à la bonne stratégie enfant.
+ */
+function getActiveStrategyIndex(stratId) {
+  const key = String(stratId);
+  if (!_state[key]?.initialized) return 0;
+  return _state[key].currentIndex ?? 0;
+}
+
+module.exports = { startAnnonceSequenceScheduler, stopAnnonceSequenceScheduler, sendNow, resetState, getActiveStrategyIndex, incrementPredCount, getPredCounts };
