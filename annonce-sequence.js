@@ -91,7 +91,7 @@ function buildPromoMessage(feat, customText, orderNum, totalCount) {
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(`💰 *COMMENT ACQUÉRIR CETTE STRATÉGIE ?*`);
   lines.push(``);
-  lines.push(`💵 Prix : *75$*`);
+  lines.push(`💵 Prix : *75$* pour avoir le fichier ZIP`);
   lines.push(`📦 Après paiement : vous recevez votre *licence personnelle* + le *fichier ZIP* complet et prêt à déployer`);
   lines.push(`🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux`);
   lines.push(``);

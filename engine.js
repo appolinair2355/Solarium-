@@ -3532,56 +3532,100 @@ class Engine {
     } else if (mode === 'costume_manquant') {
       // ── MODE COSTUME MANQUANT (+t) ────────────────────────────────────────
       // Détecte le costume absent dans une distribution 2+2 (4 cartes au total).
-      // Prédit ce costume pour gn+t (t configurable, défaut=2).
-      // Vérification à gn+1 : si le costume est apparu → annule.
-      // Option check_inverse : si le costume apparaît aussi à gn+2 → prédit l'inverse.
-      // Inverse : ♦↔♠  ♣↔♥
+      //
+      // Mode STANDARD (cmCheckInverse = false) :
+      //   N   : costume absent détecté → file d'attente
+      //   N+1 : costume apparaît → annulé. costume absent → ok
+      //   N+t : émet la prédiction du costume absent
+      //
+      // Mode N+1/N+2 (cmCheckInverse = true) :
+      //   N   : costume absent détecté → file d'attente
+      //   N+1 : costume APPARAÎT ou ABSENT → on enregistre et on attend N+2
+      //
+      //   Décision à N+2 (identique quelle que soit la situation à N+1) :
+      //     costume ABSENT  à N+2 → prédit le COSTUME MANQUANT pour N+4
+      //     costume PRÉSENT à N+2 → vérifie l'INVERSE (ex ♣ si ♥ manquant) :
+      //        inverse ABSENT de N+2 → prédit l'INVERSE pour N+4
+      //        inverse PRÉSENT dans N+2 → annulé
       if (!state.cmQueue) state.cmQueue = {};
 
-      // t configurable (défaut 2)
+      // t configurable (défaut 2) — utilisé en mode standard uniquement
       const cmT = Math.max(1, parseInt(cfg.cm_t) || 2);
       const cmCheckInverse = !!cfg.cm_check_inverse;
-      const CM_INVERSE = { '♦': '♠', '♠': '♦', '♣': '♥', '♥': '♣' };
+      // En mode N+1/N+2, la cible est toujours N+4 depuis la détection
+      const CM_TARGET_OFFSET = 4;
 
-      // Traitement de la file : vérification N+1 (et optionnellement N+2) + émission N+t
+      // Traitement de la file d'attente
       for (const [trigGnStr, entry] of Object.entries(state.cmQueue)) {
         const trigGn = parseInt(trigGnStr);
-        if (entry.cancelled) { if (gn > trigGn + cmT + 3) delete state.cmQueue[trigGnStr]; continue; }
+        const cleanupOffset = cmCheckInverse ? CM_TARGET_OFFSET + 3 : cmT + 3;
+        if (entry.cancelled) { if (gn > trigGn + cleanupOffset) delete state.cmQueue[trigGnStr]; continue; }
 
-        // Vérification à trigGn+1 : si le costume manquant est apparu → annuler
-        if (gn === trigGn + 1 && !entry.verified1) {
-          entry.verified1 = true;
-          if (handSuits.includes(entry.suit)) {
-            entry.cancelled = true;
-            console.log(`[${channelId}] [CM] ${entry.suit} apparu au jeu #${gn} (N+1) → annulée`);
-          } else {
-            console.log(`[${channelId}] [CM] ${entry.suit} absent au jeu #${gn} (N+1) → ok`);
+        if (cmCheckInverse) {
+          // ── MODE N+1/N+2 (deux chemins) ─────────────────────────────────
+          const CM_INVERSE = { '♦': '♠', '♠': '♦', '♣': '♥', '♥': '♣' };
+
+          // N+1 : enregistre la situation (apparu ou absent) sans annuler — décision à N+2
+          if (gn === trigGn + 1 && !entry.verified1) {
+            entry.verified1 = true;
+            const n1state = handSuits.includes(entry.suit) ? 'apparu' : 'absent';
+            entry.appeared_n1 = (n1state === 'apparu');
+            console.log(`[${channelId}] [CM] ${entry.suit} ${n1state} au jeu #${gn} (N+1) → attend N+2`);
           }
-        }
 
-        // Vérification à trigGn+2 (option check_inverse) : si apparu N+1 ET N+2 → inversion
-        if (cmCheckInverse && gn === trigGn + 2 && !entry.cancelled && !entry.verified2) {
-          entry.verified2 = true;
-          if (handSuits.includes(entry.suit)) {
-            // Apparu N+1 (entry.verified1 = true) ET apparu N+2 → inversion
-            entry.inverse = true;
-            console.log(`[${channelId}] [CM] ${entry.suit} apparu N+1 ET N+2 → prédiction inversée (→ ${CM_INVERSE[entry.suit] || entry.suit})`);
+          // N+2 : décision finale — même logique quelle que soit la situation à N+1
+          if (gn === trigGn + 2 && entry.verified1 && !entry.verified2 && !entry.emitted) {
+            entry.verified2 = true;
+            const n1label = entry.appeared_n1 ? 'apparu' : 'absent';
+
+            if (!handSuits.includes(entry.suit)) {
+              // ♥ ABSENT à N+2 → prédit le COSTUME MANQUANT pour N+4
+              entry.emitted = true;
+              const cmPs = resolvePredictedSuit(entry.suit) || entry.suit;
+              console.log(`[${channelId}] [CM] N+1=${n1label}, N+2=absent → prédit ${SUIT_DISPLAY[cmPs] || cmPs} (costume manquant) pour #${trigGn + CM_TARGET_OFFSET}`);
+              await emitPrediction(trigGn + CM_TARGET_OFFSET, cmPs, entry.suit, { force: true });
+
+            } else {
+              // ♥ PRÉSENT à N+2 → vérifie si l'INVERSE est absent
+              const inverseSuit = CM_INVERSE[entry.suit] || entry.suit;
+              if (!handSuits.includes(inverseSuit)) {
+                // Inverse absent de N+2 → prédit l'INVERSE pour N+4
+                entry.emitted = true;
+                const cmPs = resolvePredictedSuit(inverseSuit) || inverseSuit;
+                console.log(`[${channelId}] [CM] N+1=${n1label}, N+2=présent, inverse ${inverseSuit} absent → prédit ${SUIT_DISPLAY[cmPs] || cmPs} pour #${trigGn + CM_TARGET_OFFSET}`);
+                await emitPrediction(trigGn + CM_TARGET_OFFSET, cmPs, entry.suit, { force: true });
+              } else {
+                // Inverse aussi présent dans N+2 → annulé
+                entry.cancelled = true;
+                console.log(`[${channelId}] [CM] N+1=${n1label}, N+2=présent, inverse ${inverseSuit} aussi présent → annulée`);
+              }
+            }
           }
-        }
 
-        // Émission à trigGn+t
-        if (gn === trigGn + cmT && !entry.cancelled && !entry.emitted) {
-          entry.emitted = true;
-          let rawSuit = entry.suit;
-          if (entry.inverse && CM_INVERSE[rawSuit]) rawSuit = CM_INVERSE[rawSuit];
-          const cmPs = resolvePredictedSuit(rawSuit) || rawSuit;
-          const label = entry.inverse ? `INVERSÉ → ${SUIT_DISPLAY[cmPs] || cmPs}` : `${SUIT_DISPLAY[cmPs] || cmPs}`;
-          console.log(`[${channelId}] [CM] ${entry.suit} absent → prédiction #${trigGn + cmT} émise (${label})`);
-          await emitPrediction(trigGn + cmT, cmPs, entry.suit, { force: true });
+        } else {
+          // ── MODE STANDARD ────────────────────────────────────────────────
+          // N+1 : costume apparaît → annulé. absent → ok
+          if (gn === trigGn + 1 && !entry.verified1) {
+            entry.verified1 = true;
+            if (handSuits.includes(entry.suit)) {
+              entry.cancelled = true;
+              console.log(`[${channelId}] [CM] ${entry.suit} apparu au jeu #${gn} (N+1) → annulée`);
+            } else {
+              console.log(`[${channelId}] [CM] ${entry.suit} absent au jeu #${gn} (N+1) → ok`);
+            }
+          }
+
+          // Émission à trigGn+t
+          if (gn === trigGn + cmT && !entry.cancelled && !entry.emitted) {
+            entry.emitted = true;
+            const cmPs = resolvePredictedSuit(entry.suit) || entry.suit;
+            console.log(`[${channelId}] [CM] ${entry.suit} absent → prédiction #${trigGn + cmT} émise (${SUIT_DISPLAY[cmPs] || cmPs})`);
+            await emitPrediction(trigGn + cmT, cmPs, entry.suit, { force: true });
+          }
         }
 
         // Nettoyage des vieilles entrées
-        if (gn > trigGn + cmT + 3) delete state.cmQueue[trigGnStr];
+        if (gn > trigGn + cleanupOffset) delete state.cmQueue[trigGnStr];
       }
 
       // Détection du costume manquant dans les jeux à 2+2 cartes
@@ -3595,8 +3639,12 @@ class Engine {
         );
         const missing = ALL_SUITS.filter(s => !presentSuits.has(s));
         if (missing.length === 1 && !state.cmQueue[gn]) {
-          state.cmQueue[gn] = { suit: missing[0], verified1: false, verified2: false, cancelled: false, emitted: false, inverse: false };
-          console.log(`[${channelId}] [CM] Jeu #${gn}: costume manquant ${missing[0]} → vérif N+1${cmCheckInverse ? '/N+2' : ''} → préd N+${cmT} (#${gn + cmT})`);
+          state.cmQueue[gn] = { suit: missing[0], verified1: false, verified2: false, appeared_n1: false, cancelled: false, emitted: false };
+          if (cmCheckInverse) {
+            console.log(`[${channelId}] [CM] ▶ Jeu #${gn}: ${missing[0]} manquant | mode N+1/N+2 → décision à N+2 → cible N+4 (#${gn + CM_TARGET_OFFSET})`);
+          } else {
+            console.log(`[${channelId}] [CM] ▶ Jeu #${gn}: ${missing[0]} manquant | mode standard → vérif N+1 → préd N+${cmT} (#${gn + cmT})`);
+          }
         }
       }
 
