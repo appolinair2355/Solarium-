@@ -1192,6 +1192,75 @@ function buildTgMessage(formatId, {
       };
     }
 
+    case 56: {
+      const h56 = hand === 'banquier' ? 'BANKER' : 'PLAYER';
+      return { text: `💎 VIP LOUNGE\n━━━━━━━━━━━\n🎮 #N${gameNumber} | ${h56}\n💠 ${emoji} ${name}\n🏅 +${maxR} | ${statusLine}`, parse_mode: null };
+    }
+    case 57:
+      return { text: `⚡ FLASH BET ⚡\n🎰 #N${gameNumber}\n${emoji} ${name}\n+${maxR} → ${statusLine}`, parse_mode: null };
+    case 58:
+      return { text: `🔮 ORACLE\n📍 Jeu #N${gameNumber}\n✨ ${emoji} ${name}\n⚖ Dogon ×${maxR}\n🔮 ${statusLine}`, parse_mode: null };
+    case 59: {
+      const h59 = hand === 'banquier' ? '🏦' : '🤲';
+      return { text: `⚔️ KATANA SIGNAL\n${h59} #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
+    }
+    case 60:
+      return { text: `👻 PHANTOM\n▸ Jeu #N${gameNumber}\n▸ ${emoji} ${name}\n▸ +${maxR}\n▸ ${statusLine}`, parse_mode: null };
+    case 61:
+      return { text: `💚 EMERALD SIGNAL\n🌿 #N${gameNumber} — ${emoji} ${name}\n🌿 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
+    case 62:
+      return { text: `🌩️ THUNDER\n⚡ JEU #N${gameNumber}\n⚡ ${emoji} ${name}\n⚡ +${maxR} → ${statusLine}`, parse_mode: null };
+    case 63:
+      return { text: `◈ ELITE BORDURE ◈\n┌──────────────┐\n│ #N${gameNumber} ${emoji} ${name} │\n│ +${maxR} ${statusLine} │\n└──────────────┘`, parse_mode: null };
+    case 64:
+      return { text: `🔥 INFERNO 🔥\n🎯 #N${gameNumber}\n🃏 ${emoji} ${name}\n⚔ ×${maxR} | ${statusLine}`, parse_mode: null };
+    case 65:
+      return { text: `❄️ ARCTIC\n❄ Jeu #N${gameNumber}\n❄ ${emoji} ${name}\n❄ Dogon ×${maxR}\n❄ ${statusLine}`, parse_mode: null };
+    case 66:
+      return { text: `🌌 COSMOS\n✦ #N${gameNumber} ✦\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
+    case 67:
+      return { text: `🏆 HTML PREMIUM\n<b>#N${gameNumber}</b> — <b>${name}</b> ${emoji}\nDogon <b>×${maxR}</b> | ${statusLine}`, parse_mode: 'HTML' };
+    case 68: {
+      const h68 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      return { text: `♜ VINTAGE CASINO\n🎩 ${h68} | #N${gameNumber}\n${emoji} ${name} +${maxR}\n${statusLine}`, parse_mode: null };
+    }
+    case 69:
+      return { text: `💓 PULSE\n♥ #N${gameNumber} ♥\n${emoji} ${name}\n+${maxR} → ${statusLine}`, parse_mode: null };
+    case 70:
+      return { text: `⚔️ BLADE\n▶ JEU #N${gameNumber}\n▶ ${emoji} ${name}\n▶ +${maxR} | ${statusLine}`, parse_mode: null };
+    case 71:
+      return { text: `♾️ ZODIAC\n☯ #N${gameNumber} — ${emoji} ${name}\n☯ ×${maxR} | ${statusLine}`, parse_mode: null };
+    case 72:
+      return { text: `⛩️ TEMPLE\n⛩ #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
+    case 73:
+      return { text: `🟣 NEON ULTRA\n【#N${gameNumber}】${emoji} ${name}\n【+${maxR}】${statusLine}`, parse_mode: null };
+    case 74: {
+      const h74 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      return { text: `👑 CROWN ULTIMATE\n${h74} | #N${gameNumber}\n${emoji} ${name} — ×${maxR}\n${statusLine}`, parse_mode: null };
+    }
+    case 75:
+      return { text: `📡 SIGMA SIGNAL\n◉ Jeu #N${gameNumber}\n◉ ${emoji} ${name}\n◉ +${maxR} → ${statusLine}`, parse_mode: null };
+    case 76:
+      return { text: `🎴 MAJESTIC PRO\n🎴 #N${gameNumber} — ${emoji} ${name}\n🎴 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
+    case 77:
+      return { text: `🌙 LUNAR SIGNAL\n🌙 Jeu #N${gameNumber}\n🌙 ${emoji} ${name}\n🌙 +${maxR} | ${statusLine}`, parse_mode: null };
+    case 78:
+      return { text: `💫 SHOOTING STAR\n⭐ #N${gameNumber} ${emoji} ${name}\n⭐ ×${maxR} → ${statusLine}`, parse_mode: null };
+    case 79:
+      return { text: `🐯 TIGER ELITE\n🔶 JEU #N${gameNumber}\n🔶 ${emoji} ${name}\n🔶 +${maxR} | ${statusLine}`, parse_mode: null };
+    case 80:
+      return { text: `⚡ POWER STRIKE ⚡\n🔋 #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
+    case 81:
+      return { text: `🔱 TRIDENT PRO\n🔱 Jeu #N${gameNumber} — ${emoji} ${name}\n🔱 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
+    case 82:
+      return { text: `🎯 BULLSEYE\n🎯 #N${gameNumber}\n${emoji} ${name} — +${maxR}\n${statusLine}`, parse_mode: null };
+    case 83:
+      return { text: `🔐 LOCK & KEY\n🔐 #N${gameNumber} | ${emoji} ${name}\n🔐 ×${maxR} → ${statusLine}`, parse_mode: null };
+    case 84:
+      return { text: `🎪 GRAND CASINO\n🎪 Jeu #N${gameNumber}\n🎪 ${emoji} ${name} +${maxR}\n🎪 ${statusLine}`, parse_mode: null };
+    case 85:
+      return { text: `🌟 LEGEND STYLE\n★ #N${gameNumber} — ${emoji} ${name}\n★ Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {

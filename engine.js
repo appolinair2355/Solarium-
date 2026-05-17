@@ -20,11 +20,14 @@ const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣':
 
 // ── Helpers score Baccarat (pour mode compteur_parite) ─────────────────────
 function baccaratCardValue(c) {
-  const r = String(c?.R ?? c?.r ?? '');
-  if (r === 'A' || r === 'a' || r === '1') return 1;
+  const r = String(c?.R ?? c?.r ?? '').trim();
+  if (r === 'A' || r === 'a') return 1;
   if (['10','J','Q','K','j','q','k'].includes(r)) return 0;
-  const n = parseInt(r);
-  return isNaN(n) ? 0 : Math.min(n, 9);
+  const n = parseInt(r, 10);
+  if (isNaN(n)) return 0;
+  if (n === 1 || n === 14) return 1;   // As = 1 ou 14 selon certains encodages
+  if (n >= 10) return 0;               // 10, Valet(11), Dame(12), Roi(13) → valeur 0
+  return n;
 }
 function baccaratHandScore(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return null;
