@@ -4210,6 +4210,8 @@ function AdminPanel() {
     pred_schedule_hours: [], pred_schedule_interval: 1,
     pred_schedule_annonce_reprise: '', pred_schedule_annonce_fin: '',
     pred_schedule_annonce_enabled: false,
+    // Section Publicité automatique
+    pub_enabled: false, pub_strategies: [], pub_interval_minutes: 60,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -5252,7 +5254,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: s.vente_enabled ?? false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: s.vente_enabled ?? false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false, pub_enabled: s.pub_enabled ?? false, pub_strategies: s.pub_strategies || [], pub_interval_minutes: s.pub_interval_minutes ?? 60 });
     setStratOpen(true);
   };
 
@@ -5269,7 +5271,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, monitored_strategies: s.monitored_strategies || [], rg_stop_limit: s.rg_stop_limit ?? 10, prix: s.prix ?? 0, annonce_strat: s.annonce_strat || '', vente_enabled: false, annonce_enabled: s.annonce_enabled !== false, cm_t: s.cm_t ?? 2, cm_check_inverse: s.cm_check_inverse ?? false, pred_schedule_enabled: s.pred_schedule_enabled ?? false, pred_schedule_type: s.pred_schedule_type || 'hours', pred_schedule_hours: Array.isArray(s.pred_schedule_hours) ? s.pred_schedule_hours : [], pred_schedule_interval: s.pred_schedule_interval ?? 1, pred_schedule_annonce_reprise: s.pred_schedule_annonce_reprise || '', pred_schedule_annonce_fin: s.pred_schedule_annonce_fin || '', pred_schedule_annonce_enabled: s.pred_schedule_annonce_enabled ?? false, pub_enabled: false, pub_strategies: s.pub_strategies || [], pub_interval_minutes: s.pub_interval_minutes ?? 60 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -12169,6 +12171,177 @@ function AdminPanel() {
                     </div>
                   </>
                 )}
+              </div>
+
+              {/* ══════════════ SECTION PUBLICITÉ AUTOMATIQUE ══════════════ */}
+              <div style={{ marginTop: 20, padding: '16px', borderRadius: 12, background: 'rgba(251,113,133,0.04)', border: '1px solid rgba(251,113,133,0.25)' }}>
+                {/* Header + toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: stratForm.pub_enabled ? 16 : 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fb7185', textTransform: 'uppercase', letterSpacing: 1 }}>📢 Publicité automatique</div>
+                  <div
+                    onClick={() => setStratForm(p => ({ ...p, pub_enabled: !p.pub_enabled }))}
+                    style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    <div style={{ width: 36, height: 20, borderRadius: 10, background: stratForm.pub_enabled ? '#fb7185' : '#334155', position: 'relative', transition: 'background 0.25s', flexShrink: 0 }}>
+                      <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: stratForm.pub_enabled ? 19 : 3, transition: 'left 0.25s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: stratForm.pub_enabled ? '#fb7185' : '#475569', fontWeight: 700 }}>{stratForm.pub_enabled ? 'Activée' : 'Désactivée'}</span>
+                  </div>
+                </div>
+
+                {!stratForm.pub_enabled && (
+                  <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic' }}>
+                    Activez pour envoyer automatiquement une publicité des stratégies choisies sur vos canaux Telegram.
+                  </div>
+                )}
+
+                {stratForm.pub_enabled && (<>
+
+                  {/* ── Intervalle d'envoi ── */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>⏱ Intervalle d'envoi</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { label: '5 min',  value: 5   },
+                        { label: '30 min', value: 30  },
+                        { label: '1h',     value: 60  },
+                        { label: '2h',     value: 120 },
+                        { label: '5h',     value: 300 },
+                        { label: '10h',    value: 600 },
+                      ].map(opt => {
+                        const active = (stratForm.pub_interval_minutes || 60) === opt.value;
+                        return (
+                          <button key={opt.value} type="button"
+                            onClick={() => setStratForm(p => ({ ...p, pub_interval_minutes: opt.value }))}
+                            style={{ padding: '5px 14px', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 11, border: `1.5px solid ${active ? 'rgba(251,113,133,0.7)' : 'rgba(251,113,133,0.2)'}`, background: active ? 'rgba(251,113,133,0.2)' : 'rgba(251,113,133,0.04)', color: active ? '#fb7185' : '#64748b', transition: 'all 0.12s' }}>
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 10, color: '#fb7185', opacity: 0.8 }}>
+                      Pub envoyée toutes les <strong>{stratForm.pub_interval_minutes < 60 ? `${stratForm.pub_interval_minutes} min` : `${stratForm.pub_interval_minutes / 60}h`}</strong> sur les canaux Telegram de cette stratégie
+                    </div>
+                  </div>
+
+                  {/* ── Sélection des stratégies à promouvoir ── */}
+                  <div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                      📋 Stratégies à promouvoir — cochez et définissez le prix affiché
+                    </div>
+
+                    {strategies.length === 0 && (
+                      <div style={{ fontSize: 11, color: '#475569', fontStyle: 'italic', padding: '10px 0' }}>
+                        Aucune stratégie disponible. Créez d'abord des stratégies.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {strategies.map(s => {
+                        const sid      = String(s.id);
+                        const checked  = (stratForm.pub_strategies || []).some(ps => String(ps.id) === sid);
+                        const psEntry  = (stratForm.pub_strategies || []).find(ps => String(ps.id) === sid) || {};
+
+                        // Nom boutique : titre promo > nom auto-marketing
+                        const PFXS = ['Protocole','Système','Méthode','Formule','Module','Signal'];
+                        const GEMS = ['Platine','Émeraude','Saphir','Rubis','Diamant','Cristal','Cobalt','Ambre','Jade','Opale','Topaze','Onyx'];
+                        const SFXS = ['Pro','Élite','Expert','Premium','Prestige','Master','Ultra','VIP'];
+                        const numId    = parseInt(s.id);
+                        const autoName = `${PFXS[numId % 6]} ${GEMS[(numId * 3) % 12]} ${SFXS[(numId * 7) % 8]}`;
+                        const promo    = promoConfigs[sid] || {};
+                        const shopName = promo.titre?.trim() || autoName;
+                        const defaultPrice = parseFloat(promo.price_usd) > 0 ? parseFloat(promo.price_usd) : 75;
+
+                        // Bilan live depuis stratStats
+                        const st      = stratStats.find(x => x.strategy === `S${s.id}`);
+                        const wins    = st ? (parseInt(st.wins)   || 0) : 0;
+                        const losses  = st ? (parseInt(st.losses) || 0) : 0;
+                        const total   = wins + losses;
+                        const winRate = total > 0 ? Math.round(wins / total * 100) : null;
+                        const bilanColor  = winRate === null ? '#475569' : winRate >= 65 ? '#4ade80' : winRate >= 50 ? '#fbbf24' : '#f87171';
+                        const bilanTrend  = winRate === null ? '' : winRate >= 80 ? ' 🔥' : winRate >= 65 ? ' 📈' : winRate >= 50 ? ' ✅' : ' ⚠️';
+                        const bilanLabel  = winRate !== null ? `${wins}✅ ${losses}❌ — ${winRate}%${bilanTrend}` : 'Données en cours de collecte…';
+
+                        return (
+                          <div key={sid} style={{
+                            padding: '10px 14px', borderRadius: 10,
+                            background: checked ? 'rgba(251,113,133,0.07)' : 'rgba(255,255,255,0.02)',
+                            border: `1.5px solid ${checked ? 'rgba(251,113,133,0.45)' : 'rgba(255,255,255,0.07)'}`,
+                            transition: 'all 0.2s',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              {/* Checkbox */}
+                              <input type="checkbox" checked={checked}
+                                onChange={e => {
+                                  setStratForm(p => {
+                                    const cur = p.pub_strategies || [];
+                                    if (e.target.checked) {
+                                      return { ...p, pub_strategies: [...cur, { id: s.id, price: defaultPrice }] };
+                                    } else {
+                                      return { ...p, pub_strategies: cur.filter(ps => String(ps.id) !== sid) };
+                                    }
+                                  });
+                                }}
+                                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#fb7185', flexShrink: 0 }}
+                              />
+
+                              {/* Infos stratégie */}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: '#e2e8f0' }}>{shopName}</span>
+                                  <span style={{ fontSize: 10, color: '#475569', background: 'rgba(255,255,255,0.05)', padding: '1px 6px', borderRadius: 4 }}>{s.name}</span>
+                                  {promo.titre?.trim() && (
+                                    <span style={{ fontSize: 9, color: '#fb7185', fontWeight: 700, background: 'rgba(251,113,133,0.1)', padding: '1px 5px', borderRadius: 4 }}>BOUTIQUE</span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 10, color: bilanColor, marginTop: 3 }}>
+                                  📊 Bilan : {bilanLabel}
+                                </div>
+                              </div>
+
+                              {/* Prix (visible seulement si coché) */}
+                              {checked && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                                  <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, textAlign: 'right', marginBottom: 2 }}>Prix pub</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <input
+                                      type="number" min="0" max="9999" step="0.5"
+                                      value={psEntry.price ?? defaultPrice}
+                                      onChange={e => {
+                                        const newPrice = Math.max(0, parseFloat(e.target.value) || 0);
+                                        setStratForm(p => ({
+                                          ...p,
+                                          pub_strategies: (p.pub_strategies || []).map(ps =>
+                                            String(ps.id) === sid ? { ...ps, price: newPrice } : ps
+                                          ),
+                                        }));
+                                      }}
+                                      style={{ width: 72, padding: '5px 8px', background: '#0f172a', border: '1.5px solid rgba(251,113,133,0.5)', borderRadius: 7, color: '#fb7185', fontSize: 14, fontWeight: 800, textAlign: 'center' }}
+                                    />
+                                    <span style={{ color: '#64748b', fontSize: 12, fontWeight: 700 }}>$</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Récap sélection */}
+                    {(stratForm.pub_strategies || []).length > 0 && (
+                      <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 9, background: 'rgba(251,113,133,0.1)', border: '1px solid rgba(251,113,133,0.3)', fontSize: 11, color: '#fb7185', fontWeight: 600 }}>
+                        ✅ {stratForm.pub_strategies.length} stratégie(s) sélectionnée(s) — publication automatique toutes les <strong>{stratForm.pub_interval_minutes < 60 ? `${stratForm.pub_interval_minutes} min` : `${stratForm.pub_interval_minutes / 60}h`}</strong> sur les canaux Telegram configurés pour cette stratégie.
+                      </div>
+                    )}
+
+                    {(stratForm.pub_strategies || []).length === 0 && (
+                      <div style={{ marginTop: 10, fontSize: 11, color: '#475569', fontStyle: 'italic' }}>
+                        ⚠️ Cochez au moins une stratégie ci-dessus pour activer la publicité.
+                      </div>
+                    )}
+                  </div>
+                </>)}
               </div>
 
               {/* ── Boutons d'action ── */}

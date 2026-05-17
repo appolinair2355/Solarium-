@@ -1478,6 +1478,89 @@ export default function Dashboard() {
                               )}
                             </div>
                           );
+                        })() : absences[0]?.mode === 'compteur_parite' ? (() => {
+                          return (
+                            <div style={{ paddingTop: 2, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {absences.map(a => {
+                                const isPending = !!a.confirmPending;
+                                const pct = isPending
+                                  ? 100
+                                  : Math.min(100, ((a.count || 0) / (a.threshold || 1)) * 100);
+                                const barColor = isPending
+                                  ? '#f59e0b'
+                                  : a.count >= a.threshold - 1
+                                  ? '#f59e0b'
+                                  : a.suit === 'pair' ? '#22c55e' : '#ef4444';
+                                const labelColor = a.suit === 'pair' ? '#22c55e' : '#ef4444';
+
+                                return (
+                                  <div key={a.suit}>
+                                    {/* Ligne titre + badge */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: labelColor }}>
+                                          {a.suit === 'pair' ? '🟢 Pair' : '🔴 Impair'}
+                                        </span>
+                                        {isPending && (
+                                          <span style={{
+                                            fontSize: '0.58rem', fontWeight: 800,
+                                            letterSpacing: '0.07em', textTransform: 'uppercase',
+                                            color: '#f59e0b',
+                                            background: 'rgba(245,158,11,0.12)',
+                                            border: '1px solid rgba(245,158,11,0.4)',
+                                            borderRadius: 999, padding: '2px 7px',
+                                            animation: 'feuBlink 0.8s infinite',
+                                          }}>
+                                            ⏳ EN ATTENTE
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span style={{
+                                        fontSize: '0.72rem', fontWeight: 800,
+                                        color: isPending ? '#f59e0b' : a.count >= a.threshold - 1 ? '#f59e0b' : '#475569',
+                                      }}>
+                                        {isPending
+                                          ? `${a.count} abs.`
+                                          : `${a.count}/${a.threshold}`}
+                                      </span>
+                                    </div>
+
+                                    {/* Barre de progression */}
+                                    <div style={{
+                                      height: 7, borderRadius: 99,
+                                      background: 'rgba(255,255,255,0.06)',
+                                      overflow: 'hidden',
+                                    }}>
+                                      <div style={{
+                                        height: '100%', borderRadius: 99,
+                                        width: `${pct}%`,
+                                        background: barColor,
+                                        transition: 'width 0.4s ease, background 0.3s ease',
+                                        boxShadow: isPending ? `0 0 8px 2px ${barColor}88` : 'none',
+                                      }} />
+                                    </div>
+
+                                    {/* Description */}
+                                    <div style={{ fontSize: '0.6rem', color: '#64748b', marginTop: 3 }}>
+                                      {isPending
+                                        ? `Seuil B=${a.threshold} atteint — attend que ${a.suit} réapparaisse`
+                                        : `${a.count} absence${a.count > 1 ? 's' : ''} consécutive${a.count > 1 ? 's' : ''} sur ${a.threshold} requises`}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Légende */}
+                              <div style={{
+                                borderTop: '1px solid rgba(255,255,255,0.06)',
+                                paddingTop: 6, marginTop: 2,
+                                fontSize: '0.58rem', color: '#475569',
+                                lineHeight: 1.5,
+                              }}>
+                                Quand une parité est absente ≥ B fois → on attend qu'elle réapparaisse → prédiction
+                              </div>
+                            </div>
+                          );
                         })() : (() => {
                           const isAbsConfMode = absences.length > 0 && absences[0].mode === 'absence_confirmee';
 
