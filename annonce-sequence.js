@@ -10,6 +10,7 @@
  */
 
 const db = require('./db');
+const { getStratWinRate, formatBilanStr } = require('./strategy-auto-announce');
 
 let _timer = null;
 // État par rotateur : { currentIndex, stratStartedAt, lastPromoSentAt, initialized }
@@ -73,8 +74,9 @@ function buildStartMessage(feat, orderNum, totalCount, durationMin) {
 }
 
 // ── Message PROMOTIONNEL — envoyé à chaque intervalle ────────────────────────
-function buildPromoMessage(feat, customText, orderNum, totalCount) {
+function buildPromoMessage(feat, customText, orderNum, totalCount, stats = null) {
   const name = (feat?.name || 'Stratégie').trim();
+  const price = parseFloat(feat?.price_usd) > 0 ? feat.price_usd : 75;
   const lines = [
     `🔥 *STRATÉGIE EN VEDETTE — ${name}*`,
     ``,
@@ -87,11 +89,21 @@ function buildPromoMessage(feat, customText, orderNum, totalCount) {
     lines.push(`📝 ${customText.trim()}`);
   }
 
+  // Bilan live
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
+  if (stats) {
+    const bilanStr = formatBilanStr(stats);
+    lines.push(`📈 *Bilan en direct :* ${bilanStr}`);
+  } else {
+    lines.push(`📈 *Bilan en direct :* — (données en cours de collecte)`);
+  }
+
   lines.push(``);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(`💰 *COMMENT ACQUÉRIR CETTE STRATÉGIE ?*`);
   lines.push(``);
-  lines.push(`💵 Prix : *75$* pour avoir le fichier ZIP`);
+  lines.push(`💵 *${price}$/mois* pour avoir votre fichier qui prédit dans vos canaux — déployable sur n'importe quelle plateforme`);
   lines.push(`📦 Après paiement : vous recevez votre *licence personnelle* + le *fichier ZIP* complet et prêt à déployer`);
   lines.push(`🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux`);
   lines.push(``);
@@ -238,9 +250,10 @@ async function _tick() {
 
         // ── L'intervalle promo est écoulé → envoyer annonce promotionnelle ─
         if (elapsedPromin >= intervalMin) {
-          const idx  = st.currentIndex;
-          const feat = ordered[idx];
-          const text = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length);
+          const idx   = st.currentIndex;
+          const feat  = ordered[idx];
+          const stats = await getStratWinRate(feat.id).catch(() => null);
+          const text  = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length, stats);
           await _sendToChannels(seqStrat, text);
           _state[stateKey].lastPromoSentAt = now;
           console.log(`[AnnonceSeq] S${seqStrat.id} → Promo "${feat.name}" (pos ${idx + 1}/${ordered.length})`);
@@ -291,7 +304,8 @@ async function sendNow(stratId) {
   const stateKey    = String(stratId);
   const idx         = (_state[stateKey]?.currentIndex ?? 0) % ordered.length;
   const feat        = ordered[idx];
-  const text        = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length);
+  const stats       = await getStratWinRate(feat.id).catch(() => null);
+  const text        = buildPromoMessage(feat, seqStrat.annonce_text || '', idx + 1, ordered.length, stats);
   await _sendToChannels(seqStrat, text);
   if (_state[stateKey]) _state[stateKey].lastPromoSentAt = Date.now();
   console.log(`[AnnonceSeq] sendNow S${stratId} → promo "${feat.name}"`);
