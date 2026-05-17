@@ -773,6 +773,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
       pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
       pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
+      pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
+      pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
+      pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1049,6 +1052,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
       pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
       pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
+      pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
+      pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
+      pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);

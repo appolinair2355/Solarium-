@@ -3166,30 +3166,29 @@ class Engine {
         const logP = `[${channelId}] [CompteurParité]`;
 
         for (const [parity, isCurrent] of [['pair', isCurPair], ['impair', isCurImpair]]) {
-          if (state.parityPending[parity]) {
-            // Phase 2 : confirmation — cette parity réapparaît-elle ?
-            if (isCurrent) {
-              console.log(`${logP} ✅ ${parity} confirmé (feu VERT) score=${score} après B=${B} absence(s) → prédiction jeu #${gn + offset}`);
+          if (isCurrent) {
+            // La parité apparaît
+            if (state.parityPending[parity]) {
+              // Seuil dépassé et parité enfin revenue → prédiction + reset
+              console.log(`${logP} ✅ ${parity} réapparu (score=${score}) après ${state.parityCounts[parity]} absence(s) (seuil B=${B}) → prédiction jeu #${gn + offset}`);
               await emitPrediction(gn + offset, parity, parity);
-            } else {
-              console.log(`${logP} ❌ ${parity} absent à la confirmation (B=${B}) → feu rouge, reset`);
-            }
-            state.parityPending[parity] = false;
-            state.parityCounts[parity]  = 0;
-          } else if (isCurrent) {
-            // Parité présente (hors phase confirmation) → reset son compteur d'absence
-            if ((state.parityCounts[parity] || 0) > 0) {
+            } else if ((state.parityCounts[parity] || 0) > 0) {
               console.log(`${logP} ${parity} réapparu (score=${score}) après ${state.parityCounts[parity]} absence(s) < B=${B} → reset`);
             }
-            state.parityCounts[parity] = 0;
+            // Dans tous les cas : reset compteur et sortie de l'attente
+            state.parityPending[parity] = false;
+            state.parityCounts[parity]  = 0;
           } else {
-            // Parité absente → incrémenter compteur
+            // La parité est absente → incrémenter le compteur (toujours, même après le seuil)
             state.parityCounts[parity] = (state.parityCounts[parity] || 0) + 1;
-            console.log(`${logP} ${parity} absent (score=${score}) — compteur=${state.parityCounts[parity]} / seuil B=${B}`);
-            if (state.parityCounts[parity] >= B) {
-              console.log(`${logP} ${parity} seuil B=${B} atteint → feu JAUNE → compteur=0, attente confirmation jeu #${gn + 1}`);
+            if (!state.parityPending[parity] && state.parityCounts[parity] >= B) {
+              // On vient d'atteindre le seuil → passer en attente
+              console.log(`${logP} ${parity} seuil B=${B} atteint (compteur=${state.parityCounts[parity]}) → en attente d'apparition`);
               state.parityPending[parity] = true;
-              state.parityCounts[parity]  = 0;
+            } else if (state.parityPending[parity]) {
+              console.log(`${logP} ⏳ ${parity} toujours absent (score=${score}) — compteur=${state.parityCounts[parity]}, en attente...`);
+            } else {
+              console.log(`${logP} ${parity} absent (score=${score}) — compteur=${state.parityCounts[parity]} / seuil B=${B}`);
             }
           }
         }
@@ -4642,7 +4641,7 @@ class Engine {
             singleCounter: false,
             confirmPending: !!pp.pair,
             description: pp.pair
-              ? `⏳ Seuil atteint — attend confirmation Pair`
+              ? `⏳ Seuil B=${threshold} atteint — en attente d'apparition Pair (${pc.pair || 0} absences)`
               : `${pc.pair || 0}/${threshold} absences Pair`,
           },
           {
@@ -4656,7 +4655,7 @@ class Engine {
             singleCounter: false,
             confirmPending: !!pp.impair,
             description: pp.impair
-              ? `⏳ Seuil atteint — attend confirmation Impair`
+              ? `⏳ Seuil B=${threshold} atteint — en attente d'apparition Impair (${pc.impair || 0} absences)`
               : `${pc.impair || 0}/${threshold} absences Impair`,
           },
         ];

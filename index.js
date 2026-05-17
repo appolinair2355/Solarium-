@@ -117,6 +117,7 @@ const licenseRoutes    = require('./license-route');
 const ideaRoutes       = require('./idea-route');
 const tgAnnounceRoutes = require('./tg-announce-route');
 const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
+const { startPubScheduler }        = require('./pub-scheduler');
 app.use('/api/shop',        shopRoutes);
 app.use('/api/license',     licenseRoutes);
 app.use('/api/ideas',       blockExpired, ideaRoutes);
@@ -517,6 +518,7 @@ async function initBackgroundServices() {
 
   // ── Planificateur annonces Telegram ──────────────────────────────────────
   startTgAnnounceScheduler();
+  startPubScheduler();
 }
 
 main().catch(err => {
