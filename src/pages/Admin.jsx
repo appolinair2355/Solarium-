@@ -4412,7 +4412,7 @@ function AdminPanel() {
     { value: 'apparition_absence', label: 'Apparition → Absence' },
     { value: 'taux_miroir', label: 'Taux Miroir' },
     { value: 'compteur_adverse', label: 'Compteur Adverse' },
-    { value: 'compteur_parite', label: 'Compteur Parité' },
+    { value: 'compteur_parite', label: '⚖️ Compteur Parité (pair/impair)' },
     { value: 'victoire_adverse', label: 'Victoire Adverse' },
     { value: 'multi_strategy', label: 'Multi-stratégie' },
     { value: 'relance', label: 'Relance' },
@@ -4427,6 +4427,11 @@ function AdminPanel() {
     { value: 'union_enseignes', label: '🔗 Union Enseignes' },
     { value: 'carte_valeur', label: '🃏 Carte Valeur' },
     { value: 'intersection', label: '🎯 Intersection' },
+    { value: 'first_card_plus6', label: '🎯 Première Carte +Décalage' },
+    { value: 'costume_manquant', label: '🃏 Costume Manquant (+t)' },
+    { value: 'rattrapage_groupe', label: '🔄 Rattrapage Groupé' },
+    { value: 'comptages_ecart', label: '📊 Comptages Écart' },
+    { value: 'annonce_sequence', label: '📣 Rotateur Promo' },
   ];
 
   useEffect(() => {
@@ -10471,31 +10476,41 @@ function AdminPanel() {
                     <div style={{ marginTop: 10, padding: '14px', borderRadius: 10, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Paramètres CM+t</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                        {/* t configurable */}
+                        {/* t configurable — désactivé si mode N+1/N+2 actif */}
                         <div>
-                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Décalage t (N+t)</label>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          <label style={{ display: 'block', color: stratForm.cm_check_inverse ? '#78350f' : '#fde68a', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>
+                            Décalage t (N+t)
+                            {stratForm.cm_check_inverse && <span style={{ marginLeft: 6, fontSize: 10, color: '#78350f', fontWeight: 600 }}>⛔ désactivé (N+1/N+2 actif)</span>}
+                          </label>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, opacity: stratForm.cm_check_inverse ? 0.35 : 1, pointerEvents: stratForm.cm_check_inverse ? 'none' : 'auto' }}>
                             {[1,2,3,4,5,6].map(n => {
                               const active = (stratForm.cm_t ?? 2) === n;
                               return (
                                 <button key={n} type="button"
-                                  onClick={() => setStratForm(p => ({ ...p, cm_t: n }))}
+                                  onClick={() => setStratForm(p => ({ ...p, cm_t: n, cm_check_inverse: false }))}
                                   style={{ width: 40, height: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 14, border: active ? '2px solid #fbbf24' : '1px solid rgba(251,191,36,0.3)', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(251,191,36,0.05)', color: active ? '#fbbf24' : '#78350f', transition: 'all 0.15s' }}>
                                   {n}
                                 </button>
                               );
                             })}
                           </div>
-                          <div style={{ fontSize: 10, color: '#92400e', marginTop: 4 }}>
-                            Prédiction émise au jeu <strong style={{ color: '#fbbf24' }}>N+{stratForm.cm_t ?? 2}</strong> après détection
+                          <div style={{ fontSize: 10, color: stratForm.cm_check_inverse ? '#78350f' : '#92400e', marginTop: 4 }}>
+                            {stratForm.cm_check_inverse
+                              ? 'Sélectionner un t désactivera N+1/N+2'
+                              : <>Prédiction émise au jeu <strong style={{ color: '#fbbf24' }}>N+{stratForm.cm_t ?? 2}</strong> après détection</>
+                            }
                           </div>
                         </div>
 
-                        {/* Option vérification inversion N+1/N+2 */}
+                        {/* Option vérification inversion N+1/N+2 — désactive t quand actif */}
                         <div>
-                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🔀 Vérification N+1/N+2 (inversion)</label>
+                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🔀 Vérification N+1/N+2 (→ prédit N+4)</label>
                           <div
-                            onClick={() => setStratForm(p => ({ ...p, cm_check_inverse: !p.cm_check_inverse }))}
+                            onClick={() => setStratForm(p => ({
+                              ...p,
+                              cm_check_inverse: !p.cm_check_inverse,
+                              ...(!p.cm_check_inverse ? { cm_t: 2 } : {}),
+                            }))}
                             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, cursor: 'pointer', userSelect: 'none', background: stratForm.cm_check_inverse ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.07)', border: `1.5px solid ${stratForm.cm_check_inverse ? 'rgba(34,197,94,0.4)' : 'rgba(100,116,139,0.2)'}`, transition: 'all 0.2s' }}
                           >
                             <div style={{ width: 34, height: 19, borderRadius: 10, background: stratForm.cm_check_inverse ? '#22c55e' : '#334155', position: 'relative', flexShrink: 0, transition: 'background 0.25s' }}>
@@ -10506,15 +10521,19 @@ function AdminPanel() {
                                 {stratForm.cm_check_inverse ? 'Activé' : 'Désactivé'}
                               </div>
                               <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>
-                                Si costume apparu N+1 <strong>ET</strong> N+2 → prédit l'inverse
+                                Apparu N+1 + absent N+2 → prédit le costume absent au N+4
                               </div>
                             </div>
                           </div>
                           {stratForm.cm_check_inverse && (
-                            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 10, color: '#86efac', lineHeight: 1.6 }}>
-                              ♦️ ↔ ♠️ · ♣️ ↔ ❤️<br/>
-                              Apparu N+1 seulement → prédiction normale.<br/>
-                              Apparu N+1 <strong>ET</strong> N+2 → prédiction inversée.
+                            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 10, color: '#86efac', lineHeight: 1.8 }}>
+                              <strong style={{ color: '#4ade80' }}>Exemple :</strong> costume manquant = ♥ (inverse = ♣)<br/>
+                              <strong>N+1</strong> : ♥ apparu <em>ou</em> absent → on attend toujours N+2<br/>
+                              <span style={{ color: '#93c5fd' }}>— Décision à N+2 (identique dans les deux cas) —</span><br/>
+                              🔹 ♥ <strong>absent</strong> à N+2 → prédit <strong>♥</strong> pour <strong>N+4</strong> 🎯<br/>
+                              🔹 ♥ <strong>présent</strong> + ♣ <strong>absent</strong> → prédit <strong>♣</strong> pour <strong>N+4</strong> 🎯<br/>
+                              🔹 ♥ <strong>présent</strong> + ♣ <strong>présent</strong> → annulé ❌<br/>
+                              <span style={{ color: '#fbbf24', fontSize: 9, marginTop: 4, display: 'block' }}>⚠️ Ce mode désactive le sélecteur de décalage t — la cible est toujours N+4.</span>
                             </div>
                           )}
                         </div>
@@ -11041,7 +11060,7 @@ function AdminPanel() {
                           {/* Message promotionnel */}
                           <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(251,191,36,0.13)' }}>
                             <div style={{ fontWeight: 700, color: '#fbbf24', marginBottom: 8, fontSize: 11 }}>📣 Aperçu — Message promo (envoyé toutes les {parseInt(stratForm.annonce_interval) >= 60 ? `${Math.round(parseInt(stratForm.annonce_interval)/60)}h` : `${stratForm.annonce_interval}min`})</div>
-                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 10, color: '#cbd5e1', lineHeight: 1.75 }}>{`🔥 STRATÉGIE EN VEDETTE — ${name}\n\n✨ ${name} est la stratégie active de la rotation. Elle prédit actuellement avec la plus grande précision sur la plateforme Baccarat 1xBet.\nElle analyse les jeux en temps réel et génère des signaux fiables pour vous aider à maximiser vos gains.${customText ? `\n\n📝 ${customText}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n💰 COMMENT ACQUÉRIR CETTE STRATÉGIE ?\n\n💵 Prix : 75$\n📦 Après paiement : licence personnelle + fichier ZIP complet prêt à déployer\n🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux\n\n👉 Étapes pour acheter :\n1️⃣ Inscrivez-vous sur notre plateforme\n2️⃣ Allez dans la section "Acheter Stratégie"\n3️⃣ Sélectionnez ${name} et soumettez votre capture de paiement\n4️⃣ Après validation par l'administrateur, téléchargez votre licence et votre ZIP\n\n🔒 Licence unique — liée à votre compte${total > 1 ? `\n📌 Stratégie 1 / ${total} dans la rotation` : ''}`}</pre>
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 10, color: '#cbd5e1', lineHeight: 1.75 }}>{`🔥 STRATÉGIE EN VEDETTE — ${name}\n\n✨ ${name} est la stratégie active de la rotation. Elle prédit actuellement avec la plus grande précision sur la plateforme Baccarat 1xBet.\nElle analyse les jeux en temps réel et génère des signaux fiables pour vous aider à maximiser vos gains.${customText ? `\n\n📝 ${customText}` : ''}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n💰 COMMENT ACQUÉRIR CETTE STRATÉGIE ?\n\n💵 Prix : 75$ pour avoir le fichier ZIP\n📦 Après paiement : licence personnelle + fichier ZIP complet prêt à déployer\n🤖 Déployez votre bot Telegram et envoyez les prédictions dans vos propres canaux\n\n👉 Étapes pour acheter :\n1️⃣ Inscrivez-vous sur notre plateforme\n2️⃣ Allez dans la section "Acheter Stratégie"\n3️⃣ Sélectionnez ${name} et soumettez votre capture de paiement\n4️⃣ Après validation par l'administrateur, téléchargez votre licence et votre ZIP\n\n🔒 Licence unique — liée à votre compte${total > 1 ? `\n📌 Stratégie 1 / ${total} dans la rotation` : ''}`}</pre>
                           </div>
                         </div>
                       );
@@ -11915,9 +11934,9 @@ function AdminPanel() {
                       onChange={e => setStratForm(p => ({ ...p, prix: Math.max(0, parseFloat(e.target.value) || 0) }))}
                       style={{ width: 90, padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(251,191,36,0.45)', borderRadius: 8, color: '#fbbf24', fontSize: 16, fontWeight: 800, textAlign: 'center' }}
                     />
-                    <span style={{ color: '#92400e', fontSize: 13, fontWeight: 700 }}>$ / mois</span>
+                    <span style={{ color: '#92400e', fontSize: 13, fontWeight: 700 }}>$</span>
                   </div>
-                  <div style={{ fontSize: 10, color: '#78350f', marginTop: 6 }}>Affiché dans l'annonce</div>
+                  <div style={{ fontSize: 10, color: '#78350f', marginTop: 6 }}>Prix fixe — affiché dans l'annonce</div>
                 </div>
 
                 {/* ── Annonce ── */}
@@ -11969,7 +11988,7 @@ function AdminPanel() {
                           ``,
                           `📊 Mode : ${modeLabel}`,
                           `📈 Bilan : ${bilanStr}`,
-                          px > 0 ? `💰 Accès : <b>${px}$</b>` : null,
+                          px > 0 ? `💰 Prix : <b>${px}$</b> pour avoir le fichier ZIP` : null,
                           ``,
                           `━━━━━━━━━━━━━━━━━`,
                           `📲 Rejoignez-nous pour recevoir les prédictions en temps réel !`,
