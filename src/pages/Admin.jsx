@@ -10497,7 +10497,7 @@ function AdminPanel() {
                           <div style={{ fontSize: 10, color: stratForm.cm_check_inverse ? '#78350f' : '#92400e', marginTop: 4 }}>
                             {stratForm.cm_check_inverse
                               ? 'Sélectionner un t désactivera N+1/N+2'
-                              : <>Vérifié au jeu <strong style={{ color: '#fbbf24' }}>N+{stratForm.cm_t ?? 2}</strong> → prédit toujours <strong style={{ color: '#4ade80' }}>N+4</strong></>
+                              : <>Vérifié au jeu <strong style={{ color: '#fbbf24' }}>N+{stratForm.cm_t ?? 2}</strong> → prédit <strong style={{ color: '#4ade80' }}>N+{(stratForm.cm_t ?? 2) + 1}</strong></>
                             }
                           </div>
                         </div>
