@@ -28,7 +28,7 @@ async function loadMaxRattrapage() {
   return maxRattrapage;
 }
 async function saveMaxRattrapage(n) {
-  maxRattrapage = Math.max(0, parseInt(n) || 2);
+  maxRattrapage = Math.max(0, Math.min(5, parseInt(n) || 2));
   await db.setSetting('max_rattrapage', String(maxRattrapage));
 }
 function getCurrentMaxRattrapage() { return maxRattrapage; }
@@ -187,88 +187,6 @@ async function startBot() {
       return;
     }
 
-    // ── Commandes admin distantes ──────────────────────────────────────
-    // Ces commandes ne fonctionnent que si l'expéditeur est l'admin bot configuré.
-    if (text.startsWith('/setformat') || text.startsWith('/setmaxr') || text.startsWith('/botcmd')) {
-      let adminId = '';
-      try { adminId = (await db.getSetting('bot_admin_tg_id') || '').trim(); } catch {}
-      if (!adminId || userId !== adminId) {
-        try { await bot.sendMessage(chatId, '⛔ Accès refusé. Configurez votre ID Telegram admin dans le panneau d\'administration.'); } catch {}
-        return;
-      }
-
-      // /setformat [S<id>] <N>  — change le format global ou par stratégie
-      if (text.startsWith('/setformat')) {
-        const parts = text.split(/\s+/).slice(1);
-        // Cas: /setformat S5 3  (stratégie S5, format 3)
-        if (parts.length >= 2 && /^[sS]\d+$/.test(parts[0])) {
-          const stratId = parseInt(parts[0].slice(1));
-          const fmtId   = Math.max(1, Math.min(11, parseInt(parts[1]) || 1));
-          try {
-            const strats = await db.getStrategies();
-            const idx = strats.findIndex(s => s.id === stratId);
-            if (idx < 0) {
-              await bot.sendMessage(chatId, `❌ Stratégie S${stratId} introuvable.`);
-            } else {
-              strats[idx].tg_format = fmtId;
-              await db.setSetting('custom_strategies', JSON.stringify(strats));
-              require('./engine').reloadCustomStrategies(strats);
-              await bot.sendMessage(chatId, `✅ Format de S${stratId} (${strats[idx].name}) → <b>${fmtId}</b>`, { parse_mode: 'HTML' });
-            }
-          } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
-        } else if (parts.length >= 1 && /^\d+$/.test(parts[0])) {
-          // Cas: /setformat 3  (format global)
-          const fmtId = Math.max(1, Math.min(11, parseInt(parts[0]) || 1));
-          await saveFormat(fmtId);
-          try { await bot.sendMessage(chatId, `✅ Format global → <b>${fmtId}</b>`, { parse_mode: 'HTML' }); } catch {}
-        } else {
-          try { await bot.sendMessage(chatId, `ℹ️ Usage:\n/setformat <N> — format global\n/setformat S<id> <N> — format par stratégie`); } catch {}
-        }
-        return;
-      }
-
-      // /setmaxr <N>  — change le max_rattrapage global
-      if (text.startsWith('/setmaxr')) {
-        const parts = text.split(/\s+/).slice(1);
-        if (parts.length < 1 || isNaN(parseInt(parts[0]))) {
-          try { await bot.sendMessage(chatId, `ℹ️ Usage: /setmaxr <N>`); } catch {}
-          return;
-        }
-        const n = Math.max(0, parseInt(parts[0]));
-        await saveMaxRattrapage(n);
-        try { await bot.sendMessage(chatId, `✅ Max rattrapage global → <b>${n}</b>`, { parse_mode: 'HTML' }); } catch {}
-        return;
-      }
-
-      // /botcmd {"type":"format","data":{"format_id":3}}
-      // /botcmd {"type":"maxr","data":{"value":5}}
-      if (text.startsWith('/botcmd')) {
-        const jsonStr = text.slice('/botcmd'.length).trim();
-        try {
-          const body = JSON.parse(jsonStr);
-          const blocks = Array.isArray(body.blocks) ? body.blocks : [body];
-          const msgs = [];
-          for (const b of blocks) {
-            if (b.type === 'format') {
-              const fmtId = Math.max(1, Math.min(18, parseInt(b.data?.format_id) || 1));
-              await saveFormat(fmtId);
-              msgs.push(`✅ format global → ${fmtId}`);
-            } else if (b.type === 'maxr' || b.type === 'max_rattrapage') {
-              const n = Math.max(0, parseInt(b.data?.value ?? b.data?.max_rattrapage) || 0);
-              await saveMaxRattrapage(n);
-              msgs.push(`✅ maxR global → ${n}`);
-            } else {
-              msgs.push(`⚠️ Type "${b.type}" non supporté via bot — utilisez le panneau admin.`);
-            }
-          }
-          try { await bot.sendMessage(chatId, msgs.join('\n')); } catch {}
-        } catch (e) {
-          try { await bot.sendMessage(chatId, `❌ JSON invalide: ${e.message}`); } catch {}
-        }
-        return;
-      }
-    }
-
     // Saisie du numéro si étape 'number'
     const pending = pendingAleatoire.get(userId);
     if (!pending || pending.step !== 'number') return;
@@ -346,20 +264,13 @@ async function addChannel(tgId, name) {
   const row = await db.upsertTelegramConfig({ channel_id: String(tgId), channel_name: name });
   channelStore.set(String(tgId), { dbId: row.id, name, messages: [] });
   await startBot();
-  // Sync vers la base Render
-  try { require('./render-sync').syncTelegramChannel(row).catch(() => {}); } catch {}
   return row;
 }
 
 async function removeChannel(dbId) {
   const entry = [...channelStore.entries()].find(([, ch]) => ch.dbId === dbId);
-  const channelId = entry ? entry[0] : null;
   if (entry) channelStore.delete(entry[0]);
   await db.deleteTelegramConfig(dbId);
-  // Sync suppression vers la base Render
-  if (channelId) {
-    try { require('./render-sync').syncDeleteTelegramChannel(channelId).catch(() => {}); } catch {}
-  }
   if (channelStore.size === 0 && bot) { try { await bot.stopPolling(); } catch {} bot = null; }
   else if (channelStore.size > 0) await startBot();
 }
@@ -420,8 +331,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
-const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes', 'WIN_B': 'Victoire Banquier', 'WIN_P': 'Victoire Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
@@ -433,64 +344,18 @@ function getSuitEmoji(suit) { return SUIT_EMOJI_MAP[suit] || suit; }
 function getSuitName(suit)  { return SUIT_NAME_FR[suit]  || suit; }
 
 /**
- * renderCustomTemplate — rend un template personnalisé défini dans le fichier de stratégie.
- * Variables disponibles : {game} {emoji} {suit} {status} {maxR} {hand} {rattrapage} {strategy}
- * Exemple de template : "🎯 #{game} | {emoji} {suit} | {status}"
- */
-function renderCustomTemplate(template, { gameNumber, suit, hand, maxR, status, rattrapage, strategy }) {
-  const emoji = getSuitEmoji(suit);
-  const name  = getSuitName(suit);
-  let statusStr;
-  if (status === null)         statusStr = '⌛';
-  else if (status === 'gagne') statusStr = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
-  else                         statusStr = '❌';
-  return template
-    .replace(/\{game\}/g,      String(gameNumber  ?? ''))
-    .replace(/\{emoji\}/g,     emoji)
-    .replace(/\{suit\}/g,      name)
-    .replace(/\{status\}/g,    statusStr)
-    .replace(/\{maxR\}/g,      String(maxR        ?? ''))
-    .replace(/\{hand\}/g,      String(hand        ?? 'joueur'))
-    .replace(/\{rattrapage\}/g,String(rattrapage  ?? 0))
-    .replace(/\{strategy\}/g,  String(strategy    ?? ''));
-}
-
-/**
  * buildTgMessage — message unifié pour prédiction ET résultat.
  * status = null  → en cours (⌛)
  * status = 'gagne'  → gagné (✅ + emoji rattrapage)
  * status = 'perdu'  → perdu (❌)
  */
-function formatCardsToEmojis(cards) {
-  if (!Array.isArray(cards) || cards.length === 0) return '—';
-  return cards.map(c => {
-    const raw = (c && c.S) ? String(c.S).replace(/\uFE0F/g, '').trim() : '';
-    return SUIT_EMOJI_MAP[raw] || raw || '?';
-  }).join(' ');
-}
-
 function buildTgMessage(formatId, {
   gameNumber, suit, strategy,
   maxR = 2,
   status = null,
   rattrapage = 0,
   hand = null,
-  playerCards = null,
-  bankerCards = null,
-}, tg_template = null) {
-  // ── Template personnalisé (défini dans le fichier de stratégie ou la DB) ──
-  if (tg_template) {
-    return {
-      text: renderCustomTemplate(tg_template, { gameNumber, suit, hand, maxR, status, rattrapage, strategy }),
-      parse_mode: null,
-    };
-  }
-
-  // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
-  if (suit === 'distrib') formatId = 11;
-  // Les modes Carte 2/3 utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
-  if ((suit === 'deux' || suit === 'trois') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
-
+}) {
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
   const sup     = SUPERSCRIPT[maxR] ?? String(maxR);
@@ -511,7 +376,7 @@ function buildTgMessage(formatId, {
       return {
         text:
           `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\n` +
-          `#N${gameNumber} :${emoji}\n` +
+          `Game ${gameNumber} :${emoji}\n` +
           `${status === null ? 'En cours' : 'Statut'} :${statusLine}`,
         parse_mode: null,
       };
@@ -529,7 +394,7 @@ function buildTgMessage(formatId, {
     case 4:
       return {
         text:
-          `🎰 PRÉDICTION #N${gameNumber}\n` +
+          `🎰 PRÉDICTION #${gameNumber}\n` +
           `🎯 Couleur: ${emoji} ${name}\n` +
           `📊 Statut: ${status === null ? 'En cours ⏳' : statusLine}\n` +
           `🔍 ${status === null ? 'Vérification en cours' : (status === 'gagne' ? 'Vérifié ✓' : 'Résultat final')}`,
@@ -543,9 +408,9 @@ function buildTgMessage(formatId, {
       else                         bar = '🟥'.repeat(maxR + 1);
       return {
         text:
-          `🎰 PRÉDICTION #N${gameNumber}\n` +
+          `🎰 PRÉDICTION #${gameNumber}\n` +
           `🎯 Couleur: ${emoji} ${name}\n\n` +
-          `🔍 Vérification jeu #N${gameNumber}\n` +
+          `🔍 Vérification jeu #${gameNumber}\n` +
           `${bar}\n` +
           `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌')}`,
         parse_mode: null,
@@ -555,7 +420,7 @@ function buildTgMessage(formatId, {
     case 6:
       return {
         text:
-          `🏆 *PRÉDICTION #N${gameNumber}*\n\n` +
+          `🏆 *PRÉDICTION #${gameNumber}*\n\n` +
           `🎯 Couleur: ${emoji} ${name}\n` +
           (status === null
             ? `⏳ Statut: En cours`
@@ -568,7 +433,7 @@ function buildTgMessage(formatId, {
     case 7:
       return {
         text:
-          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
           (status === null
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
@@ -585,7 +450,7 @@ function buildTgMessage(formatId, {
       if (isBank) {
         return {
           text:
-            `🎮 banquier #N${gameNumber}\n` +
+            `🎮 banquier №${gameNumber}\n` +
             `⚜️ Couleur de la carte:${emoji}\n` +
             `🎰 Poursuite  🔰+${maxR} jeux\n` +
             `🗯️ Résultats : ${statusLine8}`,
@@ -594,7 +459,7 @@ function buildTgMessage(formatId, {
       } else {
         return {
           text:
-            `🤖 joueur #N${gameNumber}\n` +
+            `🤖 joueur :${gameNumber}\n` +
             `🔰Couleur de la carte :${emoji}\n` +
             `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
             `🧨 Résultats : ${statusLine8}`,
@@ -609,7 +474,7 @@ function buildTgMessage(formatId, {
                 :                      '❌';
       return {
         text:
-          `🤖 joueur #N${gameNumber}\n` +
+          `🤖 joueur :${gameNumber}\n` +
           `🔰Couleur de la carte :${emoji}\n` +
           `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
           `🧨 Résultats : ${sl9}`,
@@ -623,7 +488,7 @@ function buildTgMessage(formatId, {
                  :                      '❌';
       return {
         text:
-          `🎮 banquier #N${gameNumber}\n` +
+          `🎮 banquier №${gameNumber}\n` +
           `⚜️ Couleur de la carte:${emoji}\n` +
           `🎰 Poursuite  🔰+${maxR} jeux\n` +
           `🗯️ Résultats : ${sl10}`,
@@ -631,645 +496,16 @@ function buildTgMessage(formatId, {
       };
     }
 
-    case 11: {
-      const foundGame = gameNumber + rattrapage;
-      const pEmojis   = formatCardsToEmojis(playerCards);
-      const bEmojis   = formatCardsToEmojis(bankerCards);
-      if (status === null) {
-        return {
-          text:
-            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #N${gameNumber}\n` +
-            `━━━━━━━━━━━━━━━━━━\n` +
-            `⌛ Vérification en cours...`,
-          parse_mode: null,
-        };
-      } else if (status === 'gagne') {
-        // Phase 1 : affiche le jeu trouvé + cartes (remplacé après 10s par buildDistribFinalMsg)
-        return {
-          text:
-            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #N${gameNumber}\n` +
-            `━━━━━━━━━━━━━━━━━━\n` +
-            `✅ Jeu #N${foundGame} trouvé\n` +
-            `🃏 Joueur  : ${pEmojis}\n` +
-            `🎴 Banquier : ${bEmojis}`,
-          parse_mode: null,
-        };
-      } else {
-        return {
-          text:
-            `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-            `📌 Jeu #N${gameNumber}\n` +
-            `━━━━━━━━━━━━━━━━━━\n` +
-            `✅ Distribution : OUI\n` +
-            `❌ Non distribué`,
-          parse_mode: null,
-        };
-      }
-    }
-
-    case 12: {
-      const handLabel12 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      const targetCards = suit === 'deux' ? 2 : 3;
-      const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
-      const winMsg   = suit === 'deux'
-        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Naturel confirmé 🎯`
-        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmé 🎯`;
-      const lossMsg  = suit === 'deux'
-        ? `❌ Pas de naturel sur ${maxR} jeux`
-        : `❌ Pas de 3 cartes sur ${maxR} jeux`;
-      return {
-        text:
-          `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
-          `📌 Jeu #N${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━\n` +
-          `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
-          (status === null
-            ? `⌛ En cours de vérification...`
-            : status === 'gagne' ? winMsg : lossMsg),
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 13 : Victoire Pro (Banquier / Joueur) ─────────────────────
-    case 13: {
-      const sl13 = status === null    ? '⌛ En cours de vérification...'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ`
-                 :                      `❌ Perdu après ${maxR} tentatives`;
-      const winLabel13 = suit === 'WIN_B' ? '🏦 BANQUIER'
-                       : suit === 'WIN_P' ? '👤 JOUEUR'
-                       : `${emoji} ${name.toUpperCase()}`;
-      return {
-        text:
-          `🏆 PRÉDICTION VICTOIRE\n` +
-          `📌 Jeu #N${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━━━━\n` +
-          `🎯 ${winLabel13} va gagner\n` +
-          `🔰 Rattrapage : +${maxR}\n` +
-          `${sl13}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 14 : Victoire Compact ──────────────────────────────────────
-    case 14: {
-      const sl14 = status === null    ? '⌛'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
-                 :                      '❌';
-      const winLabel14 = suit === 'WIN_B' ? '🏦 Banquier'
-                       : suit === 'WIN_P' ? '👤 Joueur'
-                       : `${emoji} ${name}`;
-      return {
-        text: `${winLabel14} gagne — Jeu #N${gameNumber}   +${maxR}\n${sl14}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 15 : Match Nul Pro ─────────────────────────────────────────
-    case 15: {
-      const sl15 = status === null    ? '⌛ En cours de vérification...'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ÉGALITÉ CONFIRMÉE`
-                 :                      `❌ Pas d'égalité sur ${maxR} jeux`;
-      const tieLabel15 = suit === 'TIE' ? '⚖️ Égalité — aucun gagnant' : `🎯 ${emoji} ${name}`;
-      return {
-        text:
-          `🤝 PRÉDICTION MATCH NUL\n` +
-          `📌 Jeu #N${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━━━━\n` +
-          `${tieLabel15}\n` +
-          `🔰 Rattrapage : +${maxR}\n` +
-          `${sl15}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 16 : Match Nul Compact ─────────────────────────────────────
-    case 16: {
-      const sl16 = status === null    ? '⌛'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
-                 :                      '❌';
-      const tieLabel16 = suit === 'TIE' ? '🤝 Match Nul' : `${emoji} ${name}`;
-      return {
-        text: `${tieLabel16} · #N${gameNumber} · +${maxR}\n${sl16}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 17 : 2+3 Cartes Pro ────────────────────────────────────────
-    case 17: {
-      const sl17 = status === null    ? '⌛ En cours de vérification...'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} JEU MIXTE CONFIRMÉ`
-                 :                      `❌ Pas de jeu mixte sur ${maxR} jeux`;
-      const mixLabel17 = suit === 'TWO_THREE'
-        ? '🃏 Un camp : 2 cartes — Autre : 3 cartes'
-        : `🎯 ${emoji} ${name}`;
-      return {
-        text:
-          `⚡ PRÉDICTION 2+3 CARTES\n` +
-          `📌 Jeu #N${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━━━━\n` +
-          `${mixLabel17}\n` +
-          `🔰 Rattrapage : +${maxR}\n` +
-          `${sl17}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 18 : Cartes 2/3 Style B ────────────────────────────────────
-    case 18: {
-      const sl18 = status === null    ? '⌛ Vérification...'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé`
-                 :                      '❌ Non confirmé';
-      let cardLabel18;
-      if (suit === 'deux')       cardLabel18 = '2️⃣ 2 CARTES (Naturel)';
-      else if (suit === 'trois') cardLabel18 = '3️⃣ 3 CARTES';
-      else if (suit === 'TWO_THREE') cardLabel18 = '⚡ 2+3 CARTES MIXTE';
-      else                       cardLabel18 = `${emoji} ${name.toUpperCase()}`;
-      const handLabel18 = hand === 'banquier' ? '🏦 BANQUIER' : hand === 'joueur' ? '👤 JOUEUR' : '';
-      return {
-        text:
-          `${cardLabel18}${handLabel18 ? ` — ${handLabel18}` : ''}\n` +
-          `〖 Jeu #N${gameNumber} 〗〖 +${maxR} 〗\n` +
-          `${sl18}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 19 : VIP Casino ────────────────────────────────────────────
-    case 19:
-      return {
-        text:
-          `╔══════════════════╗\n` +
-          `🎯 JEU #N${gameNumber} — ${emoji} ${name}\n` +
-          `🔰 Rattrapage max : +${maxR}\n` +
-          `╚══════════════════╝\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 20 : Flash Signal ──────────────────────────────────────────
-    case 20:
-      return {
-        text: `⚡ #N${gameNumber} ${emoji} +${maxR} ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 21 : Casino Royale ─────────────────────────────────────────
-    case 21:
-      return {
-        text:
-          `🃏 CASINO ROYALE — Jeu #N${gameNumber}\n` +
-          `━━━━━━━━━━━━━━━━━━\n` +
-          `🎯 Signe : ${emoji} ${name}\n` +
-          `🏅 Dogon max : +${maxR}\n` +
-          `🔮 Résultat : ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 22 : Signal Pro (avec main) ───────────────────────────────
-    case 22: {
-      const handLabel22 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const handEmoji22 = hand === 'banquier' ? '🏦' : '👤';
-      return {
-        text:
-          `🔔 SIGNAL BACCARA PRO\n` +
-          `${handEmoji22} Main : ${handLabel22}\n` +
-          `🎯 Signe : ${emoji} ${name}\n` +
-          `📌 Jeu #N${gameNumber} · +${maxR}\n` +
-          `➤ ${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 23 : Alert Pro ─────────────────────────────────────────────
-    case 23:
-      return {
-        text:
-          `🚨 ALERTE PRÉDICTION\n` +
-          `📍 Tour #N${gameNumber}\n` +
-          `🃏 Costume : ${emoji} ${name}\n` +
-          `🔁 Max dogon : +${maxR}\n` +
-          `📊 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 24 : Minimaliste Stars ─────────────────────────────────────
-    case 24:
-      return {
-        text:
-          `★ #N${gameNumber} · ${emoji} ${name} · +${maxR}\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 25 : Scoreboard Pro ────────────────────────────────────────
-    case 25:
-      return {
-        text:
-          `🏅 BACCARAT SCOREBOARD\n` +
-          `┌─────────────────────┐\n` +
-          `│ #N${gameNumber} │ ${emoji} ${name} │ +${maxR} │\n` +
-          `└─────────────────────┘\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 26 : Dark Prestige ─────────────────────────────────────────
-    case 26:
-      return {
-        text:
-          `◼️◼️◼️ BACCARAT DARK ◼️◼️◼️\n` +
-          `◽ Tour #N${gameNumber}  ◽ ${emoji} ${name}  ◽ +${maxR}\n` +
-          `◼️ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 27 : Signal Ultra Compact ──────────────────────────────────
-    case 27:
-      return {
-        text: `🎯 S${gameNumber} · ${emoji} · ×${maxR}\n${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 28 : Diamant Style ─────────────────────────────────────────
-    case 28:
-      return {
-        text:
-          `💎 PRÉDICTION DIAMANT\n` +
-          `◆ Jeu #N${gameNumber} — ${emoji} ${name}\n` +
-          `◆ Dogon : +${maxR}\n` +
-          `◇ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 29 : Neon Pro ──────────────────────────────────────────────
-    case 29:
-      return {
-        text:
-          `🟣 NEON BACCARAT 🟣\n` +
-          `🔸 #N${gameNumber} | ${emoji} ${name} | +${maxR}\n` +
-          `🔹 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 30 : Feu Signal ────────────────────────────────────────────
-    case 30:
-      return {
-        text:
-          `🔥 SIGNAL #N${gameNumber}\n` +
-          `🌟 ${emoji} ${name.toUpperCase()}\n` +
-          `⚡ Dogon +${maxR}\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 31 : Russian Enhanced ──────────────────────────────────────
-    case 31: {
-      const sup31 = SUPERSCRIPT[maxR] ?? String(maxR);
-      return {
-        text:
-          `⚜ #N${gameNumber} Игрок +${sup31} ⚜\n` +
-          `◽ Масть ${emoji} ${name}\n` +
-          `◼️ Ставка: ${hand === 'banquier' ? 'Банкир' : 'Игрок'}\n` +
-          `◼️ Результат: ${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 32 : Deux Lignes Net ───────────────────────────────────────
-    case 32:
-      return {
-        text: `${emoji} #N${gameNumber} +${maxR}\n${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 33 : Trophée Pro ───────────────────────────────────────────
-    case 33:
-      return {
-        text:
-          `🥇 BACCARAT TROPHÉE\n` +
-          `📌 #N${gameNumber} | ${emoji} ${name} | 🔰+${maxR}\n` +
-          `━━━━━━━━━━━\n` +
-          `🏆 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 34 : Atomique ──────────────────────────────────────────────
-    case 34:
-      return {
-        text:
-          `⚛️ ATOMIC SIGNAL\n` +
-          `⚡ Tour #N${gameNumber} — ${emoji} ${name} — Dogon×${maxR}\n` +
-          `→ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 35 : Gold VIP ──────────────────────────────────────────────
-    case 35:
-      return {
-        text:
-          `✨ 𝐆𝐎𝐋𝐃 𝐕𝐈𝐏 ✨\n` +
-          `━━━━━━━━━━━━━━━━━\n` +
-          `🎯 #N${gameNumber}  ${emoji} ${name}  +${maxR}\n` +
-          `━━━━━━━━━━━━━━━━━\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 36 : Couronne Royal ────────────────────────────────────────
-    case 36:
-      return {
-        text:
-          `👑 ROYAL BACCARAT\n` +
-          `🎮 Jeu #N${gameNumber}\n` +
-          `🃏 Signe : ${emoji} ${name}\n` +
-          `🔑 Clé : +${maxR}\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 37 : Militaire ─────────────────────────────────────────────
-    case 37:
-      return {
-        text:
-          `🎖️ OPÉRATION BACCARAT\n` +
-          `🔵 Mission #N${gameNumber} — CIBLE : ${emoji} ${name.toUpperCase()}\n` +
-          `⚔️ Dogon max : ${maxR} tentatives\n` +
-          `📡 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 38 : Tech Hacker ───────────────────────────────────────────
-    case 38:
-      return {
-        text:
-          `> BACCARAT.EXE — RUN\n` +
-          `> GAME_ID: ${gameNumber}\n` +
-          `> TARGET: ${emoji} ${name.toUpperCase()}\n` +
-          `> MAX_RETRY: ${maxR}\n` +
-          `> STATUS: ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 39 : Dragon Style ──────────────────────────────────────────
-    case 39:
-      return {
-        text:
-          `🐉 DRAGON BACCARAT\n` +
-          `🔥 Jeu #N${gameNumber} · ${emoji} ${name} · ×${maxR}\n` +
-          `⚡ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 40 : Luxe Style ────────────────────────────────────────────
-    case 40:
-      return {
-        text:
-          `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n` +
-          `🎱 Jeu #N${gameNumber}  ·  ${emoji} ${name}  ·  Dogon +${maxR}\n` +
-          `💠 Résultat → ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 41 : Bullet Speed ──────────────────────────────────────────
-    case 41:
-      return {
-        text: `🔫 #${gameNumber}|${emoji}|+${maxR}|${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 42 : Cyber 2077 ────────────────────────────────────────────
-    case 42:
-      return {
-        text:
-          `⟨⟨ CYBER_BACCARAT ⟩⟩\n` +
-          `⚙ GAME_${gameNumber} :: ${emoji}${name.toUpperCase()} :: RETRY_${maxR}\n` +
-          `⊕ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 43 : Lune Mystique ─────────────────────────────────────────
-    case 43:
-      return {
-        text:
-          `🌙 MYSTIQUE BACCARAT\n` +
-          `✨ Tirage #N${gameNumber} — ${emoji} ${name}\n` +
-          `🌟 Puissance : ×${maxR}\n` +
-          `🔮 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 44 : Matrix ────────────────────────────────────────────────
-    case 44:
-      return {
-        text:
-          `░░░ MATRIX BACCARAT ░░░\n` +
-          `▓ #N${gameNumber} ▓ ${emoji} ${name} ▓ +${maxR} ▓\n` +
-          `▒ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 45 : Roi Absolu ────────────────────────────────────────────
-    case 45: {
-      const handR45 = hand === 'banquier' ? '🏦 BANQUIER ROI' : '👑 JOUEUR ROI';
-      return {
-        text:
-          `👑 ${handR45}\n` +
-          `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `🎯 Tour #N${gameNumber} → ${emoji} ${name.toUpperCase()}\n` +
-          `🔰 Protection : +${maxR} coups\n` +
-          `━━━━━━━━━━━━━━━━━━━━━\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 46 : Street Bet ────────────────────────────────────────────
-    case 46:
-      return {
-        text:
-          `🎰 STREET BET #N${gameNumber}\n` +
-          `💵 Mise sur ${emoji} ${name} | Max ${maxR} retours\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 47 : Ultimate Pro ──────────────────────────────────────────
-    case 47: {
-      const handL47 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      return {
-        text:
-          `🌟 ═══ ULTIMATE BACCARAT ═══ 🌟\n` +
-          `📍 Jeu #N${gameNumber}\n` +
-          `🎯 Camp : ${handL47}\n` +
-          `🃏 Signe : ${emoji} ${name.toUpperCase()}\n` +
-          `🔰 Dogon max : +${maxR}\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 48 : Analyse Pro ───────────────────────────────────────────
-    case 48:
-      return {
-        text:
-          `📊 ANALYSE PRÉDICTIVE\n` +
-          `🔢 Tour : #N${gameNumber}\n` +
-          `📈 Signal : ${emoji} ${name}\n` +
-          `🔁 Fenêtre : ${maxR} jeux\n` +
-          `📋 Résultat : ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 49 : Flèche Direct ─────────────────────────────────────────
-    case 49:
-      return {
-        text: `➤ #N${gameNumber} ${emoji} ${name} (+${maxR}) → ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 50 : Star Casino ───────────────────────────────────────────
-    case 50:
-      return {
-        text:
-          `⭐⭐⭐ STAR CASINO ⭐⭐⭐\n` +
-          `🎰 Jeu #N${gameNumber}\n` +
-          `🎯 Signal : ${emoji} ${name}\n` +
-          `🔰 Dogon : +${maxR}\n` +
-          `✨ ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 51 : Whisper Style ─────────────────────────────────────────
-    case 51:
-      return {
-        text: `〰️ #N${gameNumber}\n${emoji} · +${maxR}\n${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 52 : Double Line ───────────────────────────────────────────
-    case 52: {
-      const handL52 = hand === 'banquier' ? '🏦' : '👤';
-      return {
-        text:
-          `${handL52} #N${gameNumber} — ${emoji} ${name}\n` +
-          `+${maxR} · ${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    // ── Format 53 : Diamant Court ─────────────────────────────────────────
-    case 53:
-      return {
-        text: `💎 #N${gameNumber} ${emoji} +${maxR} ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 54 : Fusée Futur ───────────────────────────────────────────
-    case 54:
-      return {
-        text:
-          `🚀 FUTUR BACCARAT — #N${gameNumber}\n` +
-          `🛸 Signal : ${emoji} ${name.toUpperCase()}\n` +
-          `⚡ Puissance : ×${maxR}\n` +
-          `🌌 ${statusLine}`,
-        parse_mode: null,
-      };
-
-    // ── Format 55 : Cascade Pro ───────────────────────────────────────────
-    case 55: {
-      const handL55 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      return {
-        text:
-          `🌊 CASCADE BACCARAT\n` +
-          `⏩ Jeu #N${gameNumber}\n` +
-          `⏩ ${handL55} — ${emoji} ${name}\n` +
-          `⏩ Dogon ×${maxR}\n` +
-          `⏩ ${statusLine}`,
-        parse_mode: null,
-      };
-    }
-
-    case 56: {
-      const h56 = hand === 'banquier' ? 'BANKER' : 'PLAYER';
-      return { text: `💎 VIP LOUNGE\n━━━━━━━━━━━\n🎮 #N${gameNumber} | ${h56}\n💠 ${emoji} ${name}\n🏅 +${maxR} | ${statusLine}`, parse_mode: null };
-    }
-    case 57:
-      return { text: `⚡ FLASH BET ⚡\n🎰 #N${gameNumber}\n${emoji} ${name}\n+${maxR} → ${statusLine}`, parse_mode: null };
-    case 58:
-      return { text: `🔮 ORACLE\n📍 Jeu #N${gameNumber}\n✨ ${emoji} ${name}\n⚖ Dogon ×${maxR}\n🔮 ${statusLine}`, parse_mode: null };
-    case 59: {
-      const h59 = hand === 'banquier' ? '🏦' : '🤲';
-      return { text: `⚔️ KATANA SIGNAL\n${h59} #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
-    }
-    case 60:
-      return { text: `👻 PHANTOM\n▸ Jeu #N${gameNumber}\n▸ ${emoji} ${name}\n▸ +${maxR}\n▸ ${statusLine}`, parse_mode: null };
-    case 61:
-      return { text: `💚 EMERALD SIGNAL\n🌿 #N${gameNumber} — ${emoji} ${name}\n🌿 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
-    case 62:
-      return { text: `🌩️ THUNDER\n⚡ JEU #N${gameNumber}\n⚡ ${emoji} ${name}\n⚡ +${maxR} → ${statusLine}`, parse_mode: null };
-    case 63:
-      return { text: `◈ ELITE BORDURE ◈\n┌──────────────┐\n│ #N${gameNumber} ${emoji} ${name} │\n│ +${maxR} ${statusLine} │\n└──────────────┘`, parse_mode: null };
-    case 64:
-      return { text: `🔥 INFERNO 🔥\n🎯 #N${gameNumber}\n🃏 ${emoji} ${name}\n⚔ ×${maxR} | ${statusLine}`, parse_mode: null };
-    case 65:
-      return { text: `❄️ ARCTIC\n❄ Jeu #N${gameNumber}\n❄ ${emoji} ${name}\n❄ Dogon ×${maxR}\n❄ ${statusLine}`, parse_mode: null };
-    case 66:
-      return { text: `🌌 COSMOS\n✦ #N${gameNumber} ✦\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
-    case 67:
-      return { text: `🏆 HTML PREMIUM\n<b>#N${gameNumber}</b> — <b>${name}</b> ${emoji}\nDogon <b>×${maxR}</b> | ${statusLine}`, parse_mode: 'HTML' };
-    case 68: {
-      const h68 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      return { text: `♜ VINTAGE CASINO\n🎩 ${h68} | #N${gameNumber}\n${emoji} ${name} +${maxR}\n${statusLine}`, parse_mode: null };
-    }
-    case 69:
-      return { text: `💓 PULSE\n♥ #N${gameNumber} ♥\n${emoji} ${name}\n+${maxR} → ${statusLine}`, parse_mode: null };
-    case 70:
-      return { text: `⚔️ BLADE\n▶ JEU #N${gameNumber}\n▶ ${emoji} ${name}\n▶ +${maxR} | ${statusLine}`, parse_mode: null };
-    case 71:
-      return { text: `♾️ ZODIAC\n☯ #N${gameNumber} — ${emoji} ${name}\n☯ ×${maxR} | ${statusLine}`, parse_mode: null };
-    case 72:
-      return { text: `⛩️ TEMPLE\n⛩ #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
-    case 73:
-      return { text: `🟣 NEON ULTRA\n【#N${gameNumber}】${emoji} ${name}\n【+${maxR}】${statusLine}`, parse_mode: null };
-    case 74: {
-      const h74 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      return { text: `👑 CROWN ULTIMATE\n${h74} | #N${gameNumber}\n${emoji} ${name} — ×${maxR}\n${statusLine}`, parse_mode: null };
-    }
-    case 75:
-      return { text: `📡 SIGMA SIGNAL\n◉ Jeu #N${gameNumber}\n◉ ${emoji} ${name}\n◉ +${maxR} → ${statusLine}`, parse_mode: null };
-    case 76:
-      return { text: `🎴 MAJESTIC PRO\n🎴 #N${gameNumber} — ${emoji} ${name}\n🎴 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
-    case 77:
-      return { text: `🌙 LUNAR SIGNAL\n🌙 Jeu #N${gameNumber}\n🌙 ${emoji} ${name}\n🌙 +${maxR} | ${statusLine}`, parse_mode: null };
-    case 78:
-      return { text: `💫 SHOOTING STAR\n⭐ #N${gameNumber} ${emoji} ${name}\n⭐ ×${maxR} → ${statusLine}`, parse_mode: null };
-    case 79:
-      return { text: `🐯 TIGER ELITE\n🔶 JEU #N${gameNumber}\n🔶 ${emoji} ${name}\n🔶 +${maxR} | ${statusLine}`, parse_mode: null };
-    case 80:
-      return { text: `⚡ POWER STRIKE ⚡\n🔋 #N${gameNumber}\n${emoji} ${name}  ×${maxR}\n${statusLine}`, parse_mode: null };
-    case 81:
-      return { text: `🔱 TRIDENT PRO\n🔱 Jeu #N${gameNumber} — ${emoji} ${name}\n🔱 Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
-    case 82:
-      return { text: `🎯 BULLSEYE\n🎯 #N${gameNumber}\n${emoji} ${name} — +${maxR}\n${statusLine}`, parse_mode: null };
-    case 83:
-      return { text: `🔐 LOCK & KEY\n🔐 #N${gameNumber} | ${emoji} ${name}\n🔐 ×${maxR} → ${statusLine}`, parse_mode: null };
-    case 84:
-      return { text: `🎪 GRAND CASINO\n🎪 Jeu #N${gameNumber}\n🎪 ${emoji} ${name} +${maxR}\n🎪 ${statusLine}`, parse_mode: null };
-    case 85:
-      return { text: `🌟 LEGEND STYLE\n★ #N${gameNumber} — ${emoji} ${name}\n★ Dogon ×${maxR} | ${statusLine}`, parse_mode: null };
-
-    // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {
         text:
-          `🎯 PRÉDICTION #N${gameNumber}\n` +
-          `${emoji} ${name}\n` +
-          `🔰 +${maxR}\n` +
-          `${statusLine}`,
-        parse_mode: null,
+          `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          (status === null
+            ? `⏳ <i>En attente du résultat...</i>`
+            : status === 'gagne'
+              ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+              : `❌`),
+        parse_mode: 'HTML',
       };
   }
 }
@@ -1307,27 +543,15 @@ async function _sendOneMessage(token, tgChatId, text, parse_mode) {
 //  • Sinon → envoi sur TOUS les canaux configurés (comportement actuel).
 //  • Dans les deux cas, le message_id est stocké en DB pour édition.
 
-async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
+async function sendToStrategyChannels(strategy, gameNumber, suit) {
   if (!TOKEN) {
     console.warn(`[TG] ${strategy} #${gameNumber} — pas de bot token configuré, envoi ignoré`);
     return;
   }
 
-  // Utilise le format spécifique à la stratégie si fourni, sinon le format global
-  const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null && tgOpts.formatId !== '')
-    ? parseInt(tgOpts.formatId) : currentFormat;
-  const hand = tgOpts.hand || null;
-  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
-
-  // Résolution du template : inline > custom DB (formatId > 18) > built-in
-  let tg_template = tgOpts.tg_template || null;
-  if (!tg_template && formatId > 18) {
-    try { const row = await db.getCustomFormatById(formatId - 18); if (row) tg_template = row.template; } catch {}
-  }
-
-  const { text, parse_mode } = buildTgMessage(formatId, {
-    gameNumber, suit, strategy, maxR, status: null, hand,
-  }, tg_template);
+  const { text, parse_mode } = buildTgMessage(currentFormat, {
+    gameNumber, suit, strategy, maxR: maxRattrapage, status: null,
+  });
 
   // Déterminer les canaux cibles
   let targets;
@@ -1336,7 +560,7 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
     if (routes.length > 0) {
       // Routage explicite : seulement les canaux assignés à cette stratégie
       targets = routes.map(r => ({ tgId: r.tg_id, dbId: r.id, name: r.channel_name }));
-      console.log(`[TG] ${strategy} routé vers ${targets.length} canal(aux) spécifique(s) fmt=${formatId}`);
+      console.log(`[TG] ${strategy} routé vers ${targets.length} canal(aux) spécifique(s)`);
     } else {
       // Pas de route → tous les canaux globaux
       targets = getChannels().map(c => ({ tgId: c.tgId, dbId: c.dbId, name: c.name }));
@@ -1354,9 +578,8 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
     try {
       const msgId = await _sendOneMessage(TOKEN, ch.tgId, text, parse_mode);
       if (msgId) {
-        // Sauvegarde le format utilisé pour que editStoredMessages puisse re-générer le bon format
-        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null, formatId, tg_template || null).catch(() => {});
-        console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} fmt=${formatId} (msg_id=${msgId})`);
+        await db.saveTgMsgId(strategy, gameNumber, suit, ch.tgId, msgId, null).catch(() => {});
+        console.log(`[TG] ${strategy} #${gameNumber} → ${ch.name || ch.tgId} (msg_id=${msgId})`);
       }
     } catch (e) { console.error(`[TG] sendToStrategyChannels ${ch.tgId}: ${e.message}`); }
   }
@@ -1374,26 +597,19 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
   const defaultFormatId = tgOpts.formatId || currentFormat;
   const hand = tgOpts.hand || null;
   const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
-  // Template inline partagé par tous les canaux custom de la stratégie
-  const stratTemplate = tgOpts.tg_template || null;
 
   for (const { bot_token, channel_id, tg_format: targetFormat } of targets) {
     if (!bot_token || !channel_id) continue;
     // ── Chaque canal peut avoir son propre format de message ──
     const channelFormatId = (targetFormat !== undefined && targetFormat !== null)
       ? parseInt(targetFormat) : defaultFormatId;
-    // Résolution template : inline > custom DB > built-in
-    let tg_template = stratTemplate;
-    if (!tg_template && channelFormatId > 18) {
-      try { const row = await db.getCustomFormatById(channelFormatId - 18); if (row) tg_template = row.template; } catch {}
-    }
     const { text, parse_mode } = buildTgMessage(channelFormatId, {
       gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
-    }, tg_template);
+    });
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
-        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token, channelFormatId, tg_template || null).catch(() => {});
+        await db.saveTgMsgId(strategyId, gameNumber, suit, String(channel_id), msgId, bot_token, channelFormatId).catch(() => {});
         console.log(`[TG Custom] ${strategyId} #${gameNumber} → ${channel_id} fmt=${channelFormatId} (msg_id=${msgId})`);
       }
     } catch (e) {
@@ -1406,21 +622,6 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
 //
 //  Utilise le bot_token stocké dans tg_pred_messages s'il est présent
 //  (stratégie custom), sinon le TOKEN global.
-
-// Verrou anti-doublon : empêche deux phase 2 pour la même prédiction + canal
-// (editStoredMessages peut être appelée deux fois : résolution live + résolution finale)
-const _phase2Active = new Set();
-
-// Phase 2 du format 11 (Distribution) — remplace les cartes après 10 secondes
-function buildDistribFinalMsg(gameNumber, rattrapage) {
-  return (
-    `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
-    `📌 Jeu #N${gameNumber}\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `✅ Distribution : OUI\n` +
-    `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ 🎯`
-  );
-}
 
 async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage, tgOpts = {}) {
   let stored;
@@ -1437,51 +638,20 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
   }
 
   const defaultFormatId = tgOpts.formatId || currentFormat;
-  const hand        = tgOpts.hand        || null;
-  const maxR        = tgOpts.maxR        !== undefined ? tgOpts.maxR : maxRattrapage;
-  const playerCards = tgOpts.playerCards || null;
-  const bankerCards = tgOpts.bankerCards || null;
+  const hand     = tgOpts.hand     || null;
+  const maxR     = tgOpts.maxR     !== undefined ? tgOpts.maxR : maxRattrapage;
 
   for (const row of stored) {
     const token  = row.bot_token || TOKEN;
     if (!token) { console.warn(`[TG Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
     const formatId = (row.tg_format !== undefined && row.tg_format !== null)
       ? parseInt(row.tg_format) : defaultFormatId;
-    // Utilise le template stocké (inline ou DB) — résolution : stocké > opts > built-in
-    let tg_template = row.tg_template || tgOpts.tg_template || null;
-    if (!tg_template && formatId > 18) {
-      try { const dbRow = await db.getCustomFormatById(formatId - 18); if (dbRow) tg_template = dbRow.template; } catch {}
-    }
-    const { text: resultText, parse_mode } = buildTgMessage(formatId, {
-      gameNumber, suit, strategy, maxR, status, rattrapage, hand, playerCards, bankerCards,
-    }, tg_template);
-
-    // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
-    // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
-    // puis on remplace par le résultat standard après 10 secondes (phase 2).
-    const isDistrib = (suit === 'distrib');
-    const hasCards  = (Array.isArray(playerCards) && playerCards.length > 0)
-                   || (Array.isArray(bankerCards)  && bankerCards.length  > 0);
-
-    let phase1Text;
-    if (status === 'gagne' && hasCards && !isDistrib) {
-      // Formats standard : résultat + numéro du jeu trouvé + section cartes (supprimée après 20s)
-      const foundGame = gameNumber + rattrapage;
-      const pEmojis   = formatCardsToEmojis(playerCards);
-      const bEmojis   = formatCardsToEmojis(bankerCards);
-      phase1Text =
-        resultText +
-        `\n━━━━━━━━━━━━━━━━━━\n` +
-        `✅ Vérifié au jeu #N${foundGame}\n` +
-        `🃏 Joueur  : ${pEmojis}\n` +
-        `🎴 Banquier : ${bEmojis}`;
-    } else {
-      // Distribution (cartes déjà incluses dans resultText) ou pas de cartes : texte normal
-      phase1Text = resultText;
-    }
+    const { text, parse_mode } = buildTgMessage(formatId, {
+      gameNumber, suit, strategy, maxR, status, rattrapage, hand,
+    });
 
     try {
-      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text: phase1Text };
+      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text };
       if (parse_mode) body.parse_mode = parse_mode;
       const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
         method: 'POST',
@@ -1490,40 +660,6 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
       });
       if (resp.ok) {
         console.log(`[TG Edit] ${strategy} #${gameNumber} → ${row.channel_tg_id} (${status} R${rattrapage})`);
-
-        if (status === 'gagne') {
-          const capturedToken  = token;
-          const capturedChatId = row.channel_tg_id;
-          const capturedMsgId  = parseInt(row.message_id);
-
-          // Clé unique par prédiction + canal pour éviter deux phase 2 identiques
-          const p2Key = `${strategy}#${gameNumber}#${suit}#${capturedChatId}`;
-
-          if (!_phase2Active.has(p2Key)) {
-            _phase2Active.add(p2Key);
-
-            const phase2Text      = isDistrib
-              ? buildDistribFinalMsg(gameNumber, rattrapage)
-              : (hasCards ? resultText : null);
-            const capturedParseMd = parse_mode;   // capture pour le closure phase2
-
-            if (phase2Text) {
-              setTimeout(async () => {
-                _phase2Active.delete(p2Key);
-                try {
-                  const body2 = { chat_id: capturedChatId, message_id: capturedMsgId, text: phase2Text };
-                  if (capturedParseMd) body2.parse_mode = capturedParseMd;
-                  await fetch(`https://api.telegram.org/bot${capturedToken}/editMessageText`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body2),
-                  });
-                  console.log(`[TG Edit] ${strategy} #${gameNumber} → ${capturedChatId} (phase2)`);
-                } catch { _phase2Active.delete(p2Key); }
-              }, 20_000);
-            }
-          }
-        }
       } else {
         const err = await resp.text();
         // 400 "message is not modified" est bénin — on l'ignore
@@ -1568,44 +704,6 @@ async function cancelStrategyMessages(strategyId) {
     console.log(`[TG] ${strategyId} supprimée → ${deleted} message(s) Telegram effacé(s)`);
   }
   return deleted;
-}
-
-// ── Édition brute d'un message Carte Valeur (texte pré-rendu, sans formatBuilder) ─
-// Utilisé pour mettre à jour le numéro de fin de cycle sans créer de nouveau message.
-// Ne supprime PAS les message_ids de la DB car on continue à éditer le même message.
-
-async function editRawStoredMessages(strategy, gameNumber, suit, rawText) {
-  let stored;
-  try {
-    stored = await db.getTgMsgIds(strategy, gameNumber, suit);
-  } catch (e) {
-    console.error('[TG CV Edit] getTgMsgIds error:', e.message);
-    stored = [];
-  }
-  if (!stored.length) {
-    console.warn(`[TG CV Edit] Aucun message_id pour ${strategy}/#${gameNumber}/${suit}`);
-    return;
-  }
-  for (const row of stored) {
-    const token = row.bot_token || TOKEN;
-    if (!token) { console.warn(`[TG CV Edit] Pas de token pour ${row.channel_tg_id} — ignoré`); continue; }
-    try {
-      const body = { chat_id: row.channel_tg_id, message_id: parseInt(row.message_id), text: rawText };
-      const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (resp.ok) {
-        console.log(`[TG CV Edit] ${strategy} #${gameNumber}/${suit} → ${row.channel_tg_id} mis à jour`);
-      } else {
-        const err = await resp.text();
-        if (!err.includes('message is not modified')) {
-          console.error(`[TG CV Edit] editMessage ${row.channel_tg_id}: ${err.slice(0, 120)}`);
-        }
-      }
-    } catch (e) { console.error(`[TG CV Edit] Exception: ${e.message}`); }
-  }
 }
 
 // ── Alias de compatibilité ─────────────────────────────────────────
@@ -1689,7 +787,6 @@ module.exports = {
   sendPredictionToTelegram,
   sendPredictionToTargets,
   cancelStrategyMessages,
-  editRawStoredMessages,
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
 };
