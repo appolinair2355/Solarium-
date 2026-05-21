@@ -120,7 +120,7 @@ const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
 const { startPubScheduler }        = require('./pub-scheduler');
 app.use('/api/shop',        shopRoutes);
 app.use('/api/license',     licenseRoutes);
-app.use('/api/ideas',       blockExpired, ideaRoutes);
+app.use('/api/ideas',       ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
 
 // ── Statut admin en ligne ──────────────────────────────────────────

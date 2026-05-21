@@ -19,8 +19,9 @@ function requireAdmin(req, res, next) {
 router.get('/catalog', requireAuth, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, name, description, is_paid, price_usd, created_at, updated_at
-       FROM strategy_ideas WHERE enabled = TRUE ORDER BY created_at DESC`
+      `SELECT id, name, description, is_paid, price_usd, sort_order, created_at, updated_at,
+              ROW_NUMBER() OVER (ORDER BY sort_order ASC, created_at ASC) AS level_number
+       FROM strategy_ideas WHERE enabled = TRUE ORDER BY sort_order ASC, created_at ASC`
     );
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -71,7 +72,7 @@ router.post('/:id/purchase', requireAuth, async (req, res) => {
     );
     const purchase = r.rows[0];
 
-    const msg = `Je veux acheter l'idée de stratégie : ${idea.name}\nMontant : ${idea.price_usd} $\nCompte : ${user.username}\nRéférence : #IP${purchase.id}`;
+    const msg = `Je veux acheter le Niveau de stratégie : ${idea.name}\nMontant : ${idea.price_usd} $\nCompte : ${user.username}\nRéférence : #IP${purchase.id}`;
     const whatsappLink = `${WHATSAPP_LINK}?text=${encodeURIComponent(msg)}`;
 
     res.json({ ok: true, purchase: { id: purchase.id, status: purchase.status }, whatsapp_link: whatsappLink, amount_usd: idea.price_usd });
@@ -119,9 +120,12 @@ router.post('/', requireAdmin, async (req, res) => {
     if (!name?.trim() || !description?.trim()) return res.status(400).json({ error: 'Nom et description requis' });
     const paid = !!is_paid;
     const price = paid ? (parseFloat(price_usd) || 0) : 0;
+    // Sort order = next available (max + 1)
+    const maxRes = await pool.query('SELECT COALESCE(MAX(sort_order), 0) as max_order FROM strategy_ideas');
+    const nextOrder = (parseInt(maxRes.rows[0].max_order) || 0) + 1;
     const r = await pool.query(
-      `INSERT INTO strategy_ideas (name, description, is_paid, price_usd) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [name.trim(), description.trim(), paid, price]
+      `INSERT INTO strategy_ideas (name, description, is_paid, price_usd, sort_order) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [name.trim(), description.trim(), paid, price, nextOrder]
     );
     res.json({ ok: true, idea: r.rows[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -131,15 +135,44 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { name, description, is_paid, price_usd, enabled } = req.body;
+    const { name, description, is_paid, price_usd, enabled, sort_order } = req.body;
     const paid = !!is_paid;
     const price = paid ? (parseFloat(price_usd) || 0) : 0;
-    const r = await pool.query(
-      `UPDATE strategy_ideas SET name=$1, description=$2, is_paid=$3, price_usd=$4, enabled=$5, updated_at=NOW() WHERE id=$6 RETURNING *`,
-      [name?.trim(), description?.trim(), paid, price, enabled !== false, id]
-    );
+    let r;
+    if (sort_order !== undefined && sort_order !== null) {
+      r = await pool.query(
+        `UPDATE strategy_ideas SET name=$1, description=$2, is_paid=$3, price_usd=$4, enabled=$5, sort_order=$6, updated_at=NOW() WHERE id=$7 RETURNING *`,
+        [name?.trim(), description?.trim(), paid, price, enabled !== false, parseInt(sort_order), id]
+      );
+    } else {
+      r = await pool.query(
+        `UPDATE strategy_ideas SET name=$1, description=$2, is_paid=$3, price_usd=$4, enabled=$5, updated_at=NOW() WHERE id=$6 RETURNING *`,
+        [name?.trim(), description?.trim(), paid, price, enabled !== false, id]
+      );
+    }
     if (!r.rows[0]) return res.status(404).json({ error: 'Introuvable' });
     res.json({ ok: true, idea: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Réordonner les idées (déplace une idée vers le haut ou le bas) ───────────
+router.post('/admin/reorder', requireAdmin, async (req, res) => {
+  try {
+    const { id, direction } = req.body;
+    if (!id || !['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Paramètres invalides' });
+    const all = await pool.query('SELECT id, sort_order FROM strategy_ideas ORDER BY sort_order ASC, created_at ASC');
+    const rows = all.rows;
+    const idx = rows.findIndex(r => r.id === parseInt(id));
+    if (idx === -1) return res.status(404).json({ error: 'Idée introuvable' });
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= rows.length) return res.json({ ok: true, no_change: true });
+    const a = rows[idx];
+    const b = rows[swapIdx];
+    const aOrder = a.sort_order || idx + 1;
+    const bOrder = b.sort_order || swapIdx + 1;
+    await pool.query('UPDATE strategy_ideas SET sort_order=$1 WHERE id=$2', [bOrder, a.id]);
+    await pool.query('UPDATE strategy_ideas SET sort_order=$1 WHERE id=$2', [aOrder, b.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -3194,6 +3194,87 @@ class Engine {
         }
       }
 
+    } else if (mode === 'compteurs_absences') {
+      // ── MODE COMPTEURS D'ABSENCES (3 Compteurs) ──────────────────────────
+      // Algorithme basé sur 3 compteurs travaillant ensemble.
+      //
+      // Compteur 2 (Absences) : absences consécutives d'une couleur.
+      //   Seuil c3_b (défaut 4). Si absent pendant c3_b fois → déclenche.
+      //
+      // Compteur 3 (Apparences de l'inverse) : apparences consécutives de
+      //   la couleur inverse. Seuil c3_seuil3 (défaut 3).
+      //   Paires inverses : ♠↔♦  et  ♥↔♣
+      //   - Si inverse apparu >= c3_seuil3 fois → forte tendance → prédit
+      //     la couleur MANQUANTE (suivre la tendance)
+      //   - Sinon → prédit la couleur INVERSE (pas de tendance établie)
+      //
+      // Compteur 4 (Bloqueur) : si les DEUX couleurs d'une paire inverse
+      //   (♠+♦ ou ♥+♣) sont absentes ensemble pendant c3_jj jeux → BLOQUE.
+      //   Seuil c3_jj (défaut 2).
+      // ─────────────────────────────────────────────────────────────────────
+      const C3_B     = parseInt(cfg.c3_b)      || parseInt(cfg.threshold) || 4;
+      const C3_S3    = parseInt(cfg.c3_seuil3) || 3;
+      const C3_JJ    = parseInt(cfg.c3_jj)     || 2;
+      const C3_INV   = { '♠': '♦', '♦': '♠', '♥': '♣', '♣': '♥' };
+      const C3_PAIRS = [['♠', '♦'], ['♥', '♣']];
+
+      if (!state.c3_abs)   state.c3_abs   = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+      if (!state.c3_app)   state.c3_app   = { '♠': 0, '♥': 0, '♦': 0, '♣': 0 };
+      if (!state.c3_block) state.c3_block = { '♠_♦': 0, '♥_♣': 0 };
+
+      // Étape 1 : Mise à jour Compteur 2 (absences) et Compteur 3 (apparences)
+      for (const suit of ALL_SUITS) {
+        if (handSuits.includes(suit)) {
+          state.c3_abs[suit] = 0;
+          state.c3_app[suit] = (state.c3_app[suit] || 0) + 1;
+        } else {
+          state.c3_abs[suit] = (state.c3_abs[suit] || 0) + 1;
+          state.c3_app[suit] = 0;
+        }
+      }
+
+      // Étape 2 : Mise à jour Compteur 4 (bloqueur de paires)
+      for (const [a, b] of C3_PAIRS) {
+        const key = `${a}_${b}`;
+        if (!handSuits.includes(a) && !handSuits.includes(b)) {
+          state.c3_block[key] = (state.c3_block[key] || 0) + 1;
+        } else {
+          state.c3_block[key] = 0;
+        }
+      }
+
+      // Étape 3 : Décision pour chaque couleur qui dépasse le seuil
+      for (const suit of ALL_SUITS) {
+        if ((state.c3_abs[suit] || 0) < C3_B) continue;
+
+        const inv     = C3_INV[suit];
+        const pairKey = (suit === '♠' || suit === '♦') ? '♠_♦' : '♥_♣';
+
+        // Vérification Compteur 4 (bloqueur)
+        if ((state.c3_block[pairKey] || 0) >= C3_JJ) {
+          console.log(`[${channelId}] [C3] ${suit} seuil C2=${C3_B} atteint MAIS Bloqueur paire ${pairKey} = ${state.c3_block[pairKey]} >= JJ=${C3_JJ} → BLOQUÉ`);
+          continue;
+        }
+
+        // Décision : tendance inverse ou prédir le manquant
+        const appInv = state.c3_app[inv] || 0;
+        let predictedSuit;
+        if (appInv >= C3_S3) {
+          predictedSuit = suit;
+          console.log(`[${channelId}] [C3] ${suit} absent ${state.c3_abs[suit]}x (C2=${C3_B}) · inverse ${inv} apparu ${appInv}x (≥ seuil3=${C3_S3}) → tendance → prédire MANQUANT ${suit}`);
+        } else {
+          predictedSuit = inv;
+          console.log(`[${channelId}] [C3] ${suit} absent ${state.c3_abs[suit]}x (C2=${C3_B}) · inverse ${inv} apparu ${appInv}x (< seuil3=${C3_S3}) → pas de tendance → prédire INVERSE ${inv}`);
+        }
+
+        const ps = resolvePredictedSuit(predictedSuit);
+        if (ps) {
+          await emitPrediction(gn + offset, ps, suit);
+          state.c3_abs[suit] = 0;
+          break; // Une prédiction par jeu
+        }
+      }
+
     } else if (mode === 'carte_valeur') {
       // ── MODE CARTE VALEUR ────────────────────────────────────────────────
       // Suit le NOMBRE D'APPARITIONS de chaque VALEUR (A, K, Q, J, 10, 9, 8, 7, 6)
