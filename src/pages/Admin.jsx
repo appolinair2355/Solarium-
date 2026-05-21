@@ -4205,6 +4205,8 @@ function AdminPanel() {
     prix: 0, annonce_strat: '',
     // CM+t paramètres
     cm_t: 2, cm_check_inverse: false,
+    // Mode compteurs_absences (Compteurs 3)
+    c3_b: 4, c3_seuil3: 3, c3_jj: 2,
     // Planification des prédictions
     pred_schedule_enabled: false, pred_schedule_type: 'hours',
     pred_schedule_hours: [], pred_schedule_interval: 1,
@@ -4603,7 +4605,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', absence_confirmee:'✅ Abs Confirmée', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', aleatoire:'Aléatoire', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', compteur_parite:'Compteur Parité', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'🃏 CM+4', rattrapage_groupe:'🔄 Ratt. Groupé' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', absence_confirmee:'✅ Abs Confirmée', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', relance:'Relance', aleatoire:'Aléatoire', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', compteur_parite:'Compteur Parité', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', first_card_plus6:'1ère Carte +Décalage', costume_manquant:'🃏 CM+4', rattrapage_groupe:'🔄 Ratt. Groupé', compteurs_absences:'🔢 Compteurs 3' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -5314,7 +5316,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','compteur_parite'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','relance','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','compteur_parite','compteurs_absences'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison' && stratForm.mode !== 'relance') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -5808,7 +5810,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', absence_confirmee: '✅ Abs Conf.', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', compteur_parite: 'C. Parité', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: '🃏 CM+4', rattrapage_groupe: '🔄 Ratt. Groupé' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', absence_confirmee: '✅ Abs Conf.', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', relance: 'Relance', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', compteur_parite: 'C. Parité', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', costume_manquant: '🃏 CM+4', rattrapage_groupe: '🔄 Ratt. Groupé', compteurs_absences: '🔢 Compteurs 3' };
 
   return (
     <>
@@ -10367,6 +10369,7 @@ function AdminPanel() {
                       { value: 'annonce_sequence',     label: '📣 Rotateur Promo (annonces séquentielles)' },
                       { value: 'costume_manquant',     label: '🃏 Costume Manquant (+4) — costume absent dans jeu 2+2' },
                       { value: 'rattrapage_groupe',    label: '🔄 Rattrapage Groupé — surveille plusieurs stratégies' },
+                      { value: 'compteurs_absences',   label: '🔢 Compteurs 3 — Absences + Tendance inverse (♠↔♦ / ♥↔♣)' },
                     ];
                     const partnerAllowedModesFromUser = isPartnerOnly && Array.isArray(user?.allowed_modes) && user.allowed_modes.length > 0 ? user.allowed_modes : null;
                     const visibleOpts = isProOnly && proAllowedModes !== null
@@ -10552,6 +10555,44 @@ function AdminPanel() {
                       <div style={{ marginTop: 6 }}><strong>Limite d'arrêt</strong> : après ce nombre total de pertes, les rattrapages s'arrêtent (0 = illimité).</div>
                       <div style={{ marginTop: 8, color: '#22c55e', fontWeight: 600 }}>✅ Aucune autre configuration nécessaire — cochez les stratégies et définissez les limites.</div>
                     </div>
+                  )}
+                  {stratForm.mode === 'compteurs_absences' && (
+                    <>
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🔢 Mode Compteurs 3 — Absences + Tendance inverse</div>
+                      <div>Surveille les absences consécutives d'un costume (C2) ET les apparitions consécutives de son inverse (C3).</div>
+                      <div style={{ marginTop: 6 }}><strong style={{ color: '#a5b4fc' }}>Paires inverses fixes</strong> : ♠ ↔ ♦ et ♥ ↔ ♣</div>
+                      <div style={{ marginTop: 4 }}>Si C2(♠) ≥ B et C3(♦) ≥ Seuil3 → <strong style={{ color: '#4ade80' }}>forte tendance ♦</strong> → prédit le manquant ♠</div>
+                      <div style={{ marginTop: 2 }}>Si C2(♠) ≥ B et C3(♦) &lt; Seuil3 → <strong style={{ color: '#fbbf24' }}>pas de tendance</strong> → prédit l'inverse ♦</div>
+                      <div style={{ marginTop: 6, color: '#818cf8' }}>C4 (Bloqueur) : si ♠ ET ♦ sont tous les deux absents ≥ JJ jeux → bloque la prédiction.</div>
+                    </div>
+                    <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🔢 Paramètres Compteurs 3</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>C2 — Seuil absence (B)</label>
+                          <input type="number" min="1" max="30" value={stratForm.c3_b ?? 4}
+                            onChange={e => setStratForm(p => ({ ...p, c3_b: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(99,102,241,0.5)', borderRadius: 7, color: '#a5b4fc', fontSize: 16, fontWeight: 800 }} />
+                          <div style={{ fontSize: 10, color: '#6366f1', marginTop: 3 }}>Si costume absent ≥ {stratForm.c3_b ?? 4} fois → déclenche</div>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#4ade80', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>C3 — Seuil apparence inverse</label>
+                          <input type="number" min="1" max="30" value={stratForm.c3_seuil3 ?? 3}
+                            onChange={e => setStratForm(p => ({ ...p, c3_seuil3: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(34,197,94,0.4)', borderRadius: 7, color: '#4ade80', fontSize: 16, fontWeight: 800 }} />
+                          <div style={{ fontSize: 10, color: '#16a34a', marginTop: 3 }}>Inverse apparu ≥ {stratForm.c3_seuil3 ?? 3} fois → prédit MANQUANT</div>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#f87171', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>C4 — Seuil bloqueur (JJ)</label>
+                          <input type="number" min="1" max="20" value={stratForm.c3_jj ?? 2}
+                            onChange={e => setStratForm(p => ({ ...p, c3_jj: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(239,68,68,0.4)', borderRadius: 7, color: '#f87171', fontSize: 16, fontWeight: 800 }} />
+                          <div style={{ fontSize: 10, color: '#dc2626', marginTop: 3 }}>Paire inverse absente ≥ {stratForm.c3_jj ?? 2} fois → BLOQUE</div>
+                        </div>
+                      </div>
+                    </div>
+                    </>
                   )}
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
@@ -10778,8 +10819,8 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6, costume_manquant */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6, costume_manquant, compteurs_absences */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'costume_manquant' && stratForm.mode !== 'compteurs_absences' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>

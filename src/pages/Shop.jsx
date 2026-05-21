@@ -351,8 +351,8 @@ export default function Shop() {
       {/* ── Tabs ── */}
       <div style={{ display: 'flex', borderBottom: '1px solid rgba(100,116,139,0.2)', background: 'rgba(15,23,42,0.7)', padding: '0 24px' }}>
         {[
-          { id: 'boutique',   label: '🏪 Boutique', badge: catalog.length },
-          { id: 'idees',      label: '💡 Idées', badge: ideas.length || null },
+          { id: 'boutique',   label: '📦 Stratégies ZIP', badge: catalog.length },
+          { id: 'idees',      label: '💡 Stratégies Texte', badge: ideas.length || null },
           { id: 'mes-achats', label: '🛒 Mes achats', badge: purchases.length || null },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -648,9 +648,9 @@ export default function Shop() {
             <div style={{ background: 'linear-gradient(135deg,rgba(250,204,21,0.08),rgba(245,158,11,0.04))', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 14, padding: '16px 20px', marginBottom: 28, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
               <span style={{ fontSize: 24 }}>💡</span>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>Idées & Stratégies de Baccarat</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>Stratégies Texte — Niveaux</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
-                  Explorez les idées de stratégies publiées par l'équipe. Les idées <strong style={{ color: '#22c55e' }}>gratuites</strong> sont accessibles directement. Les idées <strong style={{ color: '#fbbf24' }}>payantes</strong> nécessitent un paiement via WhatsApp.
+                  Chaque niveau est une stratégie textuelle complète. Les niveaux <strong style={{ color: '#22c55e' }}>gratuits</strong> sont accessibles directement après achat. Les niveaux <strong style={{ color: '#fbbf24' }}>payants</strong> nécessitent un paiement via WhatsApp.
                 </div>
               </div>
             </div>
@@ -658,61 +658,67 @@ export default function Shop() {
             {ideas.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>💡</div>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Aucune idée disponible pour le moment</div>
-                <div style={{ fontSize: 13, marginTop: 6 }}>Revenez bientôt — l'équipe publie régulièrement de nouvelles idées.</div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>Aucune stratégie texte disponible pour le moment</div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>Revenez bientôt — l'équipe publie régulièrement de nouveaux niveaux.</div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {ideas.map(idea => {
-                  const myPurchase = ideaPurchases.find(p => p.idea_id === idea.id && p.status !== 'rejected');
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: 18 }}>
+                {ideas.map((idea, idx) => {
+                  const levelNum    = idea.level_number ?? (idx + 1);
+                  const myPurchase  = ideaPurchases.find(p => p.idea_id === idea.id && p.status !== 'rejected');
                   const isValidated = myPurchase?.status === 'validated';
 
                   return (
-                    <div key={idea.id} style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 16, overflow: 'hidden' }}>
-                      <div style={{ padding: '20px 22px' }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
-                          <div style={{ flex: 1, minWidth: 200 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 16, fontWeight: 800, color: '#f1f5f9' }}>💡 {idea.name}</span>
-                              {idea.is_paid ? (
-                                <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' }}>
-                                  💰 {Number(idea.price_usd).toFixed(0)} $
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
-                                  🆓 Gratuit
-                                </span>
-                              )}
-                              {isValidated && (
-                                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>✅ Acheté</span>
-                              )}
-                              {myPurchase && !isValidated && (() => {
-                                const s = IDEA_STATUS[myPurchase.status] || {};
-                                return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(129,140,248,0.1)', color: s.color || '#818cf8', border: '1px solid rgba(129,140,248,0.25)' }}>{s.icon} {s.label}</span>;
-                              })()}
-                            </div>
-                            <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 80, overflow: 'hidden' }}>
-                              {idea.description.slice(0, 240)}{idea.description.length > 240 ? '…' : ''}
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0, minWidth: 160 }}>
-                            {(!idea.is_paid || isValidated) && (
-                              <button onClick={() => handleOpenIdea(idea)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
-                                👁 Voir l'idée complète
-                              </button>
-                            )}
-                            {idea.is_paid && !isValidated && !myPurchase && (
-                              <button onClick={() => handleBuyIdea(idea)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
-                                💰 Acheter — {Number(idea.price_usd).toFixed(0)} $
-                              </button>
-                            )}
-                            {idea.is_paid && myPurchase && !isValidated && (
-                              <button onClick={() => setIdeaModal({ step: myPurchase.status === 'awaiting_screenshot' ? 'whatsapp' : 'done', idea, purchaseId: myPurchase.id, whatsappLink: null, price: idea.price_usd })} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                                📸 Envoyer capture
-                              </button>
-                            )}
-                          </div>
+                    <div key={idea.id} style={{ background: 'rgba(15,23,42,0.95)', border: `1px solid rgba(250,204,21,${isValidated ? '0.45' : '0.18'})`, borderRadius: 18, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                      {/* Level header */}
+                      <div style={{ background: 'linear-gradient(135deg,rgba(250,204,21,0.15),rgba(245,158,11,0.07))', padding: '22px 22px 18px', textAlign: 'center', borderBottom: '1px solid rgba(250,204,21,0.12)' }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#92400e', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Niveau</div>
+                        <div style={{ fontSize: 52, fontWeight: 900, color: '#fbbf24', lineHeight: 1, textShadow: '0 0 24px rgba(250,204,21,0.4)' }}>{levelNum}</div>
+                      </div>
+
+                      {/* Info */}
+                      <div style={{ padding: '16px 20px', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                          {idea.is_paid ? (
+                            <span style={{ fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 20, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.4)' }}>
+                              💰 {Number(idea.price_usd).toFixed(0)} $
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.35)' }}>
+                              🆓 Gratuit
+                            </span>
+                          )}
+                          {isValidated && (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>✅ Acheté</span>
+                          )}
+                          {myPurchase && !isValidated && (() => {
+                            const s = IDEA_STATUS[myPurchase.status] || {};
+                            return <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: 'rgba(129,140,248,0.1)', color: s.color || '#818cf8', border: '1px solid rgba(129,140,248,0.3)' }}>{s.icon} {s.label}</span>;
+                          })()}
                         </div>
+
+                        <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center', fontStyle: 'italic' }}>
+                          Stratégie textuelle complète — contenu révélé après accès
+                        </div>
+                      </div>
+
+                      {/* Action */}
+                      <div style={{ padding: '0 20px 20px' }}>
+                        {(!idea.is_paid || isValidated) && (
+                          <button onClick={() => handleOpenIdea(idea)} style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+                            👁 Lire la stratégie
+                          </button>
+                        )}
+                        {idea.is_paid && !isValidated && !myPurchase && (
+                          <button onClick={() => handleBuyIdea(idea)} style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>
+                            💰 Acheter — {Number(idea.price_usd).toFixed(0)} $
+                          </button>
+                        )}
+                        {idea.is_paid && myPurchase && !isValidated && (
+                          <button onClick={() => setIdeaModal({ step: myPurchase.status === 'awaiting_screenshot' ? 'whatsapp' : 'done', idea, purchaseId: myPurchase.id, whatsappLink: null, price: idea.price_usd })} style={{ width: '100%', padding: '11px', borderRadius: 10, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                            📸 Envoyer capture de paiement
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
