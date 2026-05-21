@@ -1,14 +1,11 @@
-const express              = require('express');
-const bcrypt               = require('bcryptjs');
-const fetch                = require('node-fetch');
-const crypto               = require('crypto');
-const fs                   = require('fs');
-const path                 = require('path');
-const { spawn }            = require('child_process');
-const db                   = require('./db');
-const { generateStrategyZip } = require('./zip-generator');
-const { autoUpdateStrategyAnnouncement } = require('./strategy-auto-announce');
-const router               = express.Router();
+const express = require('express');
+const bcrypt  = require('bcryptjs');
+const fetch   = require('node-fetch');
+const db      = require('./db');
+const router  = express.Router();
+const fs      = require('fs');
+const path    = require('path');
+const { spawn } = require('child_process');
 
 function genPassword(len = 10) {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -19,77 +16,6 @@ function requireAdmin(req, res, next) {
   if (!req.session.userId || !req.session.isAdmin)
     return res.status(403).json({ error: 'Accès admin requis' });
   next();
-}
-
-async function requireSuperAdmin(req, res, next) {
-  if (!req.session.userId || !req.session.isAdmin)
-    return res.status(403).json({ error: 'Accès admin requis' });
-  // Admin principal (admin_level=1) : accès complet
-  if ((req.session.adminLevel || 2) === 1) return next();
-  // Compte 'buzzinfluence' : pouvoirs étendus identiques au super admin
-  // (cohérent avec l'UI qui lui montre tous les boutons d'action)
-  let uname = req.session.username;
-  if (!uname) {
-    try {
-      const u = await db.getUser(req.session.userId);
-      uname = u?.username;
-      if (uname) req.session.username = uname;
-    } catch {}
-  }
-  if (uname === 'buzzinfluence') return next();
-  return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
-}
-
-// ── Pro OU Admin ────────────────────────────────────────────────────
-// Utilisé pour toutes les routes /pro-config et /pro-strategy-file
-function requireProOrAdmin(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
-  if (!req.session.isAdmin && !req.session.isPro)
-    return res.status(403).json({ error: 'Accès réservé aux comptes Pro' });
-  next();
-}
-
-// ── Admin OU Partenaire ─────────────────────────────────────────────
-function requireAdminOrPartner(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
-  if (!req.session.isAdmin && req.session.accountType !== 'partenaire')
-    return res.status(403).json({ error: 'Accès admin ou partenaire requis' });
-  next();
-}
-
-// Vérifie si la session est un partenaire (non-admin)
-function isPartnerSession(req) {
-  return !req.session.isAdmin && req.session.accountType === 'partenaire';
-}
-
-// Vérifie si un mode est autorisé pour un partenaire — retourne un message d'erreur ou null
-async function checkPartnerModeAllowed(req, mode) {
-  if (!isPartnerSession(req)) return null; // admin = pas de restriction
-  const u = await db.getUser(req.session.userId);
-  if (!u) return 'Utilisateur introuvable';
-  const allowed = (() => {
-    const v = u.allowed_modes;
-    if (!v) return null;
-    if (Array.isArray(v)) return v;
-    try { return JSON.parse(v); } catch { return null; }
-  })();
-  if (!allowed || allowed.length === 0) return null; // null = tous les modes autorisés
-  if (!allowed.includes(mode)) {
-    return `Mode « ${mode} » non autorisé pour votre compte partenaire. Modes autorisés : ${allowed.join(', ')}`;
-  }
-  return null;
-}
-
-// Détermine le propriétaire effectif d'une ressource Pro :
-//   - admin : peut passer ?owner_user_id=N (sinon = lui-même)
-//   - Pro   : forcé sur req.session.userId (ignore tout owner_user_id passé)
-function effectiveOwnerId(req) {
-  if (req.session.isAdmin) {
-    const q = req.query.owner_user_id || req.body?.owner_user_id;
-    const n = parseInt(q);
-    return Number.isFinite(n) && n > 0 ? n : req.session.userId;
-  }
-  return req.session.userId;
 }
 
 function getUserStatus(user) {
@@ -107,8 +33,6 @@ function fmtDuration(mins) {
 }
 
 // Route accessible aux utilisateurs normaux — retourne leurs propres stratégies visibles
-// IMPORTANT : aucun canal n'est attribué automatiquement. C'est à l'administrateur
-// d'assigner explicitement les canaux à chaque utilisateur depuis le panneau admin.
 router.get('/my-strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   if (req.session.isAdmin) return res.json({ visible: ['C1', 'C2', 'C3', 'DC', 'ALL'] });
@@ -121,21 +45,11 @@ router.get('/my-strategies', async (req, res) => {
 router.get('/users', requireAdmin, async (req, res) => {
   try {
     const users = await db.getAllUsers();
-    res.json(users.map(u => {
-      const out = { ...u, status: getUserStatus(u) };
-      // Le mot de passe en clair est exposé pour TOUS les comptes non-admin
-      // (demande explicite : l'administrateur doit pouvoir voir le mot de passe
-      // configuré pour chaque utilisateur — simple, pro ou premium).
-      // Pour les comptes admin, on ne le diffuse pas.
-      if (u.is_admin) delete out.plain_password;
-      // password_hash n'a aucune utilité côté UI
-      delete out.password_hash;
-      return out;
-    }));
+    res.json(users.map(u => ({ ...u, status: getUserStatus(u) })));
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/approve', requireSuperAdmin, async (req, res) => {
+router.post('/users/:id/approve', requireAdmin, async (req, res) => {
   const id   = parseInt(req.params.id);
   const mins = parseFloat(req.body.minutes);
   if (!req.body.minutes || isNaN(mins) || mins < 10 || mins > 45000)
@@ -145,13 +59,11 @@ router.post('/users/:id/approve', requireSuperAdmin, async (req, res) => {
     const user = await db.updateUser(id, { is_approved: true, subscription_expires_at: expires.toISOString(), subscription_duration_minutes: Math.round(mins) });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
     renderSync.syncUser(user).catch(() => {});
-    // ⚠️ Aucun canal n'est attribué automatiquement à l'approbation.
-    // L'administrateur doit assigner explicitement les canaux dans la fiche utilisateur.
     res.json({ message: `Accès accordé pour ${fmtDuration(mins)}`, user });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/extend', requireSuperAdmin, async (req, res) => {
+router.post('/users/:id/extend', requireAdmin, async (req, res) => {
   const id   = parseInt(req.params.id);
   const mins = parseFloat(req.body.minutes);
   if (!req.body.minutes || isNaN(mins) || mins < 10 || mins > 45000)
@@ -170,7 +82,7 @@ router.post('/users/:id/extend', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/users/:id/reject', requireSuperAdmin, async (req, res) => {
+router.post('/users/:id/reject', requireAdmin, async (req, res) => {
   try {
     const rUser = await db.updateUser(parseInt(req.params.id), { is_approved: false, subscription_expires_at: null });
     if (rUser) renderSync.syncUser(rUser).catch(() => {});
@@ -188,150 +100,12 @@ router.put('/users/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-/**
- * Définir / régénérer le mot de passe d'un utilisateur.
- * Body : { password?: string }  — si absent ou trop court, on en génère un aléatoire.
- * Stocke à la fois le hash (pour l'auth) ET le clair (pour l'affichage admin).
- */
-router.post('/users/:id/set-password', requireSuperAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const target = await db.getUser(id);
-    if (!target) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    if (target.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
-
-    let pwd = (req.body?.password || '').toString().trim();
-    let generated = false;
-    if (!pwd || pwd.length < 6) {
-      pwd = genPassword(10);
-      generated = true;
-    }
-    const hash = await bcrypt.hash(pwd, 10);
-    const user = await db.updateUser(id, { password_hash: hash, plain_password: pwd });
-    if (!user) return res.status(500).json({ error: 'Mise à jour échouée' });
-    renderSync.syncUser(user).catch(() => {});
-    res.json({ ok: true, password: pwd, generated });
-  } catch (e) {
-    res.status(500).json({ error: e.message || 'Erreur serveur' });
-  }
-});
-
-router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/users/:id', requireAdmin, async (req, res) => {
   try {
     const u = await db.getUser(parseInt(req.params.id));
     if (u?.is_admin) return res.status(400).json({ error: 'Impossible de supprimer un admin' });
     await db.deleteUser(parseInt(req.params.id));
     res.json({ message: 'Utilisateur supprimé' });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── Utilisateurs en ligne ───────────────────────────────────────────────────
-router.get('/online-users', requireAdmin, async (req, res) => {
-  try {
-    const users = await db.getAllUsers();
-    const now = Date.now();
-    const ONLINE_MS   = 5 * 60 * 1000;  // en ligne si vu il y a < 5 min
-    const ACTIVE_MS   = 30 * 60 * 1000; // actif si vu il y a < 30 min
-    const result = users
-      .filter(u => !u.is_admin)
-      .map(u => {
-        const lastMs = u.last_seen ? new Date(u.last_seen).getTime() : null;
-        const diff   = lastMs ? now - lastMs : null;
-        const status = !lastMs ? 'jamais'
-          : diff < ONLINE_MS  ? 'en_ligne'
-          : diff < ACTIVE_MS  ? 'actif'
-          : 'hors_ligne';
-        const isPro     = !!(u.is_pro || u.account_type === 'pro');
-        const isPremium = !!(u.is_premium || u.account_type === 'premium');
-        return {
-          id: u.id,
-          username: u.username,
-          first_name: u.first_name,
-          last_name: u.last_name,
-          is_pro: isPro,
-          is_premium: isPremium,
-          account_type: u.account_type || 'simple',
-          is_approved: u.is_approved,
-          is_banned: u.is_banned,
-          subscription_expires_at: u.subscription_expires_at,
-          allowed_modes: u.allowed_modes,
-          allowed_channels: u.allowed_channels,
-          show_counter_channels: u.show_counter_channels,
-          last_seen: u.last_seen,
-          status,
-          diff_minutes: diff !== null ? Math.floor(diff / 60000) : null,
-        };
-      })
-      .sort((a, b) => {
-        const order = { en_ligne: 0, actif: 1, hors_ligne: 2, jamais: 3 };
-        return (order[a.status] ?? 3) - (order[b.status] ?? 3);
-      });
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── Allowed modes per user ──────────────────────────────────────────────────
-router.get('/users/:id/allowed-modes', requireAdmin, async (req, res) => {
-  try {
-    const u = await db.getUser(parseInt(req.params.id));
-    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    res.json({ allowed_modes: u.allowed_modes || null });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.put('/users/:id/allowed-modes', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { allowed_modes } = req.body;
-    const modesJson = allowed_modes === null ? null : (Array.isArray(allowed_modes) ? JSON.stringify(allowed_modes) : null);
-    const u = await db.updateUser(id, { allowed_modes: modesJson });
-    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    res.json({ ok: true, allowed_modes: u.allowed_modes });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.put('/users/:id/allowed-channels', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { allowed_channels } = req.body;
-    const ids = Array.isArray(allowed_channels) ? allowed_channels : [];
-    const val = ids.length > 0 ? JSON.stringify(ids) : null;
-    const u = await db.updateUser(id, { allowed_channels: val });
-    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    // Synchroniser vers user_strategy_visible pour que getVisibleStrategies soit cohérent
-    await db.setVisibleStrategies(id, ids);
-    res.json({ ok: true, allowed_channels: u.allowed_channels });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.put('/users/:id/show-counter-channels', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { show_counter_channels } = req.body;
-    const val = show_counter_channels === null ? null : (Array.isArray(show_counter_channels) ? JSON.stringify(show_counter_channels) : null);
-    const u = await db.updateUser(id, { show_counter_channels: val });
-    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    res.json({ ok: true, show_counter_channels: u.show_counter_channels });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// Endpoint pour l'utilisateur courant : obtenir ses modes autorisés
-router.get('/my-allowed-modes', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
-  if (req.session.isAdmin) return res.json({ allowed_modes: null }); // admin = accès total
-  try {
-    const u = await db.getUser(req.session.userId);
-    if (!u) return res.status(401).json({ error: 'Utilisateur non trouvé' });
-    res.json({ allowed_modes: u.allowed_modes || null });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── Débloquer un utilisateur banni ─────────────────────────────────────────
-router.post('/users/:id/unban', requireSuperAdmin, async (req, res) => {
-  try {
-    const u = await db.updateUser(parseInt(req.params.id), { is_banned: false });
-    if (!u) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    res.json({ ok: true, message: 'Utilisateur débanni' });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -342,31 +116,14 @@ router.get('/stats', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/generate-premium', requireSuperAdmin, async (req, res) => {
+router.post('/generate-premium', requireAdmin, async (req, res) => {
   try {
     const count = Math.min(Math.max(parseInt(req.body.count) || 5, 1), 50);
     const domain = (req.body.domain || 'premium.pro').trim().replace(/^@/, '');
     const durationH = Math.max(parseInt(req.body.durationH) || 750, 1);
-
-    // Supprimer les 5 derniers comptes générés
-    const lastRaw = await db.getSetting('premium_last_generated');
-    if (lastRaw) {
-      try {
-        const lastUsernames = JSON.parse(lastRaw);
-        for (const uname of lastUsernames) {
-          const u = await db.getUserByLogin(uname);
-          if (u) await db.deleteUser(u.id);
-        }
-      } catch (_) {}
-    }
-
-    // Suffix unique basé sur timestamp (ex: pm_A3F2_1)
-    const suffix = Date.now().toString(36).slice(-4).toUpperCase();
     const accounts = [];
-    const generatedUsernames = [];
-
     for (let i = 1; i <= count; i++) {
-      const username  = `pm_${suffix}_${i}`;
+      const username  = `premium${i}`;
       const email     = `${username}@${domain}`;
       const password  = genPassword(10);
       const hash      = await bcrypt.hash(password, 10);
@@ -374,17 +131,11 @@ router.post('/generate-premium', requireSuperAdmin, async (req, res) => {
       await db.createUser({
         username, email, password_hash: hash,
         first_name: 'Premium', last_name: String(i),
-        is_approved: true, is_premium: true, subscription_expires_at: expiresAt.toISOString(),
+        is_approved: true, subscription_expires_at: expiresAt.toISOString(),
         subscription_duration_minutes: durationH * 60,
-        plain_password: password, // permet de retrouver le mdp côté admin
       });
       accounts.push({ username, email, password, expires_at: expiresAt });
-      generatedUsernames.push(username);
     }
-
-    // Sauvegarder les noms générés pour la prochaine suppression
-    await db.setSetting('premium_last_generated', JSON.stringify(generatedUsernames));
-
     res.json({ ok: true, accounts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -397,14 +148,7 @@ async function getStrategies() {
   const v = await db.getSetting('custom_strategies');
   if (!v) return [];
   const parsed = JSON.parse(v);
-  const list = Array.isArray(parsed) ? parsed : [parsed];
-  // Normalisation rétro-compatible : les anciennes stratégies n'ont pas pred_duration_minutes.
-  // On leur ajoute la valeur par défaut 0 (= aucune limite) pour éviter tout comportement inattendu.
-  return list.map(s => ({
-    pred_duration_minutes:    0,
-    pred_duration_started_at: null,
-    ...s,
-  }));
+  return Array.isArray(parsed) ? parsed : [parsed];
 }
 
 async function saveStrategies(list) {
@@ -415,13 +159,6 @@ const VALID_EXCEPTION_TYPES = [
   'consec_appearances', 'recent_frequency', 'already_pending',
   'max_consec_losses', 'trigger_overload', 'last_game_appeared',
   'time_window_block',
-  'minute_interval_block', 'min_history', 'consec_wins',
-  'suit_absent_long', 'high_win_rate', 'pending_overload',
-  'game_parity', 'dominant_streak', 'cold_start',
-  'bad_hour', 'double_suit_last', 'loss_streak_pause',
-  'trigger_card_position',
-  'consec_same_suit_pred',
-  'decalage_suit_check',
 ];
 
 function parseExceptions(raw) {
@@ -434,41 +171,6 @@ function parseExceptions(raw) {
       if (e.window !== undefined) out.window = Math.max(2, parseInt(e.window) || 2);
       if (e.type === 'time_window_block') {
         out.half = ['first', 'second'].includes(e.half) ? e.half : 'second';
-        delete out.value;
-        delete out.window;
-      }
-      if (e.type === 'minute_interval_block') {
-        out.from = Math.max(0,  Math.min(58, parseInt(e.from) || 0));
-        out.to   = Math.max(1,  Math.min(59, parseInt(e.to)   || 10));
-        delete out.value;
-        delete out.window;
-      }
-      if (e.type === 'game_parity') {
-        out.parity = ['even', 'odd'].includes(e.parity) ? e.parity : 'even';
-        delete out.value;
-        delete out.window;
-      }
-      if (e.type === 'bad_hour') {
-        out.from_hour = Math.max(0,  Math.min(23, parseInt(e.from_hour) || 0));
-        out.to_hour   = Math.max(0,  Math.min(23, parseInt(e.to_hour)   || 6));
-        delete out.value;
-        delete out.window;
-      }
-      if (['already_pending', 'last_game_appeared', 'double_suit_last'].includes(e.type)) {
-        delete out.value;
-        delete out.window;
-      }
-      if (e.type === 'trigger_card_position') {
-        // positions: tableau de numéros de position à bloquer (1, 2, 3)
-        const rawPos = Array.isArray(e.positions) ? e.positions : [];
-        out.positions = rawPos.map(Number).filter(p => p >= 1 && p <= 6);
-        if (!out.positions.length) out.positions = [1];
-        delete out.value;
-        delete out.window;
-      }
-      if (e.type === 'decalage_suit_check') {
-        out.decalage = Math.max(1, parseInt(e.decalage) || 1);
-        out.action   = ['inverse', 'skip'].includes(e.action) ? e.action : 'inverse';
         delete out.value;
         delete out.window;
       }
@@ -498,7 +200,7 @@ function validateStrategyBody(body) {
   if (!name || !name.trim())         return 'Nom requis';
   if (!['admin', 'all'].includes(visibility)) return 'Visibilité invalide';
   const offset = parseInt(body.prediction_offset);
-  if (!isNaN(offset) && (offset < 1 || offset > 30)) return 'Décalage de prédiction invalide (1–30)';
+  if (!isNaN(offset) && (offset < 1 || offset > 10)) return 'Décalage de prédiction invalide (1–10)';
 
   if (strategy_type === 'combinaison') {
     const sources = Array.isArray(body.multi_source_ids) ? body.multi_source_ids : [];
@@ -516,49 +218,14 @@ function validateStrategyBody(body) {
     return null;
   }
 
-  if (mode === 'first_card_plus6') {
-    return null;
-  }
-
-  if (mode === 'costume_manquant') {
-    return null;
-  }
-
-  if (mode === 'rattrapage_groupe') {
-    const monitored = Array.isArray(body.monitored_strategies) ? body.monitored_strategies : [];
-    if (monitored.length === 0) return 'Cochez au moins une stratégie à surveiller';
-    return null;
-  }
-
-  if (mode === 'compteurs_absences') {
-    return null;
-  }
-
-  if (mode === 'gestion_banque') {
-    return null;
-  }
-
-  // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'rattrapage_groupe'];
-
-  const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
-  const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
-
-  if (!NO_THRESHOLD_MODES.includes(mode)) {
-    const B = parseInt(threshold);
-    if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
-  }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
-  if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
-  // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
-  if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
-    const norm = normalizeMappings(mappings);
-    if (!norm) return 'Mappings invalides';
-    for (const s of SUITS) {
-      if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
-      if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
-    }
+  const B = parseInt(threshold);
+  if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
+  if (!['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'taux_miroir'].includes(mode)) return 'Mode invalide';
+  const norm = normalizeMappings(mappings);
+  if (!norm) return 'Mappings invalides';
+  for (const s of SUITS) {
+    if (!norm[s] || norm[s].length === 0) return `Au moins 1 carte cible requise pour ${s}`;
+    if (norm[s].length > 3)               return `Maximum 3 cartes cibles pour ${s}`;
   }
   return null;
 }
@@ -566,67 +233,20 @@ function validateStrategyBody(body) {
 function parseTgTargets(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map(t => {
-      const obj = {
-        bot_token:  String(t.bot_token  || '').trim(),
-        channel_id: String(t.channel_id || '').trim(),
-      };
-      if (t.tg_format !== undefined && t.tg_format !== null && t.tg_format !== '')
-        obj.tg_format = Math.max(1, parseInt(t.tg_format) || 1);
-      return obj;
-    })
+    .map(t => ({
+      bot_token:  String(t.bot_token  || '').trim(),
+      channel_id: String(t.channel_id || '').trim(),
+    }))
     .filter(t => t.bot_token && t.channel_id);
 }
-
-// ── Métadonnées des stratégies Pro (pour StrategySelect) ──────────────────
-router.get('/pro-strategies', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
-  const user = await db.getUser(req.session.userId).catch(() => null);
-  if (!user) return res.status(401).json({ error: 'Non connecté' });
-  if (!user.is_admin && !user.is_pro)
-    return res.status(403).json({ error: 'Accès réservé' });
-  try {
-    const rawIds  = await db.getSetting('pro_strategy_ids').catch(() => null);
-    const proIds  = rawIds ? JSON.parse(rawIds) : [];
-    const allStrategies = await Promise.all(proIds.map(async (id) => {
-      const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-      const m    = rawM ? JSON.parse(rawM) : {};
-      const info = m.strategy_info || {};
-      return {
-        id,
-        name: m.strategy_name || m.filename || `Stratégie S${id}`,
-        strategy_name: m.strategy_name || null,
-        filename: m.filename || '',
-        hand: info.hand || 'joueur',
-        decalage: info.decalage,
-        max_rattrapage: info.max_rattrapage ?? 2,
-        engine_type: m.engine_type || null,
-        owner_user_id: m.owner_user_id || null,
-      };
-    }));
-    // Un compte Pro (non-admin) ne voit QUE ses propres stratégies importées.
-    // L'admin voit toutes les stratégies Pro pour pouvoir les gérer.
-    const strategies = user.is_admin
-      ? allStrategies
-      : allStrategies.filter(s => s.owner_user_id === req.session.userId);
-    res.json({ strategies, active: strategies.length > 0 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 router.get('/strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
     const list = await getStrategies();
     if (!req.session.isAdmin) {
-      // Partenaire : accès complet à ses propres stratégies uniquement
-      if (isPartnerSession(req)) {
-        return res.json(list.filter(s => s.partner_owner_id === req.session.userId));
-      }
-      // Récupérer les stratégies explicitement assignées à cet utilisateur
-      const assignedIds = await db.getVisibleStrategies(req.session.userId);
-      const assignedSet = new Set(assignedIds.map(id => String(id)));
       return res.json(
-        list.filter(s => s.enabled && (s.visibility === 'all' || assignedSet.has(`S${s.id}`)))
+        list.filter(s => s.enabled && s.visibility === 'all')
             .map(s => ({ id: s.id, name: s.name, enabled: s.enabled, visibility: s.visibility, threshold: s.threshold, mode: s.mode }))
       );
     }
@@ -634,45 +254,18 @@ router.get('/strategies', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/strategies', requireAdminOrPartner, async (req, res) => {
+router.post('/strategies', requireAdmin, async (req, res) => {
   console.log('[Strategy POST] Requête reçue:', JSON.stringify(req.body).substring(0, 200));
   try {
     const err = validateStrategyBody(req.body);
     if (err) { console.log('[Strategy POST] Validation échouée:', err); return res.status(400).json({ error: err }); }
-    // Vérification serveur : mode autorisé pour le partenaire
-    const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
-    if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
-    const tg_targets  = parseTgTargets(req.body.tg_targets);
-    const exceptions  = parseExceptions(req.body.exceptions);
-    const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
-      ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
-          .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
-      : [];
-    const isComb      = strategy_type === 'combinaison';
-    const isRelance   = mode === 'relance';
-    const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
-    const isLecturePassee     = mode === 'lecture_passee';
-    const isIntelligent       = mode === 'intelligent_cartes';
-    const isCarteValeur       = mode === 'carte_valeur';
-    const isUnionEnseignes    = mode === 'union_enseignes';
-    const isIntersection      = mode === 'intersection';
-    const isComptagesEcart    = mode === 'comptages_ecart';
-    const isAnnonceSequence   = mode === 'annonce_sequence';
-    const isFirstCardPlus6    = mode === 'first_card_plus6';
-    const isCostumeManquant   = mode === 'costume_manquant';
-    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
-    const isCompteurParite    = mode === 'compteur_parite';
-    const isCompteurAbsences  = mode === 'compteurs_absences';
-    const isGestionBanque     = mode === 'gestion_banque';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
-    // Helpers pour normaliser les niveaux R en tableau (multi-select)
-    const normLevels = (v) => {
-      if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
-      if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
-      return [];
-    };
+    const tg_targets = parseTgTargets(req.body.tg_targets);
+    const exceptions = parseExceptions(req.body.exceptions);
+    const isComb     = strategy_type === 'combinaison';
+    const isRelance  = mode === 'relance';
+    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
     const list   = await getStrategies();
     const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
     const strat  = {
@@ -685,88 +278,20 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
-              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
-              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
-              return {
-                strategy_id:     String(r.strategy_id),
-                losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
-                rattrapage_levels: rLevels.length ? rLevels : null,
-                rattrapage_level: rLevels.length === 1 ? rLevels[0] : null, // legacy
-                rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-                combo_levels:    cLevels.length ? cLevels : null,
-                combo_level:     cLevels.length === 1 ? cLevels[0] : null, // legacy
-                combo_count:     Math.max(1, parseInt(r.combo_count) || 1),
-                range_from:      r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
-                range_count:     Math.max(1, parseInt(r.range_count) || 1),
-                interval_min:    r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
-                interval_max:    r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
-                interval_count:  Math.max(1, parseInt(r.interval_count) || 1),
-              };
-            }) : [] }
-        : isCarteAuto
-        ? { threshold: parseInt(threshold), mode, mappings: null }
-        : isLecturePassee
-        ? { threshold: 1, mode, mappings: null,
-            carte_p:     Math.max(1, parseInt(req.body.carte_p) || 2),
-            carte_h:     Math.max(1, parseInt(req.body.carte_h) || 32),
-            carte_ecart: Math.max(1, parseInt(req.body.carte_ecart) || 1),
-            carte_position: Math.max(1, Math.min(3, parseInt(req.body.carte_position) || 1)),
-            carte_source_hand: ['joueur','banquier'].includes(req.body.carte_source_hand) ? req.body.carte_source_hand : 'joueur' }
-        : isIntelligent
-        ? { threshold: 1, mode, mappings: null,
-            intelligent_window:    Math.max(20, Math.min(2000, parseInt(req.body.intelligent_window) || 300)),
-            intelligent_pattern:   Math.max(1, Math.min(8, parseInt(req.body.intelligent_pattern) || 3)),
-            intelligent_min_count: Math.max(1, Math.min(50, parseInt(req.body.intelligent_min_count) || 3)),
-            intelligent_categories: Array.isArray(req.body.intelligent_categories)
-              ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
-              : ['suit'] }
-        : isCarteValeur
-        ? { threshold: 1, mode: 'carte_valeur', mappings: null }
-        : isUnionEnseignes
-        ? { threshold: 1, mode: 'union_enseignes', mappings: null,
-            multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
-            union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
-        : isIntersection
-        ? { threshold: 1, mode: 'intersection', mappings: normalizedMappings,
-            inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
-            inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
-            inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
-        : isComptagesEcart
-        ? { threshold: 1, mode: 'comptages_ecart', mappings: null,
-            comptages_key: req.body.comptages_key || 'suit_p_heart' }
-        : isAnnonceSequence
-        ? { threshold: 1, mode: 'annonce_sequence', mappings: null,
-            annonce_sequence_ids: Array.isArray(req.body.annonce_sequence_ids) ? req.body.annonce_sequence_ids.map(String) : [],
-            annonce_text: String(req.body.annonce_text || '').slice(0, 1000),
-            annonce_interval: Math.max(1, parseInt(req.body.annonce_interval) || 60),
-            annonce_duration: Math.max(1, parseInt(req.body.annonce_duration) || 120) }
-        : isFirstCardPlus6
-        ? { threshold: 0, mode: 'first_card_plus6', mappings: null,
-            proche: Math.max(1, parseInt(req.body.proche) || 3),
-            banker_card_count: [0, 2, 3].includes(parseInt(req.body.banker_card_count)) ? parseInt(req.body.banker_card_count) : 0,
-            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
-        : isCostumeManquant
-        ? { threshold: 0, mode: 'costume_manquant', mappings: null }
-        : isRattrapageGroupe
-        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
-            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
-            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
-        : isCompteurAbsences
-        ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
-            c3_b:      Math.max(1, parseInt(req.body.c3_b)      || 4),
-            c3_seuil3: Math.max(1, parseInt(req.body.c3_seuil3) || 3),
-            c3_jj:     Math.max(1, parseInt(req.body.c3_jj)     || 2) }
-        : isGestionBanque
-        ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
-            bg_lot_size:     Math.max(1,   parseInt(req.body.bg_lot_size)      || 5),
-            bg_cote:         Math.max(0.1, parseFloat(req.body.bg_cote)        || 1.9),
-            bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
-            bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
+              strategy_id:     String(r.strategy_id),
+              losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+              rattrapage_level: r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
+              rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
+              combo_level:      r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
+              combo_count:      Math.max(1, parseInt(r.combo_count) || 1),
+              range_from:       r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+              range_count:      Math.max(1, parseInt(r.range_count) || 1),
+              interval_min:     r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+              interval_max:     r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+              interval_count:   Math.max(1, parseInt(r.interval_count) || 1),
+            })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
-      mirror_pairs,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -777,145 +302,17 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, parseInt(tg_format) || 1) : null,
-      pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
-      pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
-        ? new Date().toISOString() : null,
-      prix: Math.max(0, parseFloat(req.body.prix) || 0),
-      annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
-      vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
-      annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
-      // CM+t paramètres
-      cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
-      cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
-      // Planification des prédictions
-      pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
-      pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
-      pred_schedule_hours: Array.isArray(req.body.pred_schedule_hours) ? req.body.pred_schedule_hours.map(Number).filter(h => h >= 0 && h <= 23) : [],
-      pred_schedule_interval: Math.max(1, parseInt(req.body.pred_schedule_interval) || 1),
-      pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
-      pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
-      pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
-      pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
-      pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
-      pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
-      ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
+        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
     };
     list.push(strat);
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
-    // Sync vente_enabled → strategy_promo_config
-    try {
-      const rawPromo = await db.getSetting('strategy_promo_config').catch(() => null);
-      const promos   = rawPromo ? JSON.parse(rawPromo) : {};
-      const sid      = String(strat.id);
-      promos[sid]    = { ...(promos[sid] || {}), enabled: strat.vente_enabled };
-      await db.setSetting('strategy_promo_config', JSON.stringify(promos));
-    } catch {}
-    // Sync annonce_enabled → désactiver les annonces auto si nécessaire
-    if (!strat.annonce_enabled && db.pool) {
-      db.pool.query(
-        `UPDATE tg_announcements SET enabled=FALSE WHERE name LIKE $1`,
-        [`AUTO_STRAT_S${strat.id}_%`]
-      ).catch(() => {});
-    }
-    require('./strategy-auto-announce').autoUpdateStrategyAnnouncement().catch(() => {});
-    // Message de bienvenue pour chaque canal Telegram nouvellement configuré
-    if (tg_targets.length > 0) {
-      const { sendRawMessage } = require('./telegram-service');
-      const welcomeText = `🎯 <b>Bienvenue sur le site de prédiction automatique de Sossou Kouamé</b>\n\nVous allez recevoir des prédictions de qualité en temps réel pour le jeu <b>Baccarat 1xBet</b>.\n\nRestez attentif aux signaux — chaque prédiction compte !\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Suivez nos signaux et maximisez vos gains.`;
-      for (const t of tg_targets) {
-        if (t.bot_token && t.channel_id) {
-          sendRawMessage(t.bot_token, t.channel_id, welcomeText, 'HTML').catch(() => {});
-        }
-      }
-    }
     res.json({ ok: true, strategy: strat });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/annonce-sequence/:id/send-now', requireAdmin, async (req, res) => {
-  try {
-    const { sendNow } = require('./annonce-sequence');
-    await sendNow(parseInt(req.params.id));
-    res.json({ ok: true, message: 'Annonce envoyée avec succès !' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Moniteur Intersection : stratégies surveillées + prédictions actives ──
-router.get('/intersection-monitor/:id', requireAdmin, (req, res) => {
-  try {
-    const eng = require('./engine');
-    const data = eng.getIntersectionMonitor(parseInt(req.params.id));
-    if (!data) return res.json({ error: 'Stratégie intersection introuvable ou inactive' });
-    res.json(data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Moniteur Costume Manquant : état en temps réel ───────────────────────────
-router.get('/cm-monitor/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const eng = require('./engine');
-    const list = await getStrategies();
-    const strat = list.find(s => s.id === id);
-    if (!strat || strat.mode !== 'costume_manquant') {
-      return res.json({ error: 'Stratégie Costume Manquant introuvable' });
-    }
-    const state = eng.getStrategyState ? eng.getStrategyState(`S${id}`) : null;
-    if (!state) return res.json({ active: false, queue: [] });
-    const queue = Object.entries(state.cmQueue || {}).map(([trigGn, entry]) => ({
-      trigGn: parseInt(trigGn),
-      suit: entry.suit,
-      verified: entry.verified,
-      emitted: entry.emitted,
-      cancelled: entry.cancelled,
-      verifyAt: parseInt(trigGn) + 2,
-      predictAt: parseInt(trigGn) + 4,
-    })).filter(e => !e.cancelled);
-    // Calcul des distributions récentes depuis l'historique
-    const hist = (state.history || []).slice(-20);
-    const dist = { joueur: [], banquier: [], both: [] };
-    for (const g of hist) {
-      if (g.suit_p) dist.joueur.push(g.suit_p);
-      if (g.suit_b) dist.banquier.push(g.suit_b);
-    }
-    const lastEntry = queue.length > 0 ? queue[queue.length - 1] : null;
-    res.json({
-      active: true,
-      queue,
-      count: queue.length,
-      lastGame: lastEntry ? lastEntry.trigGn : null,
-      lastSuit: lastEntry ? lastEntry.suit : null,
-      recentJoueur: dist.joueur.slice(-5),
-      recentBanquier: dist.banquier.slice(-5),
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Statut du rotateur : index actif + compteurs de prédictions par stratégie enfant ──
-router.get('/rotation-status/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { getPredCounts, getActiveStrategyIndex } = require('./annonce-sequence');
-    const list = await getStrategies();
-    const strat = list.find(s => s.id === id);
-    if (!strat || strat.mode !== 'annonce_sequence') {
-      return res.json({ counts: {}, activeIdx: 0, childStrategies: [] });
-    }
-    const seqIds = Array.isArray(strat.annonce_sequence_ids) ? strat.annonce_sequence_ids : [];
-    const childStrategies = seqIds.map(sid => {
-      const child = list.find(s => String(s.id) === String(sid));
-      return child ? { id: child.id, name: child.name } : { id: sid, name: `Stratégie ${sid}` };
-    });
-    const counts   = getPredCounts(id);
-    const activeIdx = getActiveStrategyIndex(id);
-    res.json({ counts, activeIdx, childStrategies });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
+router.put('/strategies/:id', requireAdmin, async (req, res) => {
   console.log('[Strategy PUT] Requête reçue id=' + req.params.id);
   try {
     const id  = parseInt(req.params.id);
@@ -924,45 +321,13 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const list = await getStrategies();
     const idx  = list.findIndex(s => s.id === id);
     if (idx === -1) { console.log('[Strategy PUT] Stratégie introuvable id=' + id); return res.status(404).json({ error: 'Stratégie introuvable' }); }
-    // Partenaire : ne peut modifier que ses propres stratégies
-    if (isPartnerSession(req) && list[idx].partner_owner_id !== req.session.userId)
-      return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres stratégies' });
-    // Vérification serveur : mode autorisé pour le partenaire
-    const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
-    if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
             strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
-    const tg_targets  = parseTgTargets(req.body.tg_targets);
-    const exceptions  = parseExceptions(req.body.exceptions);
-    const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
-      ? req.body.mirror_pairs.filter(p => p && p.a && p.b)
-          .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
-      : [];
-    const isComb      = strategy_type === 'combinaison';
-    const isRelance   = mode === 'relance';
-    const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
-    const isLecturePassee     = mode === 'lecture_passee';
-    const isIntelligent       = mode === 'intelligent_cartes';
-    const isCarteValeur       = mode === 'carte_valeur';
-    const isUnionEnseignes    = mode === 'union_enseignes';
-    const isIntersection      = mode === 'intersection';
-    const isComptagesEcart    = mode === 'comptages_ecart';
-    const isAnnonceSequence   = mode === 'annonce_sequence';
-    const isFirstCardPlus6    = mode === 'first_card_plus6';
-    const isCostumeManquant   = mode === 'costume_manquant';
-    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
-    const isCompteurParite    = mode === 'compteur_parite';
-    const isCompteurAbsences  = mode === 'compteurs_absences';
-    const isGestionBanque     = mode === 'gestion_banque';
-    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
-    const normLevels = (v) => {
-      if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
-      if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
-      return [];
-    };
-    const oldTgTargets = list[idx].tg_targets || [];
-    const oldEnabled   = list[idx].enabled;
-    const oldPredDurationStartedAt = list[idx].pred_duration_started_at || null;
+    const tg_targets = parseTgTargets(req.body.tg_targets);
+    const exceptions = parseExceptions(req.body.exceptions);
+    const isComb    = strategy_type === 'combinaison';
+    const isRelance = mode === 'relance';
+    const normalizedMappings = (isComb || isRelance) ? null : normalizeMappings(mappings);
     list[idx] = {
       ...list[idx],
       name: name.trim().slice(0, 40),
@@ -973,88 +338,20 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             mode: 'multi_strategy', mappings: null, threshold: 0 }
         : isRelance
         ? { mode: 'relance', mappings: null, threshold: 0,
-            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
-              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
-              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
-              return {
-                strategy_id:      String(r.strategy_id),
-                losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
-                rattrapage_levels: rLevels.length ? rLevels : null,
-                rattrapage_level:  rLevels.length === 1 ? rLevels[0] : null,
-                rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
-                combo_levels:      cLevels.length ? cLevels : null,
-                combo_level:       cLevels.length === 1 ? cLevels[0] : null,
-                combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
-                range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
-                range_count:       Math.max(1, parseInt(r.range_count) || 1),
-                interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
-                interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
-                interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
-              };
-            }) : [] }
-        : isCarteAuto
-        ? { threshold: parseInt(threshold), mode, mappings: null }
-        : isLecturePassee
-        ? { threshold: 1, mode, mappings: null,
-            carte_p:     Math.max(1, parseInt(req.body.carte_p) || 2),
-            carte_h:     Math.max(1, parseInt(req.body.carte_h) || 32),
-            carte_ecart: Math.max(1, parseInt(req.body.carte_ecart) || 1),
-            carte_position: Math.max(1, Math.min(3, parseInt(req.body.carte_position) || 1)),
-            carte_source_hand: ['joueur','banquier'].includes(req.body.carte_source_hand) ? req.body.carte_source_hand : 'joueur' }
-        : isIntelligent
-        ? { threshold: 1, mode, mappings: null,
-            intelligent_window:    Math.max(20, Math.min(2000, parseInt(req.body.intelligent_window) || 300)),
-            intelligent_pattern:   Math.max(1, Math.min(8, parseInt(req.body.intelligent_pattern) || 3)),
-            intelligent_min_count: Math.max(1, Math.min(50, parseInt(req.body.intelligent_min_count) || 3)),
-            intelligent_categories: Array.isArray(req.body.intelligent_categories)
-              ? req.body.intelligent_categories.filter(c => ['suit','rank','dist','winner','high_low','pair'].includes(c))
-              : ['suit'] }
-        : isCarteValeur
-        ? { threshold: 1, mode: 'carte_valeur', mappings: null }
-        : isUnionEnseignes
-        ? { threshold: 1, mode: 'union_enseignes', mappings: null,
-            multi_source_ids: (Array.isArray(req.body.multi_source_ids) ? req.body.multi_source_ids : []).map(String),
-            union_min_agree: Math.max(2, parseInt(req.body.union_min_agree) || 2) }
-        : isIntersection
-        ? { threshold: 1, mode: 'intersection', mappings: normalizedMappings,
-            inter_category: ['costume','victoire','2_2','2_3','3_2','3_3'].includes(req.body.inter_category) ? req.body.inter_category : 'costume',
-            inter_hi:        Math.max(2, parseInt(req.body.inter_hi) || 2),
-            inter_max_ecart: Math.max(0, parseInt(req.body.inter_max_ecart) || 1) }
-        : isComptagesEcart
-        ? { threshold: 1, mode: 'comptages_ecart', mappings: null,
-            comptages_key: req.body.comptages_key || 'suit_p_heart' }
-        : isAnnonceSequence
-        ? { threshold: 1, mode: 'annonce_sequence', mappings: null,
-            annonce_sequence_ids: Array.isArray(req.body.annonce_sequence_ids) ? req.body.annonce_sequence_ids.map(String) : [],
-            annonce_text: String(req.body.annonce_text || '').slice(0, 1000),
-            annonce_interval: Math.max(1, parseInt(req.body.annonce_interval) || 60),
-            annonce_duration: Math.max(1, parseInt(req.body.annonce_duration) || 120) }
-        : isFirstCardPlus6
-        ? { threshold: 0, mode: 'first_card_plus6', mappings: null,
-            proche: Math.max(1, parseInt(req.body.proche) || 3),
-            banker_card_count: [0, 2, 3].includes(parseInt(req.body.banker_card_count)) ? parseInt(req.body.banker_card_count) : 0,
-            fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
-        : isCostumeManquant
-        ? { threshold: 0, mode: 'costume_manquant', mappings: null }
-        : isRattrapageGroupe
-        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
-            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
-            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
-        : isCompteurAbsences
-        ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
-            c3_b:      Math.max(1, parseInt(req.body.c3_b)      || 4),
-            c3_seuil3: Math.max(1, parseInt(req.body.c3_seuil3) || 3),
-            c3_jj:     Math.max(1, parseInt(req.body.c3_jj)     || 2) }
-        : isGestionBanque
-        ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
-            bg_lot_size:      Math.max(1,   parseInt(req.body.bg_lot_size)       || 5),
-            bg_cote:          Math.max(0.1, parseFloat(req.body.bg_cote)         || 1.9),
-            bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
-            bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => ({
+              strategy_id:      String(r.strategy_id),
+              losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+              rattrapage_level:  r.rattrapage_level != null ? Math.max(1, parseInt(r.rattrapage_level) || 1) : null,
+              rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
+              combo_level:       r.combo_level != null ? Math.max(1, parseInt(r.combo_level) || 1) : null,
+              combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
+              range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+              range_count:       Math.max(1, parseInt(r.range_count) || 1),
+              interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+              interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+              interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
+            })) : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
-      mirror_pairs,
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -1065,94 +362,19 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       max_rattrapage: (max_rattrapage !== undefined && max_rattrapage !== null && max_rattrapage !== '')
         ? Math.max(0, parseInt(max_rattrapage) || 0) : null,
       tg_format: (tg_format !== undefined && tg_format !== null && tg_format !== '')
-        ? Math.max(1, parseInt(tg_format) || 1) : null,
-      pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
-      pred_duration_started_at: (() => {
-        const dur = parseInt(req.body.pred_duration_minutes) || 0;
-        const willEnabled = enabled !== false;
-        if (dur <= 0) return null;
-        if (!oldEnabled && willEnabled) return new Date().toISOString();
-        if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
-        return oldPredDurationStartedAt;
-      })(),
-      prix: Math.max(0, parseFloat(req.body.prix) || 0),
-      annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
-      vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
-      annonce_enabled: req.body.annonce_enabled !== false && req.body.annonce_enabled !== 'false',
-      // CM+t paramètres
-      cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
-      cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
-      // Planification des prédictions
-      pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
-      pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
-      pred_schedule_hours: Array.isArray(req.body.pred_schedule_hours) ? req.body.pred_schedule_hours.map(Number).filter(h => h >= 0 && h <= 23) : [],
-      pred_schedule_interval: Math.max(1, parseInt(req.body.pred_schedule_interval) || 1),
-      pred_schedule_annonce_reprise: String(req.body.pred_schedule_annonce_reprise || '').slice(0, 500),
-      pred_schedule_annonce_fin: String(req.body.pred_schedule_annonce_fin || '').slice(0, 500),
-      pred_schedule_annonce_enabled: req.body.pred_schedule_annonce_enabled === true || req.body.pred_schedule_annonce_enabled === 'true',
-      pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
-      pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
-      pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
+        ? Math.max(1, Math.min(10, parseInt(tg_format) || 1)) : null,
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
     renderSync.syncStrategies().catch(() => {});
-    // Sync vente_enabled → strategy_promo_config
-    try {
-      const rawPromo = await db.getSetting('strategy_promo_config').catch(() => null);
-      const promos   = rawPromo ? JSON.parse(rawPromo) : {};
-      const sid      = String(list[idx].id);
-      promos[sid]    = { ...(promos[sid] || {}), enabled: list[idx].vente_enabled };
-      await db.setSetting('strategy_promo_config', JSON.stringify(promos));
-    } catch {}
-    // Sync annonce_enabled → désactiver les annonces auto si nécessaire
-    if (!list[idx].annonce_enabled && db.pool) {
-      db.pool.query(
-        `UPDATE tg_announcements SET enabled=FALSE WHERE name LIKE $1`,
-        [`AUTO_STRAT_S${list[idx].id}_%`]
-      ).catch(() => {});
-    } else if (list[idx].annonce_enabled && db.pool) {
-      db.pool.query(
-        `UPDATE tg_announcements SET enabled=TRUE WHERE name LIKE $1`,
-        [`AUTO_STRAT_S${list[idx].id}_%`]
-      ).catch(() => {});
-    }
-    require('./strategy-auto-announce').autoUpdateStrategyAnnouncement().catch(() => {});
-    // Message de bienvenue pour les canaux Telegram nouvellement ajoutés
-    const addedTargets = tg_targets.filter(nt =>
-      !oldTgTargets.some(ot => ot.channel_id === nt.channel_id && ot.bot_token === nt.bot_token)
-    );
-    if (addedTargets.length > 0) {
-      const { sendRawMessage } = require('./telegram-service');
-      const welcomeText = `🎯 <b>Bienvenue sur le site de prédiction automatique de Sossou Kouamé</b>\n\nVous allez recevoir des prédictions de qualité en temps réel pour le jeu <b>Baccarat 1xBet</b>.\n\nRestez attentif aux signaux — chaque prédiction compte !\n\n━━━━━━━━━━━━━━━━━━━━\n📲 Suivez nos signaux et maximisez vos gains.`;
-      for (const t of addedTargets) {
-        if (t.bot_token && t.channel_id) {
-          sendRawMessage(t.bot_token, t.channel_id, welcomeText, 'HTML').catch(() => {});
-        }
-      }
-    }
     res.json({ ok: true, strategy: list[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/strategies/:id', requireAdminOrPartner, async (req, res) => {
+router.delete('/strategies/:id', requireAdmin, async (req, res) => {
   try {
     const id   = parseInt(req.params.id);
     let list   = await getStrategies();
-    const target = list.find(s => s.id === id);
-    if (!target) return res.status(404).json({ error: 'Stratégie introuvable' });
-    // Partenaire : ne peut supprimer que ses propres stratégies
-    if (isPartnerSession(req) && target.partner_owner_id !== req.session.userId)
-      return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres stratégies' });
-    // Super admin requis pour supprimer les stratégies système (sans partner_owner_id)
-    if (!isPartnerSession(req) && (req.session.adminLevel || 2) !== 1) {
-      const uname = req.session.username || '';
-      if (uname !== 'buzzinfluence') {
-        const u = await db.getUser(req.session.userId).catch(() => null);
-        if (!u || ((u.admin_level || 2) !== 1 && u.username !== 'buzzinfluence'))
-          return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
-      }
-    }
     const before = list.length;
     list = list.filter(s => s.id !== id);
     if (list.length === before) return res.status(404).json({ error: 'Stratégie introuvable' });
@@ -1174,32 +396,15 @@ router.delete('/strategies/:id', requireAdminOrPartner, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Compteurs miroir (taux_miroir) et carte (carte_3_vers_2 / carte_2_vers_3) ──
+// ── Compteurs miroir (taux_miroir) en temps réel ──────────────────
 router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const entry = engine.custom?.[id];
     if (!entry) return res.json({ counts: {}, threshold: 0 });
-    const mode = entry.config?.mode || '';
-    const threshold = entry.config?.threshold || 0;
-    if (mode === 'carte_3_vers_2') {
-      return res.json({
-        counts: { c3v2: entry.counts?.['c3v2'] || 0 },
-        threshold,
-        waiting: !!entry.waiting_c3v2,
-        mode,
-      });
-    }
-    if (mode === 'carte_2_vers_3') {
-      return res.json({
-        counts: { c2v3: entry.counts?.['c2v3'] || 0 },
-        threshold,
-        waiting: !!entry.waiting_c2v3,
-        mode,
-      });
-    }
     const counts = entry.mirrorCounts || {};
-    res.json({ counts, threshold, mode });
+    const threshold = entry.config?.threshold || 0;
+    res.json({ counts, threshold });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1221,72 +426,36 @@ router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Effacement ciblé des prédictions UNIQUEMENT (bouton manuel) ──
-// Supprime : predictions + tg_pred_messages
-// Libère   : pending en mémoire moteur (déblocage immédiat)
-// NE touche PAS aux configs : custom_strategies, telegram_config, users,
-// strategy_channel_routes, settings, canaux, tokens, durées.
-// Identique au reset automatique jeu #1.
-router.post('/clear-predictions', requireAdmin, async (req, res) => {
-  try {
-    const eng = require('./engine');
-    const { deleted, extDeleted } = await eng.fullReset();
-    console.log(`[Admin] Reset complet — local: ${deleted}, render: ${extDeleted}`);
-    res.json({ ok: true, deleted, extDeleted });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Nettoyage complet des prédictions (sans toucher aux configs) ──
 // Supprime : predictions, tg_pred_messages
 // Remet à 0 : engine_absences, bilan_last, pending en mémoire, compteurs absences moteur
 // Conserve : users, telegram_config, strategy_channel_routes, custom_strategies,
 //            tg_msg_format, ui_styles, sessions, render_db_url, broadcast_message
-// ── Actualisation douce du moteur (sans suppression de stats) ──────────────
-router.post('/refresh-site', requireAdmin, async (req, res) => {
-  try {
-    const eng = require('./engine');
-    let predictions_cleared = 0;
-
-    // 1. Nettoyer les prédictions bloquées expirées
-    if (eng.instance?._clearExpiredByTime) {
-      predictions_cleared = await eng.instance._clearExpiredByTime().catch(() => 0) || 0;
-    }
-
-    // 2. Recharger les stratégies personnalisées
-    if (eng.instance?.reloadCustomStrategies) {
-      const db = require('./db');
-      const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
-      const strats = rawStrats ? JSON.parse(rawStrats) : [];
-      eng.instance.reloadCustomStrategies(strats);
-    }
-
-    // 3. Réinitialiser les absences moteur
-    if (eng.instance?.resetAbsences) eng.instance.resetAbsences();
-
-    console.log(`[Admin] refresh-site — ${predictions_cleared} prédiction(s) bloquée(s) nettoyée(s)`);
-    res.json({ ok: true, predictions_cleared });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 router.post('/reset-all-stats', requireAdmin, async (req, res) => {
   try {
     const pool = db.pool;
-    const eng  = require('./engine');
-    // fullReset = même chose que jeu #1 : predictions + tg_pred_messages + Render + mémoire moteur
-    const { deleted, extDeleted } = await eng.fullReset();
-    // Remettre les compteurs d'absences à zéro (engine_absences)
+    // 1. Supprimer toutes les prédictions
+    const r = await pool.query(`DELETE FROM predictions`);
+    const deleted = r.rowCount;
+    // 2. Supprimer les message_id Telegram stockés
+    await pool.query(`DELETE FROM tg_pred_messages`).catch(() => {});
+    // 3. Remettre les compteurs d'absences à zéro (engine_absences)
     const SUITS = ['♠','♥','♦','♣'];
     const zero  = Object.fromEntries(SUITS.map(s => [s, 0]));
     const absReset = JSON.stringify({ c1: {...zero}, c2: {...zero}, c3: {...zero} });
     await pool.query(`INSERT INTO settings(key,value) VALUES('engine_absences',$1)
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [absReset]).catch(() => {});
-    // Supprimer le bilan quotidien (obsolète sans prédictions)
+    // 4. Supprimer le bilan quotidien (obsolète sans prédictions)
     await pool.query(`DELETE FROM settings WHERE key='bilan_last'`).catch(() => {});
-    if (eng.resetAbsences) eng.resetAbsences();
-    console.log(`[Admin] Reset-all-stats — ${deleted} supprimée(s), absences remises à 0`);
-    res.json({ ok: true, deleted, extDeleted, details: {
+    // 5. Réinitialiser le moteur en mémoire
+    const eng = require('./engine');
+    if (eng) {
+      if (eng.clearAllPending) eng.clearAllPending();
+      if (eng.resetAbsences)   eng.resetAbsences();
+    }
+    console.log(`[Admin] Clean predictions — ${deleted} supprimée(s), absences remises à 0`);
+    res.json({ ok: true, deleted, details: {
       predictions_deleted: deleted,
-      render_deleted: extDeleted,
       tg_messages_cleared: true,
       absences_reset: true,
       bilan_cleared: true,
@@ -1328,51 +497,6 @@ router.get('/msg-format', requireAdmin, async (req, res) => {
     const v = await db.getSetting('tg_msg_format');
     res.json({ format_id: parseInt(v) || 1 });
   } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── BOT ADMIN TG ID (commandes bot distantes) ──────────────────────
-router.get('/bot-admin-tg-id', requireAdmin, async (req, res) => {
-  try {
-    const v = await db.getSetting('bot_admin_tg_id');
-    res.json({ bot_admin_tg_id: v || '' });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.post('/bot-admin-tg-id', requireAdmin, async (req, res) => {
-  const { bot_admin_tg_id } = req.body;
-  if (!bot_admin_tg_id && bot_admin_tg_id !== '')
-    return res.status(400).json({ error: 'bot_admin_tg_id requis' });
-  try {
-    await db.setSetting('bot_admin_tg_id', String(bot_admin_tg_id).trim());
-    res.json({ ok: true, bot_admin_tg_id: String(bot_admin_tg_id).trim() });
-  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-// ── APPLY UPDATE INLINE (sans fichier sur serveur) ──────────────────
-// Permet d'appliquer une mise à jour directement via JSON en body.
-// Usage: POST /api/admin/apply-update-inline
-// Body: { "type": "format", "data": { "format_id": 3 } }
-// Ou:   { "type": "strategies", "data": [...] }
-// Ou:   { "blocks": [{ "type": "...", "data": {...} }, ...] }
-router.post('/apply-update-inline', requireAdmin, async (req, res) => {
-  try {
-    const body = req.body;
-    if (!body || typeof body !== 'object')
-      return res.status(400).json({ error: 'Body JSON invalide' });
-    const results = [];
-    if (Array.isArray(body.blocks)) {
-      for (const b of body.blocks) results.push(await applyUpdateBlock(b.type, b.data));
-    } else if (body.type) {
-      results.push(await applyUpdateBlock(body.type, body.data));
-    } else {
-      return res.status(400).json({ error: 'Champ "type" ou "blocks" requis' });
-    }
-    const allOk = results.every(r => r.errors.length === 0);
-    res.json({ ok: allOk, results });
-  } catch (e) {
-    console.error('[apply-update-inline] Error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
 });
 
 // ── STRATEGY → CHANNEL ROUTING ─────────────────────────────────────
@@ -1472,7 +596,7 @@ router.get('/announcements', requireAdmin, async (req, res) => {
 
 router.post('/announcements', requireAdmin, async (req, res) => {
   try {
-    const { name, bot_token, channel_id, text, media_type, media_url, media_data, media_filename, schedule_type, interval_hours, times } = req.body;
+    const { name, bot_token, channel_id, text, media_type, media_url, schedule_type, interval_hours, times } = req.body;
     if (!name || !bot_token || !channel_id || !text || !schedule_type)
       return res.status(400).json({ error: 'name, bot_token, channel_id, text, schedule_type requis' });
     if (schedule_type === 'interval' && !interval_hours)
@@ -1488,8 +612,6 @@ router.post('/announcements', requireAdmin, async (req, res) => {
       text: text.trim(),
       media_type: media_type || null,
       media_url: media_url ? media_url.trim() : null,
-      media_data: media_data || null,           // base64 fichier téléversé
-      media_filename: media_filename || null,    // nom d'origine du fichier
       schedule_type,
       interval_hours: schedule_type === 'interval' ? parseFloat(interval_hours) : null,
       times: schedule_type === 'times' ? times : [],
@@ -1508,17 +630,9 @@ router.patch('/announcements/:id', requireAdmin, async (req, res) => {
     const current = JSON.parse(await db.getSetting('tg_announcements') || '[]');
     const idx = current.findIndex(a => a.id === id);
     if (idx === -1) return res.status(404).json({ error: 'Annonce introuvable' });
-    // Liste blanche des champs modifiables (évite d'écraser id, last_sent par accident)
-    const ALLOWED = ['name', 'bot_token', 'channel_id', 'text', 'media_type', 'media_url',
-                     'media_data', 'media_filename', 'schedule_type', 'interval_hours',
-                     'times', 'enabled'];
-    const patch = {};
-    for (const k of ALLOWED) {
-      if (k in req.body) patch[k] = req.body[k];
-    }
-    current[idx] = { ...current[idx], ...patch };
+    current[idx] = { ...current[idx], ...req.body };
     await db.setSetting('tg_announcements', JSON.stringify(current));
-    res.json({ ok: true, announcement: current[idx] });
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1562,9 +676,6 @@ router.put('/users/:userId/strategies', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'strategy_ids doit être un tableau' });
   try {
     await db.setVisibleStrategies(userId, strategy_ids);
-    // Synchroniser allowed_channels pour garder cohérence avec user_strategy_visible
-    const val = strategy_ids.length > 0 ? JSON.stringify(strategy_ids) : null;
-    await db.updateUser(userId, { allowed_channels: val });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1583,7 +694,7 @@ router.get('/users/:userId/visible', requireAdmin, async (req, res) => {
 
 router.post('/msg-format', requireAdmin, async (req, res) => {
   const id = parseInt(req.body.format_id);
-  if (!id || id < 1 || id > 25) return res.status(400).json({ error: "Format invalide (1–25)" });
+  if (!id || id < 1 || id > 10) return res.status(400).json({ error: "Format invalide (1–10)" });
   try {
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
@@ -1694,7 +805,7 @@ async function applyUpdateBlock(type, data) {
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
-    if (!id || id < 1 || id > 25) { result.errors.push(`format_id invalide (1–25)`); return result; }
+    if (!id || id < 1 || id > 10) { result.errors.push(`format_id invalide (1–10)`); return result; }
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
     result.applied = 1;
@@ -1717,7 +828,7 @@ async function applyUpdateBlock(type, data) {
           threshold: parseInt(item.threshold), prediction_offset: Math.max(1, parseInt(item.prediction_offset) || 1),
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, parseInt(item.tg_format) || 1) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
         };
         result.detail = (result.detail || '') + `\n• Mise à jour: "${item.name.trim()}"`;
       } else {
@@ -1743,7 +854,7 @@ async function applyUpdateBlock(type, data) {
           hand: item.hand === 'banquier' ? 'banquier' : 'joueur',
           loss_type: ['sec', 'rattrapage', 'martingale'].includes(item.loss_type) ? item.loss_type : 'rattrapage',
           max_rattrapage: (item.max_rattrapage !== undefined && item.max_rattrapage !== '') ? Math.max(0, parseInt(item.max_rattrapage) || 0) : null,
-          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, parseInt(item.tg_format) || 1) : null,
+          tg_format: (item.tg_format !== undefined && item.tg_format !== '') ? Math.max(1, Math.min(10, parseInt(item.tg_format) || 1)) : null,
         });
         result.detail = (result.detail || '') + `\n• Créée: "${item.name.trim()}"`;
       }
@@ -1914,258 +1025,7 @@ async function applyUpdateBlock(type, data) {
     return result;
   }
 
-  // ── Annonces Telegram planifiées ──────────────────────────────────
-  if (type === 'announcements') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau d\'annonces'); return result; }
-    const current = JSON.parse(await db.getSetting('tg_announcements') || '[]');
-    for (const item of data) {
-      if (!item.name || !item.bot_token || !item.channel_id) { result.errors.push(`Annonce "${item.name || '?'}": name, bot_token et channel_id requis`); continue; }
-      const existing = current.findIndex(a => a.id === item.id || a.name === item.name);
-      if (existing >= 0) {
-        current[existing] = { ...current[existing], ...item };
-        result.detail = (result.detail || '') + `\n• Mise à jour annonce: "${item.name}"`;
-      } else {
-        current.push({ ...item, id: item.id || Date.now() + result.applied });
-        result.detail = (result.detail || '') + `\n• Créée annonce: "${item.name}"`;
-      }
-      result.applied++;
-    }
-    await db.setSetting('tg_announcements', JSON.stringify(current));
-    return result;
-  }
-
-  // ── Canaux Telegram par défaut (C1/C2/C3/DC) ──────────────────────
-  if (type === 'default_tg') {
-    if (!data || typeof data !== 'object' || Array.isArray(data)) { result.errors.push('data doit être un objet { C1:{...}, C2:{...}, ... }'); return result; }
-    const valid = ['C1','C2','C3','DC'];
-    const current = JSON.parse(await db.getSetting('default_strategies_tg') || '{}');
-    for (const [key, val] of Object.entries(data)) {
-      if (!valid.includes(key)) { result.errors.push(`Clé inconnue: ${key} (valides: C1, C2, C3, DC)`); continue; }
-      if (!val.bot_token || !val.channel_id) { result.errors.push(`Canal ${key}: bot_token et channel_id requis`); continue; }
-      current[key] = { bot_token: val.bot_token.trim(), channel_id: val.channel_id.trim(), tg_format: val.tg_format ?? null };
-      result.applied++;
-      result.detail = (result.detail || '') + `\n• Canal ${key} mis à jour`;
-    }
-    await db.setSetting('default_strategies_tg', JSON.stringify(current));
-    return result;
-  }
-
-  // ── Clés API IA (Espace Programmation) ────────────────────────────
-  if (type === 'prog_ai_keys') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de clés API'); return result; }
-    const current = JSON.parse(await db.getSetting('prog_ai_keys') || '[]');
-    for (const item of data) {
-      if (!item.provider || !item.key) { result.errors.push(`Clé "${item.provider || '?'}": provider et key requis`); continue; }
-      const existing = current.findIndex(k => k.provider === item.provider && k.label === item.label);
-      if (existing >= 0) {
-        current[existing] = { ...current[existing], ...item };
-        result.detail = (result.detail || '') + `\n• Mise à jour clé: ${item.provider} / ${item.label || ''}`;
-      } else {
-        current.push({ ...item, id: item.id || Date.now() + result.applied });
-        result.detail = (result.detail || '') + `\n• Ajouté clé: ${item.provider} / ${item.label || ''}`;
-      }
-      result.applied++;
-    }
-    await db.setSetting('prog_ai_keys', JSON.stringify(current));
-    return result;
-  }
-
-  // ── Bots Programmation ────────────────────────────────────────────
-  if (type === 'prog_bots') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de bots'); return result; }
-    const current = JSON.parse(await db.getSetting('prog_bots') || '[]');
-    for (const item of data) {
-      if (!item.name) { result.errors.push(`Bot sans nom ignoré`); continue; }
-      const existing = current.findIndex(b => b.id === item.id || b.name === item.name);
-      if (existing >= 0) {
-        current[existing] = { ...current[existing], ...item };
-        result.detail = (result.detail || '') + `\n• Mise à jour bot: "${item.name}"`;
-      } else {
-        current.push({ ...item, id: item.id || Date.now() + result.applied });
-        result.detail = (result.detail || '') + `\n• Créé bot: "${item.name}"`;
-      }
-      result.applied++;
-    }
-    await db.setSetting('prog_bots', JSON.stringify(current));
-    return result;
-  }
-
-  // ── Canaux Telegram personnalisés (table telegram_config) ────────────
-  if (type === 'telegram_channels') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de canaux Telegram'); return result; }
-    for (const item of data) {
-      if (!item.channel_id) { result.errors.push(`Canal sans channel_id ignoré`); continue; }
-      await db.upsertTelegramConfig({ channel_id: item.channel_id, channel_name: item.channel_name || item.channel_id });
-      result.applied++;
-      result.detail = (result.detail || '') + `\n• Canal: ${item.channel_name || item.channel_id}`;
-    }
-    return result;
-  }
-
-  // ── Messages utilisateurs in-app ───────────────────────────────────
-  if (type === 'user_messages') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de messages'); return result; }
-    await db.setSetting('user_messages', JSON.stringify(data));
-    result.applied = data.length;
-    result.detail = `${data.length} message(s) utilisateurs restaurés`;
-    return result;
-  }
-
-  // ── Message de diffusion (broadcast) ─────────────────────────────
-  if (type === 'broadcast_message') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { text, enabled, targets }'); return result; }
-    await db.setSetting('broadcast_message', JSON.stringify(data));
-    result.applied = 1;
-    result.detail = `Message broadcast restauré (enabled: ${data.enabled})`;
-    return result;
-  }
-
-  // ── Config bot de chat Telegram ───────────────────────────────────
-  if (type === 'telegram_chat') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { bot_token, channel_id }'); return result; }
-    await db.setSetting('telegram_chat_config', JSON.stringify(data));
-    result.applied = 1;
-    result.detail = `Config chat Telegram restaurée (channel: ${data.channel_id || '?'})`;
-    return result;
-  }
-
-  // ── Vidéos tutoriels ──────────────────────────────────────────────
-  if (type === 'tutorial_videos') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet { video1, video2 }'); return result; }
-    await db.setSetting('tutorial_videos', JSON.stringify({ video1: data.video1 || null, video2: data.video2 || null }));
-    result.applied = 1;
-    result.detail = `Vidéos tutoriels restaurées`;
-    return result;
-  }
-
-  // ── Bilan dernière journée ────────────────────────────────────────
-  if (type === 'bilan_last') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet bilan'); return result; }
-    await db.setSetting('bilan_last', JSON.stringify(data));
-    result.applied = 1;
-    result.detail = `Bilan restauré (date: ${data.date || '?'})`;
-    return result;
-  }
-
-  // ── État moteur (compteurs d'absences) ────────────────────────────
-  if (type === 'engine_absences') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet absences'); return result; }
-    await db.setSetting('engine_absences', JSON.stringify(data));
-    result.applied = 1;
-    result.detail = `Compteurs d'absences restaurés`;
-    return result;
-  }
-
-  // ── Paramètres globaux bruts ──────────────────────────────────────
-  if (type === 'raw_settings') {
-    if (!data || typeof data !== 'object') { result.errors.push('data doit être un objet clé→valeur'); return result; }
-    const allowed = [
-      'max_rattrapage', 'tg_msg_format',
-      'render_external_url', 'render_db_url', 'render_api_key', 'render_service_id',
-      'bot_token', 'bot_admin_tg_id',
-      'site_url', 'admin_signature', 'strategy_promo_config',
-    ];
-    for (const [key, val] of Object.entries(data)) {
-      if (!allowed.includes(key)) { result.errors.push(`Paramètre "${key}" non autorisé (valides: ${allowed.join(', ')})`); continue; }
-      if (val !== null && val !== undefined) {
-        const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
-        await db.setSetting(key, strVal);
-        result.applied++;
-        const masked = key.includes('token') || key.includes('url') || key.includes('key') ? '***' : strVal;
-        result.detail = (result.detail || '') + `\n• ${key} = ${masked}`;
-      }
-    }
-    return result;
-  }
-
-  // ── Import des licences ───────────────────────────────────────────────────
-  if (type === 'licenses') {
-    if (!Array.isArray(data)) { result.errors.push('data doit être un tableau de licences'); return result; }
-    for (const lic of data) {
-      if (!lic.license_key) { result.errors.push('Licence sans license_key ignorée'); continue; }
-      try {
-        await db.upsertLicense({
-          purchase_id:   lic.purchase_id   || null,
-          user_id:       lic.user_id       || null,
-          strategy_id:   lic.strategy_id   || '',
-          strategy_name: lic.strategy_name || '',
-          license_key:   lic.license_key,
-          status:        lic.status        || 'active',
-          admin_note:    lic.admin_note    || null,
-          deploy_count:  lic.deploy_count  || 0,
-          deploy_ip:     lic.deploy_ip     || null,
-        });
-        result.applied++;
-      } catch (e) {
-        result.errors.push(`Licence ${lic.license_key}: ${e.message}`);
-      }
-    }
-    result.type   = 'licenses';
-    result.detail = `${result.applied} licence(s) importée(s)`;
-    return result;
-  }
-
-  // ── Import d'un export complet (full_config v3.0) ─────────────────
-  if (type === 'full_config') {
-    const blocks = [];
-    if (Array.isArray(data.strategies)        && data.strategies.length)
-      blocks.push({ type: 'strategies',        data: data.strategies });
-    if (Array.isArray(data.sequences)          && data.sequences.length)
-      blocks.push({ type: 'sequences',         data: data.sequences });
-    if (Array.isArray(data.announcements)      && data.announcements.length)
-      blocks.push({ type: 'announcements',     data: data.announcements });
-    if (Array.isArray(data.prog_ai_keys)       && data.prog_ai_keys.length)
-      blocks.push({ type: 'prog_ai_keys',      data: data.prog_ai_keys });
-    if (Array.isArray(data.prog_bots)          && data.prog_bots.length)
-      blocks.push({ type: 'prog_bots',         data: data.prog_bots });
-    if (Array.isArray(data.telegram_channels)  && data.telegram_channels.length)
-      blocks.push({ type: 'telegram_channels', data: data.telegram_channels });
-    if (Array.isArray(data.user_messages)      && data.user_messages.length)
-      blocks.push({ type: 'user_messages',     data: data.user_messages });
-    if (data.default_tg && Object.keys(data.default_tg).length)
-      blocks.push({ type: 'default_tg',        data: data.default_tg });
-    if (data.telegram_chat && data.telegram_chat.bot_token)
-      blocks.push({ type: 'telegram_chat',     data: data.telegram_chat });
-    if (data.broadcast_message && data.broadcast_message.text)
-      blocks.push({ type: 'broadcast_message', data: data.broadcast_message });
-    if (data.ui?.tutorial_videos)
-      blocks.push({ type: 'tutorial_videos',   data: data.ui.tutorial_videos });
-    if (data.ui?.custom_css)
-      blocks.push({ type: 'css',               data: { css: data.ui.custom_css } });
-    if (data.ui?.ui_styles && Object.keys(data.ui.ui_styles).length)
-      blocks.push({ type: 'styles',            data: data.ui.ui_styles });
-    if (data.settings?.tg_msg_format)
-      blocks.push({ type: 'format',            data: { format_id: data.settings.tg_msg_format } });
-    // Tous les paramètres bruts (URLs, tokens, liens, clés Render...)
-    const rawKeys = [
-      'max_rattrapage', 'tg_msg_format',
-      'render_external_url', 'render_db_url', 'render_api_key', 'render_service_id',
-      'bot_token', 'bot_admin_tg_id',
-      'site_url', 'admin_signature', 'strategy_promo_config',
-    ];
-    const rawData = {};
-    for (const k of rawKeys) {
-      if (data.settings?.[k] != null) rawData[k] = data.settings[k];
-    }
-    if (Object.keys(rawData).length) blocks.push({ type: 'raw_settings', data: rawData });
-    // État moteur & bilan
-    if (data.bilan_last      && typeof data.bilan_last === 'object')
-      blocks.push({ type: 'bilan_last',      data: data.bilan_last });
-    if (data.engine_absences && typeof data.engine_absences === 'object')
-      blocks.push({ type: 'engine_absences', data: data.engine_absences });
-    // Licences
-    if (Array.isArray(data.licenses) && data.licenses.length)
-      blocks.push({ type: 'licenses', data: data.licenses });
-
-    const subResults = [];
-    for (const b of blocks) subResults.push(await applyUpdateBlock(b.type, b.data));
-    result.applied = subResults.reduce((s, r) => s + r.applied, 0);
-    result.errors  = subResults.flatMap(r => r.errors);
-    result.detail  = subResults.map(r => `[${r.type}] ${r.detail || ''}`.trim()).filter(Boolean).join('\n');
-    return result;
-  }
-
-  result.errors.push(`Type "${type}" inconnu. Types valides: format, strategies, sequences, styles, code, announcements, default_tg, prog_ai_keys, prog_bots, telegram_channels, user_messages, broadcast_message, telegram_chat, tutorial_videos, bilan_last, engine_absences, raw_settings, full_config, multi`);
+  result.errors.push(`Type "${type}" inconnu. Types valides: format, strategies, sequences, styles, code, multi`);
   return result;
 }
 
@@ -2192,189 +1052,39 @@ router.post('/apply-update', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Liste des fichiers JSON de mise à jour stockés sur le serveur ────
-const EXCLUDE_JSON_FILES = new Set(['package.json', 'package-lock.json', 'railway.json', 'tsconfig.json', 'jsconfig.json']);
-router.get('/server-update-files', requireAdmin, (req, res) => {
-  try {
-    const rootDir = path.join(__dirname);
-    const entries = fs.readdirSync(rootDir);
-    const files = entries
-      .filter(f => f.endsWith('.json') && !EXCLUDE_JSON_FILES.has(f))
-      .map(f => {
-        try {
-          const stat = fs.statSync(path.join(rootDir, f));
-          let preview = null;
-          try {
-            const raw = fs.readFileSync(path.join(rootDir, f), 'utf8');
-            const parsed = JSON.parse(raw);
-            preview = parsed?._meta?.description || parsed?._meta?.version
-              ? `v${parsed._meta.version || '?'} — ${parsed._meta.description || ''}`
-              : (parsed?.type ? `Type: ${parsed.type}` : null);
-          } catch { preview = null; }
-          return { name: f, size: stat.size, mtime: stat.mtime.toISOString(), preview };
-        } catch { return null; }
-      })
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    res.json({ files });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Appliquer un fichier JSON de mise à jour depuis le serveur ────────
-router.post('/apply-server-update', requireAdmin, async (req, res) => {
-  try {
-    const { filename } = req.body;
-    if (!filename || typeof filename !== 'string') return res.status(400).json({ error: 'Nom de fichier requis' });
-    // Sécurité : interdire les traversées de répertoire
-    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
-      return res.status(400).json({ error: 'Nom de fichier invalide' });
-    }
-    if (EXCLUDE_JSON_FILES.has(filename)) return res.status(400).json({ error: 'Ce fichier ne peut pas être appliqué' });
-    const filePath = path.join(__dirname, filename);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: `Fichier "${filename}" introuvable` });
-
-    let parsed;
-    try {
-      parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    } catch { return res.status(400).json({ error: 'Fichier JSON invalide — vérifiez la syntaxe' }); }
-
-    const { type, data } = parsed;
-    if (!type) return res.status(400).json({ error: 'Champ "type" manquant dans le fichier' });
-
-    const results = [];
-    if (type === 'multi') {
-      if (!Array.isArray(data)) return res.status(400).json({ error: 'Pour type "multi", data doit être un tableau' });
-      for (const block of data) {
-        if (!block.type || !block.data) { results.push({ type: block.type || '?', applied: 0, errors: ['Bloc invalide'] }); continue; }
-        results.push(await applyUpdateBlock(block.type, block.data));
-      }
-    } else {
-      results.push(await applyUpdateBlock(type, data));
-    }
-
-    const totalApplied = results.reduce((s, r) => s + r.applied, 0);
-    const allErrors    = results.flatMap(r => r.errors);
-    res.json({ ok: allErrors.length === 0 || totalApplied > 0, results, total_applied: totalApplied, errors: allErrors, filename });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Export complet de la configuration du projet en JSON ────────────
 router.get('/export-config', requireAdmin, async (req, res) => {
   try {
-    // ── Stratégies & routes ────────────────────────────────────────────
-    const strategies       = await getStrategies();
-    const channels         = await db.getAllStrategyRoutes().catch(() => ({}));
-    const tgChannels       = await db.getTelegramConfigs(false).catch(() => []);
-
-    // ── Paramètres globaux ─────────────────────────────────────────────
-    const tgFormat         = await db.getSetting('tg_msg_format');
-    const maxRattrDB       = await db.getSetting('max_rattrapage');
-    const renderUrl        = await db.getSetting('render_external_url');
-    const renderDbUrl      = await db.getSetting('render_db_url');
-    const botToken         = await db.getSetting('bot_token');
-    const botAdminTgId     = await db.getSetting('bot_admin_tg_id');
-    const renderApiKey     = await db.getSetting('render_api_key');
-    const renderServiceId  = await db.getSetting('render_service_id');
-    const siteUrl          = await db.getSetting('site_url');
-    const adminSignature   = await db.getSetting('admin_signature');
-    const stratPromoConfig = await db.getSetting('strategy_promo_config');
-
-    // ── Telegram ───────────────────────────────────────────────────────
-    const defaultTg        = await db.getSetting('default_strategies_tg');
-    const announcements    = await db.getSetting('tg_announcements');
-    const tgChatConfig     = await db.getSetting('telegram_chat_config');
-
-    // ── UI ─────────────────────────────────────────────────────────────
-    const customCss        = await db.getSetting('custom_css');
-    const uiStyles         = await db.getSetting('ui_styles');
-    const tutorialVideos   = await db.getSetting('tutorial_videos');
-
-    // ── Séquences & messages ───────────────────────────────────────────
-    const sequences        = await db.getSetting('loss_sequences');
-    const userMessages     = await db.getSetting('user_messages');
-    const broadcastMessage = await db.getSetting('broadcast_message');
-
-    // ── Espace Programmation ───────────────────────────────────────────
-    const progAiKeys       = await db.getSetting('prog_ai_keys');
-    const progBots         = await db.getSetting('prog_bots');
-
-    // ── État moteur & bilan ────────────────────────────────────────────
-    const bilanLast        = await db.getSetting('bilan_last');
-    const engineAbsences   = await db.getSetting('engine_absences');
-
-    // ── Licences ───────────────────────────────────────────────────────
-    const licenses = await db.getLicenses().catch(() => []);
-
-    const safeParse = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
+    const strategies   = await getStrategies();
+    const tgFormat     = await db.getSetting('tg_msg_format');
+    const maxRattrDB   = await db.getSetting('max_rattrapage');
+    const renderUrl    = await db.getSetting('render_external_url');
+    const customCss    = await db.getSetting('custom_css');
+    const uiStyles     = await db.getSetting('ui_styles');
+    const sequences    = await db.getSetting('loss_sequences');
+    const defaultTg    = await db.getSetting('default_tg_channels');
+    const channels     = await db.getAllStrategyRoutes().catch(() => []);
 
     const payload = {
       _meta: {
-        version: '3.2',
+        version: '1.0',
         exported_at: new Date().toISOString(),
         project: 'Baccarat Pro',
-        description: 'Export COMPLET de la configuration + licences — réimportable via /admin/apply-update',
+        description: 'Export complet de la configuration — peut être réimporté via /admin/apply-update',
       },
-
-      // ── Stratégies ───────────────────────────────────────────────────
+      settings: {
+        tg_msg_format:       parseInt(tgFormat) || 1,
+        max_rattrapage:      parseInt(maxRattrDB) || 2,
+        render_external_url: renderUrl || null,
+      },
       strategies,
       channels,
-      telegram_channels: tgChannels,
-
-      // ── Paramètres (tous les liens/URLs/tokens) ───────────────────────
-      settings: {
-        tg_msg_format:        parseInt(tgFormat)  || 1,
-        max_rattrapage:       parseInt(maxRattrDB) || 2,
-        render_external_url:  renderUrl       || null,
-        render_db_url:        renderDbUrl     || null,
-        bot_token:            botToken        || null,
-        bot_admin_tg_id:      botAdminTgId   || null,
-        render_api_key:       renderApiKey   || null,
-        render_service_id:    renderServiceId || null,
-        site_url:             siteUrl        || null,
-        admin_signature:      adminSignature || null,
-        strategy_promo_config: safeParse(stratPromoConfig, null),
-      },
-
-      // ── Telegram ─────────────────────────────────────────────────────
-      default_tg:       safeParse(defaultTg,        {}),
-      announcements:    safeParse(announcements,     []),
-      telegram_chat:    safeParse(tgChatConfig,      {}),
-
-      // ── Séquences ────────────────────────────────────────────────────
-      sequences:        safeParse(sequences,         []),
-
-      // ── UI ───────────────────────────────────────────────────────────
       ui: {
-        custom_css:      customCss || '',
-        ui_styles:       safeParse(uiStyles,        {}),
-        tutorial_videos: safeParse(tutorialVideos,  { video1: null, video2: null }),
+        custom_css:  customCss  || '',
+        ui_styles:   uiStyles   ? JSON.parse(uiStyles)  : {},
       },
-
-      // ── Messages utilisateurs ─────────────────────────────────────────
-      user_messages:    safeParse(userMessages,      []),
-      broadcast_message: safeParse(broadcastMessage, null),
-
-      // ── Espace Programmation ─────────────────────────────────────────
-      prog_ai_keys: safeParse(progAiKeys, []),
-      prog_bots:    safeParse(progBots,   []),
-
-      // ── État moteur & bilan ───────────────────────────────────────────
-      bilan_last:       safeParse(bilanLast,       null),
-      engine_absences:  safeParse(engineAbsences,  null),
-
-      // ── Licences (strategy_licenses) ─────────────────────────────────
-      licenses: licenses.map(l => ({
-        license_key:   l.license_key,
-        strategy_id:   l.strategy_id,
-        strategy_name: l.strategy_name,
-        user_id:       l.user_id,
-        purchase_id:   l.purchase_id,
-        status:        l.status,
-        admin_note:    l.admin_note    || null,
-        deploy_count:  l.deploy_count  || 0,
-        deploy_ip:     l.deploy_ip     || null,
-        created_at:    l.created_at,
-      })),
+      sequences: sequences ? JSON.parse(sequences) : [],
+      default_tg: defaultTg ? JSON.parse(defaultTg) : {},
     };
 
     res.setHeader('Content-Type', 'application/json');
@@ -2505,14 +1215,14 @@ router.get('/modified-files', requireAdmin, (req, res) => {
 
 // ── MESSAGES REÇUS DES UTILISATEURS ────────────────────────────────
 
-router.get('/user-messages', requireSuperAdmin, async (req, res) => {
+router.get('/user-messages', requireAdmin, async (req, res) => {
   try {
     const raw = await db.getSetting('user_messages');
     res.json(raw ? JSON.parse(raw) : []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/user-messages/:id/read', requireSuperAdmin, async (req, res) => {
+router.post('/user-messages/:id/read', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const raw = await db.getSetting('user_messages');
@@ -2524,7 +1234,7 @@ router.post('/user-messages/:id/read', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/user-messages/:id/reply', requireSuperAdmin, async (req, res) => {
+router.post('/user-messages/:id/reply', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { text } = req.body;
@@ -2534,14 +1244,13 @@ router.post('/user-messages/:id/reply', requireSuperAdmin, async (req, res) => {
     const msg = messages.find(m => m.id === id);
     if (!msg) return res.status(404).json({ error: 'Message non trouvé' });
     msg.admin_reply = { text: String(text).trim().slice(0, 1000), date: new Date().toISOString() };
-    msg.replied_at = msg.admin_reply.date;
     msg.read = true;
     await db.setSetting('user_messages', JSON.stringify(messages));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/user-messages/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/user-messages/:id', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const raw = await db.getSetting('user_messages');
@@ -2551,7 +1260,7 @@ router.delete('/user-messages/:id', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/user-messages', requireSuperAdmin, async (req, res) => {
+router.delete('/user-messages', requireAdmin, async (req, res) => {
   try {
     await db.deleteSetting('user_messages');
     res.json({ ok: true });
@@ -2560,14 +1269,14 @@ router.delete('/user-messages', requireSuperAdmin, async (req, res) => {
 
 // ── MESSAGE BROADCAST (Accueil utilisateurs) ────────────────────────
 
-router.get('/broadcast-message', requireSuperAdmin, async (req, res) => {
+router.get('/broadcast-message', requireAdmin, async (req, res) => {
   try {
     const raw = await db.getSetting('broadcast_message');
     res.json(raw ? JSON.parse(raw) : { enabled: false, text: '', targets: ['pending', 'active', 'expired'] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/broadcast-message', requireSuperAdmin, async (req, res) => {
+router.post('/broadcast-message', requireAdmin, async (req, res) => {
   try {
     const { text, enabled, targets } = req.body;
     if (!text || !String(text).trim()) return res.status(400).json({ error: 'Message requis' });
@@ -2583,7 +1292,7 @@ router.post('/broadcast-message', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/broadcast-message', requireSuperAdmin, async (req, res) => {
+router.delete('/broadcast-message', requireAdmin, async (req, res) => {
   try {
     await db.deleteSetting('broadcast_message');
     res.json({ ok: true });
@@ -2592,7 +1301,7 @@ router.delete('/broadcast-message', requireSuperAdmin, async (req, res) => {
 
 // ── BASE EXTERNE RENDER ─────────────────────────────────────────────
 
-router.get('/render-db', requireSuperAdmin, async (req, res) => {
+router.get('/render-db', requireAdmin, async (req, res) => {
   try {
     const renderSync = require('./render-sync');
     const url = await db.getSetting('render_db_url');
@@ -2605,7 +1314,7 @@ router.get('/render-db', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db/test', requireSuperAdmin, async (req, res) => {
+router.post('/render-db/test', requireAdmin, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url || !url.trim()) return res.status(400).json({ error: 'URL manquante' });
@@ -2615,7 +1324,7 @@ router.post('/render-db/test', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db', requireSuperAdmin, async (req, res) => {
+router.post('/render-db', requireAdmin, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url || !url.trim()) return res.status(400).json({ error: 'URL manquante' });
@@ -2628,7 +1337,7 @@ router.post('/render-db', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/render-db', requireSuperAdmin, async (req, res) => {
+router.delete('/render-db', requireAdmin, async (req, res) => {
   try {
     await db.deleteSetting('render_db_url');
     const renderSync = require('./render-sync');
@@ -2637,7 +1346,7 @@ router.delete('/render-db', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
+router.post('/render-db/reset', requireAdmin, async (req, res) => {
   try {
     const renderSync = require('./render-sync');
     if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
@@ -2647,32 +1356,34 @@ router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
 });
 
 // ── Reset complet (retour usine) ─────────────────────────────────────────────
-// RÈGLE ABSOLUE : n'efface JAMAIS users, custom_strategies, promo_code,
-// telegram_config, bot_token, tg_msg_format, strategy_channel_routes.
-// Seules les prédictions stockées + leurs messages TG sont supprimés.
-router.post('/factory-reset', requireSuperAdmin, async (req, res) => {
+router.post('/factory-reset', requireAdmin, async (req, res) => {
   try {
     const pool = db.getPool ? db.getPool() : db.pool;
-    // 1. Prédictions uniquement (+ messages TG orphelins)
-    await pool.query(`DELETE FROM predictions`);
-    await pool.query(`DELETE FROM tg_pred_messages`);
-    // 2. Reset uniquement les compteurs de session (pas les configs permanentes)
-    const sessionKeys = ['engine_absences', 'bilan_last', 'broadcast_message'];
-    for (const key of sessionKeys) {
+    await pool.query(`TRUNCATE predictions, tg_pred_messages, strategy_channel_routes, user_channel_hidden, user_channel_visible, user_strategy_visible RESTART IDENTITY CASCADE`);
+    await pool.query(`DELETE FROM telegram_config`);
+    const settingsToReset = [
+      'custom_strategies', 'loss_sequences', 'relance_rules',
+      'max_rattrapage', 'tg_msg_format', 'default_strategies_tg',
+      'tg_announcements', 'telegram_chat_config', 'engine_absences',
+      'broadcast_message',
+    ];
+    for (const key of settingsToReset) {
       await pool.query(`DELETE FROM settings WHERE key = $1`, [key]);
     }
-    // 3. Reset mémoire moteur (sans toucher aux stratégies chargées)
     const engine = require('./engine');
-    if (engine.instance && engine.instance.fullReset) {
-      await engine.instance.fullReset().catch(() => {});
+    if (engine.instance) {
+      engine.instance.strategies = [];
+      engine.instance.relanceSequences = [];
+      engine.instance.relanceCondCounters = {};
+      engine.instance.predictions = {};
+      engine.instance.pendingPredictions = {};
+      if (engine.instance.counterState) {
+        engine.instance.counterState = { c1: {}, c2: {}, c3: {} };
+      }
     }
     _tgChat.messages = [];
     _tgChat.offset = 0;
-    res.json({
-      ok: true,
-      preserved: ['users', 'custom_strategies', 'promo_codes', 'telegram_config', 'bot_token', 'tg_msg_format', 'strategy_channel_routes'],
-      deleted: ['predictions', 'tg_pred_messages', 'engine_absences', 'bilan_last'],
-    });
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2719,10 +1430,7 @@ router.post('/telegram-chat/config', requireAdmin, async (req, res) => {
       if (!testData.ok) return res.status(400).json({ error: 'Token invalide : ' + (testData.description || 'erreur') });
       cfg.bot_username = testData.result?.username || '';
     }
-    const cfgStr = JSON.stringify(cfg);
-    await db.setSetting('telegram_chat_config', cfgStr);
-    // Sync vers la base Render
-    try { require('./render-sync').syncSetting('telegram_chat_config', cfgStr).catch(() => {}); } catch {}
+    await db.setSetting('telegram_chat_config', JSON.stringify(cfg));
     _tgChat.messages = [];
     _tgChat.offset   = 0;
     res.json({ ok: true, bot_username: cfg.bot_username });
@@ -2732,8 +1440,6 @@ router.post('/telegram-chat/config', requireAdmin, async (req, res) => {
 router.delete('/telegram-chat/config', requireAdmin, async (req, res) => {
   try {
     await db.setSetting('telegram_chat_config', '');
-    // Sync suppression vers la base Render
-    try { require('./render-sync').syncSetting('telegram_chat_config', '').catch(() => {}); } catch {}
     _tgChat.messages = [];
     _tgChat.offset   = 0;
     res.json({ ok: true });
@@ -2770,55 +1476,6 @@ router.post('/telegram-chat/send', requireAdmin, async (req, res) => {
       isBot: true,
       text: text.trim(),
       date: new Date().toISOString(),
-    });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Telegram Canal Direct — Envoi d'un média (image / vidéo / document) ──────
-// Accepte le fichier en base64 dans le JSON body (jusqu'à 50 MB).
-// file_data  : data-URL ou base64 brut
-// file_name  : nom du fichier (ex: photo.jpg)
-// file_type  : MIME type (image/jpeg, video/mp4, …)
-// caption    : légende optionnelle
-router.post('/telegram-chat/send-media', requireAdmin, async (req, res) => {
-  try {
-    const raw = await db.getSetting('telegram_chat_config');
-    const cfg = raw ? JSON.parse(raw) : {};
-    if (!cfg.bot_token || !cfg.channel_id)
-      return res.status(400).json({ error: 'Bot non configuré' });
-
-    const { file_data, file_name, file_type, caption } = req.body;
-    if (!file_data) return res.status(400).json({ error: 'Fichier manquant' });
-
-    const base64Raw = file_data.includes(',') ? file_data.split(',')[1] : file_data;
-    const buffer    = Buffer.from(base64Raw, 'base64');
-    const mime      = file_type || 'application/octet-stream';
-    const fname     = file_name || 'file';
-
-    const TelegramBot = require('node-telegram-bot-api');
-    const bot = new TelegramBot(cfg.bot_token);
-    const opts = { caption: caption || undefined };
-    const fileOpts = { filename: fname, contentType: mime };
-
-    let result;
-    if (mime.startsWith('image/')) {
-      result = await bot.sendPhoto(cfg.channel_id, buffer, opts, fileOpts);
-    } else if (mime.startsWith('video/')) {
-      result = await bot.sendVideo(cfg.channel_id, buffer, opts, fileOpts);
-    } else {
-      result = await bot.sendDocument(cfg.channel_id, buffer, opts, fileOpts);
-    }
-
-    const preview = mime.startsWith('image/') ? '🖼 Image' : mime.startsWith('video/') ? '🎬 Vidéo' : '📎 Fichier';
-    _tgChat.messages.push({
-      id: result?.message_id || Date.now(),
-      from: 'Vous (admin)',
-      isBot: true,
-      text: caption ? `${preview} · ${caption}` : `${preview} · ${fname}`,
-      date: new Date().toISOString(),
-      isMedia: true,
-      mediaType: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'document',
     });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2911,2616 +1568,5 @@ router.post('/strategies/:id/aleatoire-predict', requireAdmin, async (req, res) 
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-// ── MISE À JOUR PAR BASE DE DONNÉES ─────────────────────────────────
-
-const EXCLUDED_DIRS  = ['node_modules', '.git', '.local', '.cache', '.npm', '.upm'];
-const EXCLUDED_FILES = ['.env', 'package-lock.json'];
-const INCLUDED_EXTS  = ['.js', '.jsx', '.ts', '.tsx', '.json', '.css', '.html', '.md', '.txt', '.sh', '.cjs', '.mjs'];
-const MAX_FILE_SIZE  = 2 * 1024 * 1024; // 2 Mo max par fichier
-
-function scanProjectFiles(dir, base) {
-  const results = [];
-  let entries;
-  try { entries = fs.readdirSync(dir); } catch { return results; }
-  for (const entry of entries) {
-    if (EXCLUDED_DIRS.includes(entry)) continue;
-    const fullPath = path.join(dir, entry);
-    const relPath  = base ? `${base}/${entry}` : entry;
-    let stat;
-    try { stat = fs.statSync(fullPath); } catch { continue; }
-    if (stat.isDirectory()) {
-      results.push(...scanProjectFiles(fullPath, relPath));
-    } else if (stat.isFile()) {
-      if (EXCLUDED_FILES.includes(entry)) continue;
-      const ext = path.extname(entry).toLowerCase();
-      if (!INCLUDED_EXTS.includes(ext)) continue;
-      if (stat.size > MAX_FILE_SIZE) continue;
-      results.push({ fullPath, relPath, size: stat.size });
-    }
-  }
-  return results;
-}
-
-// Scan dist/ (inclut .js .css .html .map + pas de limite d'ext)
-function scanDistFiles(dir, base) {
-  const results = [];
-  let entries;
-  try { entries = fs.readdirSync(dir); } catch { return results; }
-  const DIST_EXTS = ['.js', '.css', '.html', '.map', '.ico', '.svg', '.png', '.woff', '.woff2', '.ttf'];
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry);
-    const relPath  = base ? `${base}/${entry}` : entry;
-    let stat;
-    try { stat = fs.statSync(fullPath); } catch { continue; }
-    if (stat.isDirectory()) {
-      results.push(...scanDistFiles(fullPath, relPath));
-    } else if (stat.isFile()) {
-      const ext = path.extname(entry).toLowerCase();
-      if (!DIST_EXTS.includes(ext)) continue;
-      if (stat.size > 5 * 1024 * 1024) continue; // 5 Mo max
-      results.push({ fullPath, relPath, size: stat.size });
-    }
-  }
-  return results;
-}
-
-const DEPLOY_README = `# Baccarat Pro — Guide de déploiement
-
-## Prérequis
-- Node.js 18+
-- PostgreSQL 14+
-
-## Variables d'environnement requises (.env)
-Créez un fichier \`.env\` à la racine avec les variables suivantes :
-\`\`\`
-DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DBNAME
-SESSION_SECRET=votre_secret_session_ici
-PORT=5000
-NODE_ENV=production
-\`\`\`
-
-## Installation
-\`\`\`bash
-npm install
-node index.js
-\`\`\`
-
-Le frontend est déjà compilé dans dist/.
-Le serveur Express sert automatiquement les fichiers statiques depuis dist/.
-
-## Telegram Bot
-Chaque canal Telegram (token + chat_id) est configuré dans l'interface Admin.
-Le bot fonctionne en mode polling — aucune configuration webhook nécessaire.
-
-## Notes importantes
-- Ne pas inclure .env dans git/zip
-- La base de données doit être accessible depuis le serveur
-- Port par défaut : 5000 (configurable via PORT)
-`;
-
-// Téléchargement du ZIP de déploiement (fichiers actuels sur disque)
-router.get('/project-backup/zip', requireAdmin, (req, res) => {
-  try {
-    const archiver = require('archiver');
-    const root     = path.join(__dirname);
-    const files    = scanProjectFiles(root, '');
-    const distDir  = path.join(root, 'dist');
-    const distFiles = fs.existsSync(distDir) ? scanDistFiles(distDir, 'dist') : [];
-    const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-complet-${date}.zip`;
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    archive.on('error', (err) => { console.error('[ZIP]', err.message); res.end(); });
-    archive.pipe(res);
-
-    for (const f of files) {
-      archive.file(f.fullPath, { name: f.relPath });
-    }
-    // Inclure les fichiers compilés du frontend
-    for (const f of distFiles) {
-      archive.file(f.fullPath, { name: f.relPath });
-    }
-    // Ajouter le guide de déploiement
-    archive.append(DEPLOY_README, { name: 'DEPLOY.md' });
-
-    archive.finalize();
-    console.log(`[ZIP] Archive générée : ${files.length} src + ${distFiles.length} dist → ${filename}`);
-  } catch (e) {
-    console.error('[ZIP] Erreur:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── ZIP de déploiement Render.com — léger, prêt à uploader (< 5 Mo) ──────────
-// Inclut uniquement ce qui est nécessaire à l'exécution : sources serveur,
-// dist/ compilé, package.json (sans lock), render.yaml + DEPLOY.md.
-// Exclut : node_modules, .git, .env, attached_assets, *.map, logs, backups…
-const RENDER_INCLUDE_ROOT_FILES = new Set([
-  'package.json', 'index.js', 'admin.js', 'auth.js', 'engine.js', 'db.js',
-  'games.js', 'render-sync.js', 'tg-history.js', 'tg-direct.js',
-  'predictions.js', 'broadcast.js', 'render.yaml', '.nvmrc',
-  'comptages.js', 'telegram-service.js', 'telegram-route.js', 'bilan.js',
-  'bot-host.js', 'payment-route.js', 'shop.js', 'license-route.js',
-  'zip-generator.js', 'prog.js', 'annonce-sequence.js', 'announcement-sender.js',
-  'cartes-store.js', 'live-broadcast.js', 'system-logs-route.js', 'jsondb.js',
-  'generate-doc.js', 'ine.js', 'ai-route.js',
-]);
-const RENDER_INCLUDE_DIRS = ['src', 'dist', 'public', 'scripts', 'middleware', 'utils', 'routes', 'lib'];
-const RENDER_EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', '.local', '.cache', '.npm', '.upm', '.config',
-  'attached_assets', 'screenshots', 'backups', 'tmp', 'logs', 'tests',
-  '__tests__', 'coverage', '.replit', '.workflows', 'workflow_history',
-]);
-const RENDER_EXCLUDE_PATTERNS = [
-  /\.env(\..*)?$/i, /\.log$/i, /\.tar\.gz$/i, /\.zip$/i, /\.map$/i,
-  /\.DS_Store$/i, /^\._/, /\.bak$/i, /\.swp$/i, /~$/,
-  // Images
-  /\.(png|jpg|jpeg|gif|webp|svg|ico|bmp|tiff|avif|raw|heic|psd)$/i,
-  // Vidéos & audio
-  /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|mp3|wav|ogg|aac|flac)$/i,
-  // Documents binaires
-  /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i,
-  // Polices
-  /\.(ttf|otf|woff|woff2|eot)$/i,
-];
-
-function _isExcludedRender(name) {
-  return RENDER_EXCLUDE_PATTERNS.some(rx => rx.test(name));
-}
-
-function scanRenderFiles(dir, base) {
-  const results = [];
-  let entries;
-  try { entries = fs.readdirSync(dir); } catch { return results; }
-  for (const entry of entries) {
-    if (RENDER_EXCLUDE_DIRS.has(entry)) continue;
-    if (_isExcludedRender(entry)) continue;
-    const fullPath = path.join(dir, entry);
-    const relPath  = base ? `${base}/${entry}` : entry;
-    let stat;
-    try { stat = fs.statSync(fullPath); } catch { continue; }
-    if (stat.isDirectory()) {
-      results.push(...scanRenderFiles(fullPath, relPath));
-    } else if (stat.isFile()) {
-      if (stat.size > 3 * 1024 * 1024) continue; // skip > 3 Mo (assets lourds)
-      results.push({ fullPath, relPath, size: stat.size });
-    }
-  }
-  return results;
-}
-
-const RENDER_YAML = `services:
-  - type: web
-    name: baccarat-pro
-    runtime: node
-    plan: free
-    buildCommand: npm install && npm run build
-    startCommand: node index.js
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 5000
-      - key: DATABASE_URL
-        sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-    healthCheckPath: /
-    autoDeploy: false
-`;
-
-const DEPLOY_RENDER_README = `# Baccarat Pro — Déploiement Render.com
-
-## 1. Créer une base PostgreSQL
-- Render Dashboard → New + → PostgreSQL → plan Free
-- Copier la chaîne de connexion **Internal Database URL**
-
-## 2. Créer le Web Service
-- New + → Web Service → Build and deploy from a Git repository (ou upload ZIP)
-- Runtime: **Node**
-- Build command: \`npm install && npm run build\`
-- Start command: \`node index.js\`
-
-## 3. Variables d'environnement (Settings → Environment)
-| Clé              | Valeur                                            |
-|------------------|---------------------------------------------------|
-| DATABASE_URL     | (Internal Database URL de l'étape 1)              |
-| SESSION_SECRET   | (chaîne aléatoire ≥ 32 caractères)                |
-| NODE_ENV         | production                                        |
-| PORT             | 5000                                              |
-
-## 4. Premier lancement
-- L'app initialise la base PostgreSQL automatiquement.
-- Connectez-vous avec le compte super admin **sossoukouam**.
-- Configurez vos canaux Telegram dans l'interface Admin.
-
-## Notes
-- Le frontend est déjà compilé dans \`dist/\` — le build Render ne refait que \`npm install\`.
-- Aucun fichier \`.env\` dans le ZIP : tout passe par les variables Render.
-- Les comptes Pro ont chacun leur propre bot Telegram (configurable dans l'onglet Config Pro).
-`;
-
-router.get('/project-backup/zip-render', requireAdmin, (req, res) => {
-  try {
-    const archiver = require('archiver');
-    const root     = path.join(__dirname);
-    const all      = scanRenderFiles(root, '');
-
-    // Filtrer : garder uniquement fichiers racine whitelistés OU fichiers dans dossiers autorisés
-    const files = all.filter(f => {
-      const segs = f.relPath.split('/');
-      if (segs.length === 1) return RENDER_INCLUDE_ROOT_FILES.has(segs[0]);
-      return RENDER_INCLUDE_DIRS.includes(segs[0]);
-    });
-
-    const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-render-${date}.zip`;
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const archive = archiver('zip', { zlib: { level: 9 } }); // compression max
-    archive.on('error', (err) => { console.error('[ZIP-RENDER]', err.message); res.end(); });
-    archive.pipe(res);
-
-    let totalBytes = 0;
-    for (const f of files) {
-      archive.file(f.fullPath, { name: f.relPath });
-      totalBytes += f.size;
-    }
-    archive.append(RENDER_YAML, { name: 'render.yaml' });
-    archive.append(DEPLOY_RENDER_README, { name: 'DEPLOY.md' });
-    // .nvmrc pour fixer la version Node sur Render
-    archive.append('20\n', { name: '.nvmrc' });
-
-    archive.finalize();
-    console.log(`[ZIP-RENDER] Archive Render générée : ${files.length} fichier(s), ${(totalBytes/1024).toFixed(0)} Ko sources → ${filename}`);
-  } catch (e) {
-    console.error('[ZIP-RENDER] Erreur:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── ZIP différentiel — uniquement les fichiers modifiés depuis un commit ──────
-router.get('/project-backup/zip-diff', requireAdmin, (req, res) => {
-  try {
-    const archiver   = require('archiver');
-    const { execSync } = require('child_process');
-    const root = path.join(__dirname);
-
-    // Commit de référence : "Add support for three new operational modes" (132d09e)
-    // On prend les fichiers modifiés entre ce commit et HEAD (git tracked)
-    const REF_COMMIT = req.query.since || '132d09e';
-    let changedFiles = [];
-    try {
-      const out = execSync(`git diff --name-only ${REF_COMMIT} HEAD`, { cwd: root, timeout: 10000 }).toString().trim();
-      changedFiles = out.split('\n').filter(Boolean);
-    } catch {
-      return res.status(500).json({ error: 'git diff échoué — vérifiez que le dépôt git est initialisé' });
-    }
-
-    if (!changedFiles.length) {
-      return res.status(400).json({ error: 'Aucun fichier modifié depuis ce commit' });
-    }
-
-    const date     = new Date().toISOString().slice(0, 10);
-    const filename = `baccarat-pro-diff-${date}.zip`;
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    archive.on('error', err => { console.error('[ZIP-DIFF]', err.message); res.end(); });
-    archive.pipe(res);
-
-    let included = 0;
-    for (const relFile of changedFiles) {
-      const fullPath = path.join(root, relFile);
-      if (!fs.existsSync(fullPath)) continue;
-      try {
-        const stat = fs.statSync(fullPath);
-        if (!stat.isFile() || stat.size > 5 * 1024 * 1024) continue;
-        archive.file(fullPath, { name: relFile });
-        included++;
-      } catch {}
-    }
-
-    // Inclure un manifeste
-    const manifest = `# Baccarat Pro — Mise à jour différentielle ${date}
-# Fichiers modifiés depuis : ${REF_COMMIT}
-# ${included} fichier(s) inclus
-
-${changedFiles.filter(f => {
-  const fp = path.join(root, f);
-  return fs.existsSync(fp);
-}).join('\n')}
-`;
-    archive.append(manifest, { name: 'UPDATE_MANIFEST.txt' });
-    archive.finalize();
-    console.log(`[ZIP-DIFF] Archive diff générée : ${included} fichiers depuis ${REF_COMMIT} → ${filename}`);
-  } catch (e) {
-    console.error('[ZIP-DIFF] Erreur:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.post('/project-backup', requireAdmin, async (req, res) => {
-  try {
-    const root  = path.join(__dirname);
-    const files = scanProjectFiles(root, '');
-    let saved = 0, errors = 0;
-    for (const f of files) {
-      try {
-        const content = fs.readFileSync(f.fullPath, 'utf8');
-        await db.upsertProjectFile(f.relPath, content, false);
-        saved++;
-      } catch { errors++; }
-    }
-    res.json({ ok: true, saved, errors, total: files.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Sauvegarde uniquement les fichiers modifiés (comparaison taille + mtime vs DB)
-router.post('/project-backup/diff', requireAdmin, async (req, res) => {
-  try {
-    const root    = path.join(__dirname);
-    const files   = scanProjectFiles(root, '');
-    const dbMeta  = await db.getProjectFileMeta(); // { relPath → { size_bytes, updated_at } }
-
-    let saved = 0, skipped = 0, added = 0, errors = 0;
-    const changed = [];
-
-    for (const f of files) {
-      try {
-        const stat    = fs.statSync(f.fullPath);
-        const diskSize = stat.size;
-        const diskMtime = stat.mtimeMs;
-        const meta    = dbMeta[f.relPath];
-
-        const isNew      = !meta;
-        const sizeChanged = meta && meta.size_bytes !== diskSize;
-        const newer       = meta && meta.updated_at && diskMtime > new Date(meta.updated_at).getTime();
-
-        if (isNew || sizeChanged || newer) {
-          const content = fs.readFileSync(f.fullPath, 'utf8');
-          await db.upsertProjectFile(f.relPath, content, false);
-          changed.push(f.relPath);
-          if (isNew) added++; else saved++;
-        } else {
-          skipped++;
-        }
-      } catch { errors++; }
-    }
-
-    res.json({ ok: true, saved: saved + added, added, updated: saved, skipped, errors, total: files.length, changed });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.get('/project-backup/list', requireAdmin, async (req, res) => {
-  try {
-    const files = await db.getAllProjectFiles();
-    const summary = files.map(f => ({
-      file_path: f.file_path,
-      size_bytes: f.size_bytes,
-      updated_at: f.updated_at,
-    }));
-    // Date de la dernière sauvegarde = max updated_at parmi tous les fichiers
-    const lastSaved = summary.reduce((max, f) => {
-      if (!f.updated_at) return max;
-      return (!max || new Date(f.updated_at) > new Date(max)) ? f.updated_at : max;
-    }, null);
-    res.json({ files: summary, total: summary.length, last_saved: lastSaved });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/project-backup', requireAdmin, async (req, res) => {
-  try {
-    const count = await db.clearProjectFiles();
-    res.json({ ok: true, deleted: count });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Récupérer le journal des déploiements
-router.get('/deploy-logs', requireSuperAdmin, async (req, res) => {
-  try {
-    const logs = await db.getDeployLogs(30);
-    res.json({ ok: true, logs });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/project-install', requireAdmin, async (req, res) => {
-  const startedAt = Date.now();
-  const os = require('os');
-  const IS_RENDER_ENV = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
-
-  // Créer le log de déploiement immédiatement en base
-  let deployLogId = null;
-  try {
-    deployLogId = await db.createDeployLog({
-      source:   IS_RENDER_ENV ? 'render' : 'manual',
-      hostname: os.hostname(),
-      env:      process.env.NODE_ENV || 'development',
-    });
-    console.log(`[Install] 📋 Log de déploiement créé → id=${deployLogId}`);
-  } catch (e) {
-    console.error('[Install] Impossible de créer le log de déploiement:', e.message);
-  }
-
-  try {
-    const files = await db.getAllProjectFiles();
-    if (!files || files.length === 0) {
-      await db.updateDeployLog(deployLogId, { status: 'error', log_text: 'Aucun fichier en base', finished_at: new Date(), duration_ms: Date.now() - startedAt });
-      return res.status(400).json({ error: 'Aucun fichier sauvegardé dans la base de données.' });
-    }
-    const root = path.join(__dirname);
-    let written = 0, errors = 0;
-    const log = [];
-
-    for (const f of files) {
-      try {
-        const dest = path.join(root, f.file_path);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, f.content, 'utf8');
-        written++;
-        log.push(`✅ ${f.file_path}`);
-      } catch (e) {
-        errors++;
-        log.push(`❌ ${f.file_path}: ${e.message}`);
-      }
-    }
-
-    // Mise à jour intermédiaire en base — fichiers écrits
-    await db.updateDeployLog(deployLogId, {
-      files_written: written,
-      files_errors:  errors,
-      status:        'installing',
-      log_text:      log.join('\n'),
-    }).catch(() => {});
-
-    res.json({ ok: true, written, errors, log, deploy_log_id: deployLogId });
-
-    // Post-install : npm install si besoin + rebuild frontend + redémarrage
-    setTimeout(async () => {
-      let npmStatus   = 'skipped';
-      let buildStatus = 'skipped';
-      const postLog   = [...log];
-
-      try {
-        const pkgChanged    = files.some(f => f.file_path === 'package.json');
-        const noNodeModules = !fs.existsSync(path.join(root, 'node_modules', '.package-lock.json')) &&
-                              !fs.existsSync(path.join(root, 'node_modules', 'express'));
-        if (pkgChanged || noNodeModules) {
-          console.log(`[Install] npm install (pkgChanged=${pkgChanged}, noNodeModules=${noNodeModules})...`);
-          postLog.push('--- npm install ---');
-          const npmCode = await new Promise((resolve) => {
-            const proc = spawn('npm', ['install', '--prefer-offline'], { cwd: root, stdio: 'inherit' });
-            proc.on('close', resolve);
-          });
-          npmStatus = npmCode === 0 ? 'success' : `failed(code=${npmCode})`;
-          postLog.push(`npm install: ${npmStatus}`);
-          console.log(`[Install] npm install → ${npmStatus}`);
-        } else {
-          npmStatus = 'skipped (node_modules déjà présent)';
-          postLog.push('npm install: skipped — node_modules déjà présent');
-          console.log('[Install] node_modules déjà présent — npm install ignoré');
-        }
-
-        // Compiler uniquement si dist/index.html n'a PAS été restauré depuis la DB
-        const distRestored = files.some(f => f.file_path === 'dist/index.html');
-        const hasSrc       = files.some(f => f.file_path.startsWith('src/'));
-        if (!distRestored && (hasSrc || pkgChanged)) {
-          console.log('[Install] dist/ absent de la DB — compilation frontend...');
-          postLog.push('--- npm run build ---');
-          const viteBin    = path.join(root, 'node_modules', '.bin', 'vite');
-          const buildSpawn = fs.existsSync(viteBin)
-            ? spawn(viteBin, ['build'], { cwd: root, stdio: 'inherit' })
-            : spawn('npm', ['run', 'build'], { cwd: root, stdio: 'inherit' });
-          const buildCode  = await new Promise((resolve) => buildSpawn.on('close', resolve));
-          buildStatus      = buildCode === 0 ? 'success' : `failed(code=${buildCode})`;
-          postLog.push(`npm run build: ${buildStatus}`);
-          console.log(`[Install] build → ${buildStatus}`);
-        } else if (distRestored) {
-          buildStatus = 'skipped (dist/ restauré depuis DB)';
-          postLog.push(`npm run build: skipped — dist/index.html déjà restauré`);
-          console.log('[Install] ✅ dist/ déjà restauré depuis la base — build ignoré');
-        }
-      } catch (e) {
-        console.error('[Install] Erreur post-install:', e.message);
-        postLog.push(`❌ Erreur post-install: ${e.message}`);
-        npmStatus = npmStatus === 'started' ? `error: ${e.message}` : npmStatus;
-      }
-
-      const finalStatus = errors === 0 ? 'success' : 'partial';
-      const durationMs  = Date.now() - startedAt;
-
-      // Sauvegarder le résultat final en base AVANT de redémarrer
-      try {
-        await db.updateDeployLog(deployLogId, {
-          files_written: written,
-          files_errors:  errors,
-          npm_install:   npmStatus,
-          build_status:  buildStatus,
-          status:        finalStatus,
-          log_text:      postLog.join('\n'),
-          duration_ms:   durationMs,
-          finished_at:   new Date(),
-        });
-        console.log(`[Install] ✅ Log de déploiement mis à jour → id=${deployLogId} status=${finalStatus}`);
-      } catch (e) {
-        console.error('[Install] Impossible de sauvegarder le log final:', e.message);
-      }
-
-      // Petit délai pour s'assurer que la transaction DB est commitée
-      await new Promise(r => setTimeout(r, 800));
-      console.log('[Install] Redémarrage du serveur (exit 1 → Render redémarre automatiquement)...');
-      process.exit(1); // code 1 = Render redémarre le service à coup sûr
-    }, 800);
-  } catch (e) {
-    await db.updateDeployLog(deployLogId, { status: 'error', log_text: e.message, finished_at: new Date(), duration_ms: Date.now() - startedAt }).catch(() => {});
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Settings génériques (clé/valeur) ──────────────────────────────────────
-const ALLOWED_SETTINGS = ['render_service_id', 'render_api_key', 'render_base_url'];
-router.post('/settings', requireAdmin, async (req, res) => {
-  try {
-    const { key, value } = req.body;
-    if (!key || !ALLOWED_SETTINGS.includes(key)) return res.status(400).json({ error: 'Clé non autorisée : ' + key });
-    if (value === undefined || value === null || value === '') return res.status(400).json({ error: 'Valeur vide' });
-    await db.setSetting(key, String(value).trim());
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-router.get('/settings/:key', requireAdmin, async (req, res) => {
-  try {
-    if (!ALLOWED_SETTINGS.includes(req.params.key)) return res.status(400).json({ error: 'Clé non autorisée' });
-    const val = await db.getSetting(req.params.key);
-    res.json({ value: val || null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Arrêt serveur Replit ───────────────────────────────────────────────────
-router.post('/stop-server', requireAdmin, (req, res) => {
-  res.json({ ok: true, message: 'Serveur Replit en cours d\'arrêt...' });
-  setTimeout(() => { console.log('[Admin] Arrêt serveur demandé par admin'); process.exit(0); }, 600);
-});
-
-// ── Suspension service Render ──────────────────────────────────────────────
-router.post('/stop-render', requireAdmin, async (req, res) => {
-  try {
-    const serviceId = await db.getSetting('render_service_id');
-    const apiKey    = await db.getSetting('render_api_key');
-    if (!serviceId || !apiKey)
-      return res.status(400).json({ error: 'Configurez d\'abord le Render Service ID et la Render API Key dans Système.' });
-    const fetch = require('node-fetch');
-    const r = await fetch(`https://api.render.com/v1/services/${serviceId}/suspend`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    });
-    if (!r.ok) { const t = await r.text(); return res.status(500).json({ error: `Render API ${r.status}: ${t}` }); }
-    res.json({ ok: true, message: 'Service Render suspendu.' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ── HÉBERGEMENT BOTS TELEGRAM ─────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-const botHost = require('./bot-host');
-
-// Lister tous les bots hébergés
-router.get('/bots', requireSuperAdmin, async (req, res) => {
-  try { res.json(await botHost.getAll()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Créer un nouveau bot (avec ZIP en base64 — fichier principal détecté automatiquement)
-router.post('/bots', requireSuperAdmin, async (req, res) => {
-  try {
-    const { name, language, token, channel_id, zip_base64 } = req.body;
-    if (!name || !token) return res.status(400).json({ error: 'name et token requis' });
-    if (!zip_base64) return res.status(400).json({ error: 'zip_base64 requis' });
-    const bot = await botHost.createBot({ name, language, token, channel_id, zip_base64 });
-    res.json({ ok: true, bot });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// Mettre à jour le code d'un bot (nouveau ZIP)
-router.post('/bots/:id/upload', requireSuperAdmin, async (req, res) => {
-  try {
-    const { zip_base64 } = req.body;
-    if (!zip_base64) return res.status(400).json({ error: 'zip_base64 requis' });
-    await botHost.updateCode(parseInt(req.params.id), zip_base64);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Démarrer un bot
-router.post('/bots/:id/start', requireSuperAdmin, async (req, res) => {
-  try {
-    const result = await botHost.startBot(parseInt(req.params.id));
-    if (!result.ok) return res.status(400).json(result);
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Arrêter un bot
-router.post('/bots/:id/stop', requireSuperAdmin, async (req, res) => {
-  try {
-    const result = botHost.stopBot(parseInt(req.params.id));
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Supprimer un bot
-router.delete('/bots/:id', requireSuperAdmin, async (req, res) => {
-  try {
-    await botHost.deleteBot(parseInt(req.params.id));
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Logs d'un bot
-router.get('/bots/:id/logs', requireSuperAdmin, (req, res) => {
-  try { res.json(botHost.getLogs(parseInt(req.params.id))); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Valider un token Telegram
-router.post('/bots/validate-token', requireSuperAdmin, async (req, res) => {
-  try {
-    const result = await botHost.validateToken(req.body.token);
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── COMPTE PRO ─────────────────────────────────────────────────────
-
-// Activer / désactiver le statut Pro d'un utilisateur
-router.post('/users/:id/toggle-pro', requireSuperAdmin, async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const current = await db.getUser(id);
-    if (!current) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    if (current.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
-    const newVal = !current.is_pro;
-    const user = await db.updateUser(id, {
-      is_pro: newVal,
-      account_type: newVal ? 'pro' : (current.is_premium ? 'premium' : 'simple'),
-    });
-    console.log(`[Pro] Compte Pro ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
-    try {
-      const list = await getProStrategiesList();
-      await saveProStrategiesList(list);
-      require('./engine').reloadProStrategies().catch(() => {});
-    } catch (e) { console.warn('[Pro] reload après toggle:', e.message); }
-    res.json({ ok: true, is_pro: newVal, user });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/users/:id/toggle-premium', requireSuperAdmin, async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const current = await db.getUser(id);
-    if (!current) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-    if (current.is_admin) return res.status(400).json({ error: 'Impossible de modifier un admin' });
-    if (current.is_pro) return res.status(400).json({ error: 'Ce compte est PRO — désactivez PRO d\'abord' });
-    const newVal = !current.is_premium;
-    const user = await db.updateUser(id, {
-      is_premium: newVal,
-      account_type: newVal ? 'premium' : 'simple',
-    });
-    console.log(`[Premium] Compte Premium ${newVal ? 'ACTIVÉ' : 'DÉSACTIVÉ'} pour ${current.username} (id=${id})`);
-    res.json({ ok: true, is_premium: newVal, user });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Configuration Telegram pour comptes Pro (token + canal) — PAR UTILISATEUR
-// Clé DB : pro_telegram_config_{userId}
-async function getProTgConfigKey(ownerId) { return `pro_telegram_config_${ownerId}`; }
-
-// Migration legacy : ancienne clé globale `pro_telegram_config` → admin principal
-async function migrateLegacyProConfigOnce() {
-  if (global.__proConfigMigrated) return;
-  global.__proConfigMigrated = true;
-  try {
-    const legacy = await db.getSetting('pro_telegram_config').catch(() => null);
-    if (!legacy) return;
-    const cfg = JSON.parse(legacy);
-    if (!cfg.bot_token || !cfg.channel_id) return;
-    const allUsers = await db.getAllUsers().catch(() => []);
-    const adm = allUsers.find(u => u.is_admin && (u.admin_level || 2) === 1) || allUsers.find(u => u.is_admin);
-    if (!adm) return;
-    const newKey = `pro_telegram_config_${adm.id}`;
-    const exists = await db.getSetting(newKey).catch(() => null);
-    if (!exists) {
-      await db.setSetting(newKey, legacy);
-      console.log(`[Pro] 🔁 Migration legacy pro_telegram_config → ${newKey} (admin "${adm.username}")`);
-    }
-    await db.setSetting('pro_telegram_config', '');
-  } catch (e) { console.warn('[Pro] migrateLegacyProConfigOnce:', e.message); }
-}
-migrateLegacyProConfigOnce();
-
-router.get('/pro-config', requireProOrAdmin, async (req, res) => {
-  try {
-    const ownerId = effectiveOwnerId(req);
-    const raw = await db.getSetting(await getProTgConfigKey(ownerId));
-    const cfg = raw ? JSON.parse(raw) : { bot_token: '', channel_id: '' };
-    res.json({ ...cfg, owner_user_id: ownerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Liste des comptes Pro (pour le sélecteur admin)
-router.get('/pro-users', requireProOrAdmin, async (req, res) => {
-  try {
-    if (!req.session.isAdmin) {
-      // Pro : ne voit que lui-même
-      const u = await db.getUser(req.session.userId);
-      return res.json({ users: u ? [{ id: u.id, username: u.username, email: u.email }] : [] });
-    }
-    const all = await db.getAllUsers();
-    const users = all.filter(u => u.is_pro && !u.is_admin)
-                      .map(u => ({ id: u.id, username: u.username, email: u.email, is_approved: u.is_approved }));
-    res.json({ users });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/pro-config', requireProOrAdmin, async (req, res) => {
-  const { bot_token, channel_id, strategy_name } = req.body;
-  if (!bot_token || !channel_id)
-    return res.status(400).json({ error: 'Token et ID canal requis' });
-  try {
-    const stratName = (strategy_name || '').trim() || '—';
-
-    // Vérifier le token via l'API Telegram (timeout 8s, non-bloquant si échec)
-    let bot_username = '';
-    let tg_ok = false;
-    try {
-      const ctrl    = new AbortController();
-      const timer   = setTimeout(() => ctrl.abort(), 8000);
-      const tgRes   = await fetch(`https://api.telegram.org/bot${bot_token}/getMe`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      const tgData  = await tgRes.json();
-      if (tgData.ok) { bot_username = tgData.result.username || ''; tg_ok = true; }
-    } catch (_) { /* timeout ou réseau — on sauvegarde quand même */ }
-
-    // Sauvegarder la config dans la DB — clé par utilisateur
-    const ownerId = effectiveOwnerId(req);
-    await db.setSetting(await getProTgConfigKey(ownerId), JSON.stringify({ bot_token, channel_id, bot_username, strategy_name: stratName, owner_user_id: ownerId }));
-
-    // Inscrire le canal Pro dans la table telegram_config (Canaux du site)
-    try {
-      const ownerLabel = req.session.isAdmin && ownerId !== req.session.userId ? ` (uid ${ownerId})` : '';
-      const canalLabel = stratName !== '—' ? `🔷 ${stratName}${ownerLabel}` : `🔷 Pro — @${bot_username || 'bot'}${ownerLabel}`;
-      await db.upsertTelegramConfig({ channel_id, channel_name: canalLabel });
-    } catch (e) { console.warn('[Pro] Canal non ajouté aux Canaux:', e.message); }
-
-    // Message de bienvenue Telegram (non-bloquant, timeout 8s)
-    if (tg_ok) {
-      const welcomeMsg =
-`🔷 *Bot Pro connecté avec succès !*
-
-🤖 Bot : @${bot_username}
-📢 Canal : \`${channel_id}\`
-📛 Stratégie : *${stratName}*
-
-✅ Les prédictions Pro seront envoyées automatiquement dans ce canal.`;
-      try {
-        const ctrl2  = new AbortController();
-        const timer2 = setTimeout(() => ctrl2.abort(), 8000);
-        await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
-          method: 'POST', signal: ctrl2.signal,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: channel_id, text: welcomeMsg, parse_mode: 'Markdown' }),
-        });
-        clearTimeout(timer2);
-      } catch (_) {}
-    }
-
-    // Recharger le moteur Pro
-    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-
-    console.log(`[Pro][uid=${ownerId}] ✅ Config sauvegardée — Bot: @${bot_username || '?'} | Canal: ${channel_id} | Stratégie: ${stratName} | TG validé: ${tg_ok}`);
-    res.json({ ok: true, bot_username, strategy_name: stratName, tg_validated: tg_ok, owner_user_id: ownerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/pro-config', requireProOrAdmin, async (req, res) => {
-  try {
-    const ownerId = effectiveOwnerId(req);
-    await db.setSetting(await getProTgConfigKey(ownerId), '');
-    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    res.json({ ok: true, owner_user_id: ownerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/pro-config/test-message', requireProOrAdmin, async (req, res) => {
-  try {
-    const ownerId = effectiveOwnerId(req);
-    const raw = await db.getSetting(await getProTgConfigKey(ownerId));
-    if (!raw) return res.status(400).json({ error: 'Bot Pro non configuré' });
-    const cfg = JSON.parse(raw);
-    const { bot_token, channel_id, bot_username } = cfg;
-    if (!bot_token || !channel_id) return res.status(400).json({ error: 'Token ou canal manquant' });
-
-    const stratName = cfg.strategy_name || '—';
-
-    const msg =
-`📡 *Message test — Bot Pro*
-
-🤖 Bot : @${bot_username || '—'}
-📢 Canal : \`${channel_id}\`
-📛 Stratégie : *${stratName}*
-
-✅ Le bot Pro fonctionne correctement.`;
-
-    const r = await fetch(`https://api.telegram.org/bot${bot_token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: channel_id, text: msg, parse_mode: 'Markdown' }),
-    });
-    const d = await r.json();
-    if (!d.ok) return res.status(400).json({ error: d.description || 'Échec envoi Telegram' });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Fichier de stratégie Pro (.json chargé dans le moteur, .js/.py stockés comme référence)
-// ── Analyse complète d'un fichier de stratégie Pro ────────────────────────
-// Retourne { ok, errors[], warnings[], strategy_name, strategy_info{} }
-function analyzeStrategyFile(ext, content, filename) {
-  const errors = [];
-  const warnings = [];
-  let strategy_name = filename.replace(/\.[^.]+$/, '');
-  let strategy_info = {};
-
-  // ── JSON ──────────────────────────────────────────────────────────────────
-  if (ext === 'json') {
-    let parsed;
-    try { parsed = JSON.parse(content); }
-    catch (e) {
-      const m = e.message.match(/position (\d+)/);
-      const pos = m ? parseInt(m[1]) : null;
-      let lineNum = null, col = null;
-      if (pos !== null) {
-        const before = content.substring(0, pos);
-        lineNum = (before.match(/\n/g) || []).length + 1;
-        col = pos - before.lastIndexOf('\n');
-      }
-      errors.push({ type: 'SyntaxError', message: `JSON invalide : ${e.message}`, line: lineNum, col });
-      return { ok: false, errors, warnings, strategy_name, strategy_info };
-    }
-    // Tolérance : accepte aussi un objet stratégie unique (sans tableau "strategies")
-    let strategies = [];
-    if (Array.isArray(parsed.strategies))      strategies = parsed.strategies;
-    else if (parsed.strategy && typeof parsed.strategy === 'object') strategies = [parsed.strategy];
-    else if (parsed.name && (parsed.mode || parsed.hand || parsed.threshold !== undefined)) strategies = [parsed];
-
-    if (!strategies.length) {
-      errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
-    }
-    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','relance'];
-    for (const s of strategies) {
-      if (!s || typeof s !== 'object') {
-        errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });
-        continue;
-      }
-      if (!s.name) warnings.push({ type: 'MissingField', message: 'Champ "name" manquant — un nom par défaut sera utilisé' });
-      if (!s.mode) warnings.push({ type: 'MissingField', message: `Champ "mode" absent dans "${s.name || '?'}" — le moteur utilisera le mode par défaut` });
-      if (s.mode && !VALID_MODES.includes(s.mode)) {
-        warnings.push({ type: 'UnknownMode', message: `Mode "${s.mode}" non reconnu — modes standards : ${VALID_MODES.join(', ')}` });
-      }
-      if (s.threshold === undefined && s.mode && ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse'].includes(s.mode)) {
-        warnings.push({ type: 'MissingField', message: `Champ "threshold" absent dans "${s.name || '?'}" pour le mode "${s.mode}"` });
-      }
-      if (s.decalage === undefined && s.prediction_offset === undefined) {
-        warnings.push({ type: 'MissingField', message: `Champ "decalage" (ou "prediction_offset") absent dans "${s.name || '?'}" — 1 sera utilisé par défaut` });
-      }
-    }
-    if (errors.length === 0) {
-      strategy_name = parsed.name || strategies[0]?.name || strategy_name;
-      strategy_info = {
-        count: strategies.length,
-        names: strategies.map(s => s.name),
-        modes: [...new Set(strategies.map(s => s.mode))],
-        hands: [...new Set(strategies.map(s => s.hand || 'joueur'))],
-        engine_type: 'json',
-      };
-    }
-
-  // ── JavaScript ────────────────────────────────────────────────────────────
-  } else if (ext === 'js' || ext === 'mjs') {
-    const vm = require('vm');
-    // 1. Vérification syntaxique
-    try { new vm.Script(content, { filename }); }
-    catch (e) {
-      errors.push({ type: 'SyntaxError', message: e.message, line: e.lineNumber || null, col: e.columnNumber || null });
-      return { ok: false, errors, warnings, strategy_name, strategy_info };
-    }
-    // 2. Exécution en sandbox pour extraire les exports et valider l'API
-    let exported = {};
-    try {
-      const moduleObj = { exports: {} };
-      const logs = [];
-      const sandbox = {
-        module: moduleObj, exports: moduleObj.exports,
-        console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push('[ERR] '+a.join(' ')), warn: (...a) => logs.push('[WARN] '+a.join(' ')) },
-        setTimeout: () => {}, clearTimeout: () => {}, setInterval: () => {}, clearInterval: () => {},
-        Math, JSON, Date, parseInt, parseFloat, isNaN, isFinite, Array, Object, String, Number, Boolean, RegExp,
-        require: (m) => { throw new Error(`require("${m}") non autorisé dans un fichier stratégie Pro`); },
-      };
-      vm.createContext(sandbox);
-      vm.runInContext(content, sandbox, { timeout: 3000, filename });
-      exported = sandbox.module.exports;
-      if (logs.length) warnings.push({ type: 'ConsoleOutput', message: `Sortie console lors du chargement : ${logs.slice(0,3).join(' | ')}` });
-    } catch (e) {
-      errors.push({ type: 'RuntimeError', message: `Erreur à l'exécution : ${e.message}`, line: e.lineNumber || null });
-      return { ok: false, errors, warnings, strategy_name, strategy_info };
-    }
-    // 3. Validation de l'API exportée — accepte plusieurs styles courants
-    //    - module.exports = { processGame }
-    //    - module.exports = { process_game }  (style Python)
-    //    - module.exports = { predict } | { run } | { strategy }
-    //    - module.exports = function(...) { ... }   (fonction directe)
-    const ALT_FN_NAMES = ['processGame', 'process_game', 'predict', 'run', 'strategy', 'handler'];
-    let fnName = null;
-    let fn = null;
-    if (typeof exported === 'function') {
-      fn = exported; fnName = '(module.exports)';
-      warnings.push({ type: 'LegacyExport', message: 'module.exports est une fonction — elle sera traitée comme processGame()' });
-    } else if (typeof exported !== 'object' || exported === null) {
-      errors.push({ type: 'ExportError', message: 'Le fichier doit exporter un objet { processGame, ... } ou une fonction via module.exports' });
-    } else {
-      for (const n of ALT_FN_NAMES) {
-        if (typeof exported[n] === 'function') { fn = exported[n]; fnName = n; break; }
-      }
-      if (!fn) {
-        errors.push({ type: 'APIError', message: `Aucune fonction de prédiction trouvée dans module.exports — noms acceptés : ${ALT_FN_NAMES.join(', ')}` });
-      } else if (fnName !== 'processGame') {
-        warnings.push({ type: 'AltFunctionName', message: `Fonction "${fnName}" détectée — le moteur la reconnaîtra via alias (nom canonique : processGame)` });
-      }
-    }
-
-    // 4. Test d'appel à sec avec données fictives — accepte plusieurs formats de retour
-    if (fn) {
-      try {
-        const testState = {};
-        const testResult = fn.call(exported, 999, ['♦','♠'], ['♥'], 'Player', testState);
-        if (testResult !== null && testResult !== undefined) {
-          // Normalise plusieurs formats vers { suit }
-          let suit = null, altFormat = null;
-          if (typeof testResult === 'string') {
-            suit = testResult; altFormat = 'chaîne brute';
-          } else if (typeof testResult === 'object') {
-            if (testResult.suit)            suit = testResult.suit;
-            else if (testResult.predicted)  { suit = testResult.predicted; altFormat = 'predicted'; }
-            else if (testResult.prediction) { suit = testResult.prediction; altFormat = 'prediction'; }
-            else if (Array.isArray(testResult.suits) && testResult.suits.length) { suit = testResult.suits[0]; altFormat = 'suits[]'; }
-            else if (testResult.side)       altFormat = 'side (côté joueur/banquier — non consommé par le moteur)';
-            else if (testResult.value)      altFormat = 'value (valeur de carte — non consommé par le moteur)';
-          } else {
-            errors.push({ type: 'ReturnTypeError', message: `La fonction doit retourner un objet, une chaîne ou null (reçu : ${typeof testResult})` });
-          }
-          if (altFormat && !suit) {
-            warnings.push({ type: 'UnsupportedReturnFormat', message: `Format de retour "${altFormat}" détecté — le moteur n'utilisera que le champ "suit". Adaptez votre fonction pour retourner { suit: '♠|♥|♦|♣' }.` });
-          } else if (altFormat && suit) {
-            warnings.push({ type: 'AltReturnFormat', message: `Format de retour "${altFormat}" détecté — normalisé vers { suit: "${suit}" }` });
-          }
-          if (suit && !['♠','♥','♦','♣'].includes(suit)) {
-            warnings.push({ type: 'InvalidSuit', message: `Costume retourné "${suit}" invalide — attendu : ♠ ♥ ♦ ♣` });
-          }
-        }
-      } catch (e) {
-        warnings.push({ type: 'TestCallWarning', message: `Avertissement lors du test d'appel : ${e.message}` });
-      }
-    }
-    if (typeof exported === 'object' && exported !== null) {
-      if (!exported.name) warnings.push({ type: 'MissingField', message: 'Champ "name" (stratégie) absent — un nom par défaut sera utilisé' });
-      if (!exported.hand) warnings.push({ type: 'MissingField', message: 'Champ "hand" absent — "joueur" sera utilisé par défaut' });
-      if (exported.decalage === undefined) warnings.push({ type: 'MissingField', message: 'Champ "decalage" absent — 1 sera utilisé par défaut' });
-    }
-    // Vérifie que la logique de prédiction gère ses exceptions (try/catch)
-    if (fn && !/try\s*\{[\s\S]*?\}\s*catch/.test(content)) {
-      warnings.push({ type: 'NoExceptionHandling', message: 'Aucun bloc try/catch détecté dans le code — la logique de prédiction devrait gérer ses propres exceptions pour éviter d\'interrompre le moteur' });
-    }
-    if (errors.length === 0) {
-      const meta = (typeof exported === 'object' && exported !== null) ? exported : {};
-      strategy_name = meta.name || strategy_name;
-      strategy_info = {
-        count: 1, names: [strategy_name],
-        hand: meta.hand || 'joueur',
-        decalage: meta.decalage || 1,
-        max_rattrapage: meta.max_rattrapage || 3,
-        engine_type: 'script_js',
-        entry_fn: fnName || null,
-      };
-    }
-
-  // ── Python ────────────────────────────────────────────────────────────────
-  } else if (ext === 'py') {
-    const { spawnSync } = require('child_process');
-    const fs = require('fs');
-    const os = require('os');
-    const path = require('path');
-    const PYTHON = process.env.PYTHON_BIN || '/home/runner/workspace/.pythonlibs/bin/python3';
-    const tmpPath = path.join(os.tmpdir(), `pro_validate_${Date.now()}.py`);
-
-    try { fs.writeFileSync(tmpPath, content, 'utf8'); } catch (e) {
-      errors.push({ type: 'WriteError', message: `Impossible d'écrire le fichier temporaire : ${e.message}` });
-      return { ok: false, errors, warnings, strategy_name, strategy_info };
-    }
-
-    // 1. Vérification syntaxique via py_compile
-    const compileResult = spawnSync(PYTHON, ['-m', 'py_compile', tmpPath], { encoding: 'utf8', timeout: 8000 });
-    if (compileResult.error) {
-      errors.push({ type: 'SpawnError', message: `Python introuvable : ${compileResult.error.message}` });
-    } else if (compileResult.status !== 0) {
-      const stderr = (compileResult.stderr || '').trim();
-      // Extraire numéro de ligne depuis le message d'erreur Python
-      const lineMatch = stderr.match(/line (\d+)/);
-      const lineNum = lineMatch ? parseInt(lineMatch[1]) : null;
-      const cleanMsg = stderr.replace(tmpPath, filename).replace(/File ".*?", /, '').trim();
-      errors.push({ type: 'SyntaxError', message: cleanMsg || 'Erreur de syntaxe Python', line: lineNum });
-    }
-    try { fs.unlinkSync(tmpPath); } catch {}
-
-    if (errors.length > 0) return { ok: false, errors, warnings, strategy_name, strategy_info };
-
-    // 2. Test d'exécution avec données fictives (vérifie le protocole stdin/stdout)
-    const testInput = JSON.stringify({ game_number: 999, player_suits: ['♦','♠'], banker_suits: ['♥'], winner: 'Player', state: {} });
-    const tmpPath2 = path.join(os.tmpdir(), `pro_test_${Date.now()}.py`);
-    try { fs.writeFileSync(tmpPath2, content, 'utf8'); } catch {}
-    const runResult = spawnSync(PYTHON, [tmpPath2], { input: testInput, encoding: 'utf8', timeout: 8000 });
-    try { fs.unlinkSync(tmpPath2); } catch {}
-
-    // Détection souple de la fonction de prédiction — plusieurs noms acceptés
-    const PY_ALT_FN = ['process_game', 'processGame', 'predict', 'run', 'strategy', 'handler'];
-    const detectedFn = PY_ALT_FN.find(n => new RegExp(`^\\s*def\\s+${n}\\s*\\(`, 'm').test(content));
-    if (!detectedFn) {
-      warnings.push({ type: 'NoEntryFunction', message: `Aucune fonction de prédiction trouvée dans le code — noms acceptés : ${PY_ALT_FN.join(', ')}` });
-    } else if (detectedFn !== 'process_game') {
-      warnings.push({ type: 'AltFunctionName', message: `Fonction "${detectedFn}" détectée — le moteur la reconnaîtra via alias (nom canonique : process_game)` });
-    }
-
-    if (runResult.error) {
-      warnings.push({ type: 'TestRunWarning', message: `Impossible de tester le script : ${runResult.error.message}` });
-    } else if (runResult.status !== 0) {
-      const stderr = (runResult.stderr || '').trim();
-      if (stderr) {
-        const moduleMatch = stderr.match(/ModuleNotFoundError: No module named '([^']+)'/);
-        const nameErrMatch = stderr.match(/NameError:\s*(.+)/);
-        const typeErrMatch = stderr.match(/TypeError:\s*(.+)/);
-        const keyErrMatch  = stderr.match(/KeyError:\s*(.+)/);
-        if (moduleMatch) {
-          errors.push({ type: 'ImportError', message: `Import externe interdit : le module '${moduleMatch[1]}' n'existe pas dans l'environnement d'exécution. Le fichier Python doit être autonome — supprimez les "import" ou "from ... import" vers des modules externes et intégrez toute la logique directement dans le fichier.` });
-        } else if (nameErrMatch) {
-          errors.push({ type: 'NameError', message: `Nom non défini : ${nameErrMatch[1].trim()}` });
-        } else if (typeErrMatch) {
-          errors.push({ type: 'TypeError', message: `Erreur de type : ${typeErrMatch[1].trim()}` });
-        } else if (keyErrMatch) {
-          errors.push({ type: 'KeyError', message: `Clé manquante : ${keyErrMatch[1].trim()}` });
-        } else {
-          errors.push({ type: 'RuntimeError', message: `Erreur à l'exécution : ${stderr.substring(0, 400)}` });
-        }
-      }
-    } else {
-      const stdout = (runResult.stdout || '').trim();
-      if (!stdout) {
-        errors.push({ type: 'ProtocolError', message: 'Le script ne produit aucune sortie sur stdout — il doit imprimer : print(json.dumps({"result": ..., "state": ...}))' });
-      } else {
-        try {
-          const out = JSON.parse(stdout);
-          if (!('result' in out)) errors.push({ type: 'ProtocolError', message: 'Sortie JSON invalide — champ "result" manquant (attendu : {"result": {...}|null, "state": {...}})' });
-          if (!('state' in out)) warnings.push({ type: 'MissingState', message: 'Champ "state" absent de la sortie — l\'état ne persistera pas entre les jeux' });
-          const r = out.result;
-          if (r !== null && r !== undefined) {
-            // Formats de retour acceptés : {suit} | "♥" | {predicted} | {prediction} | {suits:[]} | {side} | {value}
-            let suit = null, altFormat = null;
-            if (typeof r === 'string') { suit = r; altFormat = 'chaîne brute'; }
-            else if (typeof r === 'object') {
-              if (r.suit)            suit = r.suit;
-              else if (r.predicted)  { suit = r.predicted; altFormat = 'predicted'; }
-              else if (r.prediction) { suit = r.prediction; altFormat = 'prediction'; }
-              else if (Array.isArray(r.suits) && r.suits.length) { suit = r.suits[0]; altFormat = 'suits[]'; }
-              else if (r.side)       altFormat = 'side (côté — non consommé par le moteur)';
-              else if (r.value)      altFormat = 'value (valeur de carte — non consommé par le moteur)';
-              else warnings.push({ type: 'NoSuit', message: 'Le champ "suit" est absent du résultat retourné (résultat ignoré si absent)' });
-            } else {
-              warnings.push({ type: 'ReturnTypeWarning', message: `Type de retour inattendu : ${typeof r}` });
-            }
-            if (altFormat && !suit) {
-              warnings.push({ type: 'UnsupportedReturnFormat', message: `Format de retour "${altFormat}" détecté — le moteur n'utilisera que le champ "suit". Adaptez votre script pour retourner {"suit": "♠|♥|♦|♣"}.` });
-            } else if (altFormat && suit) {
-              warnings.push({ type: 'AltReturnFormat', message: `Format de retour "${altFormat}" détecté — normalisé vers {"suit": "${suit}"}` });
-            }
-            if (suit && !['♠','♥','♦','♣'].includes(suit)) {
-              warnings.push({ type: 'InvalidSuit', message: `Costume "${suit}" invalide lors du test — attendu : ♠ ♥ ♦ ♣` });
-            }
-          }
-          if (runResult.stderr?.trim()) warnings.push({ type: 'StderrOutput', message: `Sortie stderr : ${runResult.stderr.trim().substring(0, 200)}` });
-        } catch (e) {
-          errors.push({ type: 'ProtocolError', message: `Sortie non-JSON : "${stdout.substring(0, 100)}"` });
-        }
-      }
-    }
-
-    // 3. Extraction du nom + vérification des métadonnées requises (stratégie, décalage, main)
-    const nameMatch = content.match(/(?:NAME|name|STRATEGY_NAME)\s*=\s*["']([^"']+)["']/);
-    if (nameMatch) strategy_name = nameMatch[1];
-    else {
-      const commentMatch = content.match(/^#\s*(?:name|stratégie|strategy)\s*[:\-]\s*(.+)/im);
-      if (commentMatch) strategy_name = commentMatch[1].trim();
-      else warnings.push({ type: 'MissingField', message: 'Variable "NAME" (stratégie) absente — un nom par défaut sera utilisé' });
-    }
-    if (!/^\s*DECALAGE\s*=/m.test(content)) {
-      warnings.push({ type: 'MissingField', message: 'Variable "DECALAGE" absente — 1 sera utilisé par défaut' });
-    }
-    if (!/^\s*HAND\s*=/m.test(content)) {
-      warnings.push({ type: 'MissingField', message: 'Variable "HAND" absente — "joueur" sera utilisé par défaut' });
-    }
-    // Vérifie la gestion des exceptions (try/except)
-    if (!/\btry\s*:[\s\S]*?\bexcept\b/.test(content)) {
-      warnings.push({ type: 'NoExceptionHandling', message: 'Aucun bloc try/except détecté — la logique de prédiction devrait gérer ses propres exceptions pour éviter d\'interrompre le moteur' });
-    }
-
-    if (errors.length === 0) {
-      strategy_info = { count: 1, names: [strategy_name], engine_type: 'script_py', entry_fn: detectedFn || null };
-    }
-
-  // ── JSX ───────────────────────────────────────────────────────────────────
-  } else if (ext === 'jsx' || ext === 'tsx') {
-    warnings.push({ type: 'NotExecutable', message: 'Les fichiers JSX/TSX sont stockés comme référence — le moteur ne peut pas les exécuter sans transpilation Babel' });
-    const nameMatch = content.match(/name\s*[:=]\s*["'`]([^"'`]+)["'`]/);
-    if (nameMatch) strategy_name = nameMatch[1];
-    strategy_info = { count: 0, names: [], engine_type: 'jsx_ref' };
-  } else {
-    errors.push({ type: 'UnsupportedType', message: `Format ".${ext}" non supporté. Formats exécutables : .json, .js, .py` });
-  }
-
-  return { ok: errors.length === 0, errors, warnings, strategy_name, strategy_info };
-}
-
-// ══════════════════════════════════════════════════════════════════
-// MULTI-STRATÉGIES PRO — jusqu'à 100 slots, isolés par owner_user_id
-// Stockage :
-//   pro_strategies_list      = JSON [{ id, owner_user_id, filename, ... }, ...]  (GLOBAL)
-//   pro_strategy_{id}_content = contenu brut (utf8)
-//   pro_strategy_{id}_meta    = meta complète (inclut owner_user_id)
-//   pro_strategy_ids          = JSON ["S5001", ...] (uniquement les actives & owner non désactivé)
-//   pro_telegram_config_{userId} = { bot_token, channel_id, ... } par compte Pro
-// IDs : 5001..5100, alloués globalement mais filtrés par owner pour Pro
-// ══════════════════════════════════════════════════════════════════
-const PRO_BASE_ID   = 5000;
-const PRO_MAX_SLOTS = 100;
-const PRO_MAX_PER_OWNER = 10;  // chaque Pro peut avoir jusqu'à 10 stratégies
-
-// Récupère la liste globale ; assigne owner_user_id aux entrées legacy
-async function getProStrategiesList() {
-  const raw = await db.getSetting('pro_strategies_list').catch(() => null);
-  let list = [];
-  if (raw) { try { list = JSON.parse(raw); } catch {} }
-  if (!Array.isArray(list)) list = [];
-
-  // ── Migration automatique de l'ancien système (un seul fichier) ──
-  if (!list.length) {
-    const oldContent = await db.getSetting('pro_strategy_file_content').catch(() => null);
-    const oldMetaRaw = await db.getSetting('pro_strategy_file_meta').catch(() => null);
-    if (oldContent && oldMetaRaw) {
-      try {
-        const oldMeta = JSON.parse(oldMetaRaw);
-        const id = PRO_BASE_ID + 1; // 5001
-        const adm = await pickFallbackAdminId();
-        const migrated = { ...oldMeta, id, owner_user_id: adm, created_at: oldMeta.updated_at || new Date().toISOString() };
-        list = [{
-          id, owner_user_id: adm,
-          filename: oldMeta.filename || 'legacy.js', file_type: oldMeta.file_type || 'js',
-          strategy_name: oldMeta.strategy_name || 'Stratégie Pro',
-          engine_type: oldMeta.engine_type || 'script_js',
-          engine_loaded: oldMeta.engine_loaded !== false,
-          created_at: migrated.created_at, updated_at: oldMeta.updated_at || migrated.created_at,
-        }];
-        await db.setSetting('pro_strategies_list', JSON.stringify(list));
-        await db.setSetting(`pro_strategy_${id}_content`, oldContent);
-        await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(migrated));
-        console.log(`[Pro] 🔁 Migration legacy → slot S${id} "${oldMeta.strategy_name}" (owner=${adm})`);
-      } catch (e) { console.warn('[Pro] Migration legacy échouée:', e.message); }
-    }
-  }
-
-  // ── Backfill owner_user_id pour les entrées sans propriétaire ──
-  let needsResave = false;
-  const fallbackOwnerId = await pickFallbackAdminId();
-  for (const s of list) {
-    if (!s.owner_user_id) { s.owner_user_id = fallbackOwnerId; needsResave = true; }
-  }
-  if (needsResave) {
-    await db.setSetting('pro_strategies_list', JSON.stringify(list));
-    // Backfill aussi les meta
-    for (const s of list) {
-      try {
-        const mRaw = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
-        if (mRaw) {
-          const m = JSON.parse(mRaw);
-          if (!m.owner_user_id) {
-            m.owner_user_id = s.owner_user_id;
-            await db.setSetting(`pro_strategy_${s.id}_meta`, JSON.stringify(m));
-          }
-        }
-      } catch {}
-    }
-    console.log(`[Pro] 🔁 Backfill owner_user_id sur ${list.length} stratégie(s) → admin ${fallbackOwnerId}`);
-  }
-
-  return list;
-}
-
-let __fallbackAdminCache = null;
-async function pickFallbackAdminId() {
-  if (__fallbackAdminCache) return __fallbackAdminCache;
-  try {
-    const all = await db.getAllUsers();
-    const adm = all.find(u => u.is_admin && (u.admin_level || 2) === 1) || all.find(u => u.is_admin);
-    __fallbackAdminCache = adm ? adm.id : 1;
-    return __fallbackAdminCache;
-  } catch { return 1; }
-}
-
-// Filtre la liste globale pour ne garder que les stratégies du propriétaire
-async function getProStrategiesListForOwner(ownerId) {
-  const list = await getProStrategiesList();
-  return list.filter(s => s.owner_user_id === ownerId);
-}
-
-async function saveProStrategiesList(list) {
-  await db.setSetting('pro_strategies_list', JSON.stringify(list));
-  // Liste des IDs actifs : ignorer les stratégies dont l'owner est désactivé (pour le moteur)
-  const ownersDisabled = new Set();
-  try {
-    const all = await db.getAllUsers();
-    for (const u of all) {
-      if (!u.is_pro && !u.is_admin) ownersDisabled.add(u.id);
-    }
-  } catch {}
-  const loadedIds = list
-    .filter(s => s.engine_loaded !== false && !ownersDisabled.has(s.owner_user_id))
-    .map(s => `S${s.id}`);
-  await db.setSetting('pro_strategy_ids', JSON.stringify(loadedIds));
-}
-
-function allocateProId(list) {
-  const used = new Set(list.map(s => s.id));
-  for (let i = 1; i <= PRO_MAX_SLOTS; i++) {
-    const id = PRO_BASE_ID + i;
-    if (!used.has(id)) return id;
-  }
-  return null;
-}
-
-// ── POST : créer une NOUVELLE stratégie (nouveau slot) OU modifier (id fourni) ──
-router.post('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
-  const { filename, content, mimetype, id: explicitId } = req.body;
-  if (!filename || content === undefined)
-    return res.status(400).json({ error: 'Nom de fichier et contenu requis' });
-  try {
-    const ext = (filename.split('.').pop() || '').toLowerCase();
-    const EXEC_TYPES = ['json', 'js', 'mjs', 'py'];
-    const analysis = analyzeStrategyFile(ext, content, filename);
-
-    let list = await getProStrategiesList();
-    let entryId;
-    let isUpdate = false;
-    const sessionOwnerId = effectiveOwnerId(req);
-    let entryOwnerId = sessionOwnerId;
-
-    if (explicitId !== undefined && explicitId !== null && explicitId !== '') {
-      entryId = parseInt(explicitId);
-      const found = list.find(s => s.id === entryId);
-      if (!found) return res.status(404).json({ error: `Stratégie ID ${explicitId} introuvable` });
-      // Vérification ownership : un Pro ne peut modifier que ses stratégies
-      if (!req.session.isAdmin && found.owner_user_id !== req.session.userId) {
-        return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
-      }
-      entryOwnerId = found.owner_user_id;
-      isUpdate = true;
-    } else {
-      // Quota par propriétaire
-      const ownerCount = list.filter(s => s.owner_user_id === sessionOwnerId).length;
-      if (ownerCount >= PRO_MAX_PER_OWNER) {
-        return res.status(409).json({
-          error: `Nombre maximum de stratégies Pro pour ce compte atteint (${PRO_MAX_PER_OWNER}). Supprimez-en une avant d'en importer une nouvelle.`,
-        });
-      }
-      entryId = allocateProId(list);
-      if (entryId === null) {
-        return res.status(409).json({
-          error: `Nombre maximum global de stratégies Pro atteint (${PRO_MAX_SLOTS}).`,
-        });
-      }
-    }
-
-    const existing = isUpdate ? list.find(s => s.id === entryId) : null;
-    const now = new Date().toISOString();
-    const meta = {
-      id: entryId,
-      owner_user_id: entryOwnerId,
-      filename,
-      mimetype: mimetype || 'text/plain',
-      size: content.length,
-      created_at: existing?.created_at || now,
-      updated_at: now,
-      file_type: ext,
-      engine_type: analysis.strategy_info.engine_type || ext,
-      strategy_name: analysis.strategy_name,
-      strategy_names: analysis.strategy_info.names || [analysis.strategy_name],
-      strategy_count: analysis.strategy_info.count || (analysis.ok ? 1 : 0),
-      strategy_info: analysis.strategy_info,
-      engine_loaded: analysis.ok && EXEC_TYPES.includes(ext),
-      validation_errors: analysis.errors,
-      validation_warnings: analysis.warnings,
-    };
-
-    if (!analysis.ok) {
-      console.warn(`[Pro S${entryId}][uid=${entryOwnerId}] ❌ Analyse ${ext.toUpperCase()} "${filename}" — ${analysis.errors.length} erreur(s) :`);
-      analysis.errors.forEach(e => console.warn(`   [${e.type}]${e.line ? ' ligne '+e.line : ''} ${e.message}`));
-      return res.status(422).json({
-        ok: false, validation_failed: true, id: entryId, isUpdate,
-        errors: analysis.errors, warnings: analysis.warnings, meta,
-      });
-    }
-
-    await db.setSetting(`pro_strategy_${entryId}_content`, content);
-    await db.setSetting(`pro_strategy_${entryId}_meta`, JSON.stringify(meta));
-
-    const entry = {
-      id: entryId, owner_user_id: entryOwnerId,
-      filename, file_type: ext,
-      strategy_name: analysis.strategy_name,
-      engine_type: meta.engine_type,
-      engine_loaded: meta.engine_loaded,
-      created_at: meta.created_at, updated_at: meta.updated_at,
-    };
-    if (isUpdate) list = list.map(s => s.id === entryId ? entry : s);
-    else list.push(entry);
-    await saveProStrategiesList(list);
-
-    console.log(`[Pro S${entryId}][uid=${entryOwnerId}] ✅ ${isUpdate ? 'Modifiée' : 'Créée'} — ${ext.toUpperCase()} "${filename}" "${analysis.strategy_name}" | ${analysis.warnings.length} avertissement(s)`);
-    if (analysis.warnings.length) {
-      analysis.warnings.forEach(w => console.warn(`   [${w.type}]${w.line ? ' ligne '+w.line : ''} ${w.message}`));
-    }
-
-    let engineError = null;
-    if (EXEC_TYPES.includes(ext)) {
-      try { await require('./engine').reloadProStrategies(); }
-      catch (e) { engineError = e.message; console.error('[Pro] Erreur rechargement moteur:', e.message); }
-    }
-
-    // Synchroniser cette stratégie Pro vers la base externe (Render)
-    renderSync.syncProStrategy(meta, content).catch(() => {});
-
-    res.json({ ok: true, id: entryId, owner_user_id: entryOwnerId, isUpdate, meta, warnings: analysis.warnings, engine_error: engineError || undefined });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── GET : liste filtrée par propriétaire (+ 1ᵉʳ élément pour rétrocompat UI) ──
-router.get('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
-  try {
-    const ownerId = effectiveOwnerId(req);
-    const allList = await getProStrategiesList();
-    const list = allList.filter(s => s.owner_user_id === ownerId);
-    const strategies = [];
-    for (const entry of list) {
-      const metaRaw = await db.getSetting(`pro_strategy_${entry.id}_meta`).catch(() => null);
-      const meta = metaRaw ? JSON.parse(metaRaw) : { ...entry };
-      if (!meta.owner_user_id) meta.owner_user_id = entry.owner_user_id;
-      strategies.push(meta);
-    }
-    let firstMeta = null, firstContent = null;
-    if (strategies.length) {
-      firstMeta = strategies[0];
-      firstContent = await db.getSetting(`pro_strategy_${strategies[0].id}_content`).catch(() => null);
-    }
-    res.json({
-      meta: firstMeta, content: firstContent, strategies,
-      total: strategies.length, max: PRO_MAX_PER_OWNER,
-      owner_user_id: ownerId,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── GET : récupérer contenu + meta d'une stratégie précise (avec contrôle d'accès) ──
-router.get('/pro-strategy-file/:id', requireProOrAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-    if (!metaRaw) return res.status(404).json({ error: 'Stratégie introuvable' });
-    const meta = JSON.parse(metaRaw);
-    if (!req.session.isAdmin && meta.owner_user_id !== req.session.userId) {
-      return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
-    }
-    const content = await db.getSetting(`pro_strategy_${id}_content`).catch(() => null);
-    res.json({ id, meta, content });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── DELETE : supprimer UNE stratégie (avec contrôle d'accès) ──
-router.delete('/pro-strategy-file/:id', requireProOrAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    let list = await getProStrategiesList();
-    const found = list.find(s => s.id === id);
-    if (!found) return res.status(404).json({ error: 'Stratégie introuvable' });
-    if (!req.session.isAdmin && found.owner_user_id !== req.session.userId) {
-      return res.status(403).json({ error: 'Cette stratégie ne vous appartient pas' });
-    }
-    const stratKey = `S${id}`;
-
-    // 1. Retirer de la liste globale (et rafraîchir pro_strategy_ids)
-    list = list.filter(s => s.id !== id);
-    await saveProStrategiesList(list);
-
-    // 2. Effacer RÉELLEMENT les rangées settings (pas juste set value='')
-    await db.deleteSetting(`pro_strategy_${id}_content`).catch(() => {});
-    await db.deleteSetting(`pro_strategy_${id}_meta`).catch(() => {});
-
-    // 3. Supprimer toutes les prédictions liées à cette stratégie
-    try {
-      const removed = await db.deleteStrategyPredictions(stratKey).catch(() => 0);
-      if (removed) console.log(`[Pro S${id}] ${removed} prédiction(s) supprimée(s) avec la stratégie`);
-    } catch {}
-
-    // 4. Supprimer les références Telegram (mappings prediction↔message_id) et annuler les pending
-    try { await db.deleteTgMsgIdsForStrategy(stratKey); } catch {}
-    try {
-      const { cancelStrategyMessages } = require('./telegram-service');
-      await cancelStrategyMessages(stratKey);
-    } catch {}
-
-    // 5. Recharger le moteur pour purger la stratégie de la mémoire
-    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-
-    // 6. Supprimer aussi de la base externe (Render)
-    renderSync.syncDeleteStrategy(id).catch(() => {});
-
-    console.log(`[Pro S${id}][uid=${found.owner_user_id}] 🗑 Stratégie "${found.strategy_name || found.filename}" supprimée (DB local + DB Render + prédictions + messages TG)`);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── DELETE : supprimer toutes les stratégies du propriétaire effectif ──
-router.delete('/pro-strategy-file', requireProOrAdmin, async (req, res) => {
-  try {
-    const ownerId = effectiveOwnerId(req);
-    const fullList = await getProStrategiesList();
-    const toDelete = fullList.filter(s => s.owner_user_id === ownerId);
-    const { cancelStrategyMessages } = require('./telegram-service');
-    for (const s of toDelete) {
-      const stratKey = `S${s.id}`;
-      // Effacer pour de bon les settings (au lieu de set value='')
-      await db.deleteSetting(`pro_strategy_${s.id}_content`).catch(() => {});
-      await db.deleteSetting(`pro_strategy_${s.id}_meta`).catch(() => {});
-      try { await db.deleteStrategyPredictions(stratKey); } catch {}
-      try { await db.deleteTgMsgIdsForStrategy(stratKey); } catch {}
-      try { await cancelStrategyMessages(stratKey); } catch {}
-      // Supprimer de la base externe
-      renderSync.syncDeleteStrategy(s.id).catch(() => {});
-    }
-    const remaining = fullList.filter(s => s.owner_user_id !== ownerId);
-    await saveProStrategiesList(remaining);
-    // Legacy cleanup uniquement si on supprime tout en mode admin (no remaining)
-    if (!remaining.length && req.session.isAdmin) {
-      await db.deleteSetting('pro_strategy_file_meta').catch(() => {});
-      await db.deleteSetting('pro_strategy_file_content').catch(() => {});
-    }
-    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-    console.log(`[Pro][uid=${ownerId}] 🗑 ${toDelete.length} stratégie(s) Pro supprimée(s) (DB local + DB Render + prédictions + messages TG)`);
-    res.json({ ok: true, deleted: toDelete.length, owner_user_id: ownerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Recharger config Telegram Pro dans le moteur (appelé après modification de la config)
-router.post('/pro-config/reload', requireProOrAdmin, async (req, res) => {
-  try {
-    require('./engine').reloadProStrategies().catch(() => {});
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ════════════════════════════════════════════════════════════════════
-// STRATÉGIES PRO — gestion globale des cibles Telegram (panneau admin)
-// Permet à l'admin d'afficher TOUTES les stratégies Pro (S5001-S5100)
-// dans l'onglet Telegram et de configurer un bot_token + channel_id
-// par stratégie, exactement comme pour les stratégies "simples".
-// ════════════════════════════════════════════════════════════════════
-
-// GET : liste enrichie de TOUTES les stratégies Pro (admin uniquement)
-//       avec leurs cibles Telegram actuelles.
-router.get('/pro-strategies-tg', requireAdmin, async (req, res) => {
-  try {
-    const list = await getProStrategiesList();
-    const strategies = [];
-    for (const s of list) {
-      const metaRaw = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
-      const meta = metaRaw ? JSON.parse(metaRaw) : {};
-      const info = meta.strategy_info || {};
-      let owner_username = null;
-      if (meta.owner_user_id || s.owner_user_id) {
-        try {
-          const u = await db.getUser(meta.owner_user_id || s.owner_user_id);
-          owner_username = u?.username || null;
-        } catch {}
-      }
-      strategies.push({
-        id: s.id,
-        owner_user_id: meta.owner_user_id || s.owner_user_id || null,
-        owner_username,
-        filename: meta.filename || s.filename || '',
-        strategy_name: meta.strategy_name || s.strategy_name || `Stratégie S${s.id}`,
-        engine_type: meta.engine_type || s.engine_type || null,
-        engine_loaded: meta.engine_loaded ?? true,
-        hand: info.hand || 'joueur',
-        decalage: info.decalage ?? null,
-        max_rattrapage: info.max_rattrapage ?? 2,
-        tg_targets: Array.isArray(meta.tg_targets) ? meta.tg_targets : [],
-        // Repli sur la config "globale" du propriétaire si la stratégie n'a
-        // pas de cible dédiée (utile pour l'affichage dans l'UI).
-        owner_default_telegram: null,
-      });
-    }
-    // Charger les configs Telegram Pro globales par owner (repli)
-    const ownerCfgRows = await db.pool.query(
-      `SELECT key, value FROM settings WHERE key LIKE 'pro_telegram_config_%'`
-    );
-    const ownerCfgs = {};
-    for (const r of ownerCfgRows.rows) {
-      try {
-        const oid = r.key.replace('pro_telegram_config_', '');
-        ownerCfgs[oid] = JSON.parse(r.value);
-      } catch {}
-    }
-    for (const s of strategies) {
-      const cfg = s.owner_user_id != null ? ownerCfgs[String(s.owner_user_id)] : null;
-      if (cfg && (cfg.bot_token || cfg.channel_id)) {
-        s.owner_default_telegram = {
-          bot_token_preview: cfg.bot_token ? cfg.bot_token.slice(0, 12) + '…' : null,
-          channel_id: cfg.channel_id || null,
-        };
-      }
-    }
-    res.json({ strategies });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PUT : mettre à jour les cibles Telegram d'UNE stratégie Pro (admin only)
-//       Body : { tg_targets: [{ bot_token, channel_id, format }] }
-router.put('/pro-strategies/:id/tg-targets', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID invalide' });
-    const list = await getProStrategiesList();
-    const found = list.find(s => s.id === id);
-    if (!found) return res.status(404).json({ error: 'Stratégie introuvable' });
-
-    const raw = req.body && req.body.tg_targets;
-    if (!Array.isArray(raw)) return res.status(400).json({ error: 'tg_targets doit être un tableau' });
-
-    const targets = raw
-      .map(t => {
-        if (!t || typeof t !== 'object') return null;
-        const bot_token  = String(t.bot_token  || '').trim();
-        const channel_id = String(t.channel_id || '').trim();
-        if (!bot_token && !channel_id) return null;
-        const fmt = parseInt(t.format);
-        return {
-          bot_token,
-          channel_id,
-          format: Number.isFinite(fmt) ? fmt : 1,
-        };
-      })
-      .filter(Boolean);
-
-    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-    const meta = metaRaw ? JSON.parse(metaRaw) : { id };
-    meta.tg_targets = targets;
-    meta.updated_at = new Date().toISOString();
-    await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(meta));
-
-    try { require('./engine').reloadProStrategies().catch(() => {}); } catch {}
-
-    // Resynchroniser cette stratégie Pro vers la base externe (Render)
-    renderSync.syncProStrategy(meta).catch(() => {});
-
-    console.log(`[Pro S${id}] 🛰  ${targets.length} cible(s) Telegram enregistrée(s) par admin`);
-    res.json({ ok: true, id, tg_targets: targets });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// POST : envoyer un message de test sur la 1ʳᵉ cible Telegram d'une stratégie Pro
-router.post('/pro-strategies/:id/tg-test', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-    const meta = metaRaw ? JSON.parse(metaRaw) : null;
-    const target = (meta?.tg_targets || []).find(t => t.bot_token && t.channel_id);
-    if (!target) return res.status(400).json({ error: 'Aucune cible Telegram complète configurée pour cette stratégie' });
-    const text = `🧪 Test cible Telegram — Stratégie Pro S${id} "${meta?.strategy_name || ''}"`;
-    const tgRes = await fetch(`https://api.telegram.org/bot${target.bot_token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: target.channel_id, text }),
-    });
-    const data = await tgRes.json().catch(() => ({}));
-    if (!tgRes.ok || data.ok === false) {
-      return res.status(502).json({ ok: false, error: data.description || `HTTP ${tgRes.status}` });
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════
-// FORMATS DE MESSAGE PERSONNALISÉS (custom_tg_formats)
-// Stockés en DB, nombre illimité, référençables par tg_format > 18
-// ══════════════════════════════════════════════════════════════════
-
-router.get('/tg-formats', requireAdmin, async (req, res) => {
-  try {
-    const rows = await db.getCustomFormats();
-    res.json({ formats: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/tg-formats', requireAdmin, async (req, res) => {
-  try {
-    const { name, template, parse_mode } = req.body || {};
-    if (!name || !name.trim())     return res.status(400).json({ error: 'Le champ "name" est requis' });
-    if (!template || !template.trim()) return res.status(400).json({ error: 'Le champ "template" est requis' });
-    const row = await db.saveCustomFormat({ name: name.trim(), template: template.trim(), parse_mode: parse_mode || null });
-    res.json({ ok: true, format: row });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.put('/tg-formats/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { name, template, parse_mode } = req.body || {};
-    if (!name || !name.trim())     return res.status(400).json({ error: 'Le champ "name" est requis' });
-    if (!template || !template.trim()) return res.status(400).json({ error: 'Le champ "template" est requis' });
-    const row = await db.updateCustomFormat(id, { name: name.trim(), template: template.trim(), parse_mode: parse_mode || null });
-    if (!row) return res.status(404).json({ error: 'Format introuvable' });
-    res.json({ ok: true, format: row });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/tg-formats/:id', requireAdmin, async (req, res) => {
-  try {
-    await db.deleteCustomFormat(parseInt(req.params.id));
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ════════════════════════════════════════════════════════════════════
-// LIVE BROADCAST — diffusion en temps réel des jeux vers Telegram
-// ════════════════════════════════════════════════════════════════════
-const liveBroadcast = require('./live-broadcast');
-
-router.get('/live-broadcast/targets', requireAdmin, async (req, res) => {
-  try { res.json({ targets: await liveBroadcast.listTargets() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/live-broadcast/targets', requireAdmin, async (req, res) => {
-  try {
-    const { bot_token, channel_id, label } = req.body || {};
-    if (!bot_token || !channel_id) return res.status(400).json({ error: 'bot_token et channel_id requis' });
-    const t = await liveBroadcast.addTarget({ bot_token, channel_id, label });
-    res.json({ ok: true, target: { id: t.id, label: t.label, channel_id: t.channel_id, enabled: t.enabled } });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-router.delete('/live-broadcast/targets/:id', requireAdmin, async (req, res) => {
-  try { await liveBroadcast.removeTarget(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.status(404).json({ error: e.message }); }
-});
-
-router.patch('/live-broadcast/targets/:id', requireAdmin, async (req, res) => {
-  try {
-    const { enabled } = req.body || {};
-    await liveBroadcast.setTargetEnabled(req.params.id, !!enabled);
-    res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-router.post('/live-broadcast/targets/:id/test', requireAdmin, async (req, res) => {
-  try {
-    const r = await liveBroadcast.sendTestMessage(req.params.id);
-    res.json(r);
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Gestionnaire des cartes joueur/banquier (DB séparée `les_cartes`)
-// ─────────────────────────────────────────────────────────────────────────────
-const cartesStore = require('./cartes-store');
-
-// Ouvert aux comptes Pro et Admin pour que les stratégies Pro puissent
-// inspecter les cartes depuis l'interface "Gestionnaire des cartes".
-router.get('/cartes', requireProOrAdmin, async (req, res) => {
-  try {
-    const filters = {
-      date:        req.query.date       || null,
-      winner:      req.query.winner     || null,
-      dist:        req.query.dist       || null,
-      gameNumber:  req.query.gameNumber || null,
-      fromGn:      req.query.fromGn     || null,
-      toGn:        req.query.toGn       || null,
-    };
-    const limit = Math.min(1000, parseInt(req.query.limit) || 100);
-    const rows = await cartesStore.listRecent(limit, filters);
-    res.json({ rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.get('/cartes/stats', requireProOrAdmin, async (req, res) => {
-  try {
-    const stats = await cartesStore.statsGlobal();
-    res.json({ stats });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Ping santé de la base `les_cartes` (Render externe). Permet à l'UI
-// d'afficher un indicateur clair si la base est inaccessible (free tier
-// Render endormie, DNS, etc.) — utile quand les stratégies Pro semblent
-// "incapables de prédire".
-router.get('/cartes/health', requireProOrAdmin, async (req, res) => {
-  const t0 = Date.now();
-  try {
-    const stats = await cartesStore.statsGlobal();
-    const ms = Date.now() - t0;
-    res.json({
-      ok: true,
-      latency_ms: ms,
-      total_games: stats ? Number(stats.total) : 0,
-      gn_min: stats?.gn_min ?? null,
-      gn_max: stats?.gn_max ?? null,
-      checked_at: new Date().toISOString(),
-    });
-  } catch (e) {
-    res.status(503).json({ ok: false, error: e.message, latency_ms: Date.now() - t0 });
-  }
-});
-
-router.get('/cartes/:gn', requireProOrAdmin, async (req, res) => {
-  try {
-    const row = await cartesStore.byGameNumber(req.params.gn);
-    if (!row) return res.status(404).json({ error: 'introuvable' });
-    res.json({ row });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Liste des stratégies Pro (S5001+) avec leurs cibles Telegram dédiées.
-// Format attendu par le frontend : { strategies: [{ id, strategy_name, engine_type, hand,
-//   owner_username, filename, decalage, max_rattrapage, tg_targets:[], owner_default_telegram }] }
-router.get('/pro-telegram-channels', requireAdmin, async (req, res) => {
-  try {
-    const rawList = await db.getSetting('pro_strategies_list').catch(() => null);
-    const allStrats = rawList ? JSON.parse(rawList) : [];
-    const users = await db.getAllUsers().catch(() => []);
-    const userMap = {};
-    for (const u of users) userMap[u.id] = u;
-
-    const strategies = await Promise.all(allStrats.map(async (s) => {
-      const rawM = await db.getSetting(`pro_strategy_${s.id}_meta`).catch(() => null);
-      const meta = rawM ? JSON.parse(rawM) : {};
-      const info = meta.strategy_info || {};
-      const owner = userMap[s.owner_user_id] || userMap[meta.owner_user_id] || null;
-
-      // Config Telegram du propriétaire (config-pro)
-      let ownerDefaultTelegram = null;
-      if (owner) {
-        const rawCfg = await db.getSetting(`pro_telegram_config_${owner.id}`).catch(() => null);
-        if (rawCfg) {
-          const cfg = JSON.parse(rawCfg);
-          if (cfg.bot_token && cfg.channel_id) ownerDefaultTelegram = { channel_id: cfg.channel_id };
-        }
-      }
-      return {
-        id:                 s.id,
-        strategy_name:      meta.strategy_name || meta.name || s.strategy_name || `Stratégie S${s.id}`,
-        filename:           meta.filename || s.filename || '',
-        engine_type:        meta.engine_type || s.engine_type || null,
-        hand:               info.hand || meta.hand || 'joueur',
-        decalage:           info.decalage ?? meta.decalage ?? null,
-        max_rattrapage:     info.max_rattrapage ?? meta.max_rattrapage ?? 2,
-        owner_username:     owner ? (owner.username || owner.email) : null,
-        owner_user_id:      s.owner_user_id || meta.owner_user_id || null,
-        tg_targets:         Array.isArray(meta.tg_targets) ? meta.tg_targets : [],
-        owner_default_telegram: ownerDefaultTelegram,
-      };
-    }));
-    res.json({ strategies });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Sauvegarde des cibles Telegram d'une stratégie Pro ─────────────────────
-router.put('/pro-strategies/:id/tg-targets', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (!id || id < 5001) return res.status(400).json({ error: 'ID Pro invalide (doit être ≥ 5001)' });
-    const tg_targets = Array.isArray(req.body.tg_targets)
-      ? req.body.tg_targets.filter(t => t.bot_token && t.channel_id)
-          .map(t => ({ bot_token: t.bot_token.trim(), channel_id: t.channel_id.trim(), format: parseInt(t.format) || 1 }))
-      : [];
-    const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-    if (!rawM) return res.status(404).json({ error: `Stratégie Pro S${id} introuvable` });
-    const meta = JSON.parse(rawM);
-    meta.tg_targets = tg_targets;
-    await db.setSetting(`pro_strategy_${id}_meta`, JSON.stringify(meta));
-    console.log(`[Admin] Pro S${id} tg_targets mis à jour: ${tg_targets.length} cible(s)`);
-    res.json({ ok: true, tg_targets });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Test d'envoi Telegram pour une stratégie Pro ───────────────────────────
-router.post('/pro-strategies/:id/tg-test', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const rawM = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
-    if (!rawM) return res.status(404).json({ error: `Stratégie Pro S${id} introuvable` });
-    const meta  = JSON.parse(rawM);
-    const targets = Array.isArray(meta.tg_targets) ? meta.tg_targets : [];
-    if (targets.length === 0) return res.status(400).json({ error: 'Aucune cible Telegram configurée' });
-    const axios = require('axios');
-    const errors = [];
-    for (const t of targets) {
-      try {
-        await axios.post(`https://api.telegram.org/bot${t.bot_token}/sendMessage`, {
-          chat_id: t.channel_id,
-          text: `🧪 Test Baccarat Pro — Stratégie S${id} (${meta.strategy_name || meta.name || 'sans nom'}) — OK`,
-          parse_mode: 'HTML',
-        });
-      } catch (e) { errors.push(t.channel_id + ': ' + (e?.response?.data?.description || e.message)); }
-    }
-    if (errors.length) return res.status(502).json({ ok: false, error: errors.join(' | ') });
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Effacement des données de prédiction d'une stratégie spécifique ────────
-// Efface: predictions + tg_pred_messages pour cette stratégie
-// Libère: pending en mémoire moteur
-// NE touche PAS aux configs, canaux, stratégies elles-mêmes.
-router.delete('/strategies/:id/data', requireSuperAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    // id peut être 'C1','C2','C3','DC' (intégrées) ou un entier (custom Sn ou pro S5001+)
-    const stratKey = /^\d+$/.test(id) ? `S${id}` : id.toUpperCase();
-    const deleted = await db.deleteStrategyPredictions(stratKey);
-    await db.deleteTgMsgIdsForStrategy(stratKey).catch(() => {});
-    const eng = require('./engine');
-    if (eng && eng.clearStrategyPending) eng.clearStrategyPending(stratKey);
-    console.log(`[Admin] Données effacées pour ${stratKey} — ${deleted} prédiction(s) supprimée(s)`);
-    res.json({ ok: true, strategy: stratKey, deleted });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Gestion des achats de stratégies (admin) ────────────────────────────────
-
-router.get('/strategy-purchases', requireAdmin, async (req, res) => {
-  try {
-    const r = await db.pool.query(
-      `SELECT sp.*, u.username, u.email
-       FROM strategy_purchases sp
-       JOIN users u ON u.id = sp.user_id
-       ORDER BY sp.created_at DESC`
-    );
-    // Ne pas renvoyer screenshot_data ni zip_data dans la liste (trop lourd)
-    const rows = r.rows.map(({ screenshot_data, zip_data, ...rest }) => ({
-      ...rest,
-      has_screenshot: !!screenshot_data,
-      has_zip:        !!zip_data,
-    }));
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Voir la capture d'écran d'un achat
-router.get('/strategy-purchases/:id/screenshot', requireAdmin, async (req, res) => {
-  try {
-    const r = await db.pool.query(
-      'SELECT screenshot_data FROM strategy_purchases WHERE id=$1', [parseInt(req.params.id)]
-    );
-    if (!r.rows[0]?.screenshot_data) return res.status(404).json({ error: 'Pas de capture' });
-    res.json({ screenshot: r.rows[0].screenshot_data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Valider un achat + générer le ZIP de déploiement
-router.post('/strategy-purchases/:id/validate', requireAdmin, async (req, res) => {
-  const purchaseId = parseInt(req.params.id);
-  try {
-    const pr = await db.pool.query('SELECT * FROM strategy_purchases WHERE id=$1', [purchaseId]);
-    const purchase = pr.rows[0];
-    if (!purchase) return res.status(404).json({ error: 'Achat introuvable' });
-
-    // Récupérer la stratégie
-    const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
-    const strats    = rawStrats ? JSON.parse(rawStrats) : [];
-    const strat     = strats.find(s => String(s.id) === String(purchase.strategy_id));
-    if (!strat) return res.status(404).json({ error: 'Stratégie introuvable' });
-
-    // Générer une clé de licence unique
-    const licenseKey = crypto.randomUUID();
-    const serverUrl  = process.env.APP_URL
-      || (req.protocol + '://' + req.get('host'));
-
-    // Générer le ZIP via le module dédié (avec licence embarquée)
-    const zipBuf    = await generateStrategyZip(strat, licenseKey, serverUrl);
-    const zipBase64 = zipBuf.toString('base64');
-
-    // Valider l'achat + stocker le ZIP
-    await db.pool.query(
-      'UPDATE strategy_purchases SET status=\'validated\', zip_data=$1, admin_validated_by=$2, admin_validated_at=NOW(), updated_at=NOW() WHERE id=$3',
-      [zipBase64, req.session.userId, purchaseId]
-    );
-
-    // Créer l'enregistrement de licence
-    await db.createLicense({
-      purchase_id:   purchaseId,
-      user_id:       purchase.user_id,
-      strategy_id:   purchase.strategy_id,
-      strategy_name: purchase.strategy_name,
-      license_key:   licenseKey,
-    }).catch(e => console.warn('[License] Erreur création licence:', e.message));
-
-    // Notifier l'utilisateur via message système
-    try {
-      const raw      = await db.getSetting('user_messages').catch(() => null);
-      const messages = raw ? JSON.parse(raw) : [];
-      messages.unshift({
-        id:          Date.now(),
-        userId:      purchase.user_id,
-        username:    '__system__',
-        text:        '✅ Votre achat de la stratégie **' + purchase.strategy_name + '** a été validé ! Rendez-vous sur /boutique pour télécharger votre fichier ZIP.',
-        date:        new Date().toISOString(),
-        read:        false,
-        type:        'system',
-        from_system: true,
-      });
-      if (messages.length > 300) messages.splice(300);
-      await db.setSetting('user_messages', JSON.stringify(messages));
-    } catch {}
-
-    res.json({ ok: true, message: 'Achat validé et ZIP généré avec succès.' });
-  } catch (e) {
-    console.error('[validate-purchase]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Rejeter un achat
-router.post('/strategy-purchases/:id/reject', requireAdmin, async (req, res) => {
-  const { note } = req.body;
-  try {
-    const r = await db.pool.query(
-      "UPDATE strategy_purchases SET status='rejected', admin_note=$1, admin_validated_by=$2, admin_validated_at=NOW(), updated_at=NOW() WHERE id=$3 RETURNING *",
-      [note || '', req.session.userId, parseInt(req.params.id)]
-    );
-    const purchase = r.rows[0];
-    if (!purchase) return res.status(404).json({ error: 'Achat introuvable' });
-
-    // Notifier l'utilisateur
-    try {
-      const raw = await db.getSetting('user_messages').catch(() => null);
-      const messages = raw ? JSON.parse(raw) : [];
-      messages.unshift({
-        id:          Date.now(),
-        userId:      purchase.user_id,
-        username:    '__system__',
-        text:        '❌ Votre achat de la stratégie **' + purchase.strategy_name + '** a été refusé.' + (note ? ' Raison : ' + note : '') + ' Vous pouvez renvoyer une capture d\'écran valide.',
-        date:        new Date().toISOString(),
-        read:        false,
-        type:        'system',
-        from_system: true,
-      });
-      if (messages.length > 300) messages.splice(300);
-      await db.setSetting('user_messages', JSON.stringify(messages));
-    } catch {}
-
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Panneau de Vente / Vitrine Stratégies ───────────────────────────────────
-// Stocke la configuration promotionnelle de chaque stratégie custom.
-// Format DB : setting key = 'strategy_promo_config', value = JSON { [id]: { enabled, titre, ... } }
-router.get('/strategy-promo', requireAdmin, async (req, res) => {
-  try {
-    const raw = await db.getSetting('strategy_promo_config').catch(() => null);
-    res.json(raw ? JSON.parse(raw) : {});
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/strategy-promo/:id', requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const raw = await db.getSetting('strategy_promo_config').catch(() => null);
-    const configs = raw ? JSON.parse(raw) : {};
-    configs[String(id)] = req.body;
-    await db.setSetting('strategy_promo_config', JSON.stringify(configs));
-
-    // ── Auto-publication Telegram ──────────────────────────────────────────
-    autoUpdateStrategyAnnouncement().catch(e => console.warn('[Admin] AutoAnnounce erreur:', e.message));
-
-    // ── Sync nom boutique → nom stratégie ─────────────────────────────────
-    // Si un titre est défini dans la boutique, l'appliquer comme nom de stratégie
-    const newTitle = req.body?.titre;
-    if (newTitle && typeof newTitle === 'string' && newTitle.trim()) {
-      try {
-        const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
-        if (rawStrats) {
-          const strats = JSON.parse(rawStrats);
-          const idx = strats.findIndex(s => String(s.id) === String(id));
-          if (idx !== -1 && strats[idx].name !== newTitle.trim()) {
-            strats[idx].name = newTitle.trim();
-            await db.setSetting('custom_strategies', JSON.stringify(strats));
-            console.log(`[Admin] Sync boutique→stratégie #${id}: "${newTitle.trim()}"`);
-          }
-        }
-      } catch (syncErr) {
-        console.error('[Admin] Sync boutique→stratégie erreur:', syncErr.message);
-      }
-    }
-
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Export / Import de la base de données ────────────────────────────────────
-
-router.get('/db-export-data', requireAdmin, async (req, res) => {
-  try {
-    const safeParse = (v, fb = null) => { try { return v ? JSON.parse(v) : fb; } catch { return fb; } };
-
-    const users           = await db.getAllUsers();
-    const strategies      = await getStrategies();
-    const proStrategies   = safeParse(await db.getSetting('pro_strategies'), []);
-    const tgChannels      = await db.getTelegramConfigs(false).catch(() => []);
-    const strategyRoutes  = await db.getAllStrategyRoutes().catch(() => ({}));
-    const customFormats   = await db.getCustomFormats().catch(() => []);
-
-    // Paramètres clés
-    const botToken        = await db.getSetting('bot_token').catch(() => null);
-    const tgMsgFormat     = await db.getSetting('tg_msg_format').catch(() => null);
-    const defaultTg       = await db.getSetting('default_strategies_tg').catch(() => null);
-    const lossSequences   = safeParse(await db.getSetting('loss_sequences').catch(() => null), []);
-    const announcements   = safeParse(await db.getSetting('tg_announcements').catch(() => null), []);
-
-    const payload = {
-      _meta: {
-        version: '2.1',
-        exported_at: new Date().toISOString(),
-        project: 'Baccarat Pro',
-        counts: {
-          users: users.length,
-          strategies: strategies.length,
-          pro_strategies: proStrategies.length,
-          telegram_channels: tgChannels.length,
-          strategy_routes: Object.keys(strategyRoutes).length,
-          custom_formats: customFormats.length,
-          announcements: announcements.length,
-        },
-      },
-
-      // ── Utilisateurs ──────────────────────────────────────────────────────
-      users: users.map(u => ({
-        username:                      u.username,
-        email:                         u.email || null,
-        password_hash:                 u.password_hash || null,
-        plain_password:                u.plain_password || null,
-        first_name:                    u.first_name || null,
-        last_name:                     u.last_name || null,
-        is_admin:                      u.is_admin || false,
-        is_approved:                   u.is_approved || false,
-        is_premium:                    u.is_premium || false,
-        is_pro:                        u.is_pro || false,
-        is_banned:                     u.is_banned || false,
-        account_type:                  u.account_type || 'simple',
-        subscription_expires_at:       u.subscription_expires_at || null,
-        subscription_duration_minutes: u.subscription_duration_minutes || null,
-        allowed_modes:                 u.allowed_modes || null,
-        allowed_channels:              u.allowed_channels || null,
-        show_counter_channels:         u.show_counter_channels || null,
-        promo_code:                    u.promo_code || null,
-        created_at:                    u.created_at || null,
-      })),
-
-      // ── Stratégies (inclut tg_targets, tg_format, relance_*, pred_duration) ─
-      strategies,
-      pro_strategies: proStrategies,
-
-      // ── Canaux Telegram ───────────────────────────────────────────────────
-      telegram_channels: tgChannels.map(c => ({
-        channel_id:   c.channel_id,
-        channel_name: c.channel_name,
-        enabled:      c.enabled !== false,
-      })),
-
-      // ── Routage stratégies → canaux ───────────────────────────────────────
-      strategy_routes: Object.fromEntries(
-        Object.entries(strategyRoutes).map(([strat, channels]) => [
-          strat,
-          channels.map(c => ({ tg_id: c.tg_id, channel_name: c.channel_name })),
-        ])
-      ),
-
-      // ── Formats Telegram personnalisés ────────────────────────────────────
-      custom_formats: customFormats.map(f => ({
-        name:       f.name,
-        template:   f.template,
-        parse_mode: f.parse_mode || 'HTML',
-      })),
-
-      // ── Paramètres importants ─────────────────────────────────────────────
-      settings: {
-        bot_token:              botToken  || null,
-        tg_msg_format:          tgMsgFormat ? parseInt(tgMsgFormat) : 1,
-        default_strategies_tg:  safeParse(defaultTg, {}),
-        loss_sequences:         lossSequences,
-        tg_announcements:       announcements,
-      },
-    };
-
-    const filename = `baccarat-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.json(payload);
-  } catch (e) {
-    console.error('[db-export-data]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.post('/db-import-data', requireAdmin, async (req, res) => {
-  try {
-    const { users, strategies, pro_strategies, telegram_channels, strategy_routes, settings, custom_formats, _meta } = req.body || {};
-    const results = {
-      users_added:   [],   // Nouveaux utilisateurs importés
-      users_existing:[],   // Utilisateurs déjà présents (non modifiés)
-      users_errors:  [],
-      strategies_added:   [],  // Nouvelles stratégies ajoutées
-      strategies_updated: [],  // Stratégies existantes — config TG mise à jour
-      strategies_existing:[],  // Stratégies déjà présentes (identiques)
-      pro_strategies_ok: 0,
-      channels_added:   0,
-      channels_existing: 0,
-      routes_ok: 0,
-      settings_ok: 0,
-      custom_formats_added:    0,
-      custom_formats_existing: 0,
-      announcements_added:    0,
-      announcements_existing: 0,
-      errors: [],
-    };
-
-    // ── Import utilisateurs (fusion intelligente — ne touche JAMAIS aux comptes existants) ──
-    const PROTECTED_ADMINS = ['buzzinfluence', 'sossoukouam'];
-    if (Array.isArray(users)) {
-      for (const u of users) {
-        if (!u.username) { results.errors.push(`Utilisateur sans nom ignoré`); continue; }
-        // Admins protégés : jamais écrasés par l'import
-        if (PROTECTED_ADMINS.includes(u.username)) {
-          results.users_existing.push(u.username);
-          continue;
-        }
-        try {
-          // Vérifie d'abord si l'utilisateur existe déjà
-          const existing = await db.getUserByUsername(u.username).catch(() => null);
-          if (existing) {
-            results.users_existing.push(u.username);
-            continue; // Ne pas écraser les données existantes
-          }
-          // Nouvel utilisateur — insertion uniquement
-          await db.createUser({
-            username:                      u.username,
-            email:                         u.email || null,
-            password_hash:                 u.password_hash || await require('bcryptjs').hash(u.plain_password || 'changeme', 10),
-            plain_password:                u.plain_password || null,
-            first_name:                    u.first_name || null,
-            last_name:                     u.last_name || null,
-            is_admin:                      u.is_admin || false,
-            is_approved:                   u.is_approved || false,
-            is_premium:                    u.is_premium || false,
-            subscription_expires_at:       u.subscription_expires_at || null,
-            subscription_duration_minutes: u.subscription_duration_minutes || null,
-            account_type:                  u.account_type || 'simple',
-            promo_code:                    u.promo_code || null,
-          });
-          const saved = await db.getUserByUsername(u.username);
-          if (saved) {
-            const extras = {};
-            if (u.is_banned !== undefined)             extras.is_banned = u.is_banned;
-            if (u.is_pro !== undefined)                extras.is_pro    = u.is_pro;
-            if (u.allowed_modes !== undefined)         extras.allowed_modes = u.allowed_modes;
-            if (u.allowed_channels !== undefined)      extras.allowed_channels = u.allowed_channels;
-            if (u.show_counter_channels !== undefined) extras.show_counter_channels = u.show_counter_channels;
-            if (Object.keys(extras).length) await db.updateUser(saved.id, extras);
-          }
-          results.users_added.push(u.username);
-        } catch (e) {
-          if (e.code === '23505' || (e.message || '').includes('taken')) {
-            results.users_existing.push(u.username);
-          } else {
-            results.errors.push(`Utilisateur "${u.username}" : ${e.message}`);
-          }
-        }
-      }
-    }
-
-    // ── Import stratégies personnalisées (fusion intelligente) ───────────────
-    // • Stratégie inconnue → ajoutée
-    // • Stratégie existante → mise à jour de la config TG uniquement
-    //   (tg_targets, tg_format, relance_*, pred_duration_minutes)
-    if (Array.isArray(strategies) && strategies.length > 0) {
-      const rawExisting = await db.getSetting('custom_strategies').catch(() => null);
-      let existingStrats = rawExisting ? JSON.parse(rawExisting) : [];
-      let changed = false;
-
-      // Champs TG/relance à mettre à jour sur les stratégies existantes
-      const TG_FIELDS = ['tg_targets', 'tg_format', 'relance_enabled', 'relance_pertes',
-                         'relance_types', 'relance_nombre', 'pred_duration_minutes'];
-
-      for (const s of strategies) {
-        const nameKey = (s.name || '').toLowerCase();
-        const idKey   = String(s.id || '');
-        // Cherche une stratégie existante par nom OU par id
-        const existIdx = existingStrats.findIndex(e =>
-          e.name?.toLowerCase() === nameKey || (idKey && String(e.id) === idKey)
-        );
-
-        if (existIdx >= 0) {
-          // Stratégie existante : on met à jour uniquement les champs TG/relance
-          const orig = existingStrats[existIdx];
-          let tgUpdated = false;
-          for (const f of TG_FIELDS) {
-            if (s[f] !== undefined && JSON.stringify(s[f]) !== JSON.stringify(orig[f])) {
-              existingStrats[existIdx] = { ...existingStrats[existIdx], [f]: s[f] };
-              tgUpdated = true;
-              changed = true;
-            }
-          }
-          if (tgUpdated) {
-            results.strategies_updated.push(s.name || idKey);
-          } else {
-            results.strategies_existing.push(s.name || idKey);
-          }
-        } else {
-          // Nouvelle stratégie — on l'ajoute
-          existingStrats.push(s);
-          results.strategies_added.push(s.name || idKey);
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        await saveStrategies(existingStrats);
-        try { require('./engine').reloadCustomStrategies(existingStrats); } catch {}
-      }
-    }
-
-    // ── Import stratégies Pro ─────────────────────────────────────────────────
-    if (Array.isArray(pro_strategies) && pro_strategies.length > 0) {
-      await db.setSetting('pro_strategies', JSON.stringify(pro_strategies));
-      results.pro_strategies_ok = pro_strategies.length;
-    }
-
-    // ── Import canaux Telegram (upsert par channel_id) ────────────────────────
-    const tgIdToDbId = {};
-    if (Array.isArray(telegram_channels) && telegram_channels.length > 0) {
-      const existingCh = await db.getTelegramConfigs(false).catch(() => []);
-      const existingChIds = new Set(existingCh.map(c => c.channel_id));
-      for (const ch of existingCh) tgIdToDbId[ch.channel_id] = ch.id;
-
-      for (const c of telegram_channels) {
-        if (!c.channel_id) continue;
-        try {
-          if (existingChIds.has(c.channel_id)) {
-            results.channels_existing++;
-          } else {
-            const saved = await db.upsertTelegramConfig({ channel_id: c.channel_id, channel_name: c.channel_name || c.channel_id });
-            if (saved?.id) tgIdToDbId[c.channel_id] = saved.id;
-            results.channels_added++;
-          }
-        } catch (e) {
-          results.errors.push(`Canal Telegram "${c.channel_id}" : ${e.message}`);
-        }
-      }
-    }
-
-    // ── Import routage stratégies → canaux ────────────────────────────────────
-    if (strategy_routes && typeof strategy_routes === 'object') {
-      if (Object.keys(tgIdToDbId).length === 0) {
-        const existing = await db.getTelegramConfigs(false).catch(() => []);
-        for (const c of existing) tgIdToDbId[c.channel_id] = c.id;
-      }
-      for (const [strat, channels] of Object.entries(strategy_routes)) {
-        if (!Array.isArray(channels)) continue;
-        const dbIds = channels.map(c => tgIdToDbId[c.tg_id]).filter(Boolean);
-        if (dbIds.length > 0) {
-          try { await db.setStrategyRoutes(strat, dbIds); results.routes_ok++; }
-          catch (e) { results.errors.push(`Routage "${strat}" : ${e.message}`); }
-        }
-      }
-    }
-
-    // ── Import formats Telegram personnalisés (fusion par nom) ────────────────
-    if (Array.isArray(custom_formats) && custom_formats.length > 0) {
-      const existingFmts = await db.getCustomFormats().catch(() => []);
-      const existingFmtNames = new Set(existingFmts.map(f => f.name?.toLowerCase()));
-      for (const f of custom_formats) {
-        if (!f.name || !f.template) continue;
-        if (existingFmtNames.has(f.name.toLowerCase())) {
-          results.custom_formats_existing++;
-        } else {
-          try {
-            await db.saveCustomFormat({ name: f.name, template: f.template, parse_mode: f.parse_mode || 'HTML' });
-            results.custom_formats_added++;
-          } catch (e) { results.errors.push(`Format "${f.name}" : ${e.message}`); }
-        }
-      }
-    }
-
-    // ── Import paramètres ─────────────────────────────────────────────────────
-    if (settings && typeof settings === 'object') {
-      // bot_token, tg_msg_format, loss_sequences : remplacement direct
-      const simpleKeys = { bot_token: 'bot_token', tg_msg_format: 'tg_msg_format', loss_sequences: 'loss_sequences' };
-      for (const [key, dbKey] of Object.entries(simpleKeys)) {
-        if (settings[key] !== undefined && settings[key] !== null) {
-          const val = typeof settings[key] === 'object' ? JSON.stringify(settings[key]) : String(settings[key]);
-          try { await db.setSetting(dbKey, val); results.settings_ok++; } catch {}
-        }
-      }
-
-      // default_strategies_tg : fusion (ne pas écraser les canaux déjà configurés)
-      if (settings.default_strategies_tg && typeof settings.default_strategies_tg === 'object') {
-        const rawExistingDtg = await db.getSetting('default_strategies_tg').catch(() => null);
-        const existingDtg = rawExistingDtg ? JSON.parse(rawExistingDtg) : {};
-        const merged = { ...settings.default_strategies_tg, ...existingDtg }; // existant prime
-        await db.setSetting('default_strategies_tg', JSON.stringify(merged));
-        results.settings_ok++;
-      }
-
-      // tg_announcements : fusion par id — n'ajoute que les annonces inconnues
-      if (Array.isArray(settings.tg_announcements) && settings.tg_announcements.length > 0) {
-        const rawExistingAnn = await db.getSetting('tg_announcements').catch(() => null);
-        const existingAnn = rawExistingAnn ? JSON.parse(rawExistingAnn) : [];
-        const existingAnnIds = new Set(existingAnn.map(a => String(a.id || a.name)));
-        for (const ann of settings.tg_announcements) {
-          const key = String(ann.id || ann.name);
-          if (existingAnnIds.has(key)) {
-            results.announcements_existing++;
-          } else {
-            existingAnn.push(ann);
-            existingAnnIds.add(key);
-            results.announcements_added++;
-          }
-        }
-        await db.setSetting('tg_announcements', JSON.stringify(existingAnn));
-        results.settings_ok++;
-      }
-    }
-
-    const parts = [
-      results.users_added.length > 0       ? `${results.users_added.length} utilisateur(s) ajouté(s)` : null,
-      results.users_existing.length > 0    ? `${results.users_existing.length} déjà existant(s)` : null,
-      results.strategies_added.length > 0  ? `${results.strategies_added.length} stratégie(s) ajoutée(s)` : null,
-      results.strategies_updated.length > 0 ? `${results.strategies_updated.length} stratégie(s) config TG mise(s) à jour` : null,
-      results.strategies_existing.length > 0 ? `${results.strategies_existing.length} stratégie(s) déjà à jour` : null,
-      results.pro_strategies_ok > 0        ? `${results.pro_strategies_ok} stratégie(s) Pro` : null,
-      results.channels_added > 0           ? `${results.channels_added} nouveau(x) canal/canaux` : null,
-      results.channels_existing > 0        ? `${results.channels_existing} canal/canaux déjà présent(s)` : null,
-      results.routes_ok > 0               ? `${results.routes_ok} routage(s) restauré(s)` : null,
-      results.custom_formats_added > 0    ? `${results.custom_formats_added} format(s) TG ajouté(s)` : null,
-      results.announcements_added > 0     ? `${results.announcements_added} annonce(s) ajoutée(s)` : null,
-    ].filter(Boolean);
-
-    res.json({
-      ok: true,
-      message: `✅ Import terminé : ${parts.join(', ')}.`,
-      results,
-      diff: {
-        users:          { added: results.users_added,       existing: results.users_existing },
-        strategies:     { added: results.strategies_added,  updated: results.strategies_updated, existing: results.strategies_existing },
-        channels:       { added: results.channels_added,    existing: results.channels_existing },
-        custom_formats: { added: results.custom_formats_added, existing: results.custom_formats_existing },
-        announcements:  { added: results.announcements_added,  existing: results.announcements_existing },
-      },
-    });
-  } catch (e) {
-    console.error('[db-import-data]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Gestion des licences ─────────────────────────────────────────────────────
-
-router.get('/licenses', requireAdmin, async (req, res) => {
-  try {
-    const licenses = await db.getLicenses();
-    res.json(licenses);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/licenses/:key/revoke', requireAdmin, async (req, res) => {
-  const { key } = req.params;
-  const { note } = req.body || {};
-  try {
-    const lic = await db.revokeLicense(key, note || null);
-    if (!lic) return res.status(404).json({ error: 'Licence introuvable' });
-    res.json({ ok: true, license: lic });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/licenses/:key/activate', requireAdmin, async (req, res) => {
-  const { key } = req.params;
-  try {
-    const lic = await db.activateLicense(key);
-    if (!lic) return res.status(404).json({ error: 'Licence introuvable' });
-    res.json({ ok: true, license: lic });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Codes admin partenaires ───────────────────────────────────────────────────
-
-router.get('/partner-codes', requireAdmin, async (req, res) => {
-  try {
-    const codes = await db.getPartnerCodes();
-    res.json(codes);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/partner-codes', requireAdmin, async (req, res) => {
-  try {
-    const { code, note, allowed_modes } = req.body || {};
-    if (!code || !String(code).trim()) {
-      return res.status(400).json({ error: 'Le code est requis' });
-    }
-    const modesArr = Array.isArray(allowed_modes) && allowed_modes.length > 0 ? allowed_modes : null;
-    const entry = await db.createPartnerCode(String(code).trim(), note || '', modesArr);
-    if (!entry) return res.status(500).json({ error: 'DB JSON non supportée pour les codes partenaires' });
-    res.json({ ok: true, code: entry });
-  } catch (e) {
-    if (e.code === '23505') return res.status(409).json({ error: 'Ce code existe déjà' });
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Config Telegram partenaire (par partenaire, isolée) ─────────────────────
-const PARTNER_TG_CFG_KEY = (uid) => `partner_tg_config_${uid}`;
-
-router.get('/partner-tg-config', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
-  try {
-    const raw = await db.getSetting(PARTNER_TG_CFG_KEY(req.session.userId));
-    res.json(raw ? JSON.parse(raw) : { bot_token: '', channel_id: '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/partner-tg-config', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
-  try {
-    const { bot_token, channel_id } = req.body || {};
-    await db.setSetting(PARTNER_TG_CFG_KEY(req.session.userId), JSON.stringify({ bot_token: bot_token || '', channel_id: channel_id || '' }));
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Message de pub partenaire (sauvegarde/chargement) ──────────────────────
-router.get('/partner-ad-message', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
-  try {
-    const raw = await db.getSetting(`partner_ad_message_${req.session.userId}`);
-    res.json({ message: raw || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/partner-ad-message', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Non authentifié' });
-  try {
-    const { message } = req.body || {};
-    await db.setSetting(`partner_ad_message_${req.session.userId}`, String(message || '').slice(0, 2000));
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.delete('/partner-codes/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (!id) return res.status(400).json({ error: 'ID invalide' });
-    await db.deletePartnerCode(id);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Scheduler auto-pub partenaire (toutes les 2h) ───────────────────────────
-// T007 : envoie aussi le broadcast admin (si activé) sur tous les canaux partenaires
-const PARTNER_AD_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 heures
-
-async function sendPartnerAutoAd() {
-  try {
-    const { pool } = require('./db');
-    const axios = require('axios');
-
-    // T007 : récupère le broadcast admin (si activé)
-    let adminBroadcastText = null;
-    try {
-      const bcRaw = await db.getSetting('broadcast_message');
-      if (bcRaw) {
-        const bc = JSON.parse(bcRaw);
-        if (bc.enabled && bc.text) adminBroadcastText = bc.text;
-      }
-    } catch {}
-
-    // Récupère tous les partenaires (account_type = 'partenaire')
-    const { rows: partners } = await pool.query(
-      "SELECT id FROM users WHERE account_type = 'partenaire'"
-    );
-    for (const partner of partners) {
-      try {
-        const cfgRaw = await db.getSetting(PARTNER_TG_CFG_KEY(partner.id));
-        if (!cfgRaw) continue;
-        const cfg = JSON.parse(cfgRaw);
-        if (!cfg.bot_token || !cfg.channel_id) continue;
-
-        // Message auto-pub du partenaire
-        const adMsgRaw = await db.getSetting(`partner_ad_message_${partner.id}`);
-        const adMsg = adMsgRaw || '🎰 Baccarat Pro — Rejoignez notre canal pour les meilleures prédictions en temps réel ! 🏆';
-        await axios.post(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
-          chat_id: cfg.channel_id,
-          text: adMsg,
-          parse_mode: 'HTML',
-        });
-        console.log(`[PartnerAutoAd] ✅ Pub envoyée pour partenaire #${partner.id}`);
-
-        // T007 : relay du broadcast admin sur le canal partenaire (si activé)
-        if (adminBroadcastText) {
-          try {
-            await axios.post(`https://api.telegram.org/bot${cfg.bot_token}/sendMessage`, {
-              chat_id: cfg.channel_id,
-              text: adminBroadcastText,
-              parse_mode: 'HTML',
-            });
-            console.log(`[PartnerAutoAd] 📢 Broadcast admin relayé → partenaire #${partner.id}`);
-          } catch (bErr) {
-            console.warn(`[PartnerAutoAd] ⚠️ Broadcast admin échec partenaire #${partner.id} — ${bErr.message}`);
-          }
-        }
-      } catch (err) {
-        console.warn(`[PartnerAutoAd] ⚠️ Partenaire #${partner.id} — ${err.message}`);
-      }
-    }
-  } catch (e) {
-    console.error('[PartnerAutoAd] Erreur globale :', e.message);
-  }
-}
-
-setInterval(sendPartnerAutoAd, PARTNER_AD_INTERVAL_MS);
-console.log('[PartnerAutoAd] ⏱ Scheduler auto-pub partenaire démarré (toutes les 2h)');
 
 module.exports = router;
