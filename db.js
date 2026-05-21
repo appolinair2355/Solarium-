@@ -1,27 +1,99 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
-const DEFAULT_PG_URL = 'postgresql://hebergement_user:4J9ejEAGFbXqY2qubeQhY6RHZMqRLF9C@dpg-d740h98ule4c73eq5edg-a.oregon-postgres.render.com/hebergement';
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+
+// ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
+const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+
+require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
-const USE_PG = !!DB_URL;
+let USE_PG = !!DB_URL;
+
+// Exporté pour que render-sync puisse détecter les boucles de sync
+const MAIN_DB_URL = DB_URL;
 
 let pgPool = null;
 if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode'))
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
       ? { rejectUnauthorized: false }
       : false,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPool.on('error', (err) => {
+    console.error('[DB] Erreur pool inattendue:', err.message);
+    _notifyAdminDbError(err.message).catch(() => {});
   });
 }
 
+// ── Pool secondaire : base de données des cartes ─────────────────────────────
+let pgPoolCards = null;
+let USE_CARDS_PG = true;
+try {
+  const { Pool } = require('pg');
+  pgPoolCards = new Pool({
+    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPoolCards.on('error', (err) => {
+    console.error('[CARDS-DB] Erreur pool cartes:', err.message);
+  });
+} catch (e) {
+  console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
+  USE_CARDS_PG = false;
+}
+
 const jsondb = require('./jsondb');
+
+// ── Notification admin Telegram en cas de panne DB ───────────────────────────
+let _dbErrorNotifSent = 0;
+async function _notifyAdminDbError(errMsg) {
+  const now = Date.now();
+  if (now - _dbErrorNotifSent < 10 * 60 * 1000) return; // anti-spam : 1 notif / 10 min
+  _dbErrorNotifSent = now;
+  try {
+    const fetchFn = require('node-fetch');
+    const cfgRaw  = jsondb.getSetting ? jsondb.getSetting('bot_token') : null;
+    let token = process.env.BOT_TOKEN || null;
+    if (!token && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_token' LIMIT 1`);
+        token = r.rows[0]?.value || null;
+      } catch {}
+    }
+    let adminId = process.env.ADMIN_TG_ID || null;
+    if (!adminId && pgPool) {
+      try {
+        const r = await pgPool.query(`SELECT value FROM settings WHERE key='bot_admin_tg_id' LIMIT 1`);
+        adminId = r.rows[0]?.value || null;
+      } catch {}
+    }
+    if (!token || !adminId) return;
+    const text = `⚠️ <b>ALERTE BASE DE DONNÉES</b>\n\nErreur PostgreSQL détectée :\n<code>${String(errMsg).slice(0, 300)}</code>\n\nLe système bascule en mode JSON local. Vérifiez la base de données ou fournissez un nouveau lien de connexion.\n\n⏰ ${new Date().toLocaleString('fr-FR')}`;
+    await fetchFn(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: adminId, text, parse_mode: 'HTML' }),
+    });
+  } catch {}
+}
 
 // ── Initialisation ─────────────────────────────────────────────────
 
 async function initDB() {
   if (USE_PG) {
+    try {
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -32,6 +104,7 @@ async function initDB() {
         last_name TEXT,
         is_admin BOOLEAN DEFAULT FALSE,
         is_approved BOOLEAN DEFAULT FALSE,
+        is_premium BOOLEAN DEFAULT FALSE,
         subscription_expires_at TIMESTAMPTZ,
         subscription_duration_minutes INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
@@ -39,7 +112,46 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_duration_minutes INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
       ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 2;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plain_password TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'simple';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS promo_code TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_user_id INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_used BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_minutes_earned INTEGER DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS show_counter_channels JSONB DEFAULT NULL;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
+      CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS payment_requests (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        plan_id TEXT NOT NULL,
+        plan_label TEXT,
+        amount_usd NUMERIC(10,2) NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        screenshot_data TEXT,
+        ai_analysis JSONB,
+        ai_temp_access_until TIMESTAMPTZ,
+        status TEXT DEFAULT 'awaiting_screenshot',
+        admin_note TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        referrer_bonus_minutes INTEGER DEFAULT 0,
+        discount_applied BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS payment_requests_user_idx ON payment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS payment_requests_status_idx ON payment_requests(status);
 
       CREATE TABLE IF NOT EXISTS predictions (
         id SERIAL PRIMARY KEY,
@@ -60,6 +172,14 @@ async function initDB() {
       ALTER TABLE predictions ALTER COLUMN triggered_by TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN predicted_suit TYPE TEXT;
       ALTER TABLE predictions ALTER COLUMN strategy TYPE TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS hand TEXT DEFAULT 'joueur';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS prediction_type TEXT DEFAULT 'standard';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence INTEGER DEFAULT 100;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS decalage_applied INTEGER DEFAULT 1;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}';
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS source_file TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS suit_label TEXT;
+      ALTER TABLE predictions ADD COLUMN IF NOT EXISTS display_name TEXT;
 
       CREATE TABLE IF NOT EXISTS telegram_config (
         id SERIAL PRIMARY KEY,
@@ -106,42 +226,276 @@ async function initDB() {
       );
       ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS bot_token TEXT;
       ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_format INTEGER;
+      ALTER TABLE tg_pred_messages ADD COLUMN IF NOT EXISTS tg_template TEXT;
+
+      CREATE TABLE IF NOT EXISTS custom_tg_formats (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        template TEXT NOT NULL,
+        parse_mode TEXT DEFAULT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS strategy_channel_routes (
         strategy TEXT NOT NULL,
         channel_id INTEGER REFERENCES telegram_config(id) ON DELETE CASCADE,
         PRIMARY KEY (strategy, channel_id)
       );
+
+      CREATE TABLE IF NOT EXISTS project_files (
+        file_path  TEXT PRIMARY KEY,
+        content    TEXT NOT NULL,
+        is_binary  BOOLEAN DEFAULT FALSE,
+        size_bytes INTEGER DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS deploy_logs (
+        id              SERIAL PRIMARY KEY,
+        source          TEXT NOT NULL,
+        hostname        TEXT,
+        env             TEXT,
+        files_written   INTEGER DEFAULT 0,
+        files_errors    INTEGER DEFAULT 0,
+        npm_install     TEXT,
+        build_status    TEXT,
+        status          TEXT DEFAULT 'started',
+        log_text        TEXT,
+        duration_ms     INTEGER,
+        installed_at    TIMESTAMPTZ DEFAULT NOW(),
+        finished_at     TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_purchases (
+        id                  SERIAL PRIMARY KEY,
+        user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        strategy_id         TEXT NOT NULL,
+        strategy_name       TEXT NOT NULL,
+        amount_usd          NUMERIC(10,2) DEFAULT 75,
+        status              TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data     TEXT,
+        admin_note          TEXT,
+        admin_validated_by  INTEGER,
+        admin_validated_at  TIMESTAMPTZ,
+        zip_data            TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_purchases_user_idx   ON strategy_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS strategy_purchases_status_idx ON strategy_purchases(status);
+      ALTER TABLE strategy_purchases ADD COLUMN IF NOT EXISTS bot_config TEXT;
+
+      CREATE TABLE IF NOT EXISTS strategy_licenses (
+        id              SERIAL PRIMARY KEY,
+        purchase_id     INTEGER REFERENCES strategy_purchases(id) ON DELETE CASCADE,
+        user_id         INTEGER,
+        strategy_id     TEXT,
+        strategy_name   TEXT,
+        license_key     TEXT UNIQUE NOT NULL,
+        status          TEXT DEFAULT 'active',
+        deploy_count    INTEGER DEFAULT 0,
+        last_ping_at    TIMESTAMPTZ,
+        first_ping_at   TIMESTAMPTZ,
+        deploy_ip       TEXT,
+        admin_note      TEXT,
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS strategy_licenses_key_idx      ON strategy_licenses(license_key);
+      CREATE INDEX IF NOT EXISTS strategy_licenses_purchase_idx ON strategy_licenses(purchase_id);
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_id          TEXT;
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_api_token   TEXT;
+      ALTER TABLE strategy_licenses ADD COLUMN IF NOT EXISTS bot_last_seen   TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS strategy_ideas (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL,
+        description TEXT NOT NULL,
+        is_paid     BOOLEAN DEFAULT FALSE,
+        price_usd   NUMERIC(10,2) DEFAULT 0,
+        enabled     BOOLEAN DEFAULT TRUE,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
+        id                 SERIAL PRIMARY KEY,
+        user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        idea_id            INTEGER REFERENCES strategy_ideas(id) ON DELETE CASCADE,
+        idea_name          TEXT NOT NULL,
+        amount_usd         NUMERIC(10,2) DEFAULT 0,
+        status             TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data    TEXT,
+        admin_note         TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        created_at         TIMESTAMPTZ DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idea_purchases_user_idx ON strategy_idea_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS idea_purchases_status_idx ON strategy_idea_purchases(status);
+
+      CREATE TABLE IF NOT EXISTS tg_announcements (
+        id             SERIAL PRIMARY KEY,
+        name           TEXT NOT NULL,
+        channel_id     TEXT NOT NULL,
+        bot_token      TEXT NOT NULL,
+        message_text   TEXT NOT NULL,
+        media_type     TEXT,
+        media_data     TEXT,
+        media_filename TEXT,
+        schedule_type  TEXT DEFAULT 'interval',
+        interval_hours INTEGER DEFAULT 1,
+        fixed_hours    JSONB DEFAULT '[]',
+        enabled        BOOLEAN DEFAULT TRUE,
+        last_sent_at   TIMESTAMPTZ,
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS partner_admin_codes (
+        id           SERIAL PRIMARY KEY,
+        code         TEXT UNIQUE NOT NULL,
+        used         BOOLEAN DEFAULT FALSE,
+        used_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        note         TEXT,
+        allowed_modes JSONB DEFAULT NULL,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      );
+      ALTER TABLE partner_admin_codes ADD COLUMN IF NOT EXISTS allowed_modes JSONB DEFAULT NULL;
+
+      ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'whatsapp';
+      ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS transaction_id TEXT DEFAULT NULL;
+
+      CREATE TABLE IF NOT EXISTS used_payment_refs (
+        id           SERIAL PRIMARY KEY,
+        transaction_id TEXT NOT NULL,
+        user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        payment_request_id INTEGER,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
     `);
-    // Compte admin
-    const check = await pgPool.query(`SELECT id FROM users WHERE username = 'buzzinfluence' LIMIT 1`);
-    if (check.rows.length === 0) {
+    // Compte admin secondaire : buzzinfluence (admin_level=2)
+    {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
-        `INSERT INTO users (username, email, password_hash, is_admin, is_approved)
-         VALUES ($1, $2, $3, TRUE, TRUE)
-         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE`,
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 2)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
         ['buzzinfluence', 'admin@baccarat.pro', hash]
       );
-      console.log('✅ Compte admin créé: buzzinfluence');
+    }
+    // Compte super admin : sossoukouam (admin_level=1)
+    {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('arrow2026', 10);
+      await pgPool.query(
+        `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+         VALUES ($1, $2, $3, TRUE, TRUE, 1)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, email = EXCLUDED.email, is_admin = TRUE, is_approved = TRUE, admin_level = 1`,
+        ['sossoukouam', 'sossoukouam@gmail.com', hash]
+      );
+    }
+    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
+    // ── Initialisation de la base de données des cartes ─────────────────
+    if (USE_CARDS_PG && pgPoolCards) {
+      try {
+        await pgPoolCards.query(`
+          CREATE TABLE IF NOT EXISTS game_cards (
+            id SERIAL PRIMARY KEY,
+            game_number INTEGER NOT NULL,
+            strategy TEXT NOT NULL,
+            player_cards TEXT,
+            banker_cards TEXT,
+            player_score INTEGER,
+            banker_score INTEGER,
+            winner TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(game_number, strategy)
+          );
+          CREATE INDEX IF NOT EXISTS game_cards_strategy_idx ON game_cards(strategy);
+          CREATE INDEX IF NOT EXISTS game_cards_number_idx ON game_cards(game_number);
+        `);
+        console.log('✅ Base de données des cartes initialisée (les_cartes)');
+      } catch (cardsErr) {
+        console.error('[CARDS-DB] ❌ Échec initialisation:', cardsErr.message);
+      }
     }
     console.log('✅ Base de données PostgreSQL initialisée');
-  } else {
-    const existing = jsondb.getUserByUsername('buzzinfluence');
-    if (!existing) {
-      const bcrypt = require('bcryptjs');
-      const hash = await bcrypt.hash('arrow2025', 10);
-      jsondb.createUser({
-        username: 'buzzinfluence',
-        email: 'admin@baccarat.pro',
-        password_hash: hash,
-        is_admin: true,
-        is_approved: true,
-      });
-      console.log('✅ Compte admin créé: buzzinfluence');
+    } catch (pgErr) {
+      console.error('[DB] ❌ Connexion PostgreSQL échouée — bascule en mode JSON local:', pgErr.message);
+      pgPool = null;
+      USE_PG = false;
+      await _initJsonMode();
     }
-    console.log('✅ Base de données JSON locale initialisée');
+  } else {
+    await _initJsonMode();
+  }
+}
+
+async function _initJsonMode() {
+  const bcrypt = require('bcryptjs');
+  // buzzinfluence (admin secondaire)
+  const existing1 = jsondb.getUserByUsername('buzzinfluence');
+  if (!existing1) {
+    const hash = await bcrypt.hash('arrow2025', 10);
+    jsondb.createUser({
+      username: 'buzzinfluence',
+      email: 'admin@baccarat.pro',
+      password_hash: hash,
+      is_admin: true,
+      is_approved: true,
+      admin_level: 2,
+    });
+    console.log('✅ Compte admin créé: buzzinfluence');
+  } else {
+    const hash = await bcrypt.hash('arrow2025', 10);
+    jsondb.updateUser(existing1.id, { password_hash: hash, admin_level: 2, is_admin: true, is_approved: true });
+    if (!existing1.admin_level) console.log('✅ admin_level mis à jour: buzzinfluence');
+  }
+  // sossoukouam (super admin)
+  const existing2 = jsondb.getUserByUsername('sossoukouam');
+  if (!existing2) {
+    const hash = await bcrypt.hash('arrow2026', 10);
+    jsondb.createUser({
+      username: 'sossoukouam',
+      email: 'sossoukouam@gmail.com',
+      password_hash: hash,
+      is_admin: true,
+      is_approved: true,
+      admin_level: 1,
+    });
+    console.log('✅ Compte super admin créé: sossoukouam');
+  } else {
+    const hash = await bcrypt.hash('arrow2026', 10);
+    jsondb.updateUser(existing2.id, { password_hash: hash, admin_level: 1, is_admin: true, is_approved: true });
+  }
+  console.log('✅ Base de données JSON locale initialisée');
+}
+
+// Ré-initialise uniquement les mots de passe admin — appelé après chaque sync externe
+// pour garantir qu'aucune opération de sync ne corrompt les comptes admin.
+async function reinitAdmins() {
+  if (!USE_PG || !pgPool) return;
+  try {
+    const bcrypt = require('bcryptjs');
+    const h1 = await bcrypt.hash('arrow2025', 10);
+    const h2 = await bcrypt.hash('arrow2026', 10);
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,2)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
+      ['buzzinfluence', 'admin@baccarat.pro', h1]
+    );
+    await pgPool.query(
+      `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
+       VALUES ($1,$2,$3,TRUE,TRUE,1)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, email=EXCLUDED.email, is_admin=TRUE, is_approved=TRUE, admin_level=1`,
+      ['sossoukouam', 'sossoukouam@gmail.com', h2]
+    );
+  } catch (e) {
+    console.warn('[DB] Erreur reinitAdmins:', e.message);
   }
 }
 
@@ -167,26 +521,43 @@ async function getUserByUsername(username) {
 async function getAllUsers() {
   if (USE_PG) {
     const r = await pgPool.query(
-      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, subscription_expires_at, subscription_duration_minutes, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, first_name, last_name, is_admin, is_approved, is_premium, is_pro, account_type, subscription_expires_at, subscription_duration_minutes, created_at, allowed_modes, allowed_channels, show_counter_channels, last_seen, is_banned, plain_password FROM users ORDER BY created_at DESC'
     );
     return r.rows;
   }
   return jsondb.getAllUsers().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
+async function getProUsers() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT id, username, email, first_name, last_name, is_pro, is_approved, subscription_expires_at
+       FROM users WHERE is_pro = TRUE AND is_approved = TRUE ORDER BY username`
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  return all.filter(u => u.is_pro && u.is_approved);
+}
+
 async function createUser(data) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, subscription_expires_at, subscription_duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, is_admin, is_approved, is_premium, subscription_expires_at, subscription_duration_minutes, plain_password, account_type, promo_code, referrer_user_id, profile_photo, language)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, first_name = EXCLUDED.first_name,
          last_name = EXCLUDED.last_name, is_admin = EXCLUDED.is_admin, is_approved = EXCLUDED.is_approved,
-         subscription_expires_at = EXCLUDED.subscription_expires_at, subscription_duration_minutes = EXCLUDED.subscription_duration_minutes
+         is_premium = EXCLUDED.is_premium,
+         subscription_expires_at = EXCLUDED.subscription_expires_at, subscription_duration_minutes = EXCLUDED.subscription_duration_minutes,
+         plain_password = COALESCE(EXCLUDED.plain_password, users.plain_password),
+         profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo)
        RETURNING *`,
       [data.username, data.email || null, data.password_hash, data.first_name || null, data.last_name || null,
-       data.is_admin || false, data.is_approved || false, data.subscription_expires_at || null,
-       data.subscription_duration_minutes || null]
+       data.is_admin || false, data.is_approved || false, data.is_premium || false, data.subscription_expires_at || null,
+       data.subscription_duration_minutes || null, data.plain_password || null,
+       data.account_type || 'simple', data.promo_code || null, data.referrer_user_id || null,
+       data.profile_photo || null, data.language || 'fr']
     );
     return r.rows[0];
   }
@@ -211,6 +582,39 @@ async function deleteUser(id) {
   return jsondb.deleteUser(id);
 }
 
+async function updateLastSeen(userId) {
+  try {
+    if (USE_PG) {
+      await pgPool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [userId]);
+    } else {
+      jsondb.updateUser(userId, { last_seen: new Date().toISOString() });
+    }
+  } catch {}
+}
+
+async function banInactiveUsers(hoursThreshold = 48) {
+  const cutoff = new Date(Date.now() - hoursThreshold * 3600 * 1000);
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `DELETE FROM users
+       WHERE is_admin = FALSE AND is_approved = TRUE
+         AND last_seen IS NOT NULL AND last_seen < $1
+       RETURNING id, username, last_seen`,
+      [cutoff.toISOString()]
+    );
+    return r.rows;
+  }
+  const all = jsondb.getAllUsers();
+  const deleted = [];
+  for (const u of all) {
+    if (!u.is_admin && u.is_approved && u.last_seen && new Date(u.last_seen) < cutoff) {
+      jsondb.deleteUser(u.id);
+      deleted.push(u);
+    }
+  }
+  return deleted;
+}
+
 // ── PREDICTIONS ────────────────────────────────────────────────────
 
 async function getPredictions(opts = {}) {
@@ -229,13 +633,27 @@ async function getPredictions(opts = {}) {
 async function createPrediction(data) {
   if (USE_PG) {
     try {
-      await pgPool.query(
-        `INSERT INTO predictions (strategy, game_number, predicted_suit, triggered_by)
-         VALUES ($1,$2,$3,$4) ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
-        [data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null]
+      const r = await pgPool.query(
+        `INSERT INTO predictions (
+           strategy, game_number, predicted_suit, triggered_by,
+           hand, prediction_type, confidence, decalage_applied, extra_data, source_file, suit_label, display_name
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (strategy, game_number, predicted_suit) DO NOTHING`,
+        [
+          data.strategy, data.game_number, data.predicted_suit, data.triggered_by || null,
+          data.hand || 'joueur',
+          data.prediction_type || 'standard',
+          data.confidence !== undefined ? parseInt(data.confidence) : 100,
+          data.decalage_applied !== undefined ? parseInt(data.decalage_applied) : 1,
+          data.extra_data ? JSON.stringify(data.extra_data) : '{}',
+          data.source_file || null,
+          data.suit_label || null,
+          data.display_name || null,
+        ]
       );
-    } catch (e) { console.error('createPrediction error:', e.message); }
-    return;
+      return r.rowCount > 0;
+    } catch (e) { console.error('createPrediction error:', e.message); return false; }
   }
   return jsondb.createPrediction(data);
 }
@@ -280,6 +698,21 @@ async function getMaxResolvedGame() {
   return jsondb.getMaxResolvedGame();
 }
 
+async function expireAllEnCours() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `UPDATE predictions SET status='expire', resolved_at=NOW() WHERE status='en_cours'`
+    );
+    return r.rowCount;
+  }
+  const preds = jsondb.getPredictions({ limit: 1000 });
+  let count = 0;
+  for (const p of preds) {
+    if (p.status === 'en_cours') { p.status = 'expire'; count++; }
+  }
+  return count;
+}
+
 async function expireStaleByGame(threshold, maxR) {
   if (USE_PG) {
     const r = await pgPool.query(
@@ -291,16 +724,17 @@ async function expireStaleByGame(threshold, maxR) {
   return jsondb.expireStaleByGame(threshold, maxR);
 }
 
-// Expire les prédictions en_cours créées il y a plus de N minutes (déblocage temporel)
 async function expireStaleByTime(minutesOld = 22) {
+  const mins = Math.max(1, parseInt(minutesOld) || 22);
   if (USE_PG) {
     const r = await pgPool.query(
       `UPDATE predictions SET status='expire', resolved_at=NOW()
-       WHERE status='en_cours' AND created_at < NOW() - INTERVAL '${parseInt(minutesOld)} minutes'`
+       WHERE status='en_cours' AND created_at < NOW() - ($1 || ' minutes')::interval`,
+      [String(mins)]
     );
     return r.rowCount;
   }
-  // JSON fallback: expire les prédictions en_cours créées avant le seuil
+  minutesOld = mins;
   const cutoff = Date.now() - minutesOld * 60 * 1000;
   let count = 0;
   const preds = jsondb.getPredictions({ status: 'en_cours', limit: 500 });
@@ -392,7 +826,7 @@ async function setHiddenChannels(userId, channelIds) {
 
 // ── USER CHANNEL VISIBLE (opt-in) ─────────────────────────────────
 
-const _visibleStore = new Map(); // fallback JSON
+const _visibleStore = new Map();
 
 async function getVisibleChannels(userId) {
   if (USE_PG) {
@@ -417,8 +851,17 @@ async function setVisibleChannels(userId, channelIds) {
 
 async function getVisibleStrategies(userId) {
   if (USE_PG) {
+    // Source canonique : table user_strategy_visible
     const r = await pgPool.query('SELECT strategy_id FROM user_strategy_visible WHERE user_id=$1', [userId]);
-    return r.rows.map(r => r.strategy_id);
+    const fromTable = r.rows.map(row => row.strategy_id);
+    // Compatibilité : fusionner avec allowed_channels si présent (colonne legacy)
+    const uRes = await pgPool.query('SELECT allowed_channels FROM users WHERE id=$1', [userId]);
+    const u = uRes.rows[0];
+    const fromUser = (u && Array.isArray(u.allowed_channels) && u.allowed_channels.length > 0)
+      ? u.allowed_channels
+      : [];
+    // Union des deux sources, sans doublon
+    return [...new Set([...fromTable, ...fromUser])];
   }
   return [];
 }
@@ -447,7 +890,7 @@ async function getStrategyRoutes(strategy) {
        WHERE scr.strategy = $1`,
       [strategy]
     );
-    return r.rows; // [{id, tg_id, channel_name}]
+    return r.rows;
   }
   return [];
 }
@@ -460,7 +903,6 @@ async function getAllStrategyRoutes() {
        JOIN telegram_config tc ON tc.id = scr.channel_id
        ORDER BY scr.strategy`
     );
-    // Return as { strategy: [{id, tg_id, channel_name}] }
     const map = {};
     for (const row of r.rows) {
       if (!map[row.strategy]) map[row.strategy] = [];
@@ -486,22 +928,30 @@ async function setStrategyRoutes(strategy, channelDbIds) {
 
 // ── TG PRED MESSAGE IDS ────────────────────────────────────────────
 
-const _tgMsgStore = new Map(); // fallback JSON
+const _tgMsgStore = new Map();
 
-async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat) {
+async function clearAllTgPredMessages() {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM tg_pred_messages');
+  } else {
+    _tgMsgStore.clear();
+  }
+}
+
+async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, botToken, tgFormat, tgTemplate) {
   if (USE_PG) {
     await pgPool.query(
-      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
-       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format`,
-      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null]
+      `INSERT INTO tg_pred_messages (strategy, game_number, predicted_suit, channel_tg_id, message_id, bot_token, tg_format, tg_template)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (strategy, game_number, predicted_suit, channel_tg_id)
+       DO UPDATE SET message_id = EXCLUDED.message_id, bot_token = EXCLUDED.bot_token, tg_format = EXCLUDED.tg_format, tg_template = EXCLUDED.tg_template`,
+      [strategy, gameNumber, suit, channelTgId, String(messageId), botToken || null, tgFormat ?? null, tgTemplate || null]
     );
     return;
   }
   const key = `${strategy}:${gameNumber}:${suit}`;
   const list = _tgMsgStore.get(key) || [];
   const idx  = list.findIndex(x => x.channel_tg_id === channelTgId);
-  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null };
+  const entry = { channel_tg_id: channelTgId, message_id: String(messageId), bot_token: botToken || null, tg_format: tgFormat ?? null, tg_template: tgTemplate || null };
   if (idx !== -1) list[idx] = entry;
   else list.push(entry);
   _tgMsgStore.set(key, list);
@@ -510,13 +960,50 @@ async function saveTgMsgId(strategy, gameNumber, suit, channelTgId, messageId, b
 async function getTgMsgIds(strategy, gameNumber, suit) {
   if (USE_PG) {
     const r = await pgPool.query(
-      `SELECT channel_tg_id, message_id, bot_token, tg_format FROM tg_pred_messages
+      `SELECT channel_tg_id, message_id, bot_token, tg_format, tg_template FROM tg_pred_messages
        WHERE strategy=$1 AND game_number=$2 AND predicted_suit=$3`,
       [strategy, gameNumber, suit]
     );
     return r.rows;
   }
   return _tgMsgStore.get(`${strategy}:${gameNumber}:${suit}`) || [];
+}
+
+// ── Custom TG Formats ─────────────────────────────────────────────────────
+
+async function getCustomFormats() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode, created_at FROM custom_tg_formats ORDER BY id`);
+  return r.rows;
+}
+
+async function saveCustomFormat({ name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO custom_tg_formats (name, template, parse_mode) VALUES ($1,$2,$3) RETURNING id, name, template, parse_mode, created_at`,
+    [name, template, parse_mode || null]
+  );
+  return r.rows[0];
+}
+
+async function updateCustomFormat(id, { name, template, parse_mode }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE custom_tg_formats SET name=$2, template=$3, parse_mode=$4 WHERE id=$1 RETURNING id, name, template, parse_mode, created_at`,
+    [id, name, template, parse_mode || null]
+  );
+  return r.rows[0] || null;
+}
+
+async function deleteCustomFormat(id) {
+  if (!USE_PG) return;
+  await pgPool.query(`DELETE FROM custom_tg_formats WHERE id=$1`, [id]);
+}
+
+async function getCustomFormatById(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(`SELECT id, name, template, parse_mode FROM custom_tg_formats WHERE id=$1`, [id]);
+  return r.rows[0] || null;
 }
 
 async function deleteTgMsgIds(strategy, gameNumber, suit) {
@@ -572,13 +1059,37 @@ async function deleteStrategyPredictions(strategy) {
 
 async function deleteAllPredictions() {
   if (USE_PG) {
-    const r = await pgPool.query(`DELETE FROM predictions`);
+    await pgPool.query('DELETE FROM tg_pred_messages').catch(() => {});
+    const r = await pgPool.query('DELETE FROM predictions');
     return r.rowCount;
   }
   const data = require('./jsondb');
   let count = 0;
   if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
   return count;
+}
+
+async function cleanupOldPredictions(daysOld = 3) {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(
+      `DELETE FROM predictions
+       WHERE status IN ('gagne','perdu','expire')
+         AND resolved_at < NOW() - INTERVAL '${parseInt(daysOld)} days'`
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[DB] cleanupOldPredictions error:', e.message);
+    return 0;
+  }
+}
+
+async function deleteExpiredPredictions() {
+  if (!USE_PG) return 0;
+  try {
+    const r = await pgPool.query(`DELETE FROM predictions WHERE status='expire'`);
+    return r.rowCount;
+  } catch (e) { return 0; }
 }
 
 async function expireStrategyPredictions(strategy) {
@@ -621,7 +1132,6 @@ async function getUserStats() {
 // ── BILAN QUOTIDIEN ─────────────────────────────────────────────────
 
 async function getDailyBilanStats(dateStr) {
-  // dateStr = 'YYYY-MM-DD'
   if (USE_PG) {
     const r = await pgPool.query(
       `SELECT strategy, COALESCE(rattrapage,0)::int AS rattrapage, status, COUNT(*)::int AS count
@@ -634,7 +1144,6 @@ async function getDailyBilanStats(dateStr) {
     );
     return r.rows;
   }
-  // JSON fallback
   const all = jsondb.getPredictions({});
   const start = new Date(dateStr);
   const end   = new Date(dateStr); end.setDate(end.getDate() + 1);
@@ -663,12 +1172,560 @@ async function getLastBilanSnapshot() {
   } catch { return null; }
 }
 
+// ── PROJECT FILES ───────────────────────────────────────────────────
+
+async function upsertProjectFile(filePath, content, isBinary = false) {
+  if (USE_PG) {
+    await pgPool.query(
+      `INSERT INTO project_files (file_path, content, is_binary, size_bytes, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (file_path) DO UPDATE SET content = EXCLUDED.content, is_binary = EXCLUDED.is_binary, size_bytes = EXCLUDED.size_bytes, updated_at = NOW()`,
+      [filePath, content, isBinary, Buffer.byteLength(content, 'utf8')]
+    );
+    return;
+  }
+}
+
+async function getAllProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, content, is_binary, size_bytes, updated_at FROM project_files ORDER BY file_path');
+    return r.rows;
+  }
+  return [];
+}
+
+async function getProjectFileMeta() {
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT file_path, size_bytes, updated_at FROM project_files');
+    const map = {};
+    for (const row of r.rows) map[row.file_path] = { size_bytes: row.size_bytes, updated_at: row.updated_at };
+    return map;
+  }
+  return {};
+}
+
+async function deleteProjectFile(filePath) {
+  if (USE_PG) {
+    await pgPool.query('DELETE FROM project_files WHERE file_path = $1', [filePath]);
+    return;
+  }
+}
+
+async function clearProjectFiles() {
+  if (USE_PG) {
+    const r = await pgPool.query('DELETE FROM project_files');
+    return r.rowCount;
+  }
+  return 0;
+}
+
+// ── DEPLOY LOGS ─────────────────────────────────────────────────────
+
+async function createDeployLog(data) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO deploy_logs (source, hostname, env, status, installed_at)
+     VALUES ($1, $2, $3, 'started', NOW()) RETURNING id`,
+    [data.source || 'unknown', data.hostname || null, data.env || null]
+  );
+  return r.rows[0]?.id || null;
+}
+
+async function updateDeployLog(id, data) {
+  if (!USE_PG || !id) return;
+  await pgPool.query(
+    `UPDATE deploy_logs SET
+       files_written = COALESCE($1, files_written),
+       files_errors  = COALESCE($2, files_errors),
+       npm_install   = COALESCE($3, npm_install),
+       build_status  = COALESCE($4, build_status),
+       status        = COALESCE($5, status),
+       log_text      = COALESCE($6, log_text),
+       duration_ms   = COALESCE($7, duration_ms),
+       finished_at   = COALESCE($8, finished_at)
+     WHERE id = $9`,
+    [
+      data.files_written  ?? null,
+      data.files_errors   ?? null,
+      data.npm_install    ?? null,
+      data.build_status   ?? null,
+      data.status         ?? null,
+      data.log_text       ?? null,
+      data.duration_ms    ?? null,
+      data.finished_at    ?? null,
+      id,
+    ]
+  );
+}
+
+async function getDeployLogs(limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT id, source, hostname, env, files_written, files_errors,
+            npm_install, build_status, status, duration_ms,
+            installed_at, finished_at,
+            LEFT(log_text, 2000) AS log_preview
+     FROM deploy_logs
+     ORDER BY installed_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return r.rows;
+}
+
+// ── PROMO CODES & PAYMENT REQUESTS ──────────────────────────────────
+
+async function getUserByPromoCode(code) {
+  if (!code) return null;
+  if (USE_PG) {
+    const r = await pgPool.query('SELECT * FROM users WHERE promo_code = $1 LIMIT 1', [code.trim().toUpperCase()]);
+    return r.rows[0] || null;
+  }
+  const all = jsondb.getAllUsers();
+  return all.find(u => (u.promo_code || '').toUpperCase() === code.trim().toUpperCase()) || null;
+}
+
+async function isPromoCodeTaken(code) {
+  const u = await getUserByPromoCode(code);
+  return !!u;
+}
+
+async function createPaymentRequest(data) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const r = await pgPool.query(
+    `INSERT INTO payment_requests (user_id, plan_id, plan_label, amount_usd, duration_minutes, status, discount_applied)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [data.user_id, data.plan_id, data.plan_label, data.amount_usd, data.duration_minutes,
+     data.status || 'awaiting_screenshot', data.discount_applied || false]
+  );
+  return r.rows[0];
+}
+
+async function updatePaymentRequest(id, updates) {
+  if (!USE_PG) throw new Error('Payment requests require PostgreSQL');
+  const sets = ['updated_at = NOW()'];
+  const vals = []; let i = 1;
+  for (const [k, v] of Object.entries(updates)) {
+    if (k === 'ai_analysis' && typeof v !== 'string') {
+      sets.push(`${k} = $${i++}::jsonb`);
+      vals.push(JSON.stringify(v));
+    } else {
+      sets.push(`${k} = $${i++}`);
+      vals.push(v);
+    }
+  }
+  vals.push(id);
+  const r = await pgPool.query(`UPDATE payment_requests SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+  return r.rows[0] || null;
+}
+
+async function getPaymentRequest(id) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM payment_requests WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+async function getUserPaymentRequests(userId, limit = 20) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    'SELECT id, plan_id, plan_label, amount_usd, duration_minutes, status, ai_temp_access_until, created_at, admin_validated_at FROM payment_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [userId, limit]
+  );
+  return r.rows;
+}
+
+async function getPendingPaymentRequests() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT pr.*, u.username, u.email, u.account_type, u.promo_code, u.referrer_user_id,
+            ref.username AS referrer_username, ref.promo_code AS referrer_promo_code
+     FROM payment_requests pr
+     JOIN users u ON u.id = pr.user_id
+     LEFT JOIN users ref ON ref.id = u.referrer_user_id
+     WHERE pr.status IN ('ai_validated', 'awaiting_screenshot', 'pending_admin')
+     ORDER BY pr.created_at DESC LIMIT 200`
+  );
+  return r.rows;
+}
+
+// ── Strategy Licenses ────────────────────────────────────────────────────────
+
+async function createLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO strategy_licenses (purchase_id, user_id, strategy_id, strategy_name, license_key)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [purchase_id, user_id, strategy_id, strategy_name, license_key]
+  );
+  return r.rows[0];
+}
+
+async function getLicenses() {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     ORDER BY sl.created_at DESC`
+  );
+  return r.rows;
+}
+
+async function getLicenseByKey(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query('SELECT * FROM strategy_licenses WHERE license_key=$1', [key]);
+  return r.rows[0] || null;
+}
+
+async function revokeLicense(key, note = null) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='revoked', admin_note=$1 WHERE license_key=$2 RETURNING *`,
+    [note, key]
+  );
+  return r.rows[0] || null;
+}
+
+async function activateLicense(key) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `UPDATE strategy_licenses SET status='active', admin_note=NULL WHERE license_key=$1 RETURNING *`,
+    [key]
+  );
+  return r.rows[0] || null;
+}
+
+async function pingLicense(key, ip = null) {
+  if (!USE_PG) return;
+  await pgPool.query(
+    `UPDATE strategy_licenses
+     SET last_ping_at  = NOW(),
+         first_ping_at = COALESCE(first_ping_at, NOW()),
+         deploy_count  = COALESCE(deploy_count, 0) + 1,
+         deploy_ip     = COALESCE($1, deploy_ip)
+     WHERE license_key = $2`,
+    [ip, key]
+  );
+}
+
+// ── Upsert d'une licence (pour import/restore) ───────────────────────────────
+async function registerBot(key, { bot_id, bot_api_token, bot_username }) {
+  if (!USE_PG) return null;
+  await pgPool.query(
+    `UPDATE strategy_licenses
+     SET bot_id = $1, bot_api_token = $2, bot_last_seen = NOW()
+     WHERE license_key = $3`,
+    [String(bot_id || ''), bot_api_token || '', key]
+  );
+}
+
+async function pingBotActivity(key) {
+  if (!USE_PG) return;
+  await pgPool.query(
+    `UPDATE strategy_licenses SET bot_last_seen = NOW() WHERE license_key = $1`,
+    [key]
+  );
+}
+
+async function getLicensePredictions(strategyId, sinceId) {
+  if (!USE_PG) return [];
+  const sid = parseInt(sinceId) || 0;
+  const r = await pgPool.query(
+    `SELECT id, game_number, predicted_suit, hand, rattrapage, created_at
+     FROM predictions
+     WHERE (strategy = $1 OR strategy = 'S' || $1)
+       AND id > $2
+       AND status = 'en_cours'
+     ORDER BY id ASC
+     LIMIT 20`,
+    [String(strategyId), sid]
+  );
+  return r.rows;
+}
+
+async function getLicenseResults(strategyId, sinceId) {
+  if (!USE_PG) return [];
+  const sid = parseInt(sinceId) || 0;
+  const r = await pgPool.query(
+    `SELECT id, game_number, predicted_suit, hand, rattrapage, status, resolved_at
+     FROM predictions
+     WHERE (strategy = $1 OR strategy = 'S' || $1)
+       AND id > $2
+       AND status IN ('gagne', 'perdu')
+       AND resolved_at > NOW() - INTERVAL '4 hours'
+     ORDER BY id ASC
+     LIMIT 30`,
+    [String(strategyId), sid]
+  );
+  return r.rows;
+}
+
+async function upsertLicense({ purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip }) {
+  if (!USE_PG) return null;
+  const r = await pgPool.query(
+    `INSERT INTO strategy_licenses
+       (purchase_id, user_id, strategy_id, strategy_name, license_key, status, admin_note, deploy_count, deploy_ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (license_key) DO UPDATE SET
+       strategy_id   = EXCLUDED.strategy_id,
+       strategy_name = EXCLUDED.strategy_name,
+       status        = EXCLUDED.status,
+       admin_note    = EXCLUDED.admin_note,
+       deploy_count  = EXCLUDED.deploy_count,
+       deploy_ip     = EXCLUDED.deploy_ip
+     RETURNING *`,
+    [
+      purchase_id  || null,
+      user_id      || null,
+      String(strategy_id || ''),
+      strategy_name || '',
+      license_key,
+      status || 'active',
+      admin_note   || null,
+      deploy_count || 0,
+      deploy_ip    || null,
+    ]
+  );
+  return r.rows[0];
+}
+
+async function getStrategyLicenses(strategyId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT sl.*, u.username, u.email
+     FROM strategy_licenses sl
+     LEFT JOIN users u ON u.id = sl.user_id
+     WHERE sl.strategy_id = $1
+     ORDER BY sl.created_at DESC`,
+    [String(strategyId)]
+  );
+  return r.rows;
+}
+
+async function getUserLicenses(userId) {
+  if (!USE_PG) return [];
+  const r = await pgPool.query(
+    `SELECT * FROM strategy_licenses
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+  return r.rows;
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ── GESTION DES CARTES (Base secondaire : les_cartes) ────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function saveGameCards({ game_number, strategy, player_cards, banker_cards, player_score, banker_score, winner }) {
+  if (!USE_CARDS_PG || !pgPoolCards) {
+    console.warn('[CARDS-DB] Pool cartes non disponible — cartes non sauvegardées');
+    return null;
+  }
+  try {
+    const r = await pgPoolCards.query(
+      `INSERT INTO game_cards (game_number, strategy, player_cards, banker_cards, player_score, banker_score, winner)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (game_number, strategy) DO UPDATE SET
+         player_cards = EXCLUDED.player_cards,
+         banker_cards = EXCLUDED.banker_cards,
+         player_score = EXCLUDED.player_score,
+         banker_score = EXCLUDED.banker_score,
+         winner = EXCLUDED.winner,
+         created_at = NOW()
+       RETURNING *`,
+      [
+        parseInt(game_number),
+        String(strategy || ''),
+        player_cards ? JSON.stringify(player_cards) : null,
+        banker_cards ? JSON.stringify(banker_cards) : null,
+        player_score !== undefined ? parseInt(player_score) : null,
+        banker_score !== undefined ? parseInt(banker_score) : null,
+        winner || null,
+      ]
+    );
+    return r.rows[0] || null;
+  } catch (e) {
+    console.error('[CARDS-DB] saveGameCards error:', e.message);
+    return null;
+  }
+}
+
+async function getGameCards(game_number, strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return null;
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards WHERE game_number = $1 AND strategy = $2`,
+      [parseInt(game_number), String(strategy || '')]
+    );
+    const row = r.rows[0] || null;
+    if (row) {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+    }
+    return row;
+  } catch (e) {
+    console.error('[CARDS-DB] getGameCards error:', e.message);
+    return null;
+  }
+}
+
+async function getGameCardsByRange(strategy, fromGame, toGame) {
+  if (!USE_CARDS_PG || !pgPoolCards) return [];
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards
+       WHERE strategy = $1 AND game_number >= $2 AND game_number <= $3
+       ORDER BY game_number ASC`,
+      [String(strategy || ''), parseInt(fromGame), parseInt(toGame)]
+    );
+    return r.rows.map(row => {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+      return row;
+    });
+  } catch (e) {
+    console.error('[CARDS-DB] getGameCardsByRange error:', e.message);
+    return [];
+  }
+}
+
+async function getLastGameCards(strategy, limit = 50) {
+  if (!USE_CARDS_PG || !pgPoolCards) return [];
+  try {
+    const r = await pgPoolCards.query(
+      `SELECT * FROM game_cards WHERE strategy = $1 ORDER BY game_number DESC LIMIT $2`,
+      [String(strategy || ''), parseInt(limit)]
+    );
+    return r.rows.map(row => {
+      if (row.player_cards) try { row.player_cards = JSON.parse(row.player_cards); } catch {}
+      if (row.banker_cards) try { row.banker_cards = JSON.parse(row.banker_cards); } catch {}
+      return row;
+    }).reverse();
+  } catch (e) {
+    console.error('[CARDS-DB] getLastGameCards error:', e.message);
+    return [];
+  }
+}
+
+async function deleteGameCards(game_number, strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return 0;
+  try {
+    const r = await pgPoolCards.query(
+      `DELETE FROM game_cards WHERE game_number = $1 AND strategy = $2`,
+      [parseInt(game_number), String(strategy || '')]
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[CARDS-DB] deleteGameCards error:', e.message);
+    return 0;
+  }
+}
+
+async function deleteAllGameCards(strategy) {
+  if (!USE_CARDS_PG || !pgPoolCards) return 0;
+  try {
+    const r = await pgPoolCards.query(
+      `DELETE FROM game_cards WHERE strategy = $1`,
+      [String(strategy || '')]
+    );
+    return r.rowCount;
+  } catch (e) {
+    console.error('[CARDS-DB] deleteAllGameCards error:', e.message);
+    return 0;
+  }
+}
+
+// ── Codes admin partenaires ───────────────────────────────────────────────────
+async function createPartnerCode(code, note, allowedModes) {
+  if (USE_PG) {
+    const modesJson = Array.isArray(allowedModes) && allowedModes.length > 0
+      ? JSON.stringify(allowedModes) : null;
+    const r = await pgPool.query(
+      `INSERT INTO partner_admin_codes (code, note, allowed_modes) VALUES ($1, $2, $3) RETURNING *`,
+      [code.trim().toUpperCase(), note || null, modesJson]
+    );
+    return r.rows[0];
+  }
+  return null;
+}
+
+async function checkPaymentRef(transactionId) {
+  if (!USE_PG || !transactionId) return false;
+  const r = await pgPool.query(
+    `SELECT id FROM used_payment_refs WHERE transaction_id = $1`,
+    [String(transactionId).trim()]
+  );
+  return r.rows.length > 0;
+}
+
+async function addPaymentRef(transactionId, userId, paymentRequestId) {
+  if (!USE_PG || !transactionId) return;
+  try {
+    await pgPool.query(
+      `INSERT INTO used_payment_refs (transaction_id, user_id, payment_request_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [String(transactionId).trim(), userId, paymentRequestId]
+    );
+  } catch (_) {}
+}
+
+async function getPartnerCodes() {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT pc.*, u.username AS used_by_username
+       FROM partner_admin_codes pc
+       LEFT JOIN users u ON pc.used_by = u.id
+       ORDER BY pc.created_at DESC`
+    );
+    return r.rows;
+  }
+  return [];
+}
+
+async function getPartnerCodeByCode(code) {
+  if (USE_PG) {
+    const r = await pgPool.query(
+      `SELECT * FROM partner_admin_codes WHERE code = $1`,
+      [code.trim().toUpperCase()]
+    );
+    return r.rows[0] || null;
+  }
+  return null;
+}
+
+async function markPartnerCodeUsed(code, userId) {
+  if (USE_PG) {
+    await pgPool.query(
+      `UPDATE partner_admin_codes SET used = TRUE, used_by = $1 WHERE code = $2`,
+      [userId, code.trim().toUpperCase()]
+    );
+    return true;
+  }
+  return false;
+}
+
+async function deletePartnerCode(id) {
+  if (USE_PG) {
+    await pgPool.query(`DELETE FROM partner_admin_codes WHERE id = $1`, [id]);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
-  pool, USE_PG, initDB,
-  getUser, getUserByLogin, getUserByUsername, getAllUsers,
+  pool, USE_PG, MAIN_DB_URL, pgPoolCards, USE_CARDS_PG, initDB, reinitAdmins,
+  getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
+  updateLastSeen, banInactiveUsers,
+  getUserByPromoCode, isPromoCodeTaken,
+  createPartnerCode, getPartnerCodes, getPartnerCodeByCode, markPartnerCodeUsed, deletePartnerCode,
+  checkPaymentRef, addPaymentRef,
+  createPaymentRequest, updatePaymentRequest, getPaymentRequest,
+  getUserPaymentRequests, getPendingPaymentRequests,
   createUser, updateUser, deleteUser,
   getPredictions, createPrediction, updatePrediction,
-  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime,
+  getPredictionStats, getMaxResolvedGame, expireStaleByGame, expireStaleByTime, expireAllEnCours,
+  clearAllTgPredMessages,
   getSetting, setSetting, deleteSetting,
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,
@@ -677,7 +1734,16 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
+  upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
+  createDeployLog, updateDeployLog, getDeployLogs,
+  getCustomFormats, saveCustomFormat, updateCustomFormat, deleteCustomFormat, getCustomFormatById,
+  createLicense, getLicenses, getLicenseByKey, revokeLicense, activateLicense, pingLicense,
+  getStrategyLicenses, getUserLicenses, upsertLicense,
+  registerBot, pingBotActivity, getLicensePredictions, getLicenseResults,
+  // ── Cartes (base secondaire les_cartes) ────────────────────────────────
+  saveGameCards, getGameCards, getGameCardsByRange, getLastGameCards,
+  deleteGameCards, deleteAllGameCards,
 };
