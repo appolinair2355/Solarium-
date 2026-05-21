@@ -1,8 +1,16 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+
+// ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
+const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+
 require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || null;
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -13,7 +21,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('sslmode') || process.env.REPL_ID)
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
       ? { rejectUnauthorized: false }
       : false,
     max: 5,
@@ -28,25 +36,22 @@ if (USE_PG) {
 
 // ── Pool secondaire : base de données des cartes ─────────────────────────────
 let pgPoolCards = null;
-let USE_CARDS_PG = false;
-if (process.env.CARDS_DATABASE_URL) {
-  try {
-    const { Pool } = require('pg');
-    pgPoolCards = new Pool({
-      connectionString: process.env.CARDS_DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
-    pgPoolCards.on('error', (err) => {
-      console.error('[CARDS-DB] Erreur pool cartes:', err.message);
-    });
-    USE_CARDS_PG = true;
-  } catch (e) {
-    console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
-    USE_CARDS_PG = false;
-  }
+let USE_CARDS_PG = true;
+try {
+  const { Pool } = require('pg');
+  pgPoolCards = new Pool({
+    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPoolCards.on('error', (err) => {
+    console.error('[CARDS-DB] Erreur pool cartes:', err.message);
+  });
+} catch (e) {
+  console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
+  USE_CARDS_PG = false;
 }
 
 const jsondb = require('./jsondb');
@@ -308,11 +313,9 @@ async function initDB() {
         is_paid     BOOLEAN DEFAULT FALSE,
         price_usd   NUMERIC(10,2) DEFAULT 0,
         enabled     BOOLEAN DEFAULT TRUE,
-        sort_order  INTEGER DEFAULT 0,
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
-      ALTER TABLE strategy_ideas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
         id                 SERIAL PRIMARY KEY,
