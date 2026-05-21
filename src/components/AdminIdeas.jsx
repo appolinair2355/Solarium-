@@ -28,6 +28,7 @@ export default function AdminIdeas() {
   const [purchMsg, setPurchMsg]   = useState({});
   const [screenshotModal, setScreenshotModal] = useState(null);
   const [rejectNote, setRejectNote] = useState('');
+  const [reordering, setReordering] = useState(null);
 
   const loadIdeas = useCallback(async () => {
     const r = await fetch('/api/ideas/catalog', { credentials: 'include' });
@@ -92,6 +93,18 @@ export default function AdminIdeas() {
     loadIdeas();
   }
 
+  async function handleReorder(id, direction) {
+    setReordering(id);
+    try {
+      await fetch('/api/ideas/admin/reorder', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, direction }),
+      });
+      await loadIdeas();
+    } finally { setReordering(null); }
+  }
+
   async function approveP(id) {
     setPurchMsg(m => ({ ...m, [id]: { loading: true } }));
     const r = await fetch(`/api/ideas/admin/purchase/${id}/approve`, { method: 'POST', credentials: 'include' });
@@ -122,15 +135,15 @@ export default function AdminIdeas() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#fbbf24' }}>💡 Idées de Stratégies</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Publiez des idées gratuites ou payantes visibles par tous les utilisateurs</p>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#fbbf24' }}>💡 Stratégies Texte (Niveaux)</h2>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Publiez des stratégies texte numérotées par niveau — les utilisateurs voient uniquement le numéro de niveau, le prix et un aperçu</p>
         </div>
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '2px solid rgba(255,255,255,0.06)' }}>
         {[
-          { id: 'ideas', label: '💡 Idées', badge: ideas.length },
+          { id: 'ideas', label: '💡 Niveaux', badge: ideas.length },
           { id: 'purchases', label: '🧾 Achats', badge: pendingPurchases.length || null },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '10px 18px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? '#fbbf24' : '#64748b', borderBottom: tab === t.id ? '2px solid #fbbf24' : '2px solid transparent', marginBottom: -2, display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -139,7 +152,7 @@ export default function AdminIdeas() {
           </button>
         ))}
         <div style={{ marginLeft: 'auto', paddingBottom: 2 }}>
-          {tab === 'ideas' && <button onClick={openNew} style={{ padding: '8px 18px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>+ Ajouter une idée</button>}
+          {tab === 'ideas' && <button onClick={openNew} style={{ padding: '8px 18px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>+ Ajouter un niveau</button>}
         </div>
       </div>
 
@@ -149,43 +162,73 @@ export default function AdminIdeas() {
         ideas.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 60, color: '#475569' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>💡</div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>Aucune idée publiée</div>
-            <button onClick={openNew} style={{ marginTop: 14, padding: '10px 24px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>+ Créer la première idée</button>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Aucune stratégie texte publiée</div>
+            <button onClick={openNew} style={{ marginTop: 14, padding: '10px 24px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a', fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>+ Créer le Niveau 1</button>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {ideas.map(idea => (
-              <div key={idea.id} style={{ background: 'rgba(15,23,42,0.9)', border: `1px solid rgba(${idea.enabled ? '250,204,21' : '100,116,139'},0.25)`, borderRadius: 14, padding: '18px 20px' }}>
-                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>💡 {idea.name}</span>
-                      {idea.is_paid ? (
-                        <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 20, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' }}>💰 {Number(idea.price_usd).toFixed(0)} $</span>
-                      ) : (
-                        <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>🆓 Gratuit</span>
-                      )}
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: idea.enabled ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.15)', color: idea.enabled ? '#22c55e' : '#64748b', border: `1px solid rgba(${idea.enabled ? '34,197,94' : '100,116,139'},0.25)` }}>
-                        {idea.enabled ? '🌐 Visible' : '🔒 Masquée'}
-                      </span>
+            {ideas.map((idea, idx) => {
+              const levelNum = idea.level_number ?? (idx + 1);
+              const isFirst  = idx === 0;
+              const isLast   = idx === ideas.length - 1;
+              return (
+                <div key={idea.id} style={{ background: 'rgba(15,23,42,0.9)', border: `1px solid rgba(${idea.enabled ? '250,204,21' : '100,116,139'},0.25)`, borderRadius: 14, padding: '18px 20px' }}>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+
+                    {/* Reorder buttons */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}>
+                      <button
+                        disabled={isFirst || reordering === idea.id}
+                        onClick={() => handleReorder(idea.id, 'up')}
+                        title="Monter"
+                        style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid rgba(250,204,21,0.3)', background: isFirst ? 'rgba(100,116,139,0.05)' : 'rgba(250,204,21,0.08)', color: isFirst ? '#475569' : '#fbbf24', cursor: isFirst ? 'default' : 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isFirst ? 0.3 : 1 }}>
+                        ▲
+                      </button>
+                      <button
+                        disabled={isLast || reordering === idea.id}
+                        onClick={() => handleReorder(idea.id, 'down')}
+                        title="Descendre"
+                        style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid rgba(250,204,21,0.3)', background: isLast ? 'rgba(100,116,139,0.05)' : 'rgba(250,204,21,0.08)', color: isLast ? '#475569' : '#fbbf24', cursor: isLast ? 'default' : 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isLast ? 0.3 : 1 }}>
+                        ▼
+                      </button>
                     </div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7, maxWidth: 700, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'pre-wrap' }}>
-                      {idea.description}
+
+                    {/* Level badge */}
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 56, height: 56, borderRadius: 14, background: 'linear-gradient(135deg,rgba(250,204,21,0.18),rgba(245,158,11,0.10))', border: '2px solid rgba(250,204,21,0.5)', flexDirection: 'column' }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: '#92400e', letterSpacing: 0.8, textTransform: 'uppercase' }}>Niv.</div>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', lineHeight: 1 }}>{levelNum}</div>
                     </div>
-                    <div style={{ fontSize: 11, color: '#475569', marginTop: 8 }}>
-                      Créé : {fmtDate(idea.created_at)} · Mis à jour : {fmtDate(idea.updated_at)}
+
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>{idea.name}</span>
+                        {idea.is_paid ? (
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 20, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' }}>💰 {Number(idea.price_usd).toFixed(0)} $</span>
+                        ) : (
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 20, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>🆓 Gratuit</span>
+                        )}
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: idea.enabled ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.15)', color: idea.enabled ? '#22c55e' : '#64748b', border: `1px solid rgba(${idea.enabled ? '34,197,94' : '100,116,139'},0.25)` }}>
+                          {idea.enabled ? '🌐 Visible' : '🔒 Masquée'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7, maxWidth: 700, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'pre-wrap' }}>
+                        {idea.description}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#475569', marginTop: 8 }}>
+                        Créé : {fmtDate(idea.created_at)} · Mis à jour : {fmtDate(idea.updated_at)}
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-                    <button onClick={() => openEdit(idea)} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✏️ Modifier</button>
-                    <button onClick={() => toggleEnabled(idea)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid rgba(${idea.enabled ? '245,158,11' : '34,197,94'},0.35)`, background: `rgba(${idea.enabled ? '245,158,11' : '34,197,94'},0.08)`, color: idea.enabled ? '#f59e0b' : '#22c55e', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                      {idea.enabled ? '🔒 Masquer' : '🌐 Publier'}
-                    </button>
-                    <button onClick={() => handleDelete(idea.id)} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>🗑 Supprimer</button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+                      <button onClick={() => openEdit(idea)} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(250,204,21,0.35)', background: 'rgba(250,204,21,0.08)', color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✏️ Modifier</button>
+                      <button onClick={() => toggleEnabled(idea)} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid rgba(${idea.enabled ? '245,158,11' : '34,197,94'},0.35)`, background: `rgba(${idea.enabled ? '245,158,11' : '34,197,94'},0.08)`, color: idea.enabled ? '#f59e0b' : '#22c55e', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                        {idea.enabled ? '🔒 Masquer' : '🌐 Publier'}
+                      </button>
+                      <button onClick={() => handleDelete(idea.id)} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>🗑 Supprimer</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
       ) : (
@@ -193,7 +236,7 @@ export default function AdminIdeas() {
         purchases.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 60, color: '#475569' }}>
             <div style={{ fontSize: 36, marginBottom: 10 }}>🧾</div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>Aucun achat d'idée enregistré</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Aucun achat enregistré</div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -245,12 +288,12 @@ export default function AdminIdeas() {
           onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
           <div style={{ background: 'linear-gradient(145deg,#0f172a,#1e293b)', border: '1.5px solid rgba(250,204,21,0.4)', borderRadius: 20, padding: 28, maxWidth: 700, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ fontSize: 18, fontWeight: 800, color: '#fbbf24', marginBottom: 22 }}>
-              {modal === 'new' ? '💡 Nouvelle idée de stratégie' : `✏️ Modifier : ${modal.idea?.name}`}
+              {modal === 'new' ? `💡 Nouveau Niveau ${ideas.length + 1}` : `✏️ Modifier : ${modal.idea?.name}`}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label style={labelSt}>Nom de l'idée</label>
+                <label style={labelSt}>Nom interne de l'idée</label>
                 <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Stratégie Martingale Inversée" style={inp} />
               </div>
 
