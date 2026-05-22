@@ -76,6 +76,37 @@ const CATEGORIES = [
   // Parité du score Banquier uniquement
   { key: 'pt_b_pair', group: '⚖️ Parité Banquier', label: 'Banquier Pair',   match: c => c.bs !== null && c.bs % 2 === 0 },
   { key: 'pt_b_imp',  group: '⚖️ Parité Banquier', label: 'Banquier Impair', match: c => c.bs !== null && c.bs % 2 === 1 },
+
+  // ── Valeurs de cartes — Joueur ─────────────────────────────────────────
+  // Suit du rang dans la main du Joueur (A=11 dans la source, normalisé en 'A')
+  { key: 'cv_p_A',  group: '🂡 Valeurs Joueur',   label: 'A (11)', match: c => c.ranksP.has('A')  },
+  { key: 'cv_p_2',  group: '🂡 Valeurs Joueur',   label: '2',      match: c => c.ranksP.has('2')  },
+  { key: 'cv_p_3',  group: '🂡 Valeurs Joueur',   label: '3',      match: c => c.ranksP.has('3')  },
+  { key: 'cv_p_4',  group: '🂡 Valeurs Joueur',   label: '4',      match: c => c.ranksP.has('4')  },
+  { key: 'cv_p_5',  group: '🂡 Valeurs Joueur',   label: '5',      match: c => c.ranksP.has('5')  },
+  { key: 'cv_p_6',  group: '🂡 Valeurs Joueur',   label: '6',      match: c => c.ranksP.has('6')  },
+  { key: 'cv_p_7',  group: '🂡 Valeurs Joueur',   label: '7',      match: c => c.ranksP.has('7')  },
+  { key: 'cv_p_8',  group: '🂡 Valeurs Joueur',   label: '8',      match: c => c.ranksP.has('8')  },
+  { key: 'cv_p_9',  group: '🂡 Valeurs Joueur',   label: '9',      match: c => c.ranksP.has('9')  },
+  { key: 'cv_p_10', group: '🂡 Valeurs Joueur',   label: '10',     match: c => c.ranksP.has('10') },
+  { key: 'cv_p_J',  group: '🂡 Valeurs Joueur',   label: 'J',      match: c => c.ranksP.has('J')  },
+  { key: 'cv_p_Q',  group: '🂡 Valeurs Joueur',   label: 'Q',      match: c => c.ranksP.has('Q')  },
+  { key: 'cv_p_K',  group: '🂡 Valeurs Joueur',   label: 'K',      match: c => c.ranksP.has('K')  },
+
+  // ── Valeurs de cartes — Banquier ───────────────────────────────────────
+  { key: 'cv_b_A',  group: '🂡 Valeurs Banquier', label: 'A (11)', match: c => c.ranksB.has('A')  },
+  { key: 'cv_b_2',  group: '🂡 Valeurs Banquier', label: '2',      match: c => c.ranksB.has('2')  },
+  { key: 'cv_b_3',  group: '🂡 Valeurs Banquier', label: '3',      match: c => c.ranksB.has('3')  },
+  { key: 'cv_b_4',  group: '🂡 Valeurs Banquier', label: '4',      match: c => c.ranksB.has('4')  },
+  { key: 'cv_b_5',  group: '🂡 Valeurs Banquier', label: '5',      match: c => c.ranksB.has('5')  },
+  { key: 'cv_b_6',  group: '🂡 Valeurs Banquier', label: '6',      match: c => c.ranksB.has('6')  },
+  { key: 'cv_b_7',  group: '🂡 Valeurs Banquier', label: '7',      match: c => c.ranksB.has('7')  },
+  { key: 'cv_b_8',  group: '🂡 Valeurs Banquier', label: '8',      match: c => c.ranksB.has('8')  },
+  { key: 'cv_b_9',  group: '🂡 Valeurs Banquier', label: '9',      match: c => c.ranksB.has('9')  },
+  { key: 'cv_b_10', group: '🂡 Valeurs Banquier', label: '10',     match: c => c.ranksB.has('10') },
+  { key: 'cv_b_J',  group: '🂡 Valeurs Banquier', label: 'J',      match: c => c.ranksB.has('J')  },
+  { key: 'cv_b_Q',  group: '🂡 Valeurs Banquier', label: 'Q',      match: c => c.ranksB.has('Q')  },
+  { key: 'cv_b_K',  group: '🂡 Valeurs Banquier', label: 'K',      match: c => c.ranksB.has('K')  },
 ];
 
 // ── Score baccarat ─────────────────────────────────────────────────────────
@@ -116,6 +147,28 @@ function suitsOf(cards) {
   for (const c of (cards || [])) {
     const n = normalizeSuit(c?.S || '');
     if (['♠','♣','♦','♥'].includes(n)) out.add(n);
+  }
+  return out;
+}
+
+// Normalise le rang d'une carte vers une clé canonique.
+// En Baccara, l'As peut être stocké comme 'A', 1, ou 11 selon la source.
+function normalizeRank(r) {
+  if (r === undefined || r === null) return null;
+  const s = String(r).toUpperCase().trim();
+  if (s === 'A' || s === '1' || s === '11') return 'A';
+  if (s === 'T' || s === '10') return '10';
+  if (['J','Q','K','2','3','4','5','6','7','8','9'].includes(s)) return s;
+  const n = parseInt(s, 10);
+  if (!isNaN(n) && n >= 2 && n <= 9) return String(n);
+  return null;
+}
+
+function ranksOf(cards) {
+  const out = new Set();
+  for (const c of (cards || [])) {
+    const r = normalizeRank(c?.R);
+    if (r) out.add(r);
   }
   return out;
 }
@@ -252,7 +305,9 @@ function buildContext(game) {
   const suitsP = new Set(suitsOf(pCards));
   const suitsB = new Set(suitsOf(bCards));
   const suits  = new Set([...suitsP, ...suitsB]);
-  return { np, nb, ps, bs, winner, winnerScore, suits, suitsP, suitsB };
+  const ranksP = ranksOf(pCards);
+  const ranksB = ranksOf(bCards);
+  return { np, nb, ps, bs, winner, winnerScore, suits, suitsP, suitsB, ranksP, ranksB };
 }
 
 function processGame(game) {

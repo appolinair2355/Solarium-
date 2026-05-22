@@ -1677,74 +1677,144 @@ function _bgCurr(currency) { return BANQUE_CURRENCY_MAP[currency] || currency ||
 function _bgRnd(n) { return Math.round(n * 100) / 100; }
 
 /**
- * Message initial du lot (avec header banque).
+ * Ligne d'affichage d'une prédiction du lot.
+ * ❌ : montre la mise perdue
+ * ✅ : montre le profit net (gain - mise)
+ * ⌛ : en attente
+ */
+function _bgPredLine(pred, cote, curr) {
+  const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
+  if (pred.status === null) {
+    return `${pred.game}- ${se} ⌛`;
+  } else if (pred.status === 'gagne') {
+    const Re     = RATR_EMOJI[pred.ratr] ?? pred.ratr;
+    const profit = _bgRnd(pred.amount_delta);
+    return `${pred.game}- ${se} ✅ ${Re}  +${profit}${curr}`;
+  } else {
+    const perte = _bgRnd(Math.abs(pred.amount_delta));
+    return `${pred.game}- ${se} ❌  -${perte}${curr}`;
+  }
+}
+
+/**
+ * Calcule la ligne "BANQUE ACTUELLE" avec formule cumulative sur tout le lot.
+ * Ex : 5000f - 1000f - 2200f - 4840f - 10648f = -14688f
+ * Ex : 5000f - 1000f + 1980f = 5980f
+ * Aucun résultat encore : 5000f
+ */
+function _bgBankLine(bgState, curr) {
+  const preds     = bgState.lot_predictions || [];
+  const donePreds = preds.filter(p => p.status !== null);
+
+  if (donePreds.length === 0) {
+    return `${_bgRnd(bgState.bank)}${curr}`;
+  }
+
+  const totalDelta = donePreds.reduce((sum, p) => sum + (p.amount_delta || 0), 0);
+  const bankStart  = _bgRnd(bgState.bank - totalDelta);
+
+  let formula = `${bankStart}${curr}`;
+  for (const pred of donePreds) {
+    const d = pred.amount_delta || 0;
+    formula += d < 0 ? ` - ${Math.abs(d)}${curr}` : ` + ${d}${curr}`;
+  }
+  formula += ` = ${_bgRnd(bgState.bank)}${curr}`;
+  return formula;
+}
+
+/**
+ * Message initial du lot (première prédiction en attente).
  */
 function buildBanqueInitialText(bgState, cfg, gameNumber, suit) {
-  const curr = _bgCurr(cfg.bg_currency);
-  const cote = parseFloat(cfg.bg_cote) || 1.9;
+  const curr      = _bgCurr(cfg.bg_currency);
+  const cote      = parseFloat(cfg.bg_cote) || 1.9;
+  const maxR      = parseInt(cfg.max_rattrapage) || 3;
+  const lotSize   = parseInt(cfg.bg_lot_size) || 5;
+  const lotNum    = bgState.lot_number || 1;
   const suitEmoji = SUIT_EMOJI_MAP[suit] || suit;
   return (
     `💰 Montant banque : ${_bgRnd(bgState.bank)}${curr}\n` +
-    `💵 Mise : ${bgState.current_mise}${curr} | Côté : ×${cote}\n` +
-    `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `${gameNumber}${suitEmoji} ⌛`
+    `🎲 Mise : ${_bgRnd(bgState.current_mise)}${curr}\n` +
+    `📈 Côté : ×${cote}\n` +
+    `🔋 Rattrapage : ${maxR}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🎮 LOT #${lotNum} — 1/${lotSize}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `\n` +
+    `${gameNumber}- ${suitEmoji} ⌛\n` +
+    `\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🏦 BANQUE ACTUELLE\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `${_bgRnd(bgState.bank)}${curr}`
   );
 }
 
 /**
- * Message de lot en cours (résultats + prédiction en attente).
+ * Message de lot en cours (résultats + prédiction(s) en attente) — édité en live.
  */
 function buildBanqueLotText(bgState, cfg) {
-  const curr = _bgCurr(cfg.bg_currency);
-  const cote = parseFloat(cfg.bg_cote) || 1.9;
-  const preds = bgState.lot_predictions || [];
-  const lines = [];
-  for (const pred of preds) {
-    const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
-    if (pred.status === null) {
-      lines.push(`${pred.game}${se} ⌛`);
-    } else if (pred.status === 'gagne') {
-      const Re = RATR_EMOJI[pred.ratr] ?? pred.ratr;
-      const gain = _bgRnd(pred.mise * cote);
-      if (pred.ratr === 0) {
-        lines.push(`${pred.game}${se}✅ ${Re} ${pred.mise}×${cote}=${gain}${curr}`);
-      } else {
-        lines.push(`${pred.game}${se}✅ ${Re} (${pred.mise_initial || pred.mise}×${Array(pred.ratr).fill('2.2').join('×')}×${cote}=${gain}${curr})`);
-      }
-    } else {
-      lines.push(`${pred.game}${se}❌ -${pred.mise}${curr}`);
-    }
-  }
-  return lines.join('\n') || '...';
+  const curr    = _bgCurr(cfg.bg_currency);
+  const cote    = parseFloat(cfg.bg_cote) || 1.9;
+  const maxR    = parseInt(cfg.max_rattrapage) || 3;
+  const lotSize = parseInt(cfg.bg_lot_size) || 5;
+  const lotNum  = bgState.lot_number || 1;
+  const preds   = bgState.lot_predictions || [];
+  const count   = preds.length;
+
+  const predLines = preds.map(p => _bgPredLine(p, cote, curr));
+
+  return (
+    `💰 Montant banque : ${_bgRnd(bgState.bank)}${curr}\n` +
+    `🎲 Mise : ${_bgRnd(bgState.current_mise)}${curr}\n` +
+    `📈 Côté : ×${cote}\n` +
+    `🔋 Rattrapage : ${maxR}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🎮 LOT #${lotNum} — ${count}/${lotSize}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `\n` +
+    predLines.join('\n') + `\n` +
+    `\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🏦 BANQUE ACTUELLE\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    _bgBankLine(bgState, curr)
+  );
 }
 
 /**
  * Message de résumé après fin de lot.
  */
 function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter) {
-  const curr = _bgCurr(cfg.bg_currency);
-  const cote = parseFloat(cfg.bg_cote) || 1.9;
-  const lines = [];
-  for (const pred of lotPreds) {
-    const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
-    if (pred.status === 'gagne') {
-      const Re = RATR_EMOJI[pred.ratr] ?? pred.ratr;
-      const gain = _bgRnd(pred.mise * cote);
-      if (pred.ratr === 0) {
-        lines.push(`${pred.game}${se}✅ ${Re} ${pred.mise}×${cote}=${gain}${curr}`);
-      } else {
-        lines.push(`${pred.game}${se}✅ ${Re} (${pred.mise_initial || pred.mise}×${Array(pred.ratr).fill('2.2').join('×')}×${cote}=${gain}${curr})`);
-      }
-    } else {
-      lines.push(`${pred.game}${se}❌ -${pred.mise}${curr}`);
-    }
-  }
-  const delta = _bgRnd(bankAfter - bankBefore);
+  const curr    = _bgCurr(cfg.bg_currency);
+  const cote    = parseFloat(cfg.bg_cote) || 1.9;
+  const maxR    = parseInt(cfg.max_rattrapage) || 3;
+
+  const predLines = lotPreds.map(p => _bgPredLine(p, cote, curr));
+
+  const delta    = _bgRnd(bankAfter - bankBefore);
   const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`📊 Bilan Lot #${lotNumber} : ${deltaStr}${curr}`);
-  lines.push(`💰 Banque : ${_bgRnd(bankAfter)}${curr} (${deltaStr}${curr})`);
-  return lines.join('\n');
+  const bankLine = delta < 0
+    ? `${_bgRnd(bankBefore)}${curr} - ${Math.abs(delta)}${curr} = ${_bgRnd(bankAfter)}${curr}`
+    : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
+
+  return (
+    `💰 Montant banque départ : ${_bgRnd(bankBefore)}${curr}\n` +
+    `📈 Côté : ×${cote}\n` +
+    `🔋 Rattrapage : ${maxR}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `📊 BILAN LOT #${lotNumber}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `\n` +
+    predLines.join('\n') + `\n` +
+    `\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💵 Résultat : ${deltaStr}${curr}\n` +
+    `\n` +
+    `🏦 BANQUE ACTUELLE\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    bankLine
+  );
 }
 
 /**

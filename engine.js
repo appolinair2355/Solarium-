@@ -571,6 +571,12 @@ class Engine {
       // Calcul du maxR effectif : priorité à la config de la stratégie, sinon global
       const stratMaxR = (state.config.max_rattrapage !== undefined && state.config.max_rattrapage !== null)
         ? parseInt(state.config.max_rattrapage) : globalMaxR;
+      // ── Vérification des exceptions (relance forcée) ─────────────────────
+      const forceExceptions = Array.isArray(state.config.exceptions) ? state.config.exceptions : [];
+      if (forceExceptions.length > 0 && this._checkExceptions(forceExceptions, suit, suit, state, {}, nextGn)) {
+        console.log(`[${stratId}] _forceNextPrediction #${nextGn} bloquée par exception`);
+        return;
+      }
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
       const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR };
       db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(async inserted => {
@@ -1492,6 +1498,10 @@ class Engine {
     const suitVotes = {};
     for (const s of signals) { suitVotes[s.suit] = (suitVotes[s.suit] || 0) + 1; }
     const ps = Object.entries(suitVotes).sort((a,b) => b[1]-a[1])[0][0];
+
+    // ── Vérification des exceptions avant d'émettre ──
+    const multiExceptions = cfg.exceptions || [];
+    if (this._checkExceptions(multiExceptions, ps, ps, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
 
     let inserted = false;
     try {
@@ -3848,9 +3858,13 @@ class Engine {
     const pred = bgS.lot_predictions.find(p => p.game === gameNum && p.suit === suit && p.status === null);
     if (!pred) return;
 
+    // Mise effective : escalade de 2.2 par rattrapage dans cette prédiction
+    // Ex : mise=1000, R3 → effectiveMise = 1000 × 2.2^3 = 10648
+    const effectiveMise = Math.round(pred.mise * Math.pow(2.2, rattrapR) * 100) / 100;
+
     if (won) {
-      const gain    = Math.round(pred.mise * cote * 100) / 100;
-      const profit  = Math.round((gain - pred.mise) * 100) / 100;
+      const gain    = Math.round(effectiveMise * cote * 100) / 100;
+      const profit  = Math.round((gain - effectiveMise) * 100) / 100;
       bgS.bank     += profit;
       bgS.bank      = Math.round(bgS.bank * 100) / 100;
       pred.status   = 'gagne';
@@ -3859,17 +3873,17 @@ class Engine {
       // Reset mise martingale
       bgS.mise_level   = 0;
       bgS.current_mise = initMise;
-      console.log(`[${channelId}] [BanqueGestion] ✅ #${gameNum} R${rattrapR} gain=+${profit}  banque=${bgS.bank}`);
+      console.log(`[${channelId}] [BanqueGestion] ✅ #${gameNum} R${rattrapR} effectiveMise=${effectiveMise} gain=+${profit}  banque=${bgS.bank}`);
     } else {
-      bgS.bank     -= pred.mise;
+      bgS.bank     -= effectiveMise;
       bgS.bank      = Math.round(bgS.bank * 100) / 100;
       pred.status   = 'perdu';
       pred.ratr     = rattrapR;
-      pred.amount_delta = -pred.mise;
-      // Martingale : mise × 2.2
+      pred.amount_delta = -effectiveMise;
+      // Martingale : prochaine mise = effectiveMise × 2.2
       bgS.mise_level   = (bgS.mise_level || 0) + 1;
-      bgS.current_mise = Math.round(pred.mise * 2.2 * 100) / 100;
-      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} -${pred.mise}  prochaine=${bgS.current_mise}  banque=${bgS.bank}`);
+      bgS.current_mise = Math.round(effectiveMise * 2.2 * 100) / 100;
+      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} -${effectiveMise}  prochaine=${bgS.current_mise}  banque=${bgS.bank}`);
     }
 
     // Éditer le message Telegram avec le résultat à jour
