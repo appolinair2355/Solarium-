@@ -754,9 +754,11 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
-            c3_b:      Math.max(1, parseInt(req.body.c3_b)      || 4),
-            c3_seuil3: Math.max(1, parseInt(req.body.c3_seuil3) || 3),
-            c3_jj:     Math.max(1, parseInt(req.body.c3_jj)     || 2) }
+            c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
+            c3_seuil3:        Math.max(1, parseInt(req.body.c3_seuil3)        || 3),
+            c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
+            prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
+            max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
             bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
@@ -1042,9 +1044,11 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
-            c3_b:      Math.max(1, parseInt(req.body.c3_b)      || 4),
-            c3_seuil3: Math.max(1, parseInt(req.body.c3_seuil3) || 3),
-            c3_jj:     Math.max(1, parseInt(req.body.c3_jj)     || 2) }
+            c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
+            c3_seuil3:        Math.max(1, parseInt(req.body.c3_seuil3)        || 3),
+            c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
+            prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
+            max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
             bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
