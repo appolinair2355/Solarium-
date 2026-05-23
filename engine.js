@@ -65,6 +65,11 @@ function extractSuits(cards) {
   return [...suits];
 }
 
+function countValidCards(cards) {
+  if (!Array.isArray(cards)) return 0;
+  return cards.filter(c => c && c.S && c.S !== '?').length;
+}
+
 // ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
 async function canEmitNewPrediction(stratId) {
   try {
@@ -1846,8 +1851,8 @@ class Engine {
 
       // ── Résolution spéciale mode Distribution ──────────────────────────
       if (ps === 'distrib') {
-        const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
-          && pCards.length === 2 && bCards.length === 2;
+        const vp = countValidCards(pCards), vb = countValidCards(bCards);
+        const isNatural = vp === 2 && vb === 2;
         if (isNatural) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
@@ -1864,9 +1869,9 @@ class Engine {
 
       // ── Résolution spéciale mode Carte 2/3 ─────────────────────────────
       } else if (ps === 'deux' || ps === 'trois') {
-        const hc = Array.isArray(handCards) ? handCards : Array.isArray(pCards) ? pCards : [];
+        const hcRaw = Array.isArray(handCards) ? handCards : Array.isArray(pCards) ? pCards : [];
         const targetCount = ps === 'deux' ? 2 : 3;
-        if (hc.length === targetCount) {
+        if (countValidCards(hcRaw) === targetCount) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Carte${targetCount}] Jeu #${gn} = ${targetCount} cartes → gagne (R${rattrapage})`);
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -1899,8 +1904,8 @@ class Engine {
 
       // ── Résolution spéciale mode Écart 2/3 ─────────────────────────────
       } else if (ps === 'TWO_THREE') {
-        const isMixed = Array.isArray(pCards) && Array.isArray(bCards) &&
-          ((pCards.length === 2 && bCards.length === 3) || (pCards.length === 3 && bCards.length === 2));
+        const vpTT = countValidCards(pCards), vbTT = countValidCards(bCards);
+        const isMixed = (vpTT === 2 && vbTT === 3) || (vpTT === 3 && vbTT === 2);
         if (isMixed) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Écart 2/3] ✅ Jeu mixte → gagne (R${rattrapage})`);
@@ -1932,11 +1937,12 @@ class Engine {
       // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
       } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
         const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
+        const vpC = countValidCards(pCards), vbC = countValidCards(bCards);
         const isMatch = ps === 'DEUX_TROIS'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 2 && bCards.length === 3)
+          ? (vpC === 2 && vbC === 3)
           : ps === 'TROIS_DEUX'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 2)
-          : (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 3);
+          ? (vpC === 3 && vbC === 2)
+          : (vpC === 3 && vbC === 3);
         if (isMatch) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [${combLabel}] ✅ Combinaison confirmée → gagne (R${rattrapage})`);
@@ -2459,6 +2465,9 @@ class Engine {
 
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
+      // Pour gestion_banque : collecter les args de résolution sans appeler async dans le callback
+      // (évite la course où une nouvelle prédiction s'ajoute au lot avant la vérification de clôture)
+      let _banqueArgs = null;
       await this._resolvePending(state.pending, channelId, gn, resolveHandSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
@@ -2470,11 +2479,16 @@ class Engine {
         }
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
-        // ── Gestion Banque : mise à jour bankroll sur résolution ──
+        // ── Gestion Banque : stocker les args pour traitement APRÈS _resolvePending ──
         if (cfg.mode === 'gestion_banque') {
-          this._resolveBanqueOnResult(channelId, pg, ps, won, rattrapR || 0, cfg, state).catch(() => {});
+          _banqueArgs = { pg, ps, won, rattrapR: rattrapR || 0 };
         }
       }, stratMaxRForResolve, stratTgOpts, handCards, winner);
+      // Traiter la bankroll APRÈS _resolvePending et AVANT d'ajouter de nouvelles prédictions
+      // Cela garantit que la vérification de clôture de lot se fait avant tout ajout au lot
+      if (_banqueArgs) {
+        await this._resolveBanqueOnResult(channelId, _banqueArgs.pg, _banqueArgs.ps, _banqueArgs.won, _banqueArgs.rattrapR, cfg, state);
+      }
     }
 
     // ── Logique de déclenchement : ne traiter ce jeu qu'une seule fois ──
@@ -2706,8 +2720,7 @@ class Engine {
       // Compte les jeux consécutifs NON-naturels (absence de distribution).
       // Logique identique à absence_apparition : quand une distribution survient
       // après >= B absences consécutives → prédit que le prochain jeu sera aussi une distribution.
-      const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
-        && pCards.length === 2 && bCards.length === 2;
+      const isNatural = countValidCards(pCards) === 2 && countValidCards(bCards) === 2;
       if (isNatural) {
         if ((state.counts['distrib'] || 0) >= B) {
           console.log(`[${channelId}] [Distribution] Distribution après ${state.counts['distrib']} absences (seuil≥${B}) → prédiction jeu #${gn + offset}`);
@@ -2727,8 +2740,9 @@ class Engine {
       // Phase 2 (attente) : on attend que 2 cartes apparaissent pour la main choisie.
       //   - Dès que 2 cartes arrivent → prédiction envoyée + reset.
       const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
-      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
-      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
+      const _hcCnt3v2     = countValidCards(handCardsNow);
+      const hasTwoCards   = _hcCnt3v2 === 2;
+      const hasThreeCards = _hcCnt3v2 === 3;
 
       if (state.waiting_c3v2) {
         // Phase attente : seuil déjà atteint, on attend les 2 cartes
@@ -2764,8 +2778,9 @@ class Engine {
       // Phase 2 (attente) : on attend que 3 cartes apparaissent pour la main choisie.
       //   - Dès que 3 cartes arrivent → prédiction envoyée + reset.
       const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
-      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
-      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
+      const _hcCnt2v3     = countValidCards(handCardsNow);
+      const hasTwoCards   = _hcCnt2v3 === 2;
+      const hasThreeCards = _hcCnt2v3 === 3;
 
       if (state.waiting_c2v3) {
         // Phase attente : seuil déjà atteint, on attend les 3 cartes
@@ -3181,8 +3196,9 @@ class Engine {
       // ─────────────────────────────────────────────────────────────────────
       const predictCard   = mode === 'abs_3_vers_2' ? 'deux' : 'trois';
       const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
-      const hasThreeCards = Array.isArray(handCardsNow) && handCardsNow.length === 3;
-      const hasTwoCards   = Array.isArray(handCardsNow) && handCardsNow.length === 2;
+      const _hcCntAbs     = countValidCards(handCardsNow);
+      const hasThreeCards = _hcCntAbs === 3;
+      const hasTwoCards   = _hcCntAbs === 2;
 
       if (hasThreeCards) {
         if ((state.counts['abs3'] || 0) >= B) {
@@ -3824,6 +3840,14 @@ class Engine {
         const srcGn = srcPred.game_number;
         if (state.bgMirrored.has(srcGn)) continue; // déjà mirroré
 
+        // Ne pas miroir une prédiction source trop ancienne (déjà expirée côté gestion_banque)
+        // Si le jeu actuel dépasse déjà srcGn + maxR, mirorer maintenant causerait une perte immédiate
+        if (gn > srcGn + 3) {
+          state.bgMirrored.add(srcGn); // marquer pour éviter de réessayer
+          console.log(`[${channelId}] [BanqueGestion] Source #${srcGn} ignorée — trop ancienne (jeu actuel #${gn})`);
+          continue;
+        }
+
         state.bgMirrored.add(srcGn);
         // Limiter la taille du Set (garder les 50 derniers)
         if (state.bgMirrored.size > 50) {
@@ -3851,7 +3875,7 @@ class Engine {
 
         // Enregistrer en state.pending pour résolution normale
         const stratMaxR = 3; // gestion_banque : toujours 3 rattrapages (bankroll fixe R0→R3)
-        state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR };
+        state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: Date.now() };
 
         // Envoyer ou éditer le message Telegram
         if (bgS.lot_msg_ids.length === 0) {
@@ -4027,7 +4051,7 @@ class Engine {
             const pgNum = parseInt(pg);
             if (pgNum > gn) continue;
             const targetCount = info.suit === 'deux' ? 2 : 3;
-            if (hCards.length === targetCount) {
+            if (countValidCards(hCards) === targetCount) {
               const rattrapage = gn - pgNum;
               console.log(`[S${idStr}] ⚡ Live: ${targetCount} cartes (${hand}) jeu #${gn} → gagne immédiat (R${rattrapage})`);
               await resolvePrediction(`S${idStr}`, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, stratTgOpts);
