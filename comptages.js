@@ -152,13 +152,17 @@ function suitsOf(cards) {
 }
 
 // Normalise le rang d'une carte vers une clé canonique.
-// En Baccara, l'As peut être stocké comme 'A', 1, ou 11 selon la source.
+// L'API 1xBet envoie l'As comme R=11 (numérique). Dame=12, Roi=13.
+// Note: CV_RANK_MAP dans engine.js (11='J') est pour la source externe les_cartes — différente de l'API 1xBet.
 function normalizeRank(r) {
   if (r === undefined || r === null) return null;
   const s = String(r).toUpperCase().trim();
-  if (s === 'A' || s === '1' || s === '11') return 'A';
-  if (s === 'T' || s === '10') return '10';
-  if (['J','Q','K','2','3','4','5','6','7','8','9'].includes(s)) return s;
+  if (s === 'A' || s === '1' || s === '11' || s === '14') return 'A'; // As (1xBet envoie 11 pour l'As)
+  if (s === 'T' || s === '10')              return '10';
+  if (s === 'J')                            return 'J';  // Valet (lettre uniquement — 1xBet n'envoie pas J comme 11)
+  if (s === 'Q' || s === '12')             return 'Q';  // Dame  (lettre ou 12 numérique)
+  if (s === 'K' || s === '13')             return 'K';  // Roi   (lettre ou 13 numérique)
+  if (['2','3','4','5','6','7','8','9'].includes(s)) return s;
   const n = parseInt(s, 10);
   if (!isNaN(n) && n >= 2 && n <= 9) return String(n);
   return null;

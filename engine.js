@@ -1813,9 +1813,13 @@ class Engine {
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
     const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
     if (Object.keys(state.pending).length > 0) {
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps) => {
-        state.lastOutcomes.push({ won, suit: ps });
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pgNum, R) => {
+        state.lastOutcomes.push({ won, suit: ps, rattrapage: R || 0 });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        // Confirmation de rattrapage : log explicite quand la relance gagne en rattrapage
+        if (won && R > 0) {
+          console.log(`[Relance-Rattrapage✓] ${channelId} gagne en R${R} (jeu #${pgNum || '?'})`);
+        }
         // Ne pas déclencher de relance en cascade depuis une stratégie relance elle-même
       }, stratMaxR, stratTgOpts);
     }
@@ -2394,9 +2398,11 @@ class Engine {
     // Important : même si ce jeu a déjà été traité pour la logique de déclenchement
     // (ex. après _initializeNewStrategies), il faut quand même résoudre les prédictions
     // en attente contre lui, sinon elles restent bloquées jusqu'à expiration (❌).
-    const stratMaxRForResolve = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
-      ? parseInt(cfg.max_rattrapage)
-      : getCurrentMaxRattrapage();
+    // Pour gestion_banque : toujours 3 rattrapages (bankroll R0→R3 fixe)
+    const stratMaxRForResolve = cfg.mode === 'gestion_banque' ? 3
+      : (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+        ? parseInt(cfg.max_rattrapage)
+        : getCurrentMaxRattrapage();
 
     // Options Telegram propres à cette stratégie (format + main + maxR)
     const stratTgOpts = {
@@ -3318,12 +3324,11 @@ class Engine {
           console.log(`[${channelId}] [C3] ${suit} absent ${state.c3_abs[suit]}x (C2=${C3_B}) · inverse ${inv} apparu ${appInv}x (< seuil3=${C3_S3}) → pas de tendance → prédire INVERSE ${inv}`);
         }
 
-        const ps = resolvePredictedSuit(predictedSuit);
-        if (ps) {
-          await emitPrediction(gn + offset, ps, suit);
-          state.c3_abs[suit] = 0;
-          break; // Une prédiction par jeu
-        }
+        // Le costume final est déjà déterminé par l'algorithme — ne pas passer par
+        // resolvePredictedSuit (qui lirait cfg.mappings, non configurés pour ce mode).
+        state.c3_abs[suit] = 0;
+        await emitPrediction(gn + offset, predictedSuit, suit);
+        break; // Une prédiction par jeu
       }
 
     } else if (mode === 'carte_valeur') {
@@ -3845,7 +3850,7 @@ class Engine {
         });
 
         // Enregistrer en state.pending pour résolution normale
-        const stratMaxR = parseInt(cfg.max_rattrapage) || 3;
+        const stratMaxR = 3; // gestion_banque : toujours 3 rattrapages (bankroll fixe R0→R3)
         state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR };
 
         // Envoyer ou éditer le message Telegram
@@ -4982,6 +4987,35 @@ class Engine {
           singleCounter: true,
           queue,
         }];
+      }
+
+      // Mode Compteurs Absences (3 compteurs) → exposer c3_abs / c3_app / c3_block
+      if (mode === 'compteurs_absences') {
+        const c3_abs   = entry.c3_abs   || {};
+        const c3_app   = entry.c3_app   || {};
+        const c3_block = entry.c3_block || {};
+        const C3_B  = parseInt(cfg.c3_b)      || parseInt(threshold) || 4;
+        const C3_S3 = parseInt(cfg.c3_seuil3) || 3;
+        const C3_JJ = parseInt(cfg.c3_jj)     || 2;
+        const C3_INV = { '♠': '♦', '♦': '♠', '♥': '♣', '♣': '♥' };
+        return ALL_SUITS.map(suit => {
+          const inv     = C3_INV[suit];
+          const pairKey = (suit === '♠' || suit === '♦') ? '♠_♦' : '♥_♣';
+          const abs     = c3_abs[suit]      || 0;
+          const appInv  = c3_app[inv]       || 0;
+          const block   = c3_block[pairKey] || 0;
+          return {
+            suit, display: SUIT_DISPLAY[suit] || suit,
+            count: abs, threshold: C3_B,
+            mode, label: '3 Compteurs',
+            isCompteurAbsences: true,
+            c3_abs: abs,
+            c3_app_inv: appInv, c3_inv: inv, c3_seuil3: C3_S3,
+            c3_block: block, c3_jj: C3_JJ,
+            isBlocked: block >= C3_JJ,
+            hasAbsSignal: abs >= C3_B,
+          };
+        });
       }
 
       // Mode comptages_ecart → streak courant vs seuil dynamique B

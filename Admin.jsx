@@ -8602,9 +8602,9 @@ function AdminPanel() {
                 {stratForm.mode === 'relance' && (
                   <div style={{ gridColumn: '1 / -1' }}>
                     <div style={{ marginBottom: 12, fontSize: 12, color: '#94a3b8' }}>
-                      Cochez les stratégies à surveiller. Activez une ou plusieurs conditions — le premier déclencheur atteint lance la relance.
+                      Cochez les stratégies à surveiller et définissez le nombre de pertes consécutives avant déclenchement.
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {[
                         { id: 'C1', label: '♠ Pique Noir', tag: 'C1' },
                         { id: 'C2', label: '♥ Cœur Rouge', tag: 'C2' },
@@ -8614,280 +8614,41 @@ function AdminPanel() {
                       ].map(({ id, label, tag }) => {
                         const rule = (stratForm.relance_rules || []).find(r => r.strategy_id === id);
                         const checked = !!rule;
-                        const updateRule = (patch) => setStratForm(p => ({ ...p, relance_rules: p.relance_rules.map(r => r.strategy_id === id ? { ...r, ...patch } : r) }));
-
-                        const lThr    = rule?.losses_threshold ?? null;
-                        const rLevel  = rule?.rattrapage_level ?? null;
-                        const rCount  = rule?.rattrapage_count ?? 1;
-                        const cLevel  = rule?.combo_level ?? null;
-                        const cCount  = rule?.combo_count      ?? 1;
-                        const rFrom   = rule?.range_from       ?? null;
-                        const dCount  = rule?.range_count      ?? 1;
-                        const iMin    = rule?.interval_min     ?? null;
-                        const iMax    = rule?.interval_max     ?? null;
-                        const eCount  = rule?.interval_count   ?? 1;
-
-                        const summaryParts = [];
-                        if (lThr != null)                summaryParts.push(`${lThr} perte${lThr > 1 ? 's' : ''} consécutive${lThr > 1 ? 's' : ''}`);
-                        if (rLevel != null)              summaryParts.push(`${rCount}× R${rLevel} consécutif${rCount > 1 ? 's' : ''}`);
-                        if (cLevel != null)              summaryParts.push(`${cCount} event${cCount > 1 ? 's' : ''} (perte ou R${cLevel})`);
-                        if (rFrom != null)               summaryParts.push(`${dCount}× R≥R${rFrom}`);
-                        if (iMin != null && iMax != null) summaryParts.push(`${eCount}× R${iMin}→R${iMax}`);
-
-                        const BtnCount = ({ value, onChange, color }) => (
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {[1,2,3,4,5,6,7,8,9,10].map(n => {
-                              const active = value === n;
-                              return (
-                                <button key={n} type="button" onClick={() => onChange(n)}
-                                  style={{ width: 28, height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
-                                    border: active ? `2px solid ${color}` : '1px solid rgba(255,255,255,0.1)',
-                                    background: active ? `${color}33` : 'rgba(255,255,255,0.03)',
-                                    color: active ? color : '#6b7280', transition: 'all 0.1s' }}>{n}</button>
-                              );
-                            })}
-                          </div>
-                        );
-
-                        const BtnLevel = ({ value, onChange, color }) => (
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            {[1,2,3,4,5].map(n => {
-                              const active = value === n;
-                              return (
-                                <button key={n} type="button" onClick={() => onChange(n)}
-                                  style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
-                                    border: active ? `2px solid ${color}` : '1px solid rgba(255,255,255,0.1)',
-                                    background: active ? `${color}33` : 'rgba(255,255,255,0.03)',
-                                    color: active ? color : '#6b7280', transition: 'all 0.1s' }}>R{n}</button>
-                              );
-                            })}
-                          </div>
-                        );
-
-                        const CondToggle = ({ active, color, onClick }) => (
-                          <button type="button" onClick={onClick} style={{
-                            width: 18, height: 18, borderRadius: '50%', border: `2px solid ${active ? color : 'rgba(255,255,255,0.15)'}`,
-                            background: active ? color : 'transparent', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
-                          }} />
-                        );
-
+                        const lThr = rule?.losses_threshold ?? 2;
+                        const updateLosses = (n) => setStratForm(p => ({
+                          ...p,
+                          relance_rules: p.relance_rules.map(r => r.strategy_id === id ? { ...r, losses_threshold: n } : r),
+                        }));
                         return (
                           <div key={id} style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '9px 14px',
                             background: checked ? 'rgba(251,146,60,0.06)' : 'rgba(255,255,255,0.02)',
                             border: `1px solid ${checked ? 'rgba(251,146,60,0.28)' : 'rgba(255,255,255,0.07)'}`,
-                            borderRadius: 10, overflow: 'hidden', transition: 'all 0.15s',
+                            borderRadius: 9, transition: 'all 0.15s',
                           }}>
-                            {/* En-tête */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px' }}>
-                              <input type="checkbox" checked={checked}
-                                onChange={e => {
-                                  setStratForm(p => {
-                                    const cur = p.relance_rules || [];
-                                    if (e.target.checked) return { ...p, relance_rules: [...cur, { strategy_id: id, losses_threshold: null, rattrapage_level: null, rattrapage_count: 1, combo_level: null, combo_count: 1, range_from: null, range_count: 1, interval_min: null, interval_max: null, interval_count: 1 }] };
-                                    return { ...p, relance_rules: cur.filter(r => r.strategy_id !== id) };
-                                  });
-                                }}
-                                style={{ accentColor: '#fb923c', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-                              />
-                              <span style={{ flex: 1, color: checked ? '#e2e8f0' : '#64748b', fontWeight: checked ? 600 : 400, fontSize: 13 }}>{label}</span>
-                              <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace', background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 5 }}>{tag}</span>
-                            </div>
-
-                            {/* Conditions (visible si coché) */}
+                            <input type="checkbox" checked={checked}
+                              onChange={e => {
+                                setStratForm(p => {
+                                  const cur = p.relance_rules || [];
+                                  if (e.target.checked) return { ...p, relance_rules: [...cur, { strategy_id: id, losses_threshold: 2 }] };
+                                  return { ...p, relance_rules: cur.filter(r => r.strategy_id !== id) };
+                                });
+                              }}
+                              style={{ accentColor: '#fb923c', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                            />
+                            <span style={{ flex: 1, color: checked ? '#e2e8f0' : '#64748b', fontWeight: checked ? 600 : 400, fontSize: 13 }}>{label}</span>
+                            <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace', background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 5 }}>{tag}</span>
                             {checked && (
-                              <div style={{ padding: '2px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                <div style={{ height: 1, background: 'rgba(251,146,60,0.12)', marginBottom: 4 }} />
-
-                                {/* ── Condition A : Pertes consécutives ── */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: lThr != null ? 'rgba(251,146,60,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${lThr != null ? 'rgba(251,146,60,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <CondToggle active={lThr != null} color="#fb923c"
-                                      onClick={() => updateRule({ losses_threshold: lThr != null ? null : 2 })} />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: lThr != null ? '#fb923c' : '#475569' }}>Pertes consécutives</span>
-                                    {lThr != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>si ≥ {lThr} de suite → relance</span>}
-                                  </div>
-                                  {lThr != null && (
-                                    <BtnCount value={lThr} color="#fb923c" onChange={n => updateRule({ losses_threshold: n })} />
-                                  )}
-                                </div>
-
-                                {/* ── Condition B : Rattrapages consécutifs (multi-niveaux) ── */}
-                                {(() => {
-                                  // Backward-compat : tableau prioritaire, sinon fallback au champ legacy
-                                  const rLvls = Array.isArray(rule?.rattrapage_levels)
-                                    ? rule.rattrapage_levels
-                                    : (rLevel != null ? [rLevel] : []);
-                                  const condBOn = rLvls.length > 0;
-                                  const toggleLevel = (n) => {
-                                    const cur = rLvls.includes(n) ? rLvls.filter(x => x !== n) : [...rLvls, n].sort((a,b) => a-b);
-                                    updateRule({ rattrapage_levels: cur, rattrapage_level: cur.length === 1 ? cur[0] : null });
-                                  };
-                                  return (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: condBOn ? 'rgba(129,140,248,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${condBOn ? 'rgba(129,140,248,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <CondToggle active={condBOn} color="#818cf8"
-                                          onClick={() => updateRule({ rattrapage_levels: condBOn ? null : [3], rattrapage_level: condBOn ? null : 3, rattrapage_count: 1 })} />
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: condBOn ? '#818cf8' : '#475569' }}>Rattrapage consécutif</span>
-                                        {condBOn && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{rCount}× R{rLvls.join('/')} de suite → relance</span>}
-                                      </div>
-                                      {condBOn && (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Niveaux :</span>
-                                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                              {[1,2,3,4,5,6,7,8,9,10].map(n => {
-                                                const active = rLvls.includes(n);
-                                                return (
-                                                  <button key={n} type="button" onClick={() => toggleLevel(n)}
-                                                    style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
-                                                      border: active ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
-                                                      background: active ? 'rgba(129,140,248,0.25)' : 'rgba(255,255,255,0.03)',
-                                                      color: active ? '#818cf8' : '#6b7280' }}>R{n}</button>
-                                                );
-                                              })}
-                                            </div>
-                                          </div>
-                                          <div style={{ fontSize: 9, color: '#64748b', fontStyle: 'italic', paddingLeft: 58 }}>Cliquez plusieurs niveaux pour déclencher si l'un d'eux atteint le seuil.</div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 50 }}>Fois :</span>
-                                            <BtnCount value={rCount} color="#818cf8" onChange={n => updateRule({ rattrapage_count: n })} />
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* ── Condition C : Perte + Rattrapage (combo, multi-niveaux) ── */}
-                                {(() => {
-                                  const cLvls = Array.isArray(rule?.combo_levels)
-                                    ? rule.combo_levels
-                                    : (cLevel != null ? [cLevel] : []);
-                                  const condCOn = cLvls.length > 0;
-                                  const toggleCLevel = (n) => {
-                                    const cur = cLvls.includes(n) ? cLvls.filter(x => x !== n) : [...cLvls, n].sort((a,b) => a-b);
-                                    updateRule({ combo_levels: cur, combo_level: cur.length === 1 ? cur[0] : null });
-                                  };
-                                  return (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: condCOn ? 'rgba(52,211,153,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${condCOn ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <CondToggle active={condCOn} color="#34d399"
-                                          onClick={() => updateRule({ combo_levels: condCOn ? null : [3], combo_level: condCOn ? null : 3, combo_count: 1 })} />
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: condCOn ? '#34d399' : '#475569' }}>Perte + Rattrapage</span>
-                                        {condCOn && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{cCount} événement{cCount > 1 ? 's' : ''} (perte ou R{cLvls.join('/')}) → relance</span>}
-                                      </div>
-                                      {condCOn && (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 60 }}>Niveaux R :</span>
-                                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                              {[1,2,3,4,5,6,7,8,9,10].map(n => {
-                                                const active = cLvls.includes(n);
-                                                return (
-                                                  <button key={n} type="button" onClick={() => toggleCLevel(n)}
-                                                    style={{ padding: '2px 8px', height: 26, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 11,
-                                                      border: active ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
-                                                      background: active ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.03)',
-                                                      color: active ? '#34d399' : '#6b7280' }}>R{n}</button>
-                                                );
-                                              })}
-                                            </div>
-                                          </div>
-                                          <div style={{ fontSize: 9, color: '#64748b', fontStyle: 'italic', paddingLeft: 68 }}>Multi-sélection : déclenche dès que (perte) ou (R parmi sélection) atteint le seuil.</div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ fontSize: 10, color: '#64748b', minWidth: 60 }}>Fois :</span>
-                                            <BtnCount value={cCount} color="#34d399" onChange={n => updateRule({ combo_count: n })} />
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* ── Condition D : À partir de tel rattrapage ── */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: rFrom != null ? 'rgba(251,191,36,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${rFrom != null ? 'rgba(251,191,36,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <CondToggle active={rFrom != null} color="#fbbf24"
-                                      onClick={() => updateRule({ range_from: rFrom != null ? null : 3, range_count: 1 })} />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: rFrom != null ? '#fbbf24' : '#475569' }}>À partir de tel rattrapage</span>
-                                    {rFrom != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{dCount}× (R≥R{rFrom}) → relance</span>}
-                                  </div>
-                                  {rFrom != null && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Déclencher si R ≥</span>
-                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
-                                            const active = rFrom === n;
-                                            return (
-                                              <button key={n} type="button" onClick={() => updateRule({ range_from: n })}
-                                                style={{ padding: '1px 6px', height: 24, borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #fbbf24' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.03)', color: active ? '#fbbf24' : '#6b7280' }}>R{n}</button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Nombre de fois :</span>
-                                        <BtnCount value={dCount} color="#fbbf24" onChange={n => updateRule({ range_count: n })} />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* ── Condition E : Intervalle de rattrapage ── */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8, background: iMin != null ? 'rgba(168,85,247,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${iMin != null ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.05)'}` }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <CondToggle active={iMin != null} color="#a855f7"
-                                      onClick={() => updateRule({ interval_min: iMin != null ? null : 1, interval_max: iMax ?? 5, interval_count: 1 })} />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: iMin != null ? '#a855f7' : '#475569' }}>Intervalle de rattrapage</span>
-                                    {iMin != null && iMax != null && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>{eCount}× R{iMin}→R{iMax} → relance</span>}
-                                  </div>
-                                  {iMin != null && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>De (R min) :</span>
-                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
-                                            const active = iMin === n;
-                                            return (
-                                              <button key={n} type="button" onClick={() => updateRule({ interval_min: n, interval_max: iMax != null && iMax < n ? n : iMax })}
-                                                style={{ padding: '1px 5px', height: 22, borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.03)', color: active ? '#a855f7' : '#6b7280' }}>R{n}</button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>À (R max) :</span>
-                                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                                          {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(n => {
-                                            const disabled = n < (iMin || 1);
-                                            const active = iMax === n;
-                                            return (
-                                              <button key={n} type="button" onClick={() => !disabled && updateRule({ interval_max: n })}
-                                                style={{ padding: '1px 5px', height: 22, borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 10, border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', background: active ? 'rgba(168,85,247,0.25)' : disabled ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)', color: active ? '#a855f7' : disabled ? '#334155' : '#6b7280', opacity: disabled ? 0.4 : 1 }}>R{n}</button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 10, color: '#64748b', minWidth: 80 }}>Nombre de fois :</span>
-                                        <BtnCount value={eCount} color="#a855f7" onChange={n => updateRule({ interval_count: n })} />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Résumé */}
-                                {summaryParts.length > 0 ? (
-                                  <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic', paddingLeft: 4 }}>
-                                    → Déclenche si : {summaryParts.join(' OU ')}
-                                  </div>
-                                ) : (
-                                  <div style={{ fontSize: 10, color: '#ef4444', fontStyle: 'italic', paddingLeft: 4 }}>
-                                    ⚠ Activez au moins une condition ci-dessus
-                                  </div>
-                                )}
-                              </div>
+                              <>
+                                <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>après</span>
+                                <input
+                                  type="number" min="1" max="20" value={lThr}
+                                  onChange={e => updateLosses(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                                  style={{ width: 46, padding: '3px 6px', borderRadius: 5, border: '1px solid rgba(251,146,60,0.4)', background: 'rgba(0,0,0,0.3)', color: '#fb923c', fontSize: 13, fontWeight: 700, textAlign: 'center' }}
+                                />
+                                <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>perte{lThr > 1 ? 's' : ''}</span>
+                              </>
                             )}
                           </div>
                         );
