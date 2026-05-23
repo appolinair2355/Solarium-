@@ -386,7 +386,7 @@ function AdminPanel() {
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
-  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [] };
+  const BLANK_FORM = { name: '', threshold: 5, mode: 'manquants', mappings: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] }, visibility: 'admin', enabled: true, tg_targets: [], stratType: 'simple', exceptions: [], prediction_offset: 1, hand: 'joueur', max_rattrapage: 20, tg_format: null, mirror_pairs: [], trigger_on: null, trigger_strategy_id: '', trigger_count: 2, trigger_level: 3, relance_enabled: false, relance_pertes: 3, relance_types: [], relance_nombre: 1, strategy_type: 'simple', multi_source_ids: [], multi_require: 'any', loss_type: 'rattrapage', relance_rules: [], bg_source_strategy_id: '', bg_bank: 5000, bg_mise_initiale: 1000, bg_cote: 1.9, bg_lot_size: 5, c3_b: 4, c3_seuil3: 3, c3_jj: 2 };
 
   // 6 paires possibles pour le mode taux_miroir
   const MIRROR_PAIRS = [
@@ -873,7 +873,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], bg_source_strategy_id: s.bg_source_strategy_id ?? '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_cote: s.bg_cote ?? 1.9, bg_lot_size: s.bg_lot_size ?? 5, c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2 });
     setStratOpen(true);
   };
 
@@ -890,7 +890,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, relance_enabled: s.relance_enabled ?? false, relance_pertes: s.relance_pertes ?? 3, relance_types: s.relance_types ?? [], relance_nombre: s.relance_nombre ?? 1, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', relance_rules: s.relance_rules || [], bg_source_strategy_id: s.bg_source_strategy_id ?? '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_cote: s.bg_cote ?? 1.9, bg_lot_size: s.bg_lot_size ?? 5, c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -2653,6 +2653,8 @@ function AdminPanel() {
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="relance">🔁 Séquences de Relance</option>
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
+                    <option value="gestion_banque">🏦 Gestion Banque</option>
+                    <option value="compteurs_absences">📊 Compteurs Absences</option>
                   </select>
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
@@ -2677,9 +2679,11 @@ function AdminPanel() {
                   {stratForm.mode === 'relance' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.25)', fontSize: 12, color: '#fdba74', lineHeight: 1.8 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🔁 Mode Séquences de Relance — Comment ça fonctionne ?</div>
-                      <div>Ce mode <strong>ne prédit pas directement</strong> — il surveille les <strong>pertes consécutives</strong> des stratégies sélectionnées ci-dessus.</div>
-                      <div style={{ marginTop: 6 }}>Dès qu'une stratégie atteint son seuil de pertes, la relance se déclenche automatiquement et envoie une prédiction via le canal Telegram configuré.</div>
-                      <div style={{ marginTop: 6 }}>Les prédictions de relance apparaissent <strong>séparément</strong> dans le canal avec le type de perte/rattrapage choisi en Section 2.</div>
+                      <div>Ce mode surveille les <strong>pertes/rattrapages</strong> des stratégies sélectionnées. Dès que le seuil est atteint, il <strong>copie la prochaine prédiction en attente</strong> de la stratégie source et l'envoie automatiquement.</div>
+                      <div style={{ marginTop: 6 }}>Ex. : S5 a une prédiction #20 ❤️ en attente → S5 perd 2 fois → la relance copie #20 ❤️ et l'envoie dans son canal Telegram.</div>
+                      <div style={{ marginTop: 6, padding: '5px 9px', borderRadius: 6, background: 'rgba(251,146,60,0.12)', fontSize: 11 }}>
+                        ℹ️ Si aucune prédiction n'est en attente dans la source, la relance prédit le même costume que la dernière perte, au jeu suivant.
+                      </div>
                     </div>
                   )}
                   {stratForm.mode === 'aleatoire' && (
@@ -2694,10 +2698,24 @@ function AdminPanel() {
                       </div>
                     </div>
                   )}
+                  {stratForm.mode === 'gestion_banque' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.3)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🏦 Mode Gestion Banque — Comment ça fonctionne ?</div>
+                      <div>Ce mode <strong>miroire les prédictions d'une stratégie source</strong> et gère automatiquement la bankroll.</div>
+                      <div style={{ marginTop: 4 }}>La mise augmente selon le coefficient cote × 2.2 à chaque rattrapage, et revient à la mise initiale après un gain.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'compteurs_absences' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📊 Mode Compteurs Absences — Comment ça fonctionne ?</div>
+                      <div>Pour chaque costume, le moteur tient 3 compteurs : <strong>absences</strong> (jeux sans apparition), <strong>apparitions inverses</strong> (jeux où le costume inverse apparaît), et <strong>bloqueur</strong> (jeux de blocage).</div>
+                      <div style={{ marginTop: 6 }}>Dès qu'un costume dépasse le seuil d'absences <strong>c3_b</strong>, il est prédit. Le seuil d'apparitions inverses <strong>c3_seuil3</strong> permet de confirmer la prédiction. Le bloqueur <strong>c3_jj</strong> empêche une relance trop rapide.</div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Seuil B / Différence — masqué pour relance et aleatoire */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {/* Seuil B / Différence — masqué pour relance, aleatoire, gestion_banque, compteurs_absences */}
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'gestion_banque' && stratForm.mode !== 'compteurs_absences' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -2835,10 +2853,231 @@ function AdminPanel() {
                   </div>
                 )}
 
+                {/* ── CONFIG GESTION BANQUE ────────────────────────────────────────── */}
+                {stratForm.mode === 'gestion_banque' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '18px 18px', borderRadius: 14, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.28)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+                      <span style={{ fontSize: 18 }}>🏦</span>
+                      <span style={{ fontWeight: 800, fontSize: 12, color: '#10b981', letterSpacing: 1.1, textTransform: 'uppercase' }}>Configuration Gestion Banque</span>
+                    </div>
+
+                    {/* Stratégie source */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                        📡 Stratégie source à mirorer
+                      </label>
+                      <select
+                        value={stratForm.bg_source_strategy_id || ''}
+                        onChange={e => setStratForm(p => ({ ...p, bg_source_strategy_id: e.target.value }))}
+                        style={{ width: '100%', padding: '9px 12px', background: '#1e1b2e', border: '1px solid rgba(16,185,129,0.4)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
+                        <option value="">— Sélectionner une stratégie —</option>
+                        {strategies.filter(s => s.mode !== 'gestion_banque').map(s => (
+                          <option key={s.id} value={`S${s.id}`}>S{s.id} — {s.name} ({s.mode})</option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: 5, fontSize: 11, color: '#6ee7b7', opacity: 0.7 }}>
+                        Les prédictions de cette stratégie seront copiées avec gestion automatique de la bankroll.
+                      </div>
+                    </div>
+
+                    {/* Grille 2×2 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+
+                      {/* Banque initiale */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          💰 Banque initiale (FCFA)
+                        </label>
+                        <input
+                          type="number" min="100" step="100"
+                          value={stratForm.bg_bank ?? 5000}
+                          onChange={e => setStratForm(p => ({ ...p, bg_bank: parseFloat(e.target.value) || 5000 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }}
+                        />
+                        <div style={{ marginTop: 4, fontSize: 11, color: '#6ee7b7', opacity: 0.7 }}>Montant total de départ</div>
+                      </div>
+
+                      {/* Mise initiale */}
+                      <div>
+                        <label style={{ display: 'block', color: '#10b981', fontSize: 12, marginBottom: 6, fontWeight: 800 }}>
+                          🎯 Mise initiale (FCFA)
+                        </label>
+                        <input
+                          type="number" min="1" step="1"
+                          value={stratForm.bg_mise_initiale ?? 1000}
+                          onChange={e => setStratForm(p => ({ ...p, bg_mise_initiale: parseFloat(e.target.value) || 1000 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: 'rgba(16,185,129,0.12)', border: '2px solid rgba(16,185,129,0.55)', borderRadius: 8, color: '#6ee7b7', fontSize: 14, fontWeight: 800, boxSizing: 'border-box', boxShadow: '0 0 8px rgba(16,185,129,0.2)' }}
+                        />
+                        <div style={{ marginTop: 4, fontSize: 11, color: '#10b981' }}>
+                          Mise de base — escalade ×2.2 par rattrapage
+                        </div>
+                      </div>
+
+                      {/* Cote */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          📈 Cote (multiplicateur)
+                        </label>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {[1.85, 1.9, 1.95, 2.0].map(c => {
+                            const active = (stratForm.bg_cote ?? 1.9) === c;
+                            return (
+                              <button key={c} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, bg_cote: c }))}
+                                style={{
+                                  padding: '6px 12px', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                                  border: active ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                                  background: active ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.04)',
+                                  color: active ? '#6ee7b7' : '#6b7280', transition: 'all 0.15s',
+                                }}>{c}</button>
+                            );
+                          })}
+                        </div>
+                        <input
+                          type="number" min="1.01" max="5" step="0.01"
+                          value={stratForm.bg_cote ?? 1.9}
+                          onChange={e => setStratForm(p => ({ ...p, bg_cote: parseFloat(e.target.value) || 1.9 }))}
+                          style={{ width: '100%', padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      {/* Taille du lot */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          📦 Taille du lot (prédictions)
+                        </label>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {[3, 5, 10, 15, 20].map(n => {
+                            const active = (stratForm.bg_lot_size ?? 5) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, bg_lot_size: n }))}
+                                style={{
+                                  width: 42, height: 36, borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                  border: active ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                                  background: active ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.04)',
+                                  color: active ? '#6ee7b7' : '#6b7280', transition: 'all 0.15s',
+                                }}>{n}</button>
+                            );
+                          })}
+                        </div>
+                        <input
+                          type="number" min="1" max="50" step="1"
+                          value={stratForm.bg_lot_size ?? 5}
+                          onChange={e => setStratForm(p => ({ ...p, bg_lot_size: parseInt(e.target.value) || 5 }))}
+                          style={{ width: '100%', padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}
+                        />
+                        <div style={{ marginTop: 4, fontSize: 11, color: '#6ee7b7', opacity: 0.7 }}>Nb de prédictions par lot avant bilan</div>
+                      </div>
+                    </div>
+
+                    {/* Récapitulatif live */}
+                    <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 9, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.8, fontFamily: 'monospace' }}>
+                      <div>💰 Banque : <strong>{(stratForm.bg_bank ?? 5000).toLocaleString('fr-FR')}f</strong></div>
+                      <div>🎯 Mise : <strong>{(stratForm.bg_mise_initiale ?? 1000).toLocaleString('fr-FR')}f</strong>
+                        {' → '}R1: <strong>{Math.round((stratForm.bg_mise_initiale ?? 1000) * 2.2)}f</strong>
+                        {' → '}R2: <strong>{Math.round((stratForm.bg_mise_initiale ?? 1000) * 2.2 * 2.2)}f</strong>
+                        {' → '}R3: <strong>{Math.round((stratForm.bg_mise_initiale ?? 1000) * 2.2 * 2.2 * 2.2)}f</strong>
+                      </div>
+                      <div>📈 Gain (mise initiale ×cote) : <strong>+{Math.round((stratForm.bg_mise_initiale ?? 1000) * ((stratForm.bg_cote ?? 1.9) - 1)).toLocaleString('fr-FR')}f</strong></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── CONFIG COMPTEURS ABSENCES ─────────────────────────────────────── */}
+                {stratForm.mode === 'compteurs_absences' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '18px 18px', borderRadius: 14, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.28)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+                      <span style={{ fontSize: 18 }}>📊</span>
+                      <span style={{ fontWeight: 800, fontSize: 12, color: '#818cf8', letterSpacing: 1.1, textTransform: 'uppercase' }}>Configuration Compteurs Absences</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+                      {/* Seuil absences c3_b */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          ⛔ Seuil absences (c3_b)
+                        </label>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {[2,3,4,5,6,7,8,10].map(n => {
+                            const active = (stratForm.c3_b ?? 4) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, c3_b: n }))}
+                                style={{ width: 34, height: 30, borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                                  border: active ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
+                                  background: active ? 'rgba(129,140,248,0.25)' : 'rgba(255,255,255,0.04)',
+                                  color: active ? '#a5b4fc' : '#6b7280', transition: 'all 0.1s' }}>{n}</button>
+                            );
+                          })}
+                        </div>
+                        <input type="number" min="1" max="50" value={stratForm.c3_b ?? 4}
+                          onChange={e => setStratForm(p => ({ ...p, c3_b: Math.max(1, parseInt(e.target.value) || 4) }))}
+                          style={{ width: '100%', padding: '7px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 8, color: '#a5b4fc', fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }} />
+                        <div style={{ marginTop: 4, fontSize: 10, color: '#6b7280' }}>Jeux sans apparition avant déclenchement</div>
+                      </div>
+
+                      {/* Seuil apparitions inverses c3_seuil3 */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          🔄 Seuil apparitions inverses (c3_seuil3)
+                        </label>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {[1,2,3,4,5,6].map(n => {
+                            const active = (stratForm.c3_seuil3 ?? 3) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, c3_seuil3: n }))}
+                                style={{ width: 34, height: 30, borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                                  border: active ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
+                                  background: active ? 'rgba(129,140,248,0.25)' : 'rgba(255,255,255,0.04)',
+                                  color: active ? '#a5b4fc' : '#6b7280', transition: 'all 0.1s' }}>{n}</button>
+                            );
+                          })}
+                        </div>
+                        <input type="number" min="1" max="20" value={stratForm.c3_seuil3 ?? 3}
+                          onChange={e => setStratForm(p => ({ ...p, c3_seuil3: Math.max(1, parseInt(e.target.value) || 3) }))}
+                          style={{ width: '100%', padding: '7px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 8, color: '#a5b4fc', fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }} />
+                        <div style={{ marginTop: 4, fontSize: 10, color: '#6b7280' }}>Apparitions du costume inverse confirmant la pred</div>
+                      </div>
+
+                      {/* Bloqueur c3_jj */}
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+                          🔒 Bloqueur (c3_jj)
+                        </label>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+                          {[1,2,3,4,5].map(n => {
+                            const active = (stratForm.c3_jj ?? 2) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, c3_jj: n }))}
+                                style={{ width: 34, height: 30, borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                                  border: active ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
+                                  background: active ? 'rgba(129,140,248,0.25)' : 'rgba(255,255,255,0.04)',
+                                  color: active ? '#a5b4fc' : '#6b7280', transition: 'all 0.1s' }}>{n}</button>
+                            );
+                          })}
+                        </div>
+                        <input type="number" min="1" max="20" value={stratForm.c3_jj ?? 2}
+                          onChange={e => setStratForm(p => ({ ...p, c3_jj: Math.max(1, parseInt(e.target.value) || 2) }))}
+                          style={{ width: '100%', padding: '7px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 8, color: '#a5b4fc', fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }} />
+                        <div style={{ marginTop: 4, fontSize: 10, color: '#6b7280' }}>Jeux minimum entre deux déclenchements du même costume</div>
+                      </div>
+                    </div>
+
+                    {/* Récapitulatif live */}
+                    <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 9, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', fontSize: 12, color: '#a5b4fc', lineHeight: 1.8, fontFamily: 'monospace' }}>
+                      <div>⛔ Abs ≥ <strong>{stratForm.c3_b ?? 4}</strong> jeux → déclenchement</div>
+                      <div>🔄 App inverse ≥ <strong>{stratForm.c3_seuil3 ?? 3}</strong> → confirmation</div>
+                      <div>🔒 Bloqueur : <strong>{stratForm.c3_jj ?? 2}</strong> jeux entre déclenchements</div>
+                    </div>
+                  </div>
+                )}
+
                 </>)}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'relance' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'gestion_banque' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
