@@ -385,7 +385,7 @@ class Engine {
           if (rule.interval_min  != null) this.relanceCondCounters[kE] = 0;
         }
 
-        if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
+        if (fired) this._fireRelance(relanceId, stratId, gn, suit);
       }
     }
 
@@ -507,8 +507,40 @@ class Engine {
           }
         }
 
-        if (fired) this._forceNextPrediction(relanceId, gn + 1, suit);
+        if (fired) this._fireRelance(relanceId, stratId, gn, suit);
       }
+    }
+  }
+
+  // Retourne l'objet pending d'une stratégie quelconque (C1/C2/C3/DC/Sn)
+  _getPendingFor(stratId) {
+    const k = String(stratId).toUpperCase();
+    if (k === 'C1') return this.c1?.pending || {};
+    if (k === 'C2') return this.c2?.pending || {};
+    if (k === 'C3') return this.c3?.pending || {};
+    if (k === 'DC') return this.dc?.pending || {};
+    if (k.startsWith('S')) {
+      const id = parseInt(k.slice(1));
+      return this.custom[id]?.pending || {};
+    }
+    return {};
+  }
+
+  // Déclenche une relance : copie la prochaine prédiction en attente
+  // de la stratégie source ; si aucune n'est disponible, fallback sur suitFallback au jeu gn+1
+  _fireRelance(relanceId, srcStratId, gn, suitFallback) {
+    const srcPending = this._getPendingFor(srcStratId);
+    const pendingList = Object.entries(srcPending)
+      .map(([g, v]) => ({ game: parseInt(g), suit: v.suit || v }))
+      .filter(p => !isNaN(p.game) && p.suit)
+      .sort((a, b) => a.game - b.game);
+    if (pendingList.length > 0) {
+      const next = pendingList[0];
+      console.log(`[Relance→Copie] ${relanceId} ← ${srcStratId}#${next.game} ${next.suit}`);
+      this._forceNextPrediction(relanceId, next.game, next.suit);
+    } else {
+      console.log(`[Relance→Fallback] ${relanceId} ← ${srcStratId} (pas de pred en attente) → #${gn + 1} ${suitFallback}`);
+      this._forceNextPrediction(relanceId, gn + 1, suitFallback);
     }
   }
 
@@ -3858,32 +3890,44 @@ class Engine {
     const pred = bgS.lot_predictions.find(p => p.game === gameNum && p.suit === suit && p.status === null);
     if (!pred) return;
 
-    // Mise effective : escalade de 2.2 par rattrapage dans cette prédiction
-    // Ex : mise=1000, R3 → effectiveMise = 1000 × 2.2^3 = 10648
+    // Calcul du total misé de R0 jusqu'au niveau rattrapR (toutes les mises jouées)
+    // Ex : mise=1000, R4 → totalMise = 1000 + 2200 + 4840 + 10648 + 23425.6 = 42113.6
+    let totalMise = 0;
+    let m = pred.mise;
+    for (let i = 0; i <= rattrapR; i++) {
+      totalMise += m;
+      m = Math.round(m * 2.2 * 100) / 100;
+    }
+    totalMise = Math.round(totalMise * 100) / 100;
+
+    // Mise effective au niveau gagnant (ou perdant)
     const effectiveMise = Math.round(pred.mise * Math.pow(2.2, rattrapR) * 100) / 100;
 
     if (won) {
-      const gain    = Math.round(effectiveMise * cote * 100) / 100;
-      const profit  = Math.round((gain - effectiveMise) * 100) / 100;
-      bgS.bank     += profit;
-      bgS.bank      = Math.round(bgS.bank * 100) / 100;
-      pred.status   = 'gagne';
-      pred.ratr     = rattrapR;
-      pred.amount_delta = profit;
+      // Gain brut au niveau RattrapR
+      const gain       = Math.round(effectiveMise * cote * 100) / 100;
+      // Bénéfice net = gain - total de toutes les mises jouées (R0→RN)
+      const netBenefit = Math.round((gain - totalMise) * 100) / 100;
+      bgS.bank        += netBenefit;
+      bgS.bank         = Math.round(bgS.bank * 100) / 100;
+      pred.status      = 'gagne';
+      pred.ratr        = rattrapR;
+      pred.amount_delta = netBenefit;
       // Reset mise martingale
       bgS.mise_level   = 0;
       bgS.current_mise = initMise;
-      console.log(`[${channelId}] [BanqueGestion] ✅ #${gameNum} R${rattrapR} effectiveMise=${effectiveMise} gain=+${profit}  banque=${bgS.bank}`);
+      console.log(`[${channelId}] [BanqueGestion] ✅ #${gameNum} R${rattrapR} totalMisé=${totalMise} gain=${gain} bénéfice=+${netBenefit}  banque=${bgS.bank}`);
     } else {
-      bgS.bank     -= effectiveMise;
-      bgS.bank      = Math.round(bgS.bank * 100) / 100;
-      pred.status   = 'perdu';
-      pred.ratr     = rattrapR;
-      pred.amount_delta = -effectiveMise;
-      // Martingale : prochaine mise = effectiveMise × 2.2
+      // Perte = total de toutes les mises jouées (R0→RN)
+      bgS.bank        -= totalMise;
+      bgS.bank         = Math.round(bgS.bank * 100) / 100;
+      pred.status      = 'perdu';
+      pred.ratr        = rattrapR;
+      pred.amount_delta = -totalMise;
+      // Martingale : prochaine mise = niveau suivant
       bgS.mise_level   = (bgS.mise_level || 0) + 1;
       bgS.current_mise = Math.round(effectiveMise * 2.2 * 100) / 100;
-      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} -${effectiveMise}  prochaine=${bgS.current_mise}  banque=${bgS.bank}`);
+      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} totalMisé=-${totalMise}  prochaine=${bgS.current_mise}  banque=${bgS.bank}`);
     }
 
     // Éditer le message Telegram avec le résultat à jour

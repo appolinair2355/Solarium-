@@ -1697,10 +1697,9 @@ function _bgPredLine(pred, cote, curr) {
 }
 
 /**
- * Calcule la ligne "BANQUE ACTUELLE" avec formule cumulative sur tout le lot.
- * Ex : 5000f - 1000f - 2200f - 4840f - 10648f = -14688f
- * Ex : 5000f - 1000f + 1980f = 5980f
- * Aucun résultat encore : 5000f
+ * Calcule la ligne "BÉNÉFICES" avec formule cumulative sur tout le lot.
+ * Ex : 0f + 900f - 1000f = -100f
+ * Aucun résultat encore : 0f
  */
 function _bgBankLine(bgState, curr) {
   const preds     = bgState.lot_predictions || [];
