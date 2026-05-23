@@ -4572,11 +4572,21 @@ class Engine {
             if (age > 22 * 60 * 1000) delete state.pending[key];
           }
         }
-        for (const s of Object.values(this.custom || {})) {
+        for (const [sid, s] of Object.entries(this.custom || {})) {
           if (!s.pending) continue;
+          const cfg = s.config || {};
+          const channelId = `S${sid}`;
           for (const [key, p] of Object.entries(s.pending)) {
             const age = Date.now() - new Date(p.created_at || 0).getTime();
-            if (age > 22 * 60 * 1000) delete s.pending[key];
+            if (age > 22 * 60 * 1000) {
+              // Pour gestion_banque : enregistrer la perte avant suppression
+              if (cfg.mode === 'gestion_banque') {
+                const pgNum = parseInt(key);
+                const effectiveMaxR = (p.maxR !== undefined && p.maxR !== null) ? p.maxR : 3;
+                this._resolveBanqueOnResult(channelId, pgNum, p.suit, false, effectiveMaxR, cfg, s).catch(() => {});
+              }
+              delete s.pending[key];
+            }
           }
         }
       }
@@ -4994,9 +5004,9 @@ class Engine {
         const c3_abs   = entry.c3_abs   || {};
         const c3_app   = entry.c3_app   || {};
         const c3_block = entry.c3_block || {};
-        const C3_B  = parseInt(cfg.c3_b)      || parseInt(threshold) || 4;
-        const C3_S3 = parseInt(cfg.c3_seuil3) || 3;
-        const C3_JJ = parseInt(cfg.c3_jj)     || 2;
+        const C3_B  = parseInt(entry.config.c3_b)      || parseInt(threshold) || 4;
+        const C3_S3 = parseInt(entry.config.c3_seuil3) || 3;
+        const C3_JJ = parseInt(entry.config.c3_jj)     || 2;
         const C3_INV = { '♠': '♦', '♦': '♠', '♥': '♣', '♣': '♥' };
         return ALL_SUITS.map(suit => {
           const inv     = C3_INV[suit];

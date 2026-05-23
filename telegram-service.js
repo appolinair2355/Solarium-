@@ -1727,7 +1727,7 @@ function _bgBankLine(bgState, curr) {
 function buildBanqueInitialText(bgState, cfg, gameNumber, suit) {
   const curr      = _bgCurr(cfg.bg_currency);
   const cote      = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR      = parseInt(cfg.max_rattrapage) || 3;
+  const maxR      = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
   const lotSize   = parseInt(cfg.bg_lot_size) || 5;
   const lotNum    = bgState.lot_number || 1;
   const suitEmoji = SUIT_EMOJI_MAP[suit] || suit;
@@ -1755,7 +1755,7 @@ function buildBanqueInitialText(bgState, cfg, gameNumber, suit) {
 function buildBanqueLotText(bgState, cfg) {
   const curr    = _bgCurr(cfg.bg_currency);
   const cote    = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR    = parseInt(cfg.max_rattrapage) || 3;
+  const maxR    = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
   const lotSize = parseInt(cfg.bg_lot_size) || 5;
   const lotNum  = bgState.lot_number || 1;
   const preds   = bgState.lot_predictions || [];
@@ -1787,7 +1787,7 @@ function buildBanqueLotText(bgState, cfg) {
 function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter) {
   const curr    = _bgCurr(cfg.bg_currency);
   const cote    = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR    = parseInt(cfg.max_rattrapage) || 3;
+  const maxR    = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
 
   const predLines = lotPreds.map(p => _bgPredLine(p, cote, curr));
 
