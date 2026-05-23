@@ -1561,7 +1561,92 @@ export default function Dashboard() {
                               </div>
                             </div>
                           );
-                        })() : (() => {
+                        })() : absences[0]?.isCompteurAbsences ? (
+                          <div style={{ paddingTop: 2, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {absences.map(a => {
+                              const c2      = a.c3_abs     || 0;
+                              const c3      = a.c3_app_inv || 0;
+                              const c4      = a.c3_block   || 0;
+                              const B       = a.threshold  || 4;
+                              const S3      = a.c3_seuil3  || 3;
+                              const JJ      = a.c3_jj      || 2;
+                              const inv     = a.c3_inv     || '?';
+                              const blocked = a.isBlocked;
+                              const hasSignal = a.hasAbsSignal;
+                              const c2Pct   = Math.min(100, (c2 / B)  * 100);
+                              const c2Color = c2 >= B ? '#ef4444' : c2 >= B - 1 ? '#f59e0b' : '#6366f1';
+                              const c3Pct   = Math.min(100, (c3 / S3) * 100);
+                              const c3Color = c3 >= S3 ? '#22c55e' : c3 >= S3 - 1 ? '#f59e0b' : '#64748b';
+                              const c4Pct   = Math.min(100, (c4 / JJ) * 100);
+                              const c4Color = blocked ? '#ef4444' : c4 >= JJ - 1 ? '#f59e0b' : '#94a3b8';
+                              let signal = null;
+                              if (blocked) {
+                                signal = { text: '🔒 Bloqué', color: '#ef4444' };
+                              } else if (hasSignal) {
+                                signal = c3 >= S3
+                                  ? { text: `→ Prédit ${a.display} (manquant)`, color: '#f59e0b' }
+                                  : { text: `→ Prédit ${inv} (inverse)`, color: '#22c55e' };
+                              }
+                              return (
+                                <div key={a.suit} style={{
+                                  background: blocked ? 'rgba(239,68,68,0.06)' : hasSignal ? 'rgba(99,102,241,0.07)' : 'rgba(255,255,255,0.02)',
+                                  border: `1px solid ${blocked ? 'rgba(239,68,68,0.25)' : hasSignal ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)'}`,
+                                  borderRadius: 8,
+                                  padding: '7px 9px',
+                                  marginBottom: 2,
+                                }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{a.display}</span>
+                                      <span style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: 600 }}>↔ {inv}</span>
+                                    </div>
+                                    {signal && (
+                                      <span style={{
+                                        fontSize: '0.62rem', fontWeight: 700,
+                                        color: signal.color,
+                                        background: `${signal.color}18`,
+                                        border: `1px solid ${signal.color}55`,
+                                        borderRadius: 999,
+                                        padding: '1px 7px',
+                                        animation: hasSignal && !blocked ? 'pulse 1.5s infinite' : 'none',
+                                      }}>{signal.text}</span>
+                                    )}
+                                  </div>
+                                  <div style={{ marginBottom: 4 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                      <span style={{ fontSize: '0.58rem', fontWeight: 700, color: c2Color, minWidth: 20 }}>C2</span>
+                                      <span style={{ fontSize: '0.58rem', color: '#64748b' }}>Absence</span>
+                                      <span style={{ marginLeft: 'auto', fontSize: '0.65rem', fontWeight: 700, color: c2Color }}>{c2}/{B}</span>
+                                    </div>
+                                    <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 9, overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${c2Pct}%`, background: c2Color, borderRadius: 9, transition: 'width 0.4s ease, background 0.3s ease' }} />
+                                    </div>
+                                  </div>
+                                  <div style={{ marginBottom: 4 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                      <span style={{ fontSize: '0.58rem', fontWeight: 700, color: c3Color, minWidth: 20 }}>C3</span>
+                                      <span style={{ fontSize: '0.58rem', color: '#64748b' }}>Tendance {inv}</span>
+                                      <span style={{ marginLeft: 'auto', fontSize: '0.65rem', fontWeight: 700, color: c3Color }}>{c3}/{S3}</span>
+                                    </div>
+                                    <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 9, overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${c3Pct}%`, background: c3Color, borderRadius: 9, transition: 'width 0.4s ease, background 0.3s ease' }} />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                      <span style={{ fontSize: '0.58rem', fontWeight: 700, color: c4Color, minWidth: 20 }}>C4</span>
+                                      <span style={{ fontSize: '0.58rem', color: '#64748b' }}>Bloqueur</span>
+                                      <span style={{ marginLeft: 'auto', fontSize: '0.65rem', fontWeight: 700, color: c4Color }}>{c4}/{JJ}</span>
+                                    </div>
+                                    <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 9, overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${c4Pct}%`, background: c4Color, borderRadius: 9, transition: 'width 0.4s ease, background 0.3s ease' }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (() => {
                           const isAbsConfMode = absences.length > 0 && absences[0].mode === 'absence_confirmee';
 
                           return (
