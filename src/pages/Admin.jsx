@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AdminRefresh from '../components/AdminRefresh';
+import AdminIdeas   from '../components/AdminIdeas';
 
 class AdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -264,6 +266,279 @@ export default function Admin() {
   return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
 }
 
+// ── Panel : Utilisateurs en ligne ────────────────────────────────────────────
+function OnlineUsersPanel() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/admin/online-users', { credentials: 'include' })
+      .then(r => r.json()).then(setUsers).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const dot = s => s === 'en_ligne' ? '#22c55e' : s === 'actif' ? '#f59e0b' : '#64748b';
+  const label = s => s === 'en_ligne' ? 'En ligne' : s === 'actif' ? 'Actif (30 min)' : s === 'hors_ligne' ? 'Hors ligne' : 'Jamais vu';
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.35)' }}>
+      <div className="tg-admin-header">
+        <span className="tg-admin-icon">🟢</span>
+        <div style={{ flex: 1 }}>
+          <h2 className="tg-admin-title">Utilisateurs en ligne</h2>
+          <p className="tg-admin-sub">Statut de connexion de chaque utilisateur (mis à jour à chaque chargement).</p>
+        </div>
+        <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontWeight: 700, border: '1px solid rgba(34,197,94,0.3)' }}>
+          {users.filter(u => u.status === 'en_ligne').length} en ligne
+        </span>
+      </div>
+      {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Chargement…</div> : (
+        <div style={{ overflowX: 'auto', marginTop: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                {['Utilisateur', 'Prénom / Nom', 'Compte', 'Statut', 'Dernière activité'].map(h => (
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#64748b', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.7 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <td style={{ padding: '9px 12px', color: '#e2e8f0', fontWeight: 600 }}>{u.username}</td>
+                  <td style={{ padding: '9px 12px', color: '#94a3b8' }}>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</td>
+                  <td style={{ padding: '9px 12px' }}>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                      background: u.is_pro ? 'rgba(168,85,247,0.15)' : u.is_premium ? 'rgba(250,204,21,0.12)' : 'rgba(100,116,139,0.1)',
+                      color: u.is_pro ? '#a855f7' : u.is_premium ? '#fbbf24' : '#64748b',
+                      border: `1px solid ${u.is_pro ? 'rgba(168,85,247,0.3)' : u.is_premium ? 'rgba(250,204,21,0.3)' : 'rgba(100,116,139,0.2)'}`,
+                    }}>{u.is_pro ? 'PRO' : u.is_premium ? 'PREMIUM' : 'Standard'}</span>
+                  </td>
+                  <td style={{ padding: '9px 12px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: dot(u.status), fontWeight: 600 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot(u.status), display: 'inline-block', boxShadow: u.status === 'en_ligne' ? '0 0 6px #22c55e' : 'none' }} />
+                      {label(u.status)}
+                    </span>
+                  </td>
+                  <td style={{ padding: '9px 12px', color: '#64748b', fontSize: 12 }}>
+                    {u.last_seen ? new Date(u.last_seen).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Aucun utilisateur trouvé.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Panel : Demandes de paiement ─────────────────────────────────────────────
+function PaiementsPanel() {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [msg, setMsg]           = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch('/api/payments/admin/pending', { credentials: 'include' })
+      .then(r => r.json()).then(d => setRequests(Array.isArray(d) ? d : [])).catch(() => setRequests([])).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAction(id, action) {
+    const r = await fetch(`/api/payments/admin/${id}/${action}`, { method: 'POST', credentials: 'include' });
+    const d = await r.json();
+    setMsg(d.ok ? `✅ Demande ${action === 'approve' ? 'approuvée' : 'refusée'}` : `❌ ${d.error || 'Erreur'}`);
+    load();
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(99,102,241,0.35)' }}>
+      <div className="tg-admin-header">
+        <span className="tg-admin-icon">💳</span>
+        <div style={{ flex: 1 }}>
+          <h2 className="tg-admin-title">Demandes de paiement</h2>
+          <p className="tg-admin-sub">Validez ou refusez les demandes d'abonnement en attente.</p>
+        </div>
+        {requests.length > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, background: 'rgba(99,102,241,0.15)', color: '#818cf8', fontWeight: 700, border: '1px solid rgba(99,102,241,0.3)' }}>{requests.length} en attente</span>}
+      </div>
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: msg.startsWith('✅') ? '#4ade80' : '#f87171', fontSize: 13, marginBottom: 12 }}>{msg}</div>}
+      {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Chargement…</div> : requests.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#475569', fontSize: 14 }}>✅ Aucune demande en attente</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          {requests.map(req => (
+            <div key={req.id} style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{req.username || req.user_id}</span>
+                  {req.plan_name && <span style={{ marginLeft: 10, fontSize: 12, color: '#94a3b8' }}>Plan : {req.plan_name}</span>}
+                </div>
+                <span style={{ fontSize: 11, color: '#64748b' }}>{req.created_at ? new Date(req.created_at).toLocaleString('fr-FR') : ''}</span>
+              </div>
+              {req.screenshot_url && (
+                <a href={req.screenshot_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#818cf8', textDecoration: 'underline' }}>📎 Voir le justificatif</a>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => handleAction(req.id, 'approve')} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: 'rgba(34,197,94,0.18)', color: '#4ade80', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>✅ Approuver</button>
+                <button onClick={() => handleAction(req.id, 'reject')}  style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: 'rgba(239,68,68,0.12)', color: '#f87171', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>❌ Refuser</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Panel : Achats Stratégies ─────────────────────────────────────────────────
+function AchatsPanel() {
+  const [purchases, setPurchases] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [msg, setMsg]             = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch('/api/shop/admin/purchases', { credentials: 'include' })
+      .then(r => r.json()).then(d => setPurchases(Array.isArray(d) ? d : [])).catch(() => setPurchases([])).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAction(id, action) {
+    const r = await fetch(`/api/shop/admin/purchase/${id}/${action}`, { method: 'POST', credentials: 'include' });
+    const d = await r.json();
+    setMsg(d.ok ? `✅ Achat ${action === 'approve' ? 'approuvé' : 'refusé'}` : `❌ ${d.error || 'Erreur'}`);
+    load();
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.35)' }}>
+      <div className="tg-admin-header">
+        <span className="tg-admin-icon">🛒</span>
+        <div style={{ flex: 1 }}>
+          <h2 className="tg-admin-title">Achats Stratégies</h2>
+          <p className="tg-admin-sub">Gérez les achats de stratégies — validez les captures et livrez les configurations.</p>
+        </div>
+        {purchases.length > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', fontWeight: 700, border: '1px solid rgba(251,191,36,0.3)' }}>{purchases.length} achat{purchases.length > 1 ? 's' : ''}</span>}
+      </div>
+      {msg && <div style={{ padding: '10px 14px', borderRadius: 8, background: msg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: msg.startsWith('✅') ? '#4ade80' : '#f87171', fontSize: 13, marginBottom: 12 }}>{msg}</div>}
+      {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Chargement…</div> : purchases.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#475569', fontSize: 14 }}>Aucun achat en attente.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          {purchases.map(p => (
+            <div key={p.id} style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>{p.username || p.user_id}</span>
+                  <span style={{ marginLeft: 10, fontSize: 12, color: '#94a3b8' }}>{p.strategy_name || p.shop_item_name || '—'}</span>
+                </div>
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                  background: p.status === 'validated' ? 'rgba(34,197,94,0.12)' : p.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                  color: p.status === 'validated' ? '#4ade80' : p.status === 'rejected' ? '#f87171' : '#f59e0b',
+                  border: `1px solid ${p.status === 'validated' ? 'rgba(34,197,94,0.3)' : p.status === 'rejected' ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                }}>
+                  {p.status === 'validated' ? '✅ Validé' : p.status === 'rejected' ? '❌ Refusé' : '⏳ En attente'}
+                </span>
+              </div>
+              {p.screenshot_url && (
+                <a href={p.screenshot_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#fbbf24', textDecoration: 'underline' }}>📎 Voir le paiement</a>
+              )}
+              {p.status !== 'validated' && p.status !== 'rejected' && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => handleAction(p.id, 'approve')} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: 'rgba(34,197,94,0.18)', color: '#4ade80', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>✅ Approuver</button>
+                  <button onClick={() => handleAction(p.id, 'reject')}  style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: 'rgba(239,68,68,0.12)', color: '#f87171', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>❌ Refuser</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Panel : Codes Partenaires ─────────────────────────────────────────────────
+function CodesPartenairesPanel() {
+  const [codes, setCodes]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newCode, setNewCode] = useState('');
+  const [msg, setMsg]         = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch('/api/admin/partner-codes', { credentials: 'include' })
+      .then(r => r.json()).then(d => setCodes(Array.isArray(d) ? d : [])).catch(() => setCodes([])).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAdd() {
+    if (!newCode.trim()) return;
+    const r = await fetch('/api/admin/partner-codes', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: newCode.trim() }),
+    });
+    const d = await r.json();
+    setMsg(r.ok ? '✅ Code ajouté' : `❌ ${d.error || 'Erreur'}`);
+    if (r.ok) { setNewCode(''); load(); }
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.35)' }}>
+      <div className="tg-admin-header">
+        <span className="tg-admin-icon">🤝</span>
+        <div style={{ flex: 1 }}>
+          <h2 className="tg-admin-title">Codes Partenaires</h2>
+          <p className="tg-admin-sub">Créez et gérez les codes partenaires pour l'accès spécial ou les réductions.</p>
+        </div>
+        {codes.length > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, background: 'rgba(34,158,217,0.15)', color: '#7dd3fc', fontWeight: 700, border: '1px solid rgba(34,158,217,0.3)' }}>{codes.length} code{codes.length > 1 ? 's' : ''}</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, marginTop: 14 }}>
+        <input
+          type="text" value={newCode} onChange={e => setNewCode(e.target.value)}
+          placeholder="Nouveau code partenaire…"
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 9, border: '1.5px solid rgba(34,158,217,0.3)', background: 'rgba(34,158,217,0.06)', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+        />
+        <button onClick={handleAdd} style={{ padding: '10px 20px', borderRadius: 9, border: 'none', background: 'rgba(34,158,217,0.2)', color: '#38bdf8', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>Ajouter</button>
+      </div>
+      {msg && <div style={{ padding: '8px 12px', borderRadius: 8, background: msg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: msg.startsWith('✅') ? '#4ade80' : '#f87171', fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+      {loading ? <div style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Chargement…</div> : codes.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: '#475569', fontSize: 14 }}>Aucun code partenaire.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {codes.map((c, i) => (
+            <div key={i} style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(34,158,217,0.06)', border: '1px solid rgba(34,158,217,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <span style={{ fontWeight: 700, color: '#7dd3fc', fontSize: 14, fontFamily: 'monospace' }}>{c.code}</span>
+                {c.uses !== undefined && <span style={{ marginLeft: 12, fontSize: 12, color: '#64748b' }}>{c.uses} utilisation{c.uses !== 1 ? 's' : ''}</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                {c.expires_at && <span style={{ fontSize: 11, color: '#64748b' }}>Expire : {new Date(c.expires_at).toLocaleDateString('fr-FR')}</span>}
+                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                  background: c.active !== false ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)',
+                  color: c.active !== false ? '#4ade80' : '#64748b',
+                  border: `1px solid ${c.active !== false ? 'rgba(34,197,94,0.3)' : 'rgba(100,116,139,0.2)'}`,
+                }}>{c.active !== false ? 'Actif' : 'Inactif'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -456,6 +731,8 @@ function AdminPanel() {
   const [aleatPanel, setAleatPanel]       = useState(null); // { stratId, stratName, step:'hand'|'number'|'result', hand, gameInput, result, history }
   const [stratChForm, setStratChForm]     = useState({ bot_token: '', channel_id: '', tg_format: null });
   const [stratChSaving, setStratChSaving] = useState(false);
+  const [stratChTesting, setStratChTesting] = useState(false);
+  const [stratChTestResult, setStratChTestResult] = useState(null);
 
   const [stratStats,     setStratStats]     = useState([]); // wins/losses per strategy
 
@@ -467,6 +744,26 @@ function AdminPanel() {
   const [annMsg,           setAnnMsg]           = useState('');
   const [annOpen,          setAnnOpen]          = useState(false);
   const [annSendingId,     setAnnSendingId]     = useState(null);
+
+  const testStratTgTarget = async () => {
+    if (!stratChForm.bot_token.trim() || !stratChForm.channel_id.trim()) return;
+    setStratChTesting(true);
+    setStratChTestResult(null);
+    try {
+      const r = await fetch('/api/telegram/test-target', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: stratChForm.bot_token.trim(), channel_id: stratChForm.channel_id.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setStratChTestResult({ ok: true, name: d.name });
+    } catch (e) {
+      setStratChTestResult({ ok: false, error: e.message });
+    } finally {
+      setStratChTesting(false);
+    }
+  };
 
   const saveStratTg = async (id) => {
     setStratChSaving(true);
@@ -490,6 +787,7 @@ function AdminPanel() {
       });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
       setStratChForm({ bot_token: '', channel_id: '', tg_format: null });
+      setStratChTestResult(null);
       loadStrategies();
     } catch (e) { alert('❌ ' + e.message); }
     finally { setStratChSaving(false); }
@@ -1465,10 +1763,16 @@ function AdminPanel() {
         <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '2px solid rgba(255,255,255,0.06)', paddingBottom: 0, flexWrap: 'wrap' }}>
           {[
             { id: 'utilisateurs',   icon: '👥', label: 'Utilisateurs',   badge: (nonAdmins.filter(u => u.status === 'pending').length + userMessages.filter(m => !m.read).length) || null },
+            { id: 'en-ligne',       icon: '🟢', label: 'En ligne' },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
             { id: 'canaux',         icon: '✈️', label: 'Telegram',        badge: tgChannels.length > 0 ? tgChannels.length : null },
             { id: 'config',         icon: '🔀', label: 'Routage' },
+            { id: 'paiements',      icon: '💳', label: 'Paiements' },
+            { id: 'achats',         icon: '🛒', label: 'Achats Stratégies' },
+            { id: 'idees',          icon: '💡', label: 'Idées Stratégies' },
+            { id: 'codes-part',     icon: '🤝', label: 'Codes Partenaires' },
+            { id: 'actualiser',     icon: '🔄', label: 'Actualiser' },
             { id: 'systeme',        icon: '🛠️', label: 'Système' },
             { id: 'tg-direct',      icon: '📨', label: 'Canal Direct' },
           ].map(tab => {
@@ -4841,8 +5145,27 @@ function AdminPanel() {
                           {TG_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
+                      {stratChTestResult && (
+                        <div style={{
+                          marginBottom: 10, padding: '7px 12px', borderRadius: 7, fontSize: 12,
+                          background: stratChTestResult.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                          border: `1px solid ${stratChTestResult.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`,
+                          color: stratChTestResult.ok ? '#4ade80' : '#f87171',
+                        }}>
+                          {stratChTestResult.ok ? `✅ Connexion OK — Canal : ${stratChTestResult.name}` : `❌ ${stratChTestResult.error}`}
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); }}>Fermer</button>
+                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => { setStratChOpen(null); setStratChForm({ bot_token: '', channel_id: '', tg_format: null }); setStratChTestResult(null); }}>Fermer</button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          type="button"
+                          disabled={stratChTesting || !stratChForm.bot_token.trim() || !stratChForm.channel_id.trim()}
+                          onClick={testStratTgTarget}
+                          style={{ border: '1px solid rgba(34,197,94,0.4)', color: '#4ade80' }}
+                        >
+                          {stratChTesting ? '⏳ Test…' : '🔍 Tester'}
+                        </button>
                         <button
                           className="btn btn-gold btn-sm"
                           type="button"
@@ -4936,6 +5259,46 @@ function AdminPanel() {
         </div>
 
         </>}
+
+        {/* ── TAB : EN LIGNE ── */}
+        {adminTab === 'en-ligne' && <OnlineUsersPanel />}
+
+        {/* ── TAB : PAIEMENTS ── */}
+        {adminTab === 'paiements' && <PaiementsPanel />}
+
+        {/* ── TAB : ACHATS STRATÉGIES ── */}
+        {adminTab === 'achats' && <AchatsPanel />}
+
+        {/* ── TAB : IDÉES STRATÉGIES ── */}
+        {adminTab === 'idees' && (
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.3)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">💡</span>
+              <div>
+                <h2 className="tg-admin-title">Idées Stratégies</h2>
+                <p className="tg-admin-sub">Gérez le catalogue d'idées de stratégies (achat, validation des captures d'écran).</p>
+              </div>
+            </div>
+            <AdminIdeas />
+          </div>
+        )}
+
+        {/* ── TAB : CODES PARTENAIRES ── */}
+        {adminTab === 'codes-part' && <CodesPartenairesPanel />}
+
+        {/* ── TAB : ACTUALISER ── */}
+        {adminTab === 'actualiser' && (
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(56,189,248,0.3)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">🔄</span>
+              <div>
+                <h2 className="tg-admin-title">Actualiser le système</h2>
+                <p className="tg-admin-sub">Rechargez le moteur, nettoyez les prédictions bloquées ou réinitialisez les statistiques.</p>
+              </div>
+            </div>
+            <AdminRefresh />
+          </div>
+        )}
 
       </div>
 
