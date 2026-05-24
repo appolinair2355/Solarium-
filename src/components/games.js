@@ -194,13 +194,53 @@ async function requireActiveSub(req, res, next) {
   }
 }
 
-router.get('/absences', requireActiveSub, (req, res) => {
-  if (!req.session.isAdmin && !req.session.isPremium) return res.status(403).json({ error: 'Accès non autorisé' });
+router.get('/absences', requireActiveSub, async (req, res) => {
   const channel = req.query.channel || 'C1';
-  const engine = require('./engine');
-  const data = engine.getAbsences(channel);
-  if (!data) return res.json([]);
-  res.json(data);
+  const engine  = require('./engine');
+
+  // Admin : accès total
+  if (req.session.isAdmin) {
+    return res.json(engine.getAbsences(channel) || []);
+  }
+
+  // Recharge le user depuis la DB pour avoir les permissions à jour
+  const db = require('./db');
+  let u;
+  try { u = await db.getUser(req.session.userId); } catch {}
+  if (!u) return res.status(401).json({ error: 'Utilisateur non trouvé' });
+
+  const isPremium = !!(u.is_premium || u.account_type === 'premium');
+  const isPro     = !!(u.is_pro     || u.account_type === 'pro');
+
+  // Premium : autorisé uniquement si l'admin a coché ce canal dans show_counter_channels
+  if (isPremium) {
+    const showCounters = (() => {
+      const v = u.show_counter_channels;
+      if (!v) return null;
+      if (Array.isArray(v)) return v;
+      try { return JSON.parse(v); } catch { return null; }
+    })();
+    if (!Array.isArray(showCounters) || !showCounters.includes(channel)) {
+      return res.status(403).json({ error: 'Compteur non autorisé pour ce canal' });
+    }
+    return res.json(engine.getAbsences(channel) || []);
+  }
+
+  // Pro : autorisé sur ses propres stratégies (canal S5001…S5100)
+  if (isPro && /^S\d{4,5}$/.test(channel)) {
+    try {
+      const id      = parseInt(channel.slice(1));
+      const metaRaw = await db.getSetting(`pro_strategy_${id}_meta`).catch(() => null);
+      if (metaRaw) {
+        const meta = JSON.parse(metaRaw);
+        if (meta.owner_user_id === req.session.userId) {
+          return res.json(engine.getAbsences(channel) || []);
+        }
+      }
+    } catch {}
+  }
+
+  return res.status(403).json({ error: 'Accès non autorisé' });
 });
 
 // Logs Pro : accessibles à l'admin (tout) et au compte Pro propriétaire de la stratégie
@@ -303,4 +343,6 @@ router.get('/stream', requireActiveSub, (req, res) => {
   });
 });
 
-module.exports = { router, fetchGames };
+function getGamesCache() { return gamesCache; }
+
+module.exports = { router, fetchGames, getGamesCache };
