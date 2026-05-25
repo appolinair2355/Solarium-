@@ -17,6 +17,7 @@ const {
   buildBanqueInitialText,
   buildBanqueSummaryText,
   buildBanquePredText,
+  buildBanqueFinalBilanText,
 } = require('./telegram-service');
 const renderSync = require('./render-sync');
 const cartesStore = require('./cartes-store');
@@ -463,7 +464,10 @@ class Engine {
       const id = parseInt(stratId.slice(1));
       const state = this.custom[id];
       if (!state || !state.config?.enabled) return;
-      if (Object.keys(state.pending).length > 0) return; // déjà en attente
+      // Ne bloquer que si une prédiction existe déjà pour le jeu cible ou au-delà.
+      // Les pending pour des jeux <= nextGn-1 (jeu courant ou passé) seront résolus en Passe 3
+      // et ne doivent pas empêcher l'injection d'une nouvelle prédiction future.
+      if (Object.keys(state.pending).some(g => parseInt(g) >= nextGn)) return;
       // Calcul du maxR effectif : priorité à la config de la stratégie, sinon global
       const stratMaxR = (state.config.max_rattrapage !== undefined && state.config.max_rattrapage !== null)
         ? parseInt(state.config.max_rattrapage) : globalMaxR;
@@ -3164,10 +3168,14 @@ class Engine {
         const inv     = C3_INV[suit];
         const pairKey = (suit === '♠' || suit === '♦') ? '♠_♦' : '♥_♣';
 
-        // Vérification Compteur 4 (bloqueur)
+        // Vérification Compteur 4 (bloqueur) : si JJ atteint, prédit l'image du manquant
+        const C3_IMAGE = { '♠': '♣', '♣': '♠', '♦': '♥', '♥': '♦' };
         if ((state.c3_block[pairKey] || 0) >= C3_JJ) {
-          console.log(`[${channelId}] [C3] ${suit} seuil C2=${C3_B} atteint MAIS Bloqueur paire ${pairKey} = ${state.c3_block[pairKey]} >= JJ=${C3_JJ} → BLOQUÉ`);
-          continue;
+          const imageSuit = C3_IMAGE[suit] || suit;
+          console.log(`[${channelId}] [C3] ${suit} seuil C2=${C3_B} atteint · Bloqueur paire ${pairKey} >= JJ=${C3_JJ} → prédit IMAGE ${imageSuit}`);
+          state.c3_abs[suit] = 0;
+          await emitPrediction(gn + offset, imageSuit, suit);
+          break;
         }
 
         // Décision : tendance inverse ou prédir le manquant
@@ -3661,11 +3669,18 @@ class Engine {
           lot_msg_ids: [],
           bank_at_lot_start: initBank,
           tg_targets: tg_targets || [],
+          initial_bank: initBank,
+          lots_completed: 0,
+          lot_history: [],
+          finished: false,
         };
       }
       // Maintenir les cibles Telegram à jour
       if (state.bgState) state.bgState.tg_targets = tg_targets || [];
       if (!state.bgMirrored) state.bgMirrored = new Set();
+
+      // Arrêté (max_lots atteint) → plus rien
+      if (state.bgState?.finished) return;
 
       // Une prédiction déjà en attente → ne pas en ajouter une autre
       if (Object.keys(state.pending).length > 0) return;
@@ -3717,12 +3732,10 @@ class Engine {
         const stratMaxR = 3; // gestion_banque : toujours 3 rattrapages (bankroll fixe R0→R3)
         state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: Date.now() };
 
-        // Envoyer un nouveau message Telegram pour cette prédiction
+        // Envoyer un nouveau message Telegram pour cette prédiction (montre tout le lot)
         const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
-        const predIdx = bgS.lot_predictions.length;
-        const lotSz   = parseInt(cfg.bg_lot_size) || 5;
         if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-          const predText = buildBanquePredText(newPred, bgS, cfg, predIdx, lotSz);
+          const predText = buildBanqueLotText(bgS, cfg);
           const msgIds   = await sendBanqueTgMessage(tg_targets, predText);
           newPred.msg_ids = msgIds;
         }
@@ -3803,11 +3816,9 @@ class Engine {
       console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} totalMisé=-${totalMise}  reset mise→${initMise}  banque=${bgS.bank}`);
     }
 
-    // Éditer le message de CETTE prédiction avec son résultat
+    // Éditer le message de CETTE prédiction avec le lot complet mis à jour
     if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
-      const predIdx = bgS.lot_predictions.indexOf(pred) + 1;
-      const lotSz2  = parseInt(cfg.bg_lot_size) || 5;
-      const text    = buildBanquePredText(pred, bgS, cfg, predIdx, lotSz2);
+      const text = buildBanqueLotText(bgS, cfg);
       await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
     }
 
@@ -3815,35 +3826,57 @@ class Engine {
     if (!fromArchive) {
       const resolvedCount = bgS.lot_predictions.filter(p => p.status !== null).length;
       if (resolvedCount >= lotSize) {
-        const lotPreds        = [...bgS.lot_predictions]; // copie superficielle — mêmes références d'objets
+        const lotPreds        = [...bgS.lot_predictions];
         const bankBefore      = bgS.bank_at_lot_start;
         const bankAfter       = bgS.bank;
         const capturedLotNum  = bgS.lot_number;
         const capturedTargets = [...(bgS.tg_targets || [])];
+        const bgMaxLots       = parseInt(cfg.bg_max_lots) || 0;
 
-        // Archiver le lot AVANT de vider : les résolutions tardives mettront à jour
-        // les mêmes objets — le bilan final sera donc correct.
+        // Archiver le lot AVANT de vider
         bgS.archived_lot = bgS.lot_predictions;
 
-        // Réinitialiser pour le lot suivant
-        bgS.lot_number++;
-        bgS.lot_predictions  = [];
-        bgS.lot_msg_ids      = [];
-        bgS.bank_at_lot_start = bankAfter;
+        // Enregistrer dans l'historique des lots
+        bgS.lot_history = bgS.lot_history || [];
+        bgS.lot_history.push({ lotNumber: capturedLotNum, bankBefore, bankAfter, preds: lotPreds });
+        bgS.lots_completed = (bgS.lots_completed || 0) + 1;
+
+        // Vérifier si le nombre max de lots est atteint
+        const maxLotsReached = bgMaxLots > 0 && bgS.lots_completed >= bgMaxLots;
+
+        if (maxLotsReached) {
+          bgS.finished = true;
+          console.log(`[${channelId}] [BanqueGestion] ✅ ${bgMaxLots} lots terminés → bilan final`);
+        }
+
+        // Réinitialiser pour le lot suivant (sauf si terminé)
+        if (!maxLotsReached) {
+          bgS.lot_number++;
+          bgS.lot_predictions  = [];
+          bgS.lot_msg_ids      = [];
+          bgS.bank_at_lot_start = bankAfter;
+        }
         console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque: ${bankAfter}`);
 
-        // Résumé envoyé après 50 secondes — NOUVEAU MESSAGE
+        // Résumé (ou bilan final) envoyé après 50 secondes
+        const capturedLotHistory  = [...(bgS.lot_history || [])];
+        const capturedInitialBank = bgS.initial_bank || (parseFloat(cfg.bg_bank) || 5000);
         setTimeout(async () => {
           try {
-            // Recalculer bankAfter final (inclut les résolutions tardives)
             const finalDelta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
             const finalBankAfter = Math.round((bankBefore + finalDelta) * 100) / 100;
-            const summaryText    = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
             if (capturedTargets.length > 0) {
-              await sendBanqueTgMessage(capturedTargets, summaryText);
+              if (maxLotsReached) {
+                // Bilan final multi-lots
+                const finalText = buildBanqueFinalBilanText(capturedLotHistory, cfg, capturedInitialBank);
+                await sendBanqueTgMessage(capturedTargets, finalText);
+              } else {
+                const summaryText = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
+                await sendBanqueTgMessage(capturedTargets, summaryText);
+              }
             }
             if (bgS.archived_lot === lotPreds) bgS.archived_lot = null;
-            console.log(`[${channelId}] [BanqueGestion] 📊 Résumé lot #${capturedLotNum} envoyé`);
+            console.log(`[${channelId}] [BanqueGestion] 📊 ${maxLotsReached ? 'Bilan final' : `Résumé lot #${capturedLotNum}`} envoyé`);
           } catch (e) {
             console.error(`[${channelId}] [BanqueGestion] Erreur résumé: ${e.message}`);
           }

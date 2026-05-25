@@ -728,7 +728,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             bg_cote:         Math.max(0.1, parseFloat(req.body.bg_cote)        || 1.9),
             bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
             bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
+            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -763,6 +764,14 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
+      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
+        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
+            strategy_id: String(r.strategy_id),
+            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
+            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
+            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
+          }))
+        : [],
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -992,7 +1001,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             bg_cote:          Math.max(0.1, parseFloat(req.body.bg_cote)         || 1.9),
             bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
             bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
+            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0) }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -1033,6 +1043,14 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
+      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
+        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
+            strategy_id: String(r.strategy_id),
+            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
+            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
+            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
+          }))
+        : (list[idx].surveillance_rules || []),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);

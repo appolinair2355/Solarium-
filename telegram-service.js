@@ -1801,24 +1801,33 @@ function buildBanqueInitialText(bgState, cfg, gameNumber, suit) {
 }
 
 /**
- * Message de lot en cours (résultats + prédiction(s) en attente) — édité en live.
+ * Message de lot en cours (résultats + prédiction(s) en attente) — envoyé pour chaque nouvelle pred.
+ * Montre TOUT l'historique du lot + la pred courante en ⌛, plus le tableau R0→R3.
  */
 function buildBanqueLotText(bgState, cfg) {
-  const curr    = _bgCurr(cfg.bg_currency);
-  const cote    = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR    = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
-  const lotSize = parseInt(cfg.bg_lot_size) || 5;
-  const lotNum  = bgState.lot_number || 1;
-  const preds   = bgState.lot_predictions || [];
-  const count   = preds.length;
+  const curr     = _bgCurr(cfg.bg_currency);
+  const cote     = parseFloat(cfg.bg_cote) || 1.9;
+  const initMise = parseFloat(cfg.bg_mise_initiale) || 1000;
+  const maxR     = 3;
+  const lotSize  = parseInt(cfg.bg_lot_size) || 5;
+  const lotNum   = bgState.lot_number || 1;
+  const preds    = bgState.lot_predictions || [];
+  const count    = preds.length;
 
   const predLines = preds.map(p => _bgPredLine(p, cote, curr));
 
+  const ratrLines = [0, 1, 2, 3].map(r => {
+    const m = Math.round(initMise * Math.pow(2.2, r) * 100) / 100;
+    let totalM = 0, mm = initMise;
+    for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
+    totalM = Math.round(totalM * 100) / 100;
+    const gain = Math.round(m * cote * 100) / 100;
+    const net  = Math.round((gain - totalM) * 100) / 100;
+    return `R${r} ➜ ${_bgRnd(m)}${curr}   (+${net}${curr} si gagné)`;
+  }).join('\n');
+
   return (
-    `💰 Montant banque : ${_bgRnd(bgState.bank)}${curr}\n` +
-    `🎲 Mise : ${_bgRnd(bgState.current_mise)}${curr}\n` +
-    `📈 Côté : ×${cote}\n` +
-    `🔋 Rattrapage : ${maxR}\n` +
+    `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
     `━━━━━━━━━━━━━━━\n` +
     `🎮 LOT #${lotNum} — ${count}/${lotSize}\n` +
     `━━━━━━━━━━━━━━━\n` +
@@ -1828,7 +1837,48 @@ function buildBanqueLotText(bgState, cfg) {
     `━━━━━━━━━━━━━━━\n` +
     `🏦 BANQUE ACTUELLE\n` +
     `━━━━━━━━━━━━━━━\n` +
-    _bgBankLine(bgState, curr)
+    _bgBankLine(bgState, curr) + `\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🎲 Paramètres de mise :\n` +
+    ratrLines + `\n` +
+    `📈 Côte : ×${cote}`
+  );
+}
+
+/**
+ * Bilan final après que tous les lots prévus sont terminés.
+ */
+function buildBanqueFinalBilanText(lotHistory, cfg, initialBank) {
+  const curr  = _bgCurr(cfg.bg_currency);
+  const cote  = parseFloat(cfg.bg_cote) || 1.9;
+  const lines = [];
+  for (const lot of lotHistory) {
+    const delta    = _bgRnd(lot.bankAfter - lot.bankBefore);
+    const deltaStr = delta >= 0 ? `+${delta}${curr}` : `${delta}${curr}`;
+    const predLines = lot.preds.map(p => _bgPredLine(p, cote, curr)).join('\n');
+    lines.push(
+      `📊 LOT #${lot.lotNumber}\n` +
+      predLines + `\n` +
+      `Résultat : ${deltaStr}`
+    );
+  }
+  const finalBank  = lotHistory.length > 0 ? lotHistory[lotHistory.length - 1].bankAfter : initialBank;
+  const totalEarned = _bgRnd(finalBank - initialBank);
+  const earnedStr   = totalEarned >= 0 ? `+${totalEarned}${curr}` : `${totalEarned}${curr}`;
+
+  return (
+    `🏦 BILAN FINAL — GESTION BANQUE\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💰 Banque départ : ${_bgRnd(initialBank)}${curr}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `\n` +
+    lines.join('\n\n') + `\n` +
+    `\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💵 Total gagné : ${earnedStr}\n` +
+    `🏦 Banque finale : ${_bgRnd(finalBank)}${curr}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `\nMerci d'avoir suivi le montant organisé par Sossou Kouamé\nRdv sur le site: http://solarium-1-6a5p.onrender.com`
   );
 }
 
@@ -1936,6 +1986,6 @@ module.exports = {
   editRawStoredMessages,
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
-  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText,
+  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText, buildBanqueFinalBilanText,
   sendBanqueTgMessage, editBanqueTgMessage,
 };
