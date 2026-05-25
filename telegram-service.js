@@ -1677,6 +1677,57 @@ function _bgCurr(currency) { return BANQUE_CURRENCY_MAP[currency] || currency ||
 function _bgRnd(n) { return Math.round(n * 100) / 100; }
 
 /**
+ * Message individuel pour UNE prédiction du lot.
+ * Envoyé comme nouveau message à chaque signal.
+ * Édité une fois la prédiction résolue.
+ */
+function buildBanquePredText(pred, bgState, cfg, predIndexOneBased, lotSize) {
+  const curr     = _bgCurr(cfg.bg_currency);
+  const cote     = parseFloat(cfg.bg_cote) || 1.9;
+  const initMise = parseFloat(cfg.bg_mise_initiale) || 1000;
+  const lotNum   = bgState.lot_number || 1;
+  const se       = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
+
+  // Ligne de statut
+  let statusLine;
+  if (pred.status === null) {
+    statusLine = `📣 Signal #${pred.game} ${se}  ⌛`;
+  } else if (pred.status === 'gagne') {
+    const Re     = RATR_EMOJI[pred.ratr] ?? pred.ratr;
+    const profit = _bgRnd(pred.amount_delta);
+    statusLine   = `✅ Signal #${pred.game} ${se}  ${Re}  +${profit}${curr}`;
+  } else {
+    const perte  = _bgRnd(Math.abs(pred.amount_delta));
+    statusLine   = `❌ Signal #${pred.game} ${se}  -${perte}${curr}`;
+  }
+
+  // Lignes mises par rattrapage R0→R3
+  const ratrLines = [0, 1, 2, 3].map(r => {
+    const m        = Math.round(initMise * Math.pow(2.2, r) * 100) / 100;
+    let totalM = 0, mm = initMise;
+    for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
+    totalM = Math.round(totalM * 100) / 100;
+    const gain = Math.round(m * cote * 100) / 100;
+    const net  = Math.round((gain - totalM) * 100) / 100;
+    return `R${r} ➜ ${_bgRnd(m)}${curr}   (+${net}${curr} si gagné)`;
+  }).join('\n');
+
+  return (
+    `🏦 GESTION BANQUE\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🎮 LOT #${lotNum} — ${predIndexOneBased}/${lotSize}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `${statusLine}\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `🎲 Mises par rattrapage :\n` +
+    `${ratrLines}\n` +
+    `📈 Côte : ×${cote}`
+  );
+}
+
+/**
  * Ligne d'affichage d'une prédiction du lot.
  * ❌ : montre la mise perdue
  * ✅ : montre le profit net (gain - mise)
@@ -1885,6 +1936,6 @@ module.exports = {
   editRawStoredMessages,
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
-  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText,
+  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText,
   sendBanqueTgMessage, editBanqueTgMessage,
 };

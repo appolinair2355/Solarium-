@@ -16,6 +16,7 @@ const {
   buildBanqueLotText,
   buildBanqueInitialText,
   buildBanqueSummaryText,
+  buildBanquePredText,
 } = require('./telegram-service');
 const renderSync = require('./render-sync');
 const cartesStore = require('./cartes-store');
@@ -487,7 +488,7 @@ class Engine {
         }
       }).catch(() => {});
       // Stocker maxR dans le pending pour que la résolution utilise la même valeur
-      state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR };
+      state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: new Date().toISOString() };
     }
   }
 
@@ -3659,8 +3660,11 @@ class Engine {
           lot_number: 1,
           lot_msg_ids: [],
           bank_at_lot_start: initBank,
+          tg_targets: tg_targets || [],
         };
       }
+      // Maintenir les cibles Telegram à jour
+      if (state.bgState) state.bgState.tg_targets = tg_targets || [];
       if (!state.bgMirrored) state.bgMirrored = new Set();
 
       // Une prédiction déjà en attente → ne pas en ajouter une autre
@@ -3713,16 +3717,14 @@ class Engine {
         const stratMaxR = 3; // gestion_banque : toujours 3 rattrapages (bankroll fixe R0→R3)
         state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: Date.now() };
 
-        // Envoyer ou éditer le message Telegram
-        if (bgS.lot_msg_ids.length === 0) {
-          const text = buildBanqueInitialText(bgS, cfg, srcGn, suit);
-          if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-            const msgIds = await sendBanqueTgMessage(tg_targets, text);
-            bgS.lot_msg_ids = msgIds;
-          }
-        } else {
-          const text = buildBanqueLotText(bgS, cfg);
-          await editBanqueTgMessage(bgS.lot_msg_ids, text);
+        // Envoyer un nouveau message Telegram pour cette prédiction
+        const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
+        const predIdx = bgS.lot_predictions.length;
+        const lotSz   = parseInt(cfg.bg_lot_size) || 5;
+        if (Array.isArray(tg_targets) && tg_targets.length > 0) {
+          const predText = buildBanquePredText(newPred, bgS, cfg, predIdx, lotSz);
+          const msgIds   = await sendBanqueTgMessage(tg_targets, predText);
+          newPred.msg_ids = msgIds;
         }
 
         console.log(`[${channelId}] [BanqueGestion] Miroir ${srcId} #${srcGn} ${suit} (mise: ${bgS.current_mise})`);
@@ -3795,51 +3797,51 @@ class Engine {
       pred.status      = 'perdu';
       pred.ratr        = rattrapR;
       pred.amount_delta = -totalMise;
-      // Martingale : prochaine mise = niveau suivant
-      bgS.mise_level   = (bgS.mise_level || 0) + 1;
-      bgS.current_mise = Math.round(effectiveMise * 2.2 * 100) / 100;
-      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} totalMisé=-${totalMise}  prochaine=${bgS.current_mise}  banque=${bgS.bank}`);
+      // Reset mise initiale après une perte
+      bgS.mise_level   = 0;
+      bgS.current_mise = initMise;
+      console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} totalMisé=-${totalMise}  reset mise→${initMise}  banque=${bgS.bank}`);
     }
 
-    // Éditer le message Telegram avec le résultat à jour
-    // (uniquement pour le lot courant ; les résolutions tardives sur lot archivé
-    //  seront visibles dans le bilan envoyé après 50 s)
-    if (!fromArchive && bgS.lot_msg_ids.length > 0) {
-      const text = buildBanqueLotText(bgS, cfg);
-      await editBanqueTgMessage(bgS.lot_msg_ids, text).catch(() => {});
+    // Éditer le message de CETTE prédiction avec son résultat
+    if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
+      const predIdx = bgS.lot_predictions.indexOf(pred) + 1;
+      const lotSz2  = parseInt(cfg.bg_lot_size) || 5;
+      const text    = buildBanquePredText(pred, bgS, cfg, predIdx, lotSz2);
+      await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
     }
 
     // Vérifier si le lot est terminé (seulement pour le lot courant)
     if (!fromArchive) {
       const resolvedCount = bgS.lot_predictions.filter(p => p.status !== null).length;
       if (resolvedCount >= lotSize) {
-        const lotPreds       = [...bgS.lot_predictions]; // copie superficielle — mêmes références d'objets
-        const bankBefore     = bgS.bank_at_lot_start;
-        const bankAfter      = bgS.bank;
-        const capturedMsgIds = [...bgS.lot_msg_ids];
-        const capturedLotNum = bgS.lot_number;
+        const lotPreds        = [...bgS.lot_predictions]; // copie superficielle — mêmes références d'objets
+        const bankBefore      = bgS.bank_at_lot_start;
+        const bankAfter       = bgS.bank;
+        const capturedLotNum  = bgS.lot_number;
+        const capturedTargets = [...(bgS.tg_targets || [])];
 
-        // Archiver le lot AVANT de vider : les résolutions tardives de prédictions encore ⌛
-        // mettront à jour les mêmes objets que ceux dans lotPreds (copie superficielle).
-        // Ainsi le bilan à 50 s affichera l'état final correct (plus de ⌛ fantômes).
+        // Archiver le lot AVANT de vider : les résolutions tardives mettront à jour
+        // les mêmes objets — le bilan final sera donc correct.
         bgS.archived_lot = bgS.lot_predictions;
 
-        // Réinitialiser pour le lot suivant (mise + mise_level conservés = martingale continue)
+        // Réinitialiser pour le lot suivant
         bgS.lot_number++;
         bgS.lot_predictions  = [];
         bgS.lot_msg_ids      = [];
         bgS.bank_at_lot_start = bankAfter;
         console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque: ${bankAfter}`);
 
-        // Résumé envoyé après 50 secondes (laisse le temps aux dernières résolutions de se faire)
+        // Résumé envoyé après 50 secondes — NOUVEAU MESSAGE
         setTimeout(async () => {
           try {
-            // Recalculer bankAfter final à partir des objets du lot (inclut les résolutions tardives)
-            const finalDelta = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
+            // Recalculer bankAfter final (inclut les résolutions tardives)
+            const finalDelta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
             const finalBankAfter = Math.round((bankBefore + finalDelta) * 100) / 100;
-            const summaryText = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
-            await editBanqueTgMessage(capturedMsgIds, summaryText);
-            // Nettoyer l'archive après envoi
+            const summaryText    = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
+            if (capturedTargets.length > 0) {
+              await sendBanqueTgMessage(capturedTargets, summaryText);
+            }
             if (bgS.archived_lot === lotPreds) bgS.archived_lot = null;
             console.log(`[${channelId}] [BanqueGestion] 📊 Résumé lot #${capturedLotNum} envoyé`);
           } catch (e) {
