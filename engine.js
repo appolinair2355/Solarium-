@@ -158,7 +158,6 @@ class Engine {
     this.lossStreaks        = {}; // { stratId: N }
     this.rattrapStreaks     = {}; // { stratId: { level: N } }
     this.comboCounters      = {}; // { stratId: { level: N } }
-    this.relanceCondCounters = {}; // { `${relanceId}_${sourceId}_D/E`: N } — compteurs conditions D et E
     this.lossSequences  = []; // chargé depuis la DB
     this.gameCardsCache = {}; // { gameNumber: { player: ['♥','♦','♠'], banker: ['♣','♥'] } }
     this.proStrategyIds = new Set(); // IDs numériques des stratégies Pro (5001, 5002...)
@@ -349,170 +348,45 @@ class Engine {
       }
     }
 
-    // Stratégies mode='relance'
+    // ── Mode surveillance_perte — déclenchement sur pertes ───────────────
     for (const [rid, rstate] of Object.entries(this.custom)) {
       const rcfg = rstate.config;
-      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
-      for (const rule of (rcfg.relance_rules || [])) {
+      if (!rcfg?.enabled || rcfg.mode !== 'surveillance_perte') continue;
+      for (const rule of (rcfg.surveillance_rules || [])) {
         if (rule.strategy_id !== stratId) continue;
-        const relanceId = `S${rid}`;
-        let fired = false;
-
-        // Condition A : pertes consécutives
-        const lThr = rule.losses_threshold != null ? parseInt(rule.losses_threshold) : null;
-        if (!fired && lThr !== null && streak >= lThr) {
-          fired = true;
-          console.log(`[Relance] "${rcfg.name}" → ${stratId} ${streak} perte(s) (seuil ${lThr}) → ${relanceId} #${gn + 1}`);
+        const trigger = rule.trigger || 'losses';
+        if (trigger !== 'losses' && trigger !== 'both') continue;
+        const lThr = parseInt(rule.losses_threshold) || 2;
+        if (streak >= lThr) {
+          console.log(`[Surveillance] "${rcfg.name}" → ${stratId} ${streak} perte(s) (seuil ${lThr}) → S${rid}`);
           this.lossStreaks[stratId] = 0;
+          this._fireSurveillance(`S${rid}`, stratId, gn, suit);
         }
-
-        // Condition C : combo perte+Rn (multi-niveaux supporté)
-        const cLevelsRaw_loss = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
-        const cLevels_loss    = cLevelsRaw_loss.map(n => parseInt(n)).filter(n => n >= 1);
-        const cCount_loss     = parseInt(rule.combo_count) || 1;
-        if (!fired && cLevels_loss.length) {
-          for (const lv of cLevels_loss) {
-            const cur = (this.comboCounters[stratId] || {})[lv] || 0;
-            if (cur >= cCount_loss) {
-              fired = true;
-              console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${lv} ×${cur} (seuil ×${cCount_loss}) → ${relanceId} #${gn + 1}`);
-              this.comboCounters[stratId][lv] = 0;
-              break;
-            }
-          }
-        }
-
-        // Reset compteurs D et E sur perte (séquence brisée)
-        const kD = `${relanceId}_${stratId}_D`;
-        const kE = `${relanceId}_${stratId}_E`;
-        if (!fired) {
-          if (rule.range_from    != null) this.relanceCondCounters[kD] = 0;
-          if (rule.interval_min  != null) this.relanceCondCounters[kE] = 0;
-        }
-
-        if (fired) this._fireRelance(relanceId, stratId, gn, suit);
       }
     }
 
-    // ── Stratégies mode='rattrapage_groupe' — récupération automatique ──────
-    for (const [rid, rstate] of Object.entries(this.custom)) {
-      const rcfg = rstate.config;
-      if (!rcfg?.enabled || rcfg.mode !== 'rattrapage_groupe') continue;
-      const monitored = Array.isArray(rcfg.monitored_strategies) ? rcfg.monitored_strategies : [];
-      if (!monitored.includes(stratId)) continue;
-      if (!rstate.rgCounters) rstate.rgCounters = {};
-      if (!rstate.rgCounters[stratId]) rstate.rgCounters[stratId] = { r: 0, totalLosses: 0 };
-      const counter = rstate.rgCounters[stratId];
-      counter.r += 1;
-      counter.totalLosses += 1;
-      const maxR = Math.max(1, parseInt(rcfg.max_rattrapage) || 3);
-      const stopLimit = parseInt(rcfg.rg_stop_limit) || 0;
-      if (stopLimit > 0 && counter.totalLosses >= stopLimit) {
-        console.log(`[RGrp] "${rcfg.name}" → ${stratId} limite stop (${stopLimit}) atteinte → pause`);
-        continue;
-      }
-      if (counter.r <= maxR) {
-        console.log(`[RGrp] "${rcfg.name}" → ${stratId} perte R${counter.r - 1} → rattrapage #${gn + 1} (${counter.r}/${maxR})`);
-        this._forceNextPrediction(stratId, gn + 1, suit);
-        // Relayer aussi sur les canaux propres de la stratégie Rattrapage Groupé
-        this._forceNextPrediction(`S${rid}`, gn + 1, suit);
-      } else {
-        console.log(`[RGrp] "${rcfg.name}" → ${stratId} maxR=${maxR} dépassé → reset compteur`);
-        counter.r = 0;
-      }
-    }
   }
 
   // Réinitialise les streaks de pertes après un gain
   _onStratWin(stratId) {
     this.lossStreaks[stratId] = 0;
-    // Reset compteur de rattrapage pour rattrapage_groupe sur victoire
-    for (const [rid, rstate] of Object.entries(this.custom)) {
-      const rcfg = rstate.config;
-      if (!rcfg?.enabled || rcfg.mode !== 'rattrapage_groupe') continue;
-      const monitored = Array.isArray(rcfg.monitored_strategies) ? rcfg.monitored_strategies : [];
-      if (!monitored.includes(stratId)) continue;
-      if (rstate.rgCounters && rstate.rgCounters[stratId]) {
-        rstate.rgCounters[stratId].r = 0;
-      }
-    }
   }
 
   // Appelé quand une prédiction est gagnée avec N rattrapages
   _onStratRattrapage(stratId, gn, suit, R) {
-    // Suivi rattrapages consécutifs par niveau
-    if (!this.rattrapStreaks[stratId]) this.rattrapStreaks[stratId] = {};
-    for (const lv of [1,2,3,4,5]) {
-      if (lv !== R) this.rattrapStreaks[stratId][lv] = 0; // brise les autres niveaux
-    }
-    this.rattrapStreaks[stratId][R] = (this.rattrapStreaks[stratId][R] || 0) + 1;
-    const rStreak = this.rattrapStreaks[stratId][R];
-
-    // Un gain avec Rn compte aussi dans le compteur combo pour ce niveau
-    if (!this.comboCounters[stratId]) this.comboCounters[stratId] = {};
-    this.comboCounters[stratId][R] = (this.comboCounters[stratId][R] || 0) + 1;
-
+    // ── Mode surveillance_perte — déclenchement sur rattrapages ──────────
     for (const [rid, rstate] of Object.entries(this.custom)) {
       const rcfg = rstate.config;
-      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
-      for (const rule of (rcfg.relance_rules || [])) {
+      if (!rcfg?.enabled || rcfg.mode !== 'surveillance_perte') continue;
+      for (const rule of (rcfg.surveillance_rules || [])) {
         if (rule.strategy_id !== stratId) continue;
-        const relanceId = `S${rid}`;
-        let fired = false;
-
-        // Condition B : rattrapages consécutifs (multi-niveaux supporté)
-        const rLevelsRaw = Array.isArray(rule.rattrapage_levels) ? rule.rattrapage_levels : (rule.rattrapage_level != null ? [rule.rattrapage_level] : []);
-        const rLevels    = rLevelsRaw.map(n => parseInt(n)).filter(n => n >= 1);
-        const rCount     = parseInt(rule.rattrapage_count) || 1;
-        if (!fired && rLevels.includes(R) && rStreak >= rCount) {
-          fired = true;
-          console.log(`[Relance] "${rcfg.name}" → ${stratId} R${R} consécutif ×${rStreak} (seuil ×${rCount}, niveaux=[${rLevels.join(',')}]) → ${relanceId} #${gn + 1}`);
-          this.rattrapStreaks[stratId][R] = 0;
+        const trigger = rule.trigger || 'losses';
+        if (trigger !== 'rattrapage' && trigger !== 'both') continue;
+        const rMin = parseInt(rule.rattrapage_min) || 1;
+        if (R >= rMin) {
+          console.log(`[Surveillance] "${rcfg.name}" → ${stratId} R${R}≥R${rMin} → S${rid}`);
+          this._fireSurveillance(`S${rid}`, stratId, gn, suit);
         }
-
-        // Condition C : combo perte+Rn (multi-niveaux supporté)
-        const cLevelsRaw_r = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
-        const cLevels_r    = cLevelsRaw_r.map(n => parseInt(n)).filter(n => n >= 1);
-        const cCount_r     = parseInt(rule.combo_count) || 1;
-        if (!fired && cLevels_r.includes(R)) {
-          const cur = (this.comboCounters[stratId] || {})[R] || 0;
-          if (cur >= cCount_r) {
-            fired = true;
-            console.log(`[Relance] "${rcfg.name}" → ${stratId} combo R${R} ×${cur} (seuil ×${cCount_r}, niveaux=[${cLevels_r.join(',')}]) → ${relanceId} #${gn + 1}`);
-            this.comboCounters[stratId][R] = 0;
-          }
-        }
-
-        // Condition D : à partir de tel rattrapage (R >= range_from)
-        const rFrom  = rule.range_from  != null ? parseInt(rule.range_from)  : null;
-        const dCount = parseInt(rule.range_count) || 1;
-        if (!fired && rFrom !== null && R >= rFrom) {
-          const kD = `${relanceId}_${stratId}_D`;
-          this.relanceCondCounters[kD] = (this.relanceCondCounters[kD] || 0) + 1;
-          const cur = this.relanceCondCounters[kD];
-          if (cur >= dCount) {
-            fired = true;
-            this.relanceCondCounters[kD] = 0;
-            console.log(`[Relance-D] "${rcfg.name}" → ${stratId} R${R}≥R${rFrom} ×${cur} (seuil ×${dCount}) → ${relanceId} #${gn + 1}`);
-          }
-        }
-
-        // Condition E : intervalle de rattrapage (iMin <= R <= iMax)
-        const iMin   = rule.interval_min != null ? parseInt(rule.interval_min) : null;
-        const iMax   = rule.interval_max != null ? parseInt(rule.interval_max) : null;
-        const eCount = parseInt(rule.interval_count) || 1;
-        if (!fired && iMin !== null && iMax !== null && R >= iMin && R <= iMax) {
-          const kE = `${relanceId}_${stratId}_E`;
-          this.relanceCondCounters[kE] = (this.relanceCondCounters[kE] || 0) + 1;
-          const cur = this.relanceCondCounters[kE];
-          if (cur >= eCount) {
-            fired = true;
-            this.relanceCondCounters[kE] = 0;
-            console.log(`[Relance-E] "${rcfg.name}" → ${stratId} R${iMin}≤R${R}≤R${iMax} ×${cur} (seuil ×${eCount}) → ${relanceId} #${gn + 1}`);
-          }
-        }
-
-        if (fired) this._fireRelance(relanceId, stratId, gn, suit);
       }
     }
   }
@@ -531,9 +405,13 @@ class Engine {
     return {};
   }
 
-  // Déclenche une relance : copie la prochaine prédiction en attente
-  // de la stratégie source ; si aucune n'est disponible, fallback sur suitFallback au jeu gn+1
-  _fireRelance(relanceId, srcStratId, gn, suitFallback) {
+  // Retourne les compteurs relance pour l'API /relance-status
+  getRelanceStatus() {
+    return {};
+  }
+
+  // Déclenche une surveillance : copie la prochaine pred en attente de la source
+  _fireSurveillance(survId, srcStratId, gn, suitFallback) {
     const srcPending = this._getPendingFor(srcStratId);
     const pendingList = Object.entries(srcPending)
       .map(([g, v]) => ({ game: parseInt(g), suit: v.suit || v }))
@@ -541,48 +419,28 @@ class Engine {
       .sort((a, b) => a.game - b.game);
     if (pendingList.length > 0) {
       const next = pendingList[0];
-      console.log(`[Relance→Copie] ${relanceId} ← ${srcStratId}#${next.game} ${next.suit}`);
-      this._forceNextPrediction(relanceId, next.game, next.suit);
+      console.log(`[Surveillance→Copie] ${survId} ← ${srcStratId}#${next.game} ${next.suit}`);
+      this._forceNextPrediction(survId, next.game, next.suit);
     } else {
-      console.log(`[Relance→Fallback] ${relanceId} ← ${srcStratId} (pas de pred en attente) → #${gn + 1} ${suitFallback}`);
-      this._forceNextPrediction(relanceId, gn + 1, suitFallback);
+      console.log(`[Surveillance→Fallback] ${survId} ← ${srcStratId} (aucune pred en attente) → #${gn + 1} ${suitFallback}`);
+      this._forceNextPrediction(survId, gn + 1, suitFallback);
     }
   }
 
-  // Retourne les compteurs relance pour l'API /relance-status
-  getRelanceStatus() {
-    const out = {};
-    for (const [rid, rstate] of Object.entries(this.custom)) {
-      const rcfg = rstate.config;
-      if (!rcfg?.enabled || rcfg.mode !== 'relance') continue;
-      const relanceId = `S${rid}`;
-      out[relanceId] = { name: rcfg.name, sources: [] };
-      for (const rule of (rcfg.relance_rules || [])) {
-        const srcId = rule.strategy_id;
-        const srcName = this.custom[srcId.replace('S','')]?.config?.name || srcId;
-        const entry = { id: srcId, name: srcName };
-        if (rule.losses_threshold != null)
-          entry.A = { cur: this.lossStreaks[srcId] || 0, thr: parseInt(rule.losses_threshold) };
-        const rLvls = Array.isArray(rule.rattrapage_levels) ? rule.rattrapage_levels : (rule.rattrapage_level != null ? [rule.rattrapage_level] : []);
-        if (rLvls.length) {
-          const lvls = rLvls.map(n => parseInt(n));
-          const maxCur = Math.max(...lvls.map(lv => (this.rattrapStreaks[srcId] || {})[lv] || 0));
-          entry.B = { cur: maxCur, thr: parseInt(rule.rattrapage_count) || 1, lvl: lvls.length === 1 ? lvls[0] : null, lvls };
-        }
-        const cLvls = Array.isArray(rule.combo_levels) ? rule.combo_levels : (rule.combo_level != null ? [rule.combo_level] : []);
-        if (cLvls.length) {
-          const lvls = cLvls.map(n => parseInt(n));
-          const maxCur = Math.max(...lvls.map(lv => (this.comboCounters[srcId] || {})[lv] || 0));
-          entry.C = { cur: maxCur, thr: parseInt(rule.combo_count) || 1, lvl: lvls.length === 1 ? lvls[0] : null, lvls };
-        }
-        if (rule.range_from != null)
-          entry.D = { cur: this.relanceCondCounters[`${relanceId}_${srcId}_D`] || 0, thr: parseInt(rule.range_count) || 1, from: parseInt(rule.range_from) };
-        if (rule.interval_min != null)
-          entry.E = { cur: this.relanceCondCounters[`${relanceId}_${srcId}_E`] || 0, thr: parseInt(rule.interval_count) || 1, min: parseInt(rule.interval_min), max: parseInt(rule.interval_max) };
-        out[relanceId].sources.push(entry);
-      }
+  async _processSurveillancePerte(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
+    if (!this.custom[id]) return;
+    const channelId = `S${id}`;
+    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
+    const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
+      ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
+    if (Object.keys(state.pending).length > 0) {
+      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pgNum, R) => {
+        state.lastOutcomes.push({ won, suit: ps, rattrapage: R || 0 });
+        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
+        if (won && R > 0) console.log(`[Surveillance✓] ${channelId} gagne en R${R} (jeu #${pgNum || '?'})`);
+      }, stratMaxR, stratTgOpts);
     }
-    return out;
   }
 
   // Injecte une prédiction forcée (relance) sur le prochain jeu
@@ -1438,7 +1296,7 @@ class Engine {
         continue;
       }
       // Stratégies JSON déclaratives standard
-      if (cfg.mode !== 'multi_strategy' && cfg.mode !== 'union_enseignes' && cfg.mode !== 'relance' && cfg.mode !== 'intersection') {
+      if (cfg.mode !== 'multi_strategy' && cfg.mode !== 'union_enseignes' && cfg.mode !== 'intersection' && cfg.mode !== 'surveillance_perte') {
         await this._processCustomStrategy(parseInt(id), state, cfg, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
@@ -1454,10 +1312,10 @@ class Engine {
         await this._processIntersection(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards, winner);
       }
     }
-    // Passe 3 : stratégies relance (résolution de pending uniquement — le déclenchement se fait via _onStratLoss)
+    // Passe 3 : stratégies surveillance_perte (résolution des pending uniquement)
     for (const [id, state] of Object.entries(this.custom)) {
-      if (state.config?.enabled && state.config?.mode === 'relance') {
-        await this._processRelanceStrategy(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
+      if (state.config?.enabled && state.config?.mode === 'surveillance_perte') {
+        await this._processSurveillancePerte(parseInt(id), state, state.config, gn, suits, bSuits, pCards, bCards);
       }
     }
   }
@@ -1793,7 +1651,7 @@ class Engine {
     switch (category) {
       case 'costume':
         // Modes basés sur les costumes (♠♥♦♣) — la plupart des modes standards
-        return !['victoire_adverse', 'absence_victoire', 'carte_valeur', 'intersection', 'multi_strategy', 'union_enseignes', 'relance', 'aleatoire', 'distribution'].includes(mode);
+        return !['victoire_adverse', 'absence_victoire', 'carte_valeur', 'intersection', 'multi_strategy', 'union_enseignes', 'aleatoire', 'distribution'].includes(mode);
       case 'victoire':
         return mode === 'victoire_adverse' || mode === 'absence_victoire';
       case '2_2':
@@ -1810,25 +1668,6 @@ class Engine {
     }
   }
 
-  async _processRelanceStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards) {
-    if (!this.custom[id]) return;
-    const channelId = `S${id}`;
-    const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
-    const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
-      ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
-    if (Object.keys(state.pending).length > 0) {
-      await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pgNum, R) => {
-        state.lastOutcomes.push({ won, suit: ps, rattrapage: R || 0 });
-        if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-        // Confirmation de rattrapage : log explicite quand la relance gagne en rattrapage
-        if (won && R > 0) {
-          console.log(`[Relance-Rattrapage✓] ${channelId} gagne en R${R} (jeu #${pgNum || '?'})`);
-        }
-        // Ne pas déclencher de relance en cascade depuis une stratégie relance elle-même
-      }, stratMaxR, stratTgOpts);
-    }
-  }
 
   async _resolvePending(pending, strategy, gn, suits, pCards, bCards, onLoss, maxR = null, tgOpts = {}, handCards = null, winner = null) {
     if (maxR === null) maxR = getCurrentMaxRattrapage();
@@ -2467,7 +2306,8 @@ class Engine {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
       // Pour gestion_banque : collecter les args de résolution sans appeler async dans le callback
       // (évite la course où une nouvelle prédiction s'ajoute au lot avant la vérification de clôture)
-      let _banqueArgs = null;
+      // FIX : tableau pour stocker TOUS les résultats (pas seulement le dernier)
+      const _banqueArgsList = [];
       await this._resolvePending(state.pending, channelId, gn, resolveHandSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
@@ -2481,13 +2321,13 @@ class Engine {
         this._updateBadPredBlocker(channelId, gn, state);
         // ── Gestion Banque : stocker les args pour traitement APRÈS _resolvePending ──
         if (cfg.mode === 'gestion_banque') {
-          _banqueArgs = { pg, ps, won, rattrapR: rattrapR || 0 };
+          _banqueArgsList.push({ pg, ps, won, rattrapR: rattrapR || 0 });
         }
       }, stratMaxRForResolve, stratTgOpts, handCards, winner);
       // Traiter la bankroll APRÈS _resolvePending et AVANT d'ajouter de nouvelles prédictions
       // Cela garantit que la vérification de clôture de lot se fait avant tout ajout au lot
-      if (_banqueArgs) {
-        await this._resolveBanqueOnResult(channelId, _banqueArgs.pg, _banqueArgs.ps, _banqueArgs.won, _banqueArgs.rattrapR, cfg, state);
+      for (const args of _banqueArgsList) {
+        await this._resolveBanqueOnResult(channelId, args.pg, args.ps, args.won, args.rattrapR, cfg, state);
       }
     }
 
@@ -3802,10 +3642,6 @@ class Engine {
         }
       }
 
-    } else if (mode === 'rattrapage_groupe') {
-      // Ce mode surveille d'autres stratégies via _onStratLoss/_onStratWin.
-      // Il ne génère pas de prédictions propres — traitement uniquement dans les callbacks.
-
     } else if (mode === 'gestion_banque') {
       // Miroir d'une stratégie source avec gestion bankroll + messages Telegram édités
       const srcId = cfg.bg_source_strategy_id;
@@ -3915,8 +3751,14 @@ class Engine {
     const initMise  = parseFloat(cfg.bg_mise_initiale)  || 1000;
     const lotSize   = parseInt(cfg.bg_lot_size)         || 5;
 
-    // Trouver la prédiction dans le lot courant
-    const pred = bgS.lot_predictions.find(p => p.game === gameNum && p.suit === suit && p.status === null);
+    // Trouver la prédiction dans le lot courant OU dans le lot archivé (vient de fermer)
+    // Cas : le lot s'est fermé (lotSize atteint) mais quelques prédictions restaient en attente ;
+    // elles sont résolues ici après la fermeture → on les retrouve dans archived_lot.
+    let pred = bgS.lot_predictions.find(p => p.game === gameNum && p.suit === suit && p.status === null);
+    const fromArchive = !pred;
+    if (!pred && bgS.archived_lot) {
+      pred = bgS.archived_lot.find(p => p.game === gameNum && p.suit === suit && p.status === null);
+    }
     if (!pred) return;
 
     // Calcul du total misé de R0 jusqu'au niveau rattrapR (toutes les mises jouées)
@@ -3960,37 +3802,51 @@ class Engine {
     }
 
     // Éditer le message Telegram avec le résultat à jour
-    if (bgS.lot_msg_ids.length > 0) {
+    // (uniquement pour le lot courant ; les résolutions tardives sur lot archivé
+    //  seront visibles dans le bilan envoyé après 50 s)
+    if (!fromArchive && bgS.lot_msg_ids.length > 0) {
       const text = buildBanqueLotText(bgS, cfg);
       await editBanqueTgMessage(bgS.lot_msg_ids, text).catch(() => {});
     }
 
-    // Vérifier si le lot est terminé
-    const resolvedCount = bgS.lot_predictions.filter(p => p.status !== null).length;
-    if (resolvedCount >= lotSize) {
-      const lotPreds       = [...bgS.lot_predictions];
-      const bankBefore     = bgS.bank_at_lot_start;
-      const bankAfter      = bgS.bank;
-      const capturedMsgIds = [...bgS.lot_msg_ids];
-      const capturedLotNum = bgS.lot_number;
+    // Vérifier si le lot est terminé (seulement pour le lot courant)
+    if (!fromArchive) {
+      const resolvedCount = bgS.lot_predictions.filter(p => p.status !== null).length;
+      if (resolvedCount >= lotSize) {
+        const lotPreds       = [...bgS.lot_predictions]; // copie superficielle — mêmes références d'objets
+        const bankBefore     = bgS.bank_at_lot_start;
+        const bankAfter      = bgS.bank;
+        const capturedMsgIds = [...bgS.lot_msg_ids];
+        const capturedLotNum = bgS.lot_number;
 
-      // Résumé envoyé après 50 secondes
-      setTimeout(async () => {
-        try {
-          const summaryText = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, bankAfter);
-          await editBanqueTgMessage(capturedMsgIds, summaryText);
-          console.log(`[${channelId}] [BanqueGestion] 📊 Résumé lot #${capturedLotNum} envoyé`);
-        } catch (e) {
-          console.error(`[${channelId}] [BanqueGestion] Erreur résumé: ${e.message}`);
-        }
-      }, 50_000);
+        // Archiver le lot AVANT de vider : les résolutions tardives de prédictions encore ⌛
+        // mettront à jour les mêmes objets que ceux dans lotPreds (copie superficielle).
+        // Ainsi le bilan à 50 s affichera l'état final correct (plus de ⌛ fantômes).
+        bgS.archived_lot = bgS.lot_predictions;
 
-      // Réinitialiser pour le lot suivant (mise + mise_level conservés = martingale continue)
-      bgS.lot_number++;
-      bgS.lot_predictions  = [];
-      bgS.lot_msg_ids      = [];
-      bgS.bank_at_lot_start = bankAfter;
-      console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque: ${bankAfter}`);
+        // Réinitialiser pour le lot suivant (mise + mise_level conservés = martingale continue)
+        bgS.lot_number++;
+        bgS.lot_predictions  = [];
+        bgS.lot_msg_ids      = [];
+        bgS.bank_at_lot_start = bankAfter;
+        console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque: ${bankAfter}`);
+
+        // Résumé envoyé après 50 secondes (laisse le temps aux dernières résolutions de se faire)
+        setTimeout(async () => {
+          try {
+            // Recalculer bankAfter final à partir des objets du lot (inclut les résolutions tardives)
+            const finalDelta = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
+            const finalBankAfter = Math.round((bankBefore + finalDelta) * 100) / 100;
+            const summaryText = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
+            await editBanqueTgMessage(capturedMsgIds, summaryText);
+            // Nettoyer l'archive après envoi
+            if (bgS.archived_lot === lotPreds) bgS.archived_lot = null;
+            console.log(`[${channelId}] [BanqueGestion] 📊 Résumé lot #${capturedLotNum} envoyé`);
+          } catch (e) {
+            console.error(`[${channelId}] [BanqueGestion] Erreur résumé: ${e.message}`);
+          }
+        }, 50_000);
+      }
     }
   }
 
@@ -4034,11 +3890,12 @@ class Engine {
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
       const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR };
 
-      // ── Mode Distribution : résolution en fin de jeu uniquement ─────
-      // Ne pas résoudre live — on attend que le jeu soit terminé
-      // pour vérifier que les DEUX mains ont exactement 2 cartes.
-      // La résolution correcte est dans _resolvePending (appelé par processGame).
-      if (cfg.mode === 'distribution') {
+      // ── Mode Distribution / Gestion Banque : résolution en fin de jeu uniquement ─────
+      // Distribution : on attend que le jeu soit terminé pour vérifier 2+2 cartes.
+      // Gestion Banque : la résolution live ne met pas à jour bgState (lot_predictions,
+      // bank, current_mise) car le callback onLoss de _resolvePending n'est pas appelé.
+      // On force donc la résolution en fin de jeu via _resolvePending.
+      if (cfg.mode === 'distribution' || cfg.mode === 'gestion_banque') {
         continue; // skip tryResolve, résolution via _resolvePending en fin de jeu
       }
 
@@ -4909,7 +4766,7 @@ class Engine {
       }
 
       // Modes sans compteur pertinent → tableau vide (évite l'affichage "Absent" inutile)
-      if (['relance', 'aleatoire', 'annonce_sequence', 'multi_strategy', 'union_enseignes'].includes(mode)) {
+      if (['aleatoire', 'annonce_sequence', 'multi_strategy', 'union_enseignes', 'surveillance_perte'].includes(mode)) {
         return [];
       }
 
