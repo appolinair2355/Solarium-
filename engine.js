@@ -2372,11 +2372,9 @@ class Engine {
       const hCnt = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
       resolveHandSuits = hCnt === 2 ? ['deux'] : hCnt === 3 ? ['trois'] : [];
     }
-    // Pour gestion_banque : utiliser les deux mains (joueur + banquier) car la stratégie source
-    // peut surveiller n'importe quelle main — on vérifie la présence du costume prédit dans l'une ou l'autre.
-    if (cfg.mode === 'gestion_banque') {
-      resolveHandSuits = [...new Set([...(suits || []), ...(bSuits || [])])];
-    }
+    // gestion_banque : résolution avec la main configurée (cfg.hand), comme les autres modes.
+    // NE PAS utiliser les deux mains — cela provoquerait une résolution prématurée (rattrapage=0)
+    // si le costume prédit apparaît dans la mauvaise main, alors que la main configurée ne l'a pas.
 
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;

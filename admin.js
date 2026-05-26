@@ -1169,6 +1169,36 @@ router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Compteurs live serpent (pair_impair / carte_2v3) ──────────────
+router.get('/strategies/:id/snake-counts', requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const entry = engine.custom?.[id];
+    if (!entry) return res.json({ mode: null });
+    const mode = entry.config?.mode || '';
+    const threshold = entry.config?.threshold || 0;
+    if (mode === 'pair_impair') {
+      return res.json({
+        mode,
+        threshold,
+        parityCounts: entry.parityCounts || { pair: 0, impair: 0 },
+        snakeActive: !!entry.snakeActive,
+        snakeSuit: entry.snakeSuit || null,
+      });
+    }
+    if (mode === 'carte_2v3') {
+      return res.json({
+        mode,
+        threshold,
+        c2v3Counts: entry.c2v3Counts || { deux: 0, trois: 0 },
+        snakeActive: !!entry.snakeActive,
+        snakeSuit: entry.snakeSuit || null,
+      });
+    }
+    res.json({ mode });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Reset statistiques par stratégie ──────────────────────────────
 // Supprime tout l'historique de prédictions d'une stratégie (C1, C2, C3, DC ou Sn)
 router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
