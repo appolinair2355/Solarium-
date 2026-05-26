@@ -536,10 +536,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -653,7 +653,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
+    const isPairImpair        = mode === 'pair_impair';
+    const isCarte2v3          = mode === 'carte_2v3';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -729,7 +731,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
             bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
             bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0) }
+            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
+            bg_boutique_name: String(req.body.bg_boutique_name || ''),
+            bg_site_url:      String(req.body.bg_site_url || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -926,7 +930,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
+    const isPairImpair        = mode === 'pair_impair';
+    const isCarte2v3          = mode === 'carte_2v3';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1002,7 +1008,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
             bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
             bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0) }
+            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
+            bg_boutique_name: String(req.body.bg_boutique_name || ''),
+            bg_site_url:      String(req.body.bg_site_url || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -3758,7 +3766,7 @@ function analyzeStrategyFile(ext, content, filename) {
     if (!strategies.length) {
       errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
     }
-    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire'];
+    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire','pair_impair','carte_2v3'];
     for (const s of strategies) {
       if (!s || typeof s !== 'object') {
         errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });

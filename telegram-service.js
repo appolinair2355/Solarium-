@@ -1878,7 +1878,18 @@ function buildBanqueFinalBilanText(lotHistory, cfg, initialBank) {
     `💵 Total gagné : ${earnedStr}\n` +
     `🏦 Banque finale : ${_bgRnd(finalBank)}${curr}\n` +
     `━━━━━━━━━━━━━━━\n` +
-    `\nMerci d'avoir suivi le montant organisé par Sossou Kouamé\nRdv sur le site: http://solarium-1-6a5p.onrender.com`
+    (() => {
+      const bn  = cfg.bg_boutique_name ? String(cfg.bg_boutique_name).trim() : '';
+      const url = cfg.bg_site_url      ? String(cfg.bg_site_url).trim()      : 'http://solarium-1-6a5p.onrender.com';
+      return (
+        `\n🎉 <b>Campagne terminée avec succès !</b>\n\n` +
+        (bn  ? `🏪 <b>${bn}</b>\n` : ``) +
+        `🔗 ${url}\n\n` +
+        `💎 Veux-tu continuer à gagner ?\n` +
+        `📲 Rejoins notre site et commande ta stratégie dès maintenant !\n` +
+        `🚀 Des centaines de joueurs gagnent déjà — à ton tour !`
+      );
+    })()
   );
 }
 
@@ -1898,6 +1909,18 @@ function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter)
     ? `${_bgRnd(bankBefore)}${curr} - ${Math.abs(delta)}${curr} = ${_bgRnd(bankAfter)}${curr}`
     : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
 
+  const boutiqueName = cfg.bg_boutique_name ? String(cfg.bg_boutique_name).trim() : '';
+  const siteUrl      = cfg.bg_site_url      ? String(cfg.bg_site_url).trim()      : '';
+
+  const promoBlock = (boutiqueName || siteUrl)
+    ? `\n\n━━━━━━━━━━━━━━━\n` +
+      (boutiqueName ? `🏪 <b>${boutiqueName}</b>\n` : '') +
+      (siteUrl      ? `🔗 ${siteUrl}\n` : '') +
+      `\n💎 <b>Rejoins notre communauté de gagnants !</b>\n` +
+      `🚀 Accède à cette stratégie exclusive sur notre site\n` +
+      `📲 Clique sur le lien ci-dessus et commence à gagner dès aujourd'hui !`
+    : `\n\nMerci de suivre la stratégie organisée par Sossou Kouamé`;
+
   return (
     `💰 Montant banque départ : ${_bgRnd(bankBefore)}${curr}\n` +
     `📈 Côté : ×${cote}\n` +
@@ -1913,7 +1936,8 @@ function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter)
     `\n` +
     `🏦 BANQUE ACTUELLE\n` +
     `━━━━━━━━━━━━━━━\n` +
-    bankLine
+    bankLine +
+    promoBlock
   );
 }
 

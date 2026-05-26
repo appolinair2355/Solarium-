@@ -268,7 +268,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false } };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 } };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -521,9 +521,13 @@ class Engine {
           // Reset confirmPending (absence_confirmee)
           const cp = this.custom[cfg.id].confirmPending;
           if (cp) for (const s of ALL_SUITS) cp[s] = false;
-          // Reset parityCounts/parityPending (compteur_parite)
+          // Reset parityCounts/parityPending (compteur_parite / pair_impair)
           if (this.custom[cfg.id].parityCounts)  { this.custom[cfg.id].parityCounts.pair  = 0; this.custom[cfg.id].parityCounts.impair  = 0; }
           if (this.custom[cfg.id].parityPending) { this.custom[cfg.id].parityPending.pair = false; this.custom[cfg.id].parityPending.impair = false; }
+          // Reset serpent (pair_impair / carte_2v3)
+          this.custom[cfg.id].snakeActive = false;
+          this.custom[cfg.id].snakeSuit   = null;
+          if (this.custom[cfg.id].c2v3Counts) { this.custom[cfg.id].c2v3Counts.deux = 0; this.custom[cfg.id].c2v3Counts.trois = 0; }
           // Reset histoire (basée sur la main surveillée)
           this.custom[cfg.id].history = [];
           // Reset lastHour pour forcer la réinitialisation de mirrorLastHour
@@ -2250,6 +2254,7 @@ class Engine {
     // en attente contre lui, sinon elles restent bloquées jusqu'à expiration (❌).
     // Pour gestion_banque : toujours 3 rattrapages (bankroll R0→R3 fixe)
     const stratMaxRForResolve = cfg.mode === 'gestion_banque' ? 3
+      : (cfg.mode === 'pair_impair' || cfg.mode === 'carte_2v3') ? 0
       : (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
         ? parseInt(cfg.max_rattrapage)
         : getCurrentMaxRattrapage();
@@ -2300,11 +2305,15 @@ class Engine {
       }
     }
 
-    // ── Pour compteur_parite : résolution sur parité du score, pas sur costume ──
+    // ── Résolution sur parité / nombre de cartes pour les modes spéciaux ──
     let resolveHandSuits = handSuits;
-    if (cfg.mode === 'compteur_parite') {
+    if (cfg.mode === 'compteur_parite' || cfg.mode === 'pair_impair') {
       const rScore = baccaratHandScore(cfg.hand === 'banquier' ? bCards : pCards);
       resolveHandSuits = rScore !== null ? [rScore % 2 === 0 ? 'pair' : 'impair'] : [];
+    }
+    if (cfg.mode === 'carte_2v3') {
+      const hCnt = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
+      resolveHandSuits = hCnt === 2 ? ['deux'] : hCnt === 3 ? ['trois'] : [];
     }
 
     if (Object.keys(state.pending).length > 0) {
@@ -2319,8 +2328,22 @@ class Engine {
         if (won) {
           this._onStratWin(channelId);
           if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
+          // 🐍 Serpent : désactiver sur victoire
+          if (mode === 'pair_impair' || mode === 'carte_2v3') {
+            state.snakeActive = false;
+            state.snakeSuit   = null;
+            if (mode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
+            if (mode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
+          }
         } else {
           this._onStratLoss(channelId, gn, ps);
+          // 🐍 Serpent : activer sur perte — mémoriser l'opposé à prédire
+          if (mode === 'pair_impair' || mode === 'carte_2v3') {
+            const _opp = { pair: 'impair', impair: 'pair', deux: 'trois', trois: 'deux' };
+            state.snakeActive = true;
+            state.snakeSuit   = _opp[ps] || ps;
+            console.log(`[${channelId}] 🐍 Serpent activé — prochaine pred: ${state.snakeSuit}`);
+          }
         }
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
@@ -3109,6 +3132,65 @@ class Engine {
               console.log(`${logP} ${parity} absent (score=${score}) — compteur=${state.parityCounts[parity]} / seuil B=${B}`);
             }
           }
+        }
+      }
+
+    } else if (mode === 'pair_impair') {
+      // ── Mode Pair / Impair (Spécial + Serpent 🐍) ────────────────────────
+      // Compte les absences consécutives de Pair ou Impair (score de la main).
+      // Quand le seuil B est atteint → prédiction immédiate pour jeu+1.
+      // Serpent : si perte → prédit l'opposé automatiquement jusqu'à victoire.
+      if (!state.parityCounts) state.parityCounts = { pair: 0, impair: 0 };
+      const piScore = baccaratHandScore(cfg.hand === 'banquier' ? bCards : pCards);
+      if (piScore === null) {
+        console.warn(`[${channelId}] [Pair/Impair] Score indisponible — jeu #${gn} ignoré`);
+      } else if (state.snakeActive && state.snakeSuit) {
+        // 🐍 Serpent actif : injecter l'opposé pour le prochain jeu
+        if (Object.keys(state.pending).length === 0) {
+          console.log(`[${channelId}] 🐍 Serpent → ${state.snakeSuit} jeu #${gn + 1}`);
+          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit);
+        }
+      } else {
+        const isCurPair = piScore % 2 === 0;
+        for (const [parity, isCurrent] of [['pair', isCurPair], ['impair', !isCurPair]]) {
+          if (isCurrent) {
+            state.parityCounts[parity] = 0;
+          } else {
+            state.parityCounts[parity] = (state.parityCounts[parity] || 0) + 1;
+            if (state.parityCounts[parity] >= B && Object.keys(state.pending).length === 0) {
+              console.log(`[${channelId}] [Pair/Impair] ${parity} absent ${state.parityCounts[parity]}× (≥${B}) → préd jeu #${gn + 1}`);
+              await emitPrediction(gn + 1, parity, parity);
+              state.parityCounts[parity] = 0;
+            }
+          }
+        }
+      }
+
+    } else if (mode === 'carte_2v3') {
+      // ── Mode 2 cartes / 3 cartes (Spécial + Serpent 🐍) ──────────────────
+      // Compte les absences consécutives de 2-cartes ou 3-cartes.
+      // Quand le seuil B est atteint → prédiction immédiate pour jeu+1.
+      // Serpent : si perte → prédit l'opposé automatiquement jusqu'à victoire.
+      if (!state.c2v3Counts) state.c2v3Counts = { deux: 0, trois: 0 };
+      const _c2v3Cards = cfg.hand === 'banquier' ? bCards : pCards;
+      const _c2v3Cnt   = countValidCards(_c2v3Cards);
+      if (_c2v3Cnt !== 2 && _c2v3Cnt !== 3) {
+        // carte invalide ou 0 cartes — ignorer
+      } else if (state.snakeActive && state.snakeSuit) {
+        // 🐍 Serpent actif : injecter l'opposé pour le prochain jeu
+        if (Object.keys(state.pending).length === 0) {
+          console.log(`[${channelId}] 🐍 Serpent → ${state.snakeSuit} jeu #${gn + 1}`);
+          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit);
+        }
+      } else {
+        const curKey = _c2v3Cnt === 2 ? 'deux' : 'trois';
+        const absKey = _c2v3Cnt === 2 ? 'trois' : 'deux';
+        state.c2v3Counts[curKey] = 0;
+        state.c2v3Counts[absKey] = (state.c2v3Counts[absKey] || 0) + 1;
+        if (state.c2v3Counts[absKey] >= B && Object.keys(state.pending).length === 0) {
+          console.log(`[${channelId}] [2/3 cartes] ${absKey} absent ${state.c2v3Counts[absKey]}× (≥${B}) → préd jeu #${gn + 1}`);
+          await emitPrediction(gn + 1, absKey, absKey);
+          state.c2v3Counts[absKey] = 0;
         }
       }
 
@@ -4886,6 +4968,62 @@ class Engine {
             description: pp.impair
               ? `⏳ Seuil B=${threshold} atteint — en attente d'apparition Impair (${pc.impair || 0} absences)`
               : `${pc.impair || 0}/${threshold} absences Impair`,
+          },
+        ];
+      }
+
+      // Mode Pair/Impair → afficher compteurs pair/impair + état serpent
+      if (mode === 'pair_impair') {
+        const pc  = entry.parityCounts || { pair: 0, impair: 0 };
+        const sna = !!entry.snakeActive;
+        return [
+          {
+            suit: 'pair', display: '🟢 Pair',
+            count: pc.pair || 0, threshold,
+            mode, label: 'Pair/Impair 🐍',
+            isLive: false, singleCounter: false,
+            snakeActive: sna, snakeSuit: entry.snakeSuit || null,
+            description: sna && entry.snakeSuit === 'pair'
+              ? `🐍 Serpent actif → Pair prédit`
+              : `${pc.pair || 0}/${threshold} absences Pair`,
+          },
+          {
+            suit: 'impair', display: '🔴 Impair',
+            count: pc.impair || 0, threshold,
+            mode, label: 'Pair/Impair 🐍',
+            isLive: false, singleCounter: false,
+            snakeActive: sna, snakeSuit: entry.snakeSuit || null,
+            description: sna && entry.snakeSuit === 'impair'
+              ? `🐍 Serpent actif → Impair prédit`
+              : `${pc.impair || 0}/${threshold} absences Impair`,
+          },
+        ];
+      }
+
+      // Mode Carte 2v3 → afficher compteurs deux/trois + état serpent
+      if (mode === 'carte_2v3') {
+        const c2 = entry.c2v3Counts || { deux: 0, trois: 0 };
+        const sna = !!entry.snakeActive;
+        return [
+          {
+            suit: 'deux', display: '2️⃣ 2 cartes',
+            count: c2.deux || 0, threshold,
+            mode, label: '2 vs 3 cartes 🐍',
+            isLive: false, singleCounter: false,
+            snakeActive: sna, snakeSuit: entry.snakeSuit || null,
+            description: sna && entry.snakeSuit === 'deux'
+              ? `🐍 Serpent actif → 2 cartes prédit`
+              : `${c2.deux || 0}/${threshold} absences 2 cartes`,
+          },
+          {
+            suit: 'trois', display: '3️⃣ 3 cartes',
+            count: c2.trois || 0, threshold,
+            mode, label: '2 vs 3 cartes 🐍',
+            isLive: false, singleCounter: false,
+            snakeActive: sna, snakeSuit: entry.snakeSuit || null,
+            description: sna && entry.snakeSuit === 'trois'
+              ? `🐍 Serpent actif → 3 cartes prédit`
+              : `${c2.trois || 0}/${threshold} absences 3 cartes`,
           },
         ];
       }
