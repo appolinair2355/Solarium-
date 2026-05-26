@@ -360,9 +360,18 @@ class Engine {
         if (trigger !== 'losses' && trigger !== 'both') continue;
         const lThr = parseInt(rule.losses_threshold) || 2;
         if (streak >= lThr) {
-          console.log(`[Surveillance] "${rcfg.name}" → ${stratId} ${streak} perte(s) (seuil ${lThr}) → S${rid}`);
+          console.log(`[Surveillance] "S${rid}" ← ${stratId} : ${streak} perte(s) consécutive(s) (seuil ${lThr}) → en attente de la prochaine prédiction source`);
           this.lossStreaks[stratId] = 0;
-          this._fireSurveillance(`S${rid}`, stratId, gn, suit);
+          // FIX : poser un flag d'attente au lieu de copier immédiatement la pred courante
+          // La prédiction courante vient d'échouer — on attend la PROCHAINE pred de la source
+          rstate.survWaitingFrom  = rstate.survWaitingFrom  || {};
+          rstate.survWaitingFrom[stratId]  = true;
+          rstate.survWaitingAt = rstate.survWaitingAt || {};
+          rstate.survWaitingAt[stratId]    = gn;
+          // Réinitialiser compteur rattrapages pour ce couple source/surveillance
+          if (!this.survRattrapCounters) this.survRattrapCounters = {};
+          if (!this.survRattrapCounters[rid]) this.survRattrapCounters[rid] = {};
+          this.survRattrapCounters[rid][stratId] = 0;
         }
       }
     }
@@ -377,6 +386,7 @@ class Engine {
   // Appelé quand une prédiction est gagnée avec N rattrapages
   _onStratRattrapage(stratId, gn, suit, R) {
     // ── Mode surveillance_perte — déclenchement sur rattrapages ──────────
+    if (!this.survRattrapCounters) this.survRattrapCounters = {};
     for (const [rid, rstate] of Object.entries(this.custom)) {
       const rcfg = rstate.config;
       if (!rcfg?.enabled || rcfg.mode !== 'surveillance_perte') continue;
@@ -384,10 +394,25 @@ class Engine {
         if (rule.strategy_id !== stratId) continue;
         const trigger = rule.trigger || 'losses';
         if (trigger !== 'rattrapage' && trigger !== 'both') continue;
-        const rMin = parseInt(rule.rattrapage_min) || 1;
+        const rMin   = parseInt(rule.rattrapage_min)   || 1;
+        const rCount = parseInt(rule.rattrapage_count) || 1; // nombre de fois à atteindre avant déclenchement
         if (R >= rMin) {
-          console.log(`[Surveillance] "${rcfg.name}" → ${stratId} R${R}≥R${rMin} → S${rid}`);
-          this._fireSurveillance(`S${rid}`, stratId, gn, suit);
+          if (!this.survRattrapCounters[rid]) this.survRattrapCounters[rid] = {};
+          this.survRattrapCounters[rid][stratId] = (this.survRattrapCounters[rid][stratId] || 0) + 1;
+          const curCount = this.survRattrapCounters[rid][stratId];
+          console.log(`[Surveillance] "S${rid}" ← ${stratId} R${R}≥R${rMin} (${curCount}/${rCount} fois)`);
+          if (curCount >= rCount) {
+            console.log(`[Surveillance] "S${rid}" ← ${stratId} : seuil rattrapage atteint (${rCount}× R≥${rMin}) → en attente prochaine pred source`);
+            this.survRattrapCounters[rid][stratId] = 0;
+            // FIX : poser un flag d'attente — copier la PROCHAINE prédiction source (pas la courante)
+            rstate.survWaitingFrom = rstate.survWaitingFrom || {};
+            rstate.survWaitingFrom[stratId] = true;
+            rstate.survWaitingAt = rstate.survWaitingAt || {};
+            rstate.survWaitingAt[stratId] = gn;
+          }
+        } else {
+          // R < rMin : réinitialiser le compteur (on veut des occurrences R≥min consécutives ou non ?)
+          // Par défaut : compteur cumulatif (non réinitialisé sur petits R) — correspond au comportement attendu
         }
       }
     }
@@ -436,11 +461,43 @@ class Engine {
     const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
     const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR };
+
+    // ── FIX : vérifier les flags d'attente — copier la prochaine pred source dès qu'elle est disponible
+    if (state.survWaitingFrom) {
+      for (const [srcStratId, waiting] of Object.entries(state.survWaitingFrom)) {
+        if (!waiting) continue;
+        const triggeredAt = (state.survWaitingAt || {})[srcStratId] || 0;
+        const srcPending  = this._getPendingFor(srcStratId);
+        // Chercher une prédiction émise APRÈS le jeu déclencheur (prédiction pour un jeu futur)
+        const newPreds = Object.entries(srcPending)
+          .map(([g, v]) => ({ game: parseInt(g), suit: v.suit || v }))
+          .filter(p => !isNaN(p.game) && p.suit && p.game > triggeredAt)
+          .sort((a, b) => a.game - b.game);
+        if (newPreds.length > 0) {
+          const next = newPreds[0];
+          // Vérifier qu'on n'a pas déjà une prédiction en attente pour ce jeu
+          if (!Object.keys(state.pending).some(g => parseInt(g) >= next.game)) {
+            console.log(`[Surveillance→Copie] ${channelId} ← ${srcStratId}#${next.game} ${next.suit} (copie après attente jeu>${triggeredAt})`);
+            this._forceNextPrediction(channelId, next.game, next.suit);
+          }
+          // Effacer le flag dans tous les cas (pred trouvée ou déjà en cours)
+          state.survWaitingFrom[srcStratId] = false;
+          if (state.survWaitingAt) state.survWaitingAt[srcStratId] = null;
+        }
+        // Sinon : source n'a pas encore émis de nouvelle pred → on reste en attente (flag conservé)
+      }
+    }
+
+    // ── Résoudre les prédictions en attente de cette surveillance
     if (Object.keys(state.pending).length > 0) {
       await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pgNum, R) => {
         state.lastOutcomes.push({ won, suit: ps, rattrapage: R || 0 });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
-        if (won && R > 0) console.log(`[Surveillance✓] ${channelId} gagne en R${R} (jeu #${pgNum || '?'})`);
+        if (won) {
+          console.log(`[Surveillance✓] ${channelId} gagne${R > 0 ? ` en R${R}` : ''} (jeu #${pgNum || '?'})`);
+        } else {
+          console.log(`[Surveillance✗] ${channelId} perd (jeu #${pgNum || '?'})`);
+        }
       }, stratMaxR, stratTgOpts);
     }
   }
@@ -2315,6 +2372,11 @@ class Engine {
       const hCnt = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
       resolveHandSuits = hCnt === 2 ? ['deux'] : hCnt === 3 ? ['trois'] : [];
     }
+    // Pour gestion_banque : utiliser les deux mains (joueur + banquier) car la stratégie source
+    // peut surveiller n'importe quelle main — on vérifie la présence du costume prédit dans l'une ou l'autre.
+    if (cfg.mode === 'gestion_banque') {
+      resolveHandSuits = [...new Set([...(suits || []), ...(bSuits || [])])];
+    }
 
     if (Object.keys(state.pending).length > 0) {
       const handCards = cfg.hand === 'banquier' ? bCards : pCards;
@@ -2322,6 +2384,8 @@ class Engine {
       // (évite la course où une nouvelle prédiction s'ajoute au lot avant la vérification de clôture)
       // FIX : tableau pour stocker TOUS les résultats (pas seulement le dernier)
       const _banqueArgsList = [];
+      // FIX : utiliser cfg.mode (disponible via closure sur cfg) au lieu de `mode` (non encore déclaré à ce stade)
+      const _cfgMode = cfg.mode;
       await this._resolvePending(state.pending, channelId, gn, resolveHandSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
@@ -2329,16 +2393,16 @@ class Engine {
           this._onStratWin(channelId);
           if (rattrapR > 0) this._onStratRattrapage(channelId, gn, ps, rattrapR);
           // 🐍 Serpent : désactiver sur victoire
-          if (mode === 'pair_impair' || mode === 'carte_2v3') {
+          if (_cfgMode === 'pair_impair' || _cfgMode === 'carte_2v3') {
             state.snakeActive = false;
             state.snakeSuit   = null;
-            if (mode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
-            if (mode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
+            if (_cfgMode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
+            if (_cfgMode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
           }
         } else {
           this._onStratLoss(channelId, gn, ps);
           // 🐍 Serpent : activer sur perte — mémoriser l'opposé à prédire
-          if (mode === 'pair_impair' || mode === 'carte_2v3') {
+          if (_cfgMode === 'pair_impair' || _cfgMode === 'carte_2v3') {
             const _opp = { pair: 'impair', impair: 'pair', deux: 'trois', trois: 'deux' };
             state.snakeActive = true;
             state.snakeSuit   = _opp[ps] || ps;
@@ -2348,7 +2412,7 @@ class Engine {
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
         // ── Gestion Banque : stocker les args pour traitement APRÈS _resolvePending ──
-        if (cfg.mode === 'gestion_banque') {
+        if (_cfgMode === 'gestion_banque') {
           _banqueArgsList.push({ pg, ps, won, rattrapR: rattrapR || 0 });
         }
       }, stratMaxRForResolve, stratTgOpts, handCards, winner);
@@ -3755,11 +3819,26 @@ class Engine {
           lots_completed: 0,
           lot_history: [],
           finished: false,
+          boutique_titre: null,
         };
       }
       // Maintenir les cibles Telegram à jour
       if (state.bgState) state.bgState.tg_targets = tg_targets || [];
       if (!state.bgMirrored) state.bgMirrored = new Set();
+
+      // Récupérer (et cacher) le titre boutique de la stratégie source depuis strategy_promo_config
+      if (!state.bgState.boutique_titre) {
+        try {
+          const rawPromo = await db.getSetting('strategy_promo_config');
+          if (rawPromo) {
+            const promos = JSON.parse(rawPromo);
+            // srcId peut être 'S12' ou '12' — tester les deux formats
+            const srcNumId = String(srcId || '').replace(/^S/, '');
+            const promoEntry = promos[srcId] || promos[srcNumId] || promos[String(id)];
+            if (promoEntry?.titre) state.bgState.boutique_titre = promoEntry.titre;
+          }
+        } catch {}
+      }
 
       // Arrêté (max_lots atteint) → plus rien
       if (state.bgState?.finished) return;
@@ -3814,10 +3893,13 @@ class Engine {
         const stratMaxR = 3; // gestion_banque : toujours 3 rattrapages (bankroll fixe R0→R3)
         state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: Date.now() };
 
+        // Construire cfg enrichi avec nom boutique pour les messages Telegram
+        const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
+
         // Envoyer un nouveau message Telegram pour cette prédiction (montre tout le lot)
         const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
         if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-          const predText = buildBanqueLotText(bgS, cfg);
+          const predText = buildBanqueLotText(bgS, cfgWithBoutique);
           const msgIds   = await sendBanqueTgMessage(tg_targets, predText);
           newPred.msg_ids = msgIds;
         }
@@ -3900,7 +3982,8 @@ class Engine {
 
     // Éditer le message de CETTE prédiction avec le lot complet mis à jour
     if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
-      const text = buildBanqueLotText(bgS, cfg);
+      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
+      const text = buildBanqueLotText(bgS, cfgRich);
       await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
     }
 
@@ -3943,6 +4026,7 @@ class Engine {
         // Résumé (ou bilan final) envoyé après 50 secondes
         const capturedLotHistory  = [...(bgS.lot_history || [])];
         const capturedInitialBank = bgS.initial_bank || (parseFloat(cfg.bg_bank) || 5000);
+        const cfgRich2 = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
         setTimeout(async () => {
           try {
             const finalDelta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
@@ -3950,10 +4034,10 @@ class Engine {
             if (capturedTargets.length > 0) {
               if (maxLotsReached) {
                 // Bilan final multi-lots
-                const finalText = buildBanqueFinalBilanText(capturedLotHistory, cfg, capturedInitialBank);
+                const finalText = buildBanqueFinalBilanText(capturedLotHistory, cfgRich2, capturedInitialBank);
                 await sendBanqueTgMessage(capturedTargets, finalText);
               } else {
-                const summaryText = buildBanqueSummaryText(lotPreds, cfg, capturedLotNum, bankBefore, finalBankAfter);
+                const summaryText = buildBanqueSummaryText(lotPreds, cfgRich2, capturedLotNum, bankBefore, finalBankAfter);
                 await sendBanqueTgMessage(capturedTargets, summaryText);
               }
             }

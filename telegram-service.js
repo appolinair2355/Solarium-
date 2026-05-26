@@ -1826,7 +1826,13 @@ function buildBanqueLotText(bgState, cfg) {
     return `R${r} ➜ ${_bgRnd(m)}${curr}   (+${net}${curr} si gagné)`;
   }).join('\n');
 
+  // Nom boutique : priorité au titre issu de strategy_promo_config, sinon bg_boutique_name admin
+  const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
+  const siteUrl      = (cfg.bg_site_url || '').trim();
+  const headerLine   = boutiqueName ? `🏪 ${boutiqueName}${siteUrl ? `  |  🔗 ${siteUrl}` : ''}\n` : (siteUrl ? `🔗 ${siteUrl}\n` : '');
+
   return (
+    (headerLine ? headerLine + `━━━━━━━━━━━━━━━\n` : ``) +
     `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
     `━━━━━━━━━━━━━━━\n` +
     `🎮 LOT #${lotNum} — ${count}/${lotSize}\n` +
@@ -1879,8 +1885,8 @@ function buildBanqueFinalBilanText(lotHistory, cfg, initialBank) {
     `🏦 Banque finale : ${_bgRnd(finalBank)}${curr}\n` +
     `━━━━━━━━━━━━━━━\n` +
     (() => {
-      const bn  = cfg.bg_boutique_name ? String(cfg.bg_boutique_name).trim() : '';
-      const url = cfg.bg_site_url      ? String(cfg.bg_site_url).trim()      : 'http://solarium-1-6a5p.onrender.com';
+      const bn  = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
+      const url = (cfg.bg_site_url || 'http://solarium-1-6a5p.onrender.com').trim();
       return (
         `\n🎉 <b>Campagne terminée avec succès !</b>\n\n` +
         (bn  ? `🏪 <b>${bn}</b>\n` : ``) +
@@ -1909,8 +1915,8 @@ function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter)
     ? `${_bgRnd(bankBefore)}${curr} - ${Math.abs(delta)}${curr} = ${_bgRnd(bankAfter)}${curr}`
     : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
 
-  const boutiqueName = cfg.bg_boutique_name ? String(cfg.bg_boutique_name).trim() : '';
-  const siteUrl      = cfg.bg_site_url      ? String(cfg.bg_site_url).trim()      : '';
+  const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
+  const siteUrl      = (cfg.bg_site_url || '').trim();
 
   const promoBlock = (boutiqueName || siteUrl)
     ? `\n\n━━━━━━━━━━━━━━━\n` +
