@@ -1326,6 +1326,12 @@ async function _sendOneMessage(token, tgChatId, text, parse_mode) {
 //  • Sinon → envoi sur TOUS les canaux configurés (comportement actuel).
 //  • Dans les deux cas, le message_id est stocké en DB pour édition.
 
+function _siteFooter(siteUrl, stratName) {
+  if (!siteUrl) return '';
+  const nameLine = stratName ? `\n🏷 Cherchez « ${stratName} » dans la boutique` : '\n🛒 Aller dans la boutique';
+  return `\n━━━━━━━━━━━━━━━\n🌐 Pour acquérir cette stratégie vite, cliquez sur le lien :\n🔗 ${siteUrl}${nameLine}`;
+}
+
 async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   if (!TOKEN) {
     console.warn(`[TG] ${strategy} #${gameNumber} — pas de bot token configuré, envoi ignoré`);
@@ -1335,8 +1341,10 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   // Utilise le format spécifique à la stratégie si fourni, sinon le format global
   const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null && tgOpts.formatId !== '')
     ? parseInt(tgOpts.formatId) : currentFormat;
-  const hand = tgOpts.hand || null;
-  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+  const hand      = tgOpts.hand || null;
+  const maxR      = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+  const siteUrl   = tgOpts.siteUrl   || '';
+  const stratName = tgOpts.stratName || '';
 
   // Résolution du template : inline > custom DB (formatId > 18) > built-in
   let tg_template = tgOpts.tg_template || null;
@@ -1344,9 +1352,10 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
     try { const row = await db.getCustomFormatById(formatId - 18); if (row) tg_template = row.template; } catch {}
   }
 
-  const { text, parse_mode } = buildTgMessage(formatId, {
+  const { text: rawText, parse_mode } = buildTgMessage(formatId, {
     gameNumber, suit, strategy, maxR, status: null, hand,
   }, tg_template);
+  const text = rawText + _siteFooter(siteUrl, stratName);
 
   // Déterminer les canaux cibles
   let targets;
@@ -1391,8 +1400,10 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
   if (!Array.isArray(targets) || targets.length === 0) return;
 
   const defaultFormatId = tgOpts.formatId || currentFormat;
-  const hand = tgOpts.hand || null;
-  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+  const hand      = tgOpts.hand || null;
+  const maxR      = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
+  const siteUrl   = tgOpts.siteUrl   || '';
+  const stratName = tgOpts.stratName || '';
   // Template inline partagé par tous les canaux custom de la stratégie
   const stratTemplate = tgOpts.tg_template || null;
 
@@ -1406,9 +1417,10 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
     if (!tg_template && channelFormatId > 18) {
       try { const row = await db.getCustomFormatById(channelFormatId - 18); if (row) tg_template = row.template; } catch {}
     }
-    const { text, parse_mode } = buildTgMessage(channelFormatId, {
+    const { text: rawText, parse_mode } = buildTgMessage(channelFormatId, {
       gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
     }, tg_template);
+    const text = rawText + _siteFooter(siteUrl, stratName);
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
@@ -1460,6 +1472,8 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
   const maxR        = tgOpts.maxR        !== undefined ? tgOpts.maxR : maxRattrapage;
   const playerCards = tgOpts.playerCards || null;
   const bankerCards = tgOpts.bankerCards || null;
+  const siteUrl     = tgOpts.siteUrl     || '';
+  const stratName   = tgOpts.stratName   || '';
 
   for (const row of stored) {
     const token  = row.bot_token || TOKEN;
@@ -1471,9 +1485,10 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     if (!tg_template && formatId > 18) {
       try { const dbRow = await db.getCustomFormatById(formatId - 18); if (dbRow) tg_template = dbRow.template; } catch {}
     }
-    const { text: resultText, parse_mode } = buildTgMessage(formatId, {
+    const { text: rawResultText, parse_mode } = buildTgMessage(formatId, {
       gameNumber, suit, strategy, maxR, status, rattrapage, hand, playerCards, bankerCards,
     }, tg_template);
+    const resultText = rawResultText + _siteFooter(siteUrl, stratName);
 
     // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
     // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
@@ -1850,6 +1865,10 @@ function buildBanqueLotText(bgState, cfg) {
   const siteUrl      = (cfg.bg_site_url || '').trim();
   const headerLine   = boutiqueName ? `🏪 ${boutiqueName}${siteUrl ? `  |  🔗 ${siteUrl}` : ''}\n` : (siteUrl ? `🔗 ${siteUrl}\n` : '');
 
+  const followLine = siteUrl
+    ? `\n━━━━━━━━━━━━━━━\n🌐 Pour nous suivre, cliquez sur le lien :\n🔗 ${siteUrl}`
+    : '';
+
   return (
     (headerLine ? headerLine + `━━━━━━━━━━━━━━━\n` : ``) +
     `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
@@ -1866,7 +1885,8 @@ function buildBanqueLotText(bgState, cfg) {
     `━━━━━━━━━━━━━━━\n` +
     `🎲 Paramètres de mise :\n` +
     ratrLines + `\n` +
-    `📈 Côte : ×${cote}`
+    `📈 Côte : ×${cote}` +
+    followLine
   );
 }
 

@@ -750,6 +750,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
+      tg_site_url: String(req.body.tg_site_url || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -774,6 +775,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
             losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
             rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
+            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
           }))
         : [],
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
@@ -1033,6 +1035,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
         return oldPredDurationStartedAt;
       })(),
+      tg_site_url: String(req.body.tg_site_url || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -1057,6 +1060,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
             losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
             rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
+            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
           }))
         : (list[idx].surveillance_rules || []),
     };
