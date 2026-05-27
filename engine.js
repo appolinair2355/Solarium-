@@ -2401,12 +2401,21 @@ class Engine {
           }
         } else {
           this._onStratLoss(channelId, gn, ps);
-          // 🐍 Serpent : activer sur perte — mémoriser l'opposé à prédire
+          // 🐍 Serpent : activer sur perte normale ; désactiver si c'était déjà le serpent qui perdait
           if (_cfgMode === 'pair_impair' || _cfgMode === 'carte_2v3') {
-            const _opp = { pair: 'impair', impair: 'pair', deux: 'trois', trois: 'deux' };
-            state.snakeActive = true;
-            state.snakeSuit   = _opp[ps] || ps;
-            console.log(`[${channelId}] 🐍 Serpent activé — prochaine pred: ${state.snakeSuit}`);
+            if (state.snakeActive) {
+              // La prédiction du serpent a aussi perdu → retour au comptage normal (un seul essai)
+              state.snakeActive = false;
+              state.snakeSuit   = null;
+              if (_cfgMode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
+              if (_cfgMode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
+              console.log(`[${channelId}] 🐍 Serpent perdu — retour au comptage normal`);
+            } else {
+              const _opp = { pair: 'impair', impair: 'pair', deux: 'trois', trois: 'deux' };
+              state.snakeActive = true;
+              state.snakeSuit   = _opp[ps] || ps;
+              console.log(`[${channelId}] 🐍 Serpent activé — prochaine pred: ${state.snakeSuit}`);
+            }
           }
         }
         // Évaluer si le bloqueur doit s'activer

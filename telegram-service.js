@@ -1955,16 +1955,20 @@ function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter)
     : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
 
   const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-  const siteUrl      = (cfg.bg_site_url || '').trim();
+  const siteUrl      = (cfg.bg_site_url || 'http://solarium-1-6a5p.onrender.com').trim();
+  const stratNom     = (boutiqueName || cfg.name || 'Stratégie Gestion Banque').trim();
 
-  const promoBlock = (boutiqueName || siteUrl)
-    ? `\n\n━━━━━━━━━━━━━━━\n` +
-      (boutiqueName ? `🏪 <b>${boutiqueName}</b>\n` : '') +
-      (siteUrl      ? `🔗 ${siteUrl}\n` : '') +
-      `\n💎 <b>Rejoins notre communauté de gagnants !</b>\n` +
-      `🚀 Accède à cette stratégie exclusive sur notre site\n` +
-      `📲 Clique sur le lien ci-dessus et commence à gagner dès aujourd'hui !`
-    : `\n\nMerci de suivre la stratégie organisée par Sossou Kouamé`;
+  const promoBlock =
+    `\n\n━━━━━━━━━━━━━━━\n` +
+    `✅ Merci d'avoir suivi le montant du lot numéro ${lotNumber} !\n\n` +
+    `📊 Stratégie : <b>${stratNom}</b>\n` +
+    `🔗 Lien : ${siteUrl}\n\n` +
+    `🙏 Sossou Kouamé vous remercie !\n\n` +
+    `🛒 <b>Rendez-vous vite sur le site — Section Boutique</b>\npour acquérir cette stratégie exclusive !\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💎 Des centaines de joueurs gagnent déjà grâce à cette méthode\n— rejoignez-les !\n` +
+    `🚀 Ne laissez pas cette opportunité vous échapper !\n` +
+    `📲 Cliquez sur le lien ci-dessus et commencez à gagner dès aujourd'hui !`;
 
   return (
     `💰 Montant banque départ : ${_bgRnd(bankBefore)}${curr}\n` +

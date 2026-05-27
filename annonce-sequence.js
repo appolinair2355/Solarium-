@@ -45,7 +45,7 @@ function getPredCounts(seqStratId) {
 }
 
 // ── Message de DÉMARRAGE — envoyé lors d'un changement de stratégie ──────────
-function buildStartMessage(feat, orderNum, totalCount, durationMin) {
+function buildStartMessage(feat, orderNum, totalCount, durationMin, stats = null) {
   const name = (feat?.name || 'Stratégie').trim();
   const durStr = durationMin >= 1440
     ? `${Math.round(durationMin / 1440)} jour(s)`
@@ -69,6 +69,12 @@ function buildStartMessage(feat, orderNum, totalCount, durationMin) {
   }
   lines.push(``);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━━`);
+  if (stats) {
+    lines.push(`📈 *Bilan en direct :* ${formatBilanStr(stats)}`);
+  } else {
+    lines.push(`📈 *Bilan en direct :* — (données en cours de collecte)`);
+  }
+  lines.push(``);
   lines.push(`📲 *Suivez les signaux en temps réel sur notre plateforme !*`);
   return lines.join('\n');
 }
@@ -216,9 +222,10 @@ async function _tick() {
           if (isResume) {
             console.log(`[AnnonceSeq] S${seqStrat.id} → Reprise : "${ordered[idx].name}" (pos ${idx + 1}/${ordered.length}, écoulé ${Math.round(alreadyElapsed)}min/${durationMin}min)`);
           } else {
-            // Première initialisation : envoyer message de départ
+            // Première initialisation : envoyer message de départ avec bilan live
             const feat     = ordered[idx];
-            const startMsg = buildStartMessage(feat, idx + 1, ordered.length, durationMin);
+            const stats    = await getStratWinRate(feat.id).catch(() => null);
+            const startMsg = buildStartMessage(feat, idx + 1, ordered.length, durationMin, stats);
             await _sendToChannels(seqStrat, startMsg);
             await _saveRotationState(seqStrat.id, idx, stratStartedAt);
             console.log(`[AnnonceSeq] S${seqStrat.id} → Démarrage initial : "${feat.name}" (durée ${durationMin}min)`);
@@ -242,7 +249,9 @@ async function _tick() {
           // Persister le nouvel état en DB
           await _saveRotationState(seqStrat.id, newIdx, now);
 
-          const startMsg = buildStartMessage(feat, newIdx + 1, ordered.length, durationMin);
+          // Bilan live au moment du changement de rotation
+          const rotStats = await getStratWinRate(feat.id).catch(() => null);
+          const startMsg = buildStartMessage(feat, newIdx + 1, ordered.length, durationMin, rotStats);
           await _sendToChannels(seqStrat, startMsg);
           console.log(`[AnnonceSeq] S${seqStrat.id} → Rotation vers "${feat.name}" (${newIdx + 1}/${ordered.length})`);
           continue; // pas de promo sur ce même tick

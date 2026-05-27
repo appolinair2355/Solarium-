@@ -751,6 +751,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
       tg_site_url: String(req.body.tg_site_url || ''),
+      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -1036,6 +1037,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         return oldPredDurationStartedAt;
       })(),
       tg_site_url: String(req.body.tg_site_url || ''),
+      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
