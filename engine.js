@@ -3903,7 +3903,8 @@ class Engine {
         state.pending[srcGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: Date.now() };
 
         // Construire cfg enrichi avec nom boutique pour les messages Telegram
-        const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
+        const _bgGlobalSiteUrl1 = (await db.getSetting('site_url').catch(() => '')) || '';
+        const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl1 };
 
         // Envoyer un nouveau message Telegram pour cette prédiction (montre tout le lot)
         const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
@@ -3991,7 +3992,8 @@ class Engine {
 
     // Éditer le message de CETTE prédiction avec le lot complet mis à jour
     if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
-      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
+      const _bgGlobalSiteUrl2 = (await db.getSetting('site_url').catch(() => '')) || '';
+      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl2 };
       const text = buildBanqueLotText(bgS, cfgRich);
       await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
     }
@@ -4035,7 +4037,8 @@ class Engine {
         // Résumé (ou bilan final) envoyé après 50 secondes
         const capturedLotHistory  = [...(bgS.lot_history || [])];
         const capturedInitialBank = bgS.initial_bank || (parseFloat(cfg.bg_bank) || 5000);
-        const cfgRich2 = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '' };
+        const _bgGlobalSiteUrl3 = (await db.getSetting('site_url').catch(() => '')) || '';
+        const cfgRich2 = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl3 };
         setTimeout(async () => {
           try {
             const finalDelta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);

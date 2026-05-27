@@ -1866,7 +1866,7 @@ function buildBanqueLotText(bgState, cfg) {
   const headerLine   = boutiqueName ? `🏪 ${boutiqueName}${siteUrl ? `  |  🔗 ${siteUrl}` : ''}\n` : (siteUrl ? `🔗 ${siteUrl}\n` : '');
 
   const followLine = siteUrl
-    ? `\n━━━━━━━━━━━━━━━\n🌐 Pour nous suivre, cliquez sur le lien :\n🔗 ${siteUrl}`
+    ? `\n━━━━━━━━━━━━━━━\n🌐 Pour avoir cette stratégie, cliquez sur le lien — allez dans la section boutique, voilà le lien du site :\n🔗 ${siteUrl}`
     : '';
 
   return (
@@ -1925,11 +1925,11 @@ function buildBanqueFinalBilanText(lotHistory, cfg, initialBank) {
     `━━━━━━━━━━━━━━━\n` +
     (() => {
       const bn  = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-      const url = (cfg.bg_site_url || 'http://solarium-1-6a5p.onrender.com').trim();
+      const url = (cfg.bg_site_url || '').trim();
       return (
         `\n🎉 <b>Campagne terminée avec succès !</b>\n\n` +
         (bn  ? `🏪 <b>${bn}</b>\n` : ``) +
-        `🔗 ${url}\n\n` +
+        (url ? `🔗 ${url}\n\n` : `\n`) +
         `💎 Veux-tu continuer à gagner ?\n` +
         `📲 Rejoins notre site et commande ta stratégie dès maintenant !\n` +
         `🚀 Des centaines de joueurs gagnent déjà — à ton tour !`
@@ -1955,14 +1955,14 @@ function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter)
     : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
 
   const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-  const siteUrl      = (cfg.bg_site_url || 'http://solarium-1-6a5p.onrender.com').trim();
+  const siteUrl      = (cfg.bg_site_url || '').trim();
   const stratNom     = (boutiqueName || cfg.name || 'Stratégie Gestion Banque').trim();
 
   const promoBlock =
     `\n\n━━━━━━━━━━━━━━━\n` +
     `✅ Merci d'avoir suivi le montant du lot numéro ${lotNumber} !\n\n` +
     `📊 Stratégie : <b>${stratNom}</b>\n` +
-    `🔗 Lien : ${siteUrl}\n\n` +
+    (siteUrl ? `🔗 Lien : ${siteUrl}\n\n` : `\n`) +
     `🙏 Sossou Kouamé vous remercie !\n\n` +
     `🛒 <b>Rendez-vous vite sur le site — Section Boutique</b>\npour acquérir cette stratégie exclusive !\n` +
     `━━━━━━━━━━━━━━━\n` +
