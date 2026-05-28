@@ -2401,20 +2401,18 @@ class Engine {
           }
         } else {
           this._onStratLoss(channelId, gn, ps);
-          // 🐍 Serpent : activer sur perte normale ; désactiver si c'était déjà le serpent qui perdait
+          // 🐍 Serpent : activer sur perte ; continuer jusqu'à victoire
           if (_cfgMode === 'pair_impair' || _cfgMode === 'carte_2v3') {
             if (state.snakeActive) {
-              // La prédiction du serpent a aussi perdu → retour au comptage normal (un seul essai)
-              state.snakeActive = false;
-              state.snakeSuit   = null;
-              if (_cfgMode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
-              if (_cfgMode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
-              console.log(`[${channelId}] 🐍 Serpent perdu — retour au comptage normal`);
+              // La prédiction du serpent a aussi perdu → continuer avec le même enseigne jusqu'à victoire
+              console.log(`[${channelId}] 🐍 Serpent perdu — continue avec ${state.snakeSuit} jusqu'à victoire`);
+              // snakeActive et snakeSuit restent inchangés — la prédiction sera réémise au prochain jeu
             } else {
+              // Première perte → activer le serpent avec l'enseigne opposée
               const _opp = { pair: 'impair', impair: 'pair', deux: 'trois', trois: 'deux' };
               state.snakeActive = true;
               state.snakeSuit   = _opp[ps] || ps;
-              console.log(`[${channelId}] 🐍 Serpent activé — prochaine pred: ${state.snakeSuit}`);
+              console.log(`[${channelId}] 🐍 Serpent activé — prédit ${state.snakeSuit} jusqu'à victoire`);
             }
           }
         }
@@ -3835,16 +3833,31 @@ class Engine {
       if (state.bgState) state.bgState.tg_targets = tg_targets || [];
       if (!state.bgMirrored) state.bgMirrored = new Set();
 
-      // Récupérer (et cacher) le titre boutique de la stratégie source depuis strategy_promo_config
+      // Récupérer (et cacher) le titre boutique de la stratégie source
       if (!state.bgState.boutique_titre) {
         try {
+          const srcNumId = String(srcId || '').replace(/^S/, '');
+          // 1. Priorité : titre dans strategy_promo_config (panneau Vente Stratégies)
           const rawPromo = await db.getSetting('strategy_promo_config');
           if (rawPromo) {
             const promos = JSON.parse(rawPromo);
-            // srcId peut être 'S12' ou '12' — tester les deux formats
-            const srcNumId = String(srcId || '').replace(/^S/, '');
             const promoEntry = promos[srcId] || promos[srcNumId] || promos[String(id)];
             if (promoEntry?.titre) state.bgState.boutique_titre = promoEntry.titre;
+          }
+          // 2. Fallback : cfg.name de la stratégie SOURCE en mémoire moteur
+          //    (synchro auto depuis admin quand le titre boutique est sauvegardé)
+          if (!state.bgState.boutique_titre) {
+            const srcInMem = this.custom[srcNumId] || this.custom[parseInt(srcNumId, 10)];
+            if (srcInMem?.config?.name) state.bgState.boutique_titre = srcInMem.config.name;
+          }
+          // 3. Fallback : nom dans custom_strategies en base
+          if (!state.bgState.boutique_titre) {
+            const rawStrats = await db.getSetting('custom_strategies').catch(() => null);
+            if (rawStrats) {
+              const strats = JSON.parse(rawStrats);
+              const srcStrat = strats.find(s => String(s.id) === srcNumId || s.channelId === srcId);
+              if (srcStrat?.name) state.bgState.boutique_titre = srcStrat.name;
+            }
           }
         } catch {}
       }
@@ -3904,7 +3917,7 @@ class Engine {
 
         // Construire cfg enrichi avec nom boutique pour les messages Telegram
         const _bgGlobalSiteUrl1 = (await db.getSetting('site_url').catch(() => '')) || '';
-        const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl1 };
+        const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl1 || 'http://solarium-1-6a5p.onrender.com' };
 
         // Envoyer un nouveau message Telegram pour cette prédiction (montre tout le lot)
         const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
@@ -3993,7 +4006,7 @@ class Engine {
     // Éditer le message de CETTE prédiction avec le lot complet mis à jour
     if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
       const _bgGlobalSiteUrl2 = (await db.getSetting('site_url').catch(() => '')) || '';
-      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl2 };
+      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl2 || 'http://solarium-1-6a5p.onrender.com' };
       const text = buildBanqueLotText(bgS, cfgRich);
       await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
     }
@@ -4027,18 +4040,25 @@ class Engine {
 
         // Réinitialiser pour le lot suivant (sauf si terminé)
         if (!maxLotsReached) {
+          const resetBank = bgS.initial_bank || (parseFloat(cfg.bg_bank) || 5000);
           bgS.lot_number++;
           bgS.lot_predictions  = [];
           bgS.lot_msg_ids      = [];
-          bgS.bank_at_lot_start = bankAfter;
+          // Réinitialiser la banque à la banque initiale pour chaque nouveau lot
+          bgS.bank             = resetBank;
+          bgS.bank_at_lot_start = resetBank;
+          bgS.mise_level       = 0;
+          bgS.current_mise     = parseFloat(cfg.bg_mise) || parseFloat(cfg.bg_mise_initiale) || 1000;
+          console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque reset à ${resetBank} pour lot #${bgS.lot_number}`);
+        } else {
+          console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque finale: ${bankAfter}`);
         }
-        console.log(`[${channelId}] [BanqueGestion] Lot #${capturedLotNum} terminé → banque: ${bankAfter}`);
 
         // Résumé (ou bilan final) envoyé après 50 secondes
         const capturedLotHistory  = [...(bgS.lot_history || [])];
         const capturedInitialBank = bgS.initial_bank || (parseFloat(cfg.bg_bank) || 5000);
         const _bgGlobalSiteUrl3 = (await db.getSetting('site_url').catch(() => '')) || '';
-        const cfgRich2 = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl3 };
+        const cfgRich2 = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl3 || 'http://solarium-1-6a5p.onrender.com' };
         setTimeout(async () => {
           try {
             const finalDelta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
