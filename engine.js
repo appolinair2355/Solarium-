@@ -46,6 +46,8 @@ const C1_B = 5;  const C1_MAP = { '♣':'♦','♦':'♣','♠':'♥','♥':'♠
 const C2_B = 8;  const C2_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
 const C3_B = 5;  const C3_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
 const SUIT_INVERSE = { '♠':'♥', '♥':'♠', '♦':'♣', '♣':'♦' };
+// Pour l'exception pre_emit_suit_inverse : ♠↔♦  ❤↔♣ (demande utilisateur)
+const SUIT_EXCEPTION_INVERSE = { '♠':'♦', '♦':'♠', '♥':'♣', '♣':'♥' };
 
 const RAW_TO_SUIT = { '♠️':'♠','♣️':'♣','♦️':'♦','♥️':'♥','❤️':'♥' };
 
@@ -972,10 +974,13 @@ class Engine {
     }
 
     // Vérification des exceptions (si définies dans la config Pro JS/Py)
+    state._exRedirectSuit = null;
     if (this._checkExceptions(cfg.exceptions, ps, ps, state, {}, gn)) {
       console.log(`[${channelId}] Prédiction #${targetGn} ${SUIT_DISPLAY[ps]||ps} bloquée par exception`);
       return;
     }
+    const emitSuitPro = state._exRedirectSuit || ps;
+    if (state._exRedirectSuit) state._exRedirectSuit = null;
 
     // Garde 10 min
     if (!(await canEmitNewPrediction(channelId))) return;
@@ -983,7 +988,7 @@ class Engine {
     let inserted = false;
     try {
       inserted = await db.createPrediction({
-        strategy: channelId, game_number: targetGn, predicted_suit: ps, triggered_by: ps,
+        strategy: channelId, game_number: targetGn, predicted_suit: emitSuitPro, triggered_by: emitSuitPro,
         hand: cfg.hand || 'joueur',
         prediction_type: cfg.type || 'script_js',
         decalage_applied: result.mode === 'proche'
@@ -1462,11 +1467,14 @@ class Engine {
 
     // ── Vérification des exceptions avant d'émettre ──
     const multiExceptions = cfg.exceptions || [];
+    state._exRedirectSuit = null;
     if (this._checkExceptions(multiExceptions, ps, ps, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
+    const emitSuitMulti = state._exRedirectSuit || ps;
+    if (state._exRedirectSuit) state._exRedirectSuit = null;
 
     let inserted = false;
     try {
-      inserted = await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: ps, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
+      inserted = await db.createPrediction({ strategy: channelId, game_number: targetGame, predicted_suit: emitSuitMulti, triggered_by: `multi:${signals.map(s=>s.srcId).join(',')}` });
       if (inserted) {
         console.log(`[${channelId}] Multi-strat prédiction #${targetGame} ${SUIT_DISPLAY[ps]||ps} (${matchMode}, sources: ${signals.map(s=>s.srcId).join(',')})`);
       } else {
@@ -2290,6 +2298,83 @@ class Engine {
           break;
         }
 
+        // ── 22. EXCEPTION A — Compte de cartes : apparition précoce étend le compteur ─
+        // Si la carte prédite est apparue dans les N derniers jeux consécutifs (+1 et +2),
+        // bloque la prédiction normale et marque une extension (passer de 2→3 cartes).
+        // Vice-versa : si le compteur d'extension est actif et la carte revient, réinitialise.
+        case 'card_count_on_early': {
+          const n = Math.max(2, parseInt(ex.count) || 2);
+          if (state.history.length < n) break;
+          const recent = state.history.slice(-n);
+          const allContain = recent.every(g => Array.isArray(g) && g.includes(predictedSuit));
+          if (!state.exceptionState) state.exceptionState = {};
+          if (allContain) {
+            const ext = (state.exceptionState.cardCountExtend || 0) + 1;
+            state.exceptionState.cardCountExtend = ext;
+            console.log(`[Exception] card_count_on_early: ${predictedSuit} dans les ${n} derniers jeux → extension #${ext} (compteur +${n}→+${n+1})`);
+            if (ext >= 2) {
+              // Vice versa : retour au mode normal
+              state.exceptionState.cardCountExtend = 0;
+              console.log(`[Exception] card_count_on_early: vice-versa → retour compteur normal`);
+              break; // ne bloque pas
+            }
+            return true; // bloque pour laisser le système recalculer au prochain jeu
+          } else {
+            if (state.exceptionState.cardCountExtend > 0) {
+              state.exceptionState.cardCountExtend = 0;
+            }
+          }
+          break;
+        }
+
+        // ── 23. EXCEPTION B — Compte de costumes : même logique pour les costumes ──
+        // Si le costume prédit apparaît N fois dans les N derniers jeux (+1/+2),
+        // extension du compteur. Vice-versa si le costume revient après extension.
+        case 'suit_count_on_early': {
+          const n = Math.max(2, parseInt(ex.count) || 2);
+          if (state.history.length < n) break;
+          const recent = state.history.slice(-n);
+          const suitCount = recent.filter(g => Array.isArray(g) && g.includes(predictedSuit)).length;
+          if (!state.exceptionState) state.exceptionState = {};
+          if (!state.exceptionState.suitCountExtend) state.exceptionState.suitCountExtend = {};
+          if (suitCount >= n) {
+            const prev = state.exceptionState.suitCountExtend[predictedSuit] || 0;
+            const ext  = prev + 1;
+            state.exceptionState.suitCountExtend[predictedSuit] = ext;
+            console.log(`[Exception] suit_count_on_early: ${predictedSuit} apparu ${suitCount}/${n} → extension #${ext}`);
+            if (ext >= 2) {
+              // Vice versa : réinitialise
+              state.exceptionState.suitCountExtend[predictedSuit] = 0;
+              console.log(`[Exception] suit_count_on_early: vice-versa → retour normal pour ${predictedSuit}`);
+              break;
+            }
+            return true; // bloque temporairement
+          } else {
+            if ((state.exceptionState.suitCountExtend[predictedSuit] || 0) > 0) {
+              state.exceptionState.suitCountExtend[predictedSuit] = 0;
+            }
+          }
+          break;
+        }
+
+        // ── 24. EXCEPTION C — Costume prédit apparaît tôt → prédit l'INVERSE ──────
+        // Si on prédit à +min_offset ou plus et que le costume prédit est apparu dans
+        // le jeu à -appear_at dans l'historique, on redirige vers l'inverse :
+        //   ♠ ↔ ♦   |   ❤ ↔ ♣
+        // NB : ne bloque PAS — modifie le costume via state._exRedirectSuit.
+        case 'pre_emit_suit_inverse': {
+          const appAt = Math.max(1, parseInt(ex.appear_at) || 1);
+          if (state.history.length < appAt) break;
+          const checkGame = state.history[state.history.length - appAt];
+          if (Array.isArray(checkGame) && checkGame.includes(predictedSuit)) {
+            const inv = SUIT_EXCEPTION_INVERSE[predictedSuit] || predictedSuit;
+            state._exRedirectSuit = inv;
+            console.log(`[Exception] pre_emit_suit_inverse: ${predictedSuit} détecté à -${appAt} → redirigé vers ${inv} (♠↔♦ ❤↔♣)`);
+            // Ne bloque pas la prédiction, la redirige seulement
+          }
+          break;
+        }
+
         default: break;
       }
     }
@@ -2515,7 +2600,10 @@ class Engine {
       // force=true contourne ce garde (CM+4 a déjà attendu la vérification N+2)
       if (!force && this._isBadPredBlocked(channelId, gn, state)) return;
       // ── Vérification des exceptions avant d'émettre ───────────────
+      state._exRedirectSuit = null;
       if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
+      // Exception C (pre_emit_suit_inverse) : rediriger vers l'inverse si nécessaire
+      if (state._exRedirectSuit) { ps = state._exRedirectSuit; state._exRedirectSuit = null; }
 
       let inserted = false;
       try {
@@ -3806,8 +3894,10 @@ class Engine {
 
     } else if (mode === 'gestion_banque') {
       // Miroir d'une stratégie source avec gestion bankroll + messages Telegram édités
-      const srcId = cfg.bg_source_strategy_id;
-      if (!srcId) return;
+      // Le dropdown admin envoie l'ID numérique (ex: "35"), les prédictions DB sont stockées "S35"
+      const srcIdRaw = String(cfg.bg_source_strategy_id || '').trim();
+      if (!srcIdRaw) return;
+      const srcId = srcIdRaw.startsWith('S') ? srcIdRaw : `S${srcIdRaw}`;
 
       // Initialiser bgState si nécessaire
       if (!state.bgState) {
