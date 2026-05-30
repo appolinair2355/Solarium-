@@ -1696,7 +1696,7 @@ class Engine {
 
     // ── Vérifier exceptions ──
     const exceptions = cfg.exceptions || [];
-    if (this._checkExceptions(exceptions, ps, chosenSuit, state, { pCards, bCards, hand }, gn)) return;
+    if (this._checkExceptions(exceptions, ps, chosenSuit, state, { pCards, bCards, hand, prediction_offset: cfg.prediction_offset }, gn)) return;
 
     let inserted = false;
     try {
@@ -2371,6 +2371,29 @@ class Engine {
             state._exRedirectSuit = inv;
             console.log(`[Exception] pre_emit_suit_inverse: ${predictedSuit} détecté à -${appAt} → redirigé vers ${inv} (♠↔♦ ❤↔♣)`);
             // Ne bloque pas la prédiction, la redirige seulement
+          }
+          break;
+        }
+
+        // ── 25. EXCEPTION D — Inverse par offset + apparition ─────────────
+        // Active uniquement si l'offset de prédiction de la stratégie >= min_offset.
+        // Si le costume prédit est apparu à -appear_at dans l'historique,
+        // redirige vers le costume inverse (♠↔♦ ❤↔♣) sans bloquer la prédiction.
+        // Paramètres :
+        //   min_offset : offset minimum de la stratégie pour activer (défaut 3)
+        //   appear_at  : position historique à vérifier (défaut 1 = dernier jeu)
+        case 'offset_suit_inverse': {
+          const minOffset  = Math.max(1, parseInt(ex.min_offset) || 3);
+          const appAt      = Math.max(1, parseInt(ex.appear_at)  || 1);
+          const currOffset = parseInt(triggerCards.prediction_offset) || 1;
+          if (currOffset < minOffset) break; // offset de la stratégie insuffisant
+          if (state.history.length < appAt) break;
+          const checkGame = state.history[state.history.length - appAt];
+          if (Array.isArray(checkGame) && checkGame.includes(predictedSuit)) {
+            const inv = SUIT_EXCEPTION_INVERSE[predictedSuit] || predictedSuit;
+            state._exRedirectSuit = inv;
+            console.log(`[Exception] offset_suit_inverse: offset=${currOffset}>=${minOffset}, ${predictedSuit} apparu à -${appAt} → redirigé vers ${inv} (♠↔♦ ❤↔♣)`);
+            // Ne bloque pas la prédiction, redirige seulement
           }
           break;
         }

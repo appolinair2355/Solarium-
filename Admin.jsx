@@ -3328,6 +3328,198 @@ function ProjectBackupPanel() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENT : IdeesStrategiesPanel
+// ─────────────────────────────────────────────────────────────────────────────
+function IdeesStrategiesPanel() {
+  const [ideas, setIdeas] = React.useState([]);
+  const [purchases, setPurchases] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [msg, setMsg] = React.useState({ text: '', error: false });
+  const [form, setForm] = React.useState({ name: '', description: '', is_paid: false, price_usd: 0 });
+  const [editing, setEditing] = React.useState(null);
+  const [showForm, setShowForm] = React.useState(false);
+
+  const flash = (text, error = false) => { setMsg({ text, error }); setTimeout(() => setMsg({ text: '', error: false }), 4000); };
+
+  const loadAll = async () => {
+    setLoading(true);
+    try {
+      const [ir, pr] = await Promise.all([
+        fetch('/api/ideas', { credentials: 'include' }).then(r => r.json()),
+        fetch('/api/ideas/admin/purchases', { credentials: 'include' }).then(r => r.json()),
+      ]);
+      setIdeas(Array.isArray(ir) ? ir : []);
+      setPurchases(Array.isArray(pr) ? pr : []);
+    } catch (e) { flash('Erreur chargement : ' + e.message, true); }
+    setLoading(false);
+  };
+
+  React.useEffect(() => { loadAll(); }, []);
+
+  const saveIdea = async () => {
+    try {
+      const url = editing ? `/api/ideas/${editing}` : '/api/ideas';
+      const method = editing ? 'PUT' : 'POST';
+      const r = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      const d = await r.json();
+      if (!r.ok) return flash(d.error || 'Erreur', true);
+      flash(editing ? '✅ Idée mise à jour' : '✅ Idée créée');
+      setEditing(null); setForm({ name: '', description: '', is_paid: false, price_usd: 0 }); setShowForm(false);
+      loadAll();
+    } catch (e) { flash(e.message, true); }
+  };
+
+  const deleteIdea = async (id) => {
+    if (!window.confirm('Supprimer cette idée ?')) return;
+    await fetch(`/api/ideas/${id}`, { method: 'DELETE', credentials: 'include' });
+    flash('✅ Idée supprimée'); loadAll();
+  };
+
+  const reorder = async (id, dir) => {
+    await fetch('/api/ideas/admin/reorder', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, direction: dir }) });
+    loadAll();
+  };
+
+  const approvePurchase = async (pid) => {
+    await fetch(`/api/ideas/admin/purchase/${pid}/approve`, { method: 'POST', credentials: 'include' });
+    flash('✅ Achat validé'); loadAll();
+  };
+
+  const rejectPurchase = async (pid) => {
+    const note = prompt('Motif de refus (optionnel) :') ?? '';
+    await fetch(`/api/ideas/admin/purchase/${pid}/reject`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
+    flash('Achat rejeté'); loadAll();
+  };
+
+  const CARD = { background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 10, padding: '12px 16px', marginBottom: 10 };
+  const INP = { padding: '8px 12px', background: '#1e293b', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 8, color: '#fff', fontSize: 13, width: '100%', boxSizing: 'border-box' };
+  const BTN = (col) => ({ padding: '6px 14px', borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: 'pointer', border: 'none', background: col, color: '#fff' });
+
+  if (loading) return <div style={{ padding: 24, color: '#64748b', textAlign: 'center' }}>⏳ Chargement…</div>;
+
+  return (
+    <div>
+      {msg.text && (
+        <div style={{ marginBottom: 10, padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+          background: msg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+          border: `1px solid ${msg.error ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)'}`,
+          color: msg.error ? '#f87171' : '#86efac' }}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* ── Bouton créer + formulaire ── */}
+      <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', description: '', is_paid: false, price_usd: 0 }); }}
+        style={{ ...BTN('rgba(250,204,21,0.2)'), border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24', marginBottom: 12 }}>
+        {showForm ? '✕ Annuler' : '+ Nouvelle idée'}
+      </button>
+
+      {(showForm || editing !== null) && (
+        <div style={{ ...CARD, borderColor: 'rgba(250,204,21,0.4)', marginBottom: 16 }}>
+          <div style={{ fontWeight: 800, color: '#fbbf24', marginBottom: 10 }}>{editing ? '✏️ Modifier l\'idée' : '✨ Nouvelle idée'}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input type="text" placeholder="Nom de l'idée *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} style={INP} />
+            <textarea placeholder="Description (objectif, fonctionnement, conditions…) *" rows={4} value={form.description}
+              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+              style={{ ...INP, resize: 'vertical', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: form.is_paid ? '#fbbf24' : '#64748b', fontWeight: 700 }}>
+                <input type="checkbox" checked={!!form.is_paid} onChange={e => setForm(p => ({ ...p, is_paid: e.target.checked }))} style={{ accentColor: '#fbbf24', width: 14, height: 14 }} />
+                Idée payante
+              </label>
+              {form.is_paid && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>Prix ($) :</span>
+                  <input type="number" min={0} step={0.5} value={form.price_usd}
+                    onChange={e => setForm(p => ({ ...p, price_usd: parseFloat(e.target.value) || 0 }))}
+                    style={{ ...INP, width: 80 }} />
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={saveIdea} style={{ ...BTN('#22c55e'), flex: 1 }}>💾 {editing ? 'Enregistrer' : 'Créer'}</button>
+              <button onClick={() => { setEditing(null); setShowForm(false); }} style={{ ...BTN('#475569') }}>Annuler</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Liste des idées ── */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
+          Catalogue ({ideas.length} idée{ideas.length !== 1 ? 's' : ''})
+        </div>
+        {ideas.length === 0 && <div style={{ color: '#475569', fontSize: 12, padding: '12px 0' }}>Aucune idée pour l'instant. Cliquez sur "+ Nouvelle idée" pour commencer.</div>}
+        {ideas.map((idea, idx) => (
+          <div key={idea.id} style={{ ...CARD, borderLeft: `3px solid ${idea.enabled ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.4)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 800, fontSize: 14, color: '#f1f5f9' }}>{idea.name}</span>
+                  {idea.is_paid ? (
+                    <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)', padding: '1px 7px', borderRadius: 100 }}>
+                      💰 {idea.price_usd > 0 ? `$${idea.price_usd}` : 'Payant'}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', padding: '1px 7px', borderRadius: 100 }}>Gratuit</span>
+                  )}
+                  {!idea.enabled && <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(100,116,139,0.15)', padding: '1px 7px', borderRadius: 100, border: '1px solid rgba(100,116,139,0.25)' }}>Désactivée</span>}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{idea.description}</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 100 }}>
+                <button onClick={() => { setEditing(idea.id); setForm({ name: idea.name, description: idea.description, is_paid: idea.is_paid, price_usd: idea.price_usd, enabled: idea.enabled }); setShowForm(false); }}
+                  style={{ ...BTN('rgba(99,102,241,0.25)'), border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc', fontSize: 11 }}>✏️ Modifier</button>
+                <button onClick={() => deleteIdea(idea.id)} style={{ ...BTN('rgba(239,68,68,0.15)'), border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 11 }}>🗑 Supprimer</button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button onClick={() => reorder(idea.id, 'up')} disabled={idx === 0} style={{ ...BTN('rgba(100,116,139,0.2)'), border: '1px solid rgba(100,116,139,0.3)', color: '#94a3b8', fontSize: 11, flex: 1, opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
+                  <button onClick={() => reorder(idea.id, 'down')} disabled={idx === ideas.length - 1} style={{ ...BTN('rgba(100,116,139,0.2)'), border: '1px solid rgba(100,116,139,0.3)', color: '#94a3b8', fontSize: 11, flex: 1, opacity: idx === ideas.length - 1 ? 0.3 : 1 }}>↓</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Achats d'idées ── */}
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
+          Achats d'idées ({purchases.length})
+        </div>
+        {purchases.length === 0 && <div style={{ color: '#475569', fontSize: 12 }}>Aucun achat pour l'instant.</div>}
+        {purchases.map(p => (
+          <div key={p.id} style={{ ...CARD }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 13 }}>
+                  #{p.id} — <span style={{ color: '#a5b4fc' }}>{p.username}</span> → <span style={{ color: '#fbbf24' }}>{p.idea_name_current || p.idea_name}</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                  {new Date(p.created_at).toLocaleString()} · {p.amount_paid > 0 ? `$${p.amount_paid}` : 'Gratuit'} ·
+                  <span style={{
+                    marginLeft: 5, fontWeight: 700,
+                    color: p.status === 'validated' ? '#22c55e' : p.status === 'rejected' ? '#f87171' : '#fbbf24'
+                  }}>
+                    {p.status === 'validated' ? '✅ Validé' : p.status === 'rejected' ? '❌ Rejeté' : '⏳ En attente'}
+                  </span>
+                  {p.admin_note && <span style={{ marginLeft: 8, fontStyle: 'italic', color: '#94a3b8' }}>Note : {p.admin_note}</span>}
+                </div>
+              </div>
+              {p.status === 'pending_admin' && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => approvePurchase(p.id)} style={{ ...BTN('#22c55e') }}>✅ Valider</button>
+                  <button onClick={() => rejectPurchase(p.id)} style={{ ...BTN('rgba(239,68,68,0.7)') }}>❌ Rejeter</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Admin() {
   return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
 }
@@ -3723,6 +3915,11 @@ function AdminPanel() {
     proche: 3, banker_card_count: 0, fc_ecart: 2,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
+    // Mode gestion_banque
+    bg_source_strategy_id: '', bg_bank: 5000, bg_mise_initiale: 1000, bg_lot_size: 5,
+    bg_cote: 1.9, bg_currency: 'f', bg_max_lots: 0, bg_site_url: '', bg_boutique_name: '',
+    // Champ commun tous modes
+    tg_site_url: '',
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -4734,7 +4931,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, bg_source_strategy_id: s.bg_source_strategy_id || '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_lot_size: s.bg_lot_size ?? 5, bg_cote: s.bg_cote ?? 1.9, bg_currency: s.bg_currency || 'f', bg_max_lots: s.bg_max_lots ?? 0, bg_site_url: s.bg_site_url || '', bg_boutique_name: s.bg_boutique_name || '', tg_site_url: s.tg_site_url || '' });
     setStratOpen(true);
   };
 
@@ -4751,7 +4948,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, bg_source_strategy_id: s.bg_source_strategy_id || '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_lot_size: s.bg_lot_size ?? 5, bg_cote: s.bg_cote ?? 1.9, bg_currency: s.bg_currency || 'f', bg_max_lots: s.bg_max_lots ?? 0, bg_site_url: s.bg_site_url || '', bg_boutique_name: s.bg_boutique_name || '', tg_site_url: s.tg_site_url || '' });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5677,6 +5874,8 @@ function AdminPanel() {
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
+            { id: 'idees-strat',    icon: '💡', label: 'Idées Stratégies', badge: null },
+            { id: 'vente-strat',    icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -5786,8 +5985,8 @@ function AdminPanel() {
           </div>
         </div>}
 
-        {/* ── VITRINE / PANNEAU DE VENTE ── */}
-        <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
+        {/* ── VITRINE / PANNEAU DE VENTE — déplacé dans l'onglet 🛒 Vente Stratégies ── */}
+        {false && <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
           <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
             <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
             <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
@@ -6040,7 +6239,7 @@ function AdminPanel() {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* ── USER TABLE ── */}
         <div className="admin-card">
@@ -6675,6 +6874,273 @@ function AdminPanel() {
           )}
         </div>}
 
+        </>}
+
+        {/* ── TAB : VENTE STRATÉGIES ── */}
+        {adminTab === 'vente-strat' && <>
+        <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
+          <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
+            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>🛒 Panneau de Vente — Vitrine Stratégies</h2>
+            <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
+          </div>
+          <div style={{ padding: '16px 20px' }}>
+            {/* Sélecteur de stratégie */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
+              <select
+                value={promoEditId}
+                onChange={e => {
+                  const id = e.target.value;
+                  setPromoEditId(id);
+                  if (id && promoConfigs[id]) setPromoForm({ ...BLANK_PROMO, ...promoConfigs[id] });
+                  else setPromoForm(BLANK_PROMO);
+                }}
+                style={{ flex: 1, maxWidth: 320, padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}
+              >
+                <option value="">— Choisir une stratégie —</option>
+                {strategies.map(s => (
+                  <option key={s.id} value={String(s.id)}>
+                    S{s.id} — {s.name} {promoConfigs[String(s.id)]?.enabled ? '✅' : ''}
+                  </option>
+                ))}
+              </select>
+              {promoEditId && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: promoForm.enabled ? '#22c55e' : '#64748b', fontWeight: 700 }}>
+                  <input type="checkbox" checked={!!promoForm.enabled}
+                    onChange={e => setPromoForm(p => ({ ...p, enabled: e.target.checked }))}
+                    style={{ accentColor: '#22c55e', width: 15, height: 15 }} />
+                  {promoForm.enabled ? 'Vente activée' : 'Vente désactivée'}
+                </label>
+              )}
+            </div>
+
+            {promoEditId && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {/* Colonne gauche — formulaire */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 }}>Configuration de la fiche</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Badge emoji</label>
+                      <select value={promoForm.badge} onChange={e => setPromoForm(p => ({ ...p, badge: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="🔥">🔥 Populaire</option>
+                        <option value="⭐">⭐ Nouveau</option>
+                        <option value="🏆">🏆 Premium</option>
+                        <option value="💎">💎 Exclusif</option>
+                        <option value="🚀">🚀 Puissant</option>
+                        <option value="🎯">🎯 Précis</option>
+                        <option value="🤖">🤖 Automatique</option>
+                        <option value="">∅ Aucun badge</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Plan requis</label>
+                      <select value={promoForm.plan_requis} onChange={e => setPromoForm(p => ({ ...p, plan_requis: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="standard">Standard</option>
+                        <option value="premium">Premium ⭐</option>
+                        <option value="pro">Pro 💼</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Titre de la stratégie</label>
+                    <input type="text" value={promoForm.titre} maxLength={60}
+                      onChange={e => setPromoForm(p => ({ ...p, titre: e.target.value }))}
+                      placeholder="Ex : Stratégie Comptages Paire Joueur"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Accroche (tagline)</label>
+                    <input type="text" value={promoForm.tagline} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, tagline: e.target.value }))}
+                      placeholder="Ex : Seuil dynamique basé sur les statistiques réelles"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 1</label>
+                    <input type="text" value={promoForm.bullet1} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet1: e.target.value }))}
+                      placeholder="Ex : Seuil B recalculé automatiquement à chaque tour"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 2</label>
+                    <input type="text" value={promoForm.bullet2} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet2: e.target.value }))}
+                      placeholder="Ex : Déclenché sur les absences longues détectées en live"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 3</label>
+                    <input type="text" value={promoForm.bullet3} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet3: e.target.value }))}
+                      placeholder="Ex : Compatible Telegram et prédictions temps réel"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Prix affiché</label>
+                      <input type="text" value={promoForm.prix_texte} maxLength={30}
+                        onChange={e => setPromoForm(p => ({ ...p, prix_texte: e.target.value }))}
+                        placeholder="Ex : 12$/semaine"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Texte du bouton</label>
+                      <input type="text" value={promoForm.cta} maxLength={40}
+                        onChange={e => setPromoForm(p => ({ ...p, cta: e.target.value }))}
+                        placeholder="Souscrire maintenant"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  {/* Bouton sauvegarder */}
+                  <button
+                    onClick={async () => {
+                      if (!promoEditId) return;
+                      setPromoSaving(true);
+                      try {
+                        const r = await fetch(`/api/admin/strategy-promo/${promoEditId}`, {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(promoForm),
+                        });
+                        if (r.ok) {
+                          await loadPromoConfigs();
+                          setPromoMsg({ text: `✅ Fiche de vente S${promoEditId} sauvegardée`, error: false });
+                        } else {
+                          setPromoMsg({ text: '❌ Erreur lors de la sauvegarde', error: true });
+                        }
+                      } catch {
+                        setPromoMsg({ text: '❌ Erreur réseau', error: true });
+                      } finally {
+                        setPromoSaving(false);
+                        setTimeout(() => setPromoMsg({ text: '', error: false }), 4000);
+                      }
+                    }}
+                    disabled={promoSaving}
+                    style={{ padding: '10px 0', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: promoSaving ? 'wait' : 'pointer',
+                      background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
+                      border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24', marginTop: 4 }}
+                  >
+                    {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
+                  </button>
+                  {promoMsg.text && (
+                    <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                      background: promoMsg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                      border: `1px solid ${promoMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                      color: promoMsg.error ? '#f87171' : '#86efac' }}>
+                      {promoMsg.text}
+                    </div>
+                  )}
+                </div>
+
+                {/* Colonne droite — aperçu carte */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Aperçu de la carte</div>
+                  <div style={{
+                    borderRadius: 16, overflow: 'hidden',
+                    background: 'linear-gradient(145deg, #0f172a, #1e293b)',
+                    border: promoForm.enabled ? '1.5px solid rgba(250,204,21,0.5)' : '1.5px solid rgba(100,116,139,0.3)',
+                    boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
+                    maxWidth: 340, position: 'relative',
+                  }}>
+                    {promoForm.badge && (
+                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
+                        background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
+                        color: '#fbbf24', padding: '3px 10px', borderRadius: 100, letterSpacing: 0.5 }}>
+                        {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
+                      </div>
+                    )}
+                    {!promoForm.enabled && (
+                      <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
+                        background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
+                        ● Désactivée
+                      </div>
+                    )}
+                    <div style={{ padding: '28px 20px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
+                          S{promoEditId}
+                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
+                          background: promoForm.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promoForm.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
+                          color: promoForm.plan_requis === 'pro' ? '#c084fc' : promoForm.plan_requis === 'premium' ? '#fbbf24' : '#22c55e' }}>
+                          {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
+                        {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
+                      </div>
+                      {promoForm.tagline && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
+                      )}
+                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, idx2) => (
+                        <div key={idx2} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
+                          <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
+                          <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
+                        </div>
+                      ))}
+                      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        {promoForm.prix_texte ? (
+                          <div>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>À PARTIR DE</div>
+                            <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{promoForm.prix_texte}</div>
+                          </div>
+                        ) : <div />}
+                        <button disabled style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12,
+                          background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', cursor: 'default',
+                          opacity: promoForm.enabled ? 1 : 0.4 }}>
+                          {promoForm.cta || 'Souscrire'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 10, color: '#475569', lineHeight: 1.6 }}>
+                    💡 Activez la fiche pour qu'elle soit visible. Partagez la capture ou intégrez ce contenu dans votre canal de promotion.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des fiches actives */}
+            {Object.keys(promoConfigs).some(k => promoConfigs[k]?.enabled) && (
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(250,204,21,0.15)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Fiches actives ({Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length})</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => (
+                    <button key={id} onClick={() => { setPromoEditId(id); setPromoForm({ ...BLANK_PROMO, ...cfg }); }}
+                      style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        background: promoEditId === id ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.07)',
+                        border: `1px solid rgba(250,204,21,${promoEditId === id ? 0.5 : 0.2})`, color: '#fbbf24' }}>
+                      {cfg.badge} S{id} — {cfg.titre || `Stratégie ${id}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        </>}
+
+        {/* ── TAB : IDÉES STRATÉGIES ── */}
+        {adminTab === 'idees-strat' && <>
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.3)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">💡</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Idées Stratégies</h2>
+              <p className="tg-admin-sub">Gérez le catalogue d'idées de stratégies proposées aux utilisateurs (gratuit / payant).</p>
+            </div>
+          </div>
+          <div style={{ padding: '16px 20px' }}>
+            <IdeesStrategiesPanel />
+          </div>
+        </div>
         </>}
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
@@ -8996,7 +9462,135 @@ function AdminPanel() {
                       </div>
                     </div>
                   )}
+
+                  {/* ── Mode Gestion Banque — description ── */}
+                  {stratForm.mode === 'gestion_banque' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.8 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13, color: '#fbbf24' }}>🏦 Mode Gestion Banque — Configuration</div>
+                      <div>Ce mode copie les prédictions d'une <strong>stratégie source</strong> et les gère via un système de bankroll avec martingale R0→R3. Configurez les paramètres ci-dessous.</div>
+                    </div>
+                  )}
                 </div>
+
+                {/* ── Section Gestion Banque ── */}
+                {stratForm.mode === 'gestion_banque' && (
+                  <div style={{ padding: '16px', background: 'rgba(250,204,21,0.05)', borderRadius: 10, border: '1px solid rgba(250,204,21,0.25)', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: 13, marginBottom: 14 }}>🏦 Paramètres Gestion Banque</div>
+
+                    {/* Stratégie source */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Stratégie source (ID)</label>
+                      <select
+                        value={stratForm.bg_source_strategy_id}
+                        onChange={e => setStratForm(p => ({ ...p, bg_source_strategy_id: e.target.value }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}
+                      >
+                        <option value="">— Choisir la stratégie source —</option>
+                        {strategies.filter(s => s.id !== stratEditing).map(s => (
+                          <option key={s.id} value={String(s.id)}>S{s.id} — {s.name}</option>
+                        ))}
+                      </select>
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Prédictions de cette stratégie seront reprises en mode bankroll</div>
+                    </div>
+
+                    {/* Grille de champs numériques */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Banque initiale</label>
+                        <input type="number" min={100} step={100}
+                          value={stratForm.bg_bank}
+                          onChange={e => setStratForm(p => ({ ...p, bg_bank: parseFloat(e.target.value) || 5000 }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Mise initiale (R0)</label>
+                        <input type="number" min={1} step={1}
+                          value={stratForm.bg_mise_initiale}
+                          onChange={e => setStratForm(p => ({ ...p, bg_mise_initiale: parseFloat(e.target.value) || 1000 }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Taille du lot (prédictions)</label>
+                        <input type="number" min={1} max={20} step={1}
+                          value={stratForm.bg_lot_size}
+                          onChange={e => setStratForm(p => ({ ...p, bg_lot_size: parseInt(e.target.value) || 5 }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Côte</label>
+                        <input type="number" min={1.1} step={0.05}
+                          value={stratForm.bg_cote}
+                          onChange={e => setStratForm(p => ({ ...p, bg_cote: parseFloat(e.target.value) || 1.9 }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Devise</label>
+                        <select
+                          value={stratForm.bg_currency}
+                          onChange={e => setStratForm(p => ({ ...p, bg_currency: e.target.value }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}
+                        >
+                          <option value="f">f (FCFA)</option>
+                          <option value="eur">€ (Euro)</option>
+                          <option value="usd">$ (Dollar)</option>
+                          <option value="rub">₽ (Rouble)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Nombre de lots pour finir</label>
+                        <input type="number" min={0} step={1}
+                          value={stratForm.bg_max_lots}
+                          onChange={e => setStratForm(p => ({ ...p, bg_max_lots: parseInt(e.target.value) || 0 }))}
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>0 = illimité</div>
+                      </div>
+                    </div>
+
+                    {/* Lien site + Nom boutique */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>🔗 Lien site (affiché dans messages Telegram)</label>
+                        <input type="text"
+                          value={stratForm.bg_site_url}
+                          onChange={e => setStratForm(p => ({ ...p, bg_site_url: e.target.value }))}
+                          placeholder="https://monsite.com"
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>🏪 Nom boutique (titre dans messages)</label>
+                        <input type="text"
+                          value={stratForm.bg_boutique_name}
+                          onChange={e => setStratForm(p => ({ ...p, bg_boutique_name: e.target.value }))}
+                          placeholder="Ex : Ma Boutique Pro"
+                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
+                    </div>
+
+                    {/* Aperçu des mises R0→R3 */}
+                    {stratForm.bg_mise_initiale > 0 && stratForm.bg_cote > 1 && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(250,204,21,0.06)', borderRadius: 8, border: '1px solid rgba(250,204,21,0.15)' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Aperçu des mises R0→R3</div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {[0,1,2,3].map(r => {
+                            const m = Math.round(stratForm.bg_mise_initiale * Math.pow(2.2, r) * 100) / 100;
+                            let totalM = 0, mm = stratForm.bg_mise_initiale;
+                            for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
+                            totalM = Math.round(totalM * 100) / 100;
+                            const gain = Math.round(m * stratForm.bg_cote * 100) / 100;
+                            const net = Math.round((gain - totalM) * 100) / 100;
+                            const curr = stratForm.bg_currency === 'eur' ? '€' : stratForm.bg_currency === 'usd' ? '$' : stratForm.bg_currency === 'rub' ? '₽' : 'f';
+                            return (
+                              <div key={r} style={{ padding: '5px 10px', borderRadius: 6, background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.2)', fontSize: 11, color: '#e2e8f0', minWidth: 120 }}>
+                                <span style={{ fontWeight: 800, color: '#fbbf24' }}>R{r}</span> : {m}{curr}
+                                <span style={{ color: '#22c55e', marginLeft: 6 }}>+{net}{curr}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Seuil B / Différence — masqué pour surveillance_perte, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6 */}
                 {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
@@ -9566,6 +10160,18 @@ function AdminPanel() {
                   )}
                 </div>
 
+                {/* Lien site — commun à tous les modes */}
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>🔗 Lien site (affiché dans les messages Telegram)</label>
+                  <input
+                    type="text"
+                    value={stratForm.tg_site_url || ''}
+                    onChange={e => setStratForm(p => ({ ...p, tg_site_url: e.target.value }))}
+                    placeholder="https://monsite.com (optionnel)"
+                    style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+
                 {/* Visibilité */}
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Visibilité</label>
@@ -9754,10 +10360,15 @@ function AdminPanel() {
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                     { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
                     { val: 'consec_same_suit_pred', label: '🚫 Prédictions consécutives même costume', desc: 'Bloquer si le même costume a été prédit N fois de suite. Libération automatique si un autre costume est prédit ou après 20 min.' },
+                    { val: 'card_count_on_early',  label: '🃏 Extension +1/+2 (cartes 2→3)', desc: 'Si la carte prédite est apparue dans les N derniers jeux (+1/+2), bloque la prédiction normale et étend le compteur (2→3 cartes). Vice-versa au 2ème déclenchement.' },
+                    { val: 'suit_count_on_early',  label: '♠ Extension +1/+2 (costumes)', desc: 'Même logique que la précédente pour les costumes : si le costume prédit apparaît N fois dans les N derniers jeux, étend le compteur de costume. Vice-versa.' },
+                    { val: 'pre_emit_suit_inverse', label: '🔀 Inverse si costume présent à -(N)', desc: 'Si on prédit à +offset ou plus et que le costume prédit est apparu dans le jeu à -N dans l\'historique, redirige vers l\'inverse : ♠↔♦  ❤↔♣.' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause','consec_same_suit_pred'].includes(ex.type);
                   const needsWindow = ['recent_frequency','trigger_overload','high_win_rate','loss_streak_pause'].includes(ex.type);
+                  const needsCount  = ['card_count_on_early','suit_count_on_early'].includes(ex.type);
+                  const needsAppearAt = ex.type === 'pre_emit_suit_inverse';
                   const needsHalf   = ex.type === 'time_window_block';
                   const needsMinInterval = ex.type === 'minute_interval_block';
                   const needsParity = ex.type === 'game_parity';
@@ -9773,7 +10384,12 @@ function AdminPanel() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <select
                           value={ex.type}
-                          onChange={e => setEx({ type: e.target.value, value: 2, window: 5 })}
+                          onChange={e => {
+                            const t = e.target.value;
+                            if (t === 'pre_emit_suit_inverse') setEx({ type: t, appear_at: 1 });
+                            else if (t === 'card_count_on_early' || t === 'suit_count_on_early') setEx({ type: t, count: 2 });
+                            else setEx({ type: t, value: 2, window: 5 });
+                          }}
                           style={{ flex: 1, padding: '6px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
                             borderRadius: 6, color: '#f1f5f9', fontSize: 12 }}>
                           {EX_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -9821,6 +10437,30 @@ function AdminPanel() {
                             {ex.type === 'cold_start'          && `→ bloque les ${ex.value ?? 10} premières parties`}
                             {ex.type === 'loss_streak_pause'   && `→ pause ${ex.window ?? 2} jeux après ${ex.value ?? 3} défaites de suite`}
                             {ex.type === 'consec_same_suit_pred' && `→ bloque si le même costume est prédit ${ex.value ?? 3}x de suite (libéré après autre costume ou 20 min)`}
+                          </div>
+                        </div>
+                      )}
+
+                      {needsCount && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>N (derniers jeux) =</label>
+                          <input type="number" min="2" max="10" value={ex.count ?? 2}
+                            onChange={e => setEx({ count: parseInt(e.target.value) || 2 })}
+                            style={{ width: 60, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → extension si présent dans les {ex.count ?? 2} derniers jeux
+                          </div>
+                        </div>
+                      )}
+
+                      {needsAppearAt && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -(N) =</label>
+                          <input type="number" min="1" max="10" value={ex.appear_at ?? 1}
+                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
+                            style={{ width: 60, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → si présent au jeu -{ex.appear_at ?? 1} : redirige vers inverse (♠↔♦  ❤↔♣)
                           </div>
                         </div>
                       )}
