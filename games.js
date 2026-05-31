@@ -112,23 +112,55 @@ function isGameFinished(game, scSList) {
   return false;
 }
 
+// Services proxy pour contourner le blocage IP de 1xBet
+const PROXY_SERVICES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+
+let _lastProxyAttempt = 0;
+const PROXY_COOLDOWN = 8000; // 8s entre deux tentatives proxy
+
+async function fetchGamesViaProxy() {
+  const now = Date.now();
+  if (now - _lastProxyAttempt < PROXY_COOLDOWN) return gamesCache;
+  _lastProxyAttempt = now;
+
+  const targetUrl = `${API_URL}?${API_PARAMS}`;
+  for (const proxyFn of PROXY_SERVICES) {
+    try {
+      const resp = await fetch(proxyFn(targetUrl), { timeout: 12000 });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const parsed = parseRawData(data);
+      if (parsed && parsed.length > 0) {
+        updateCache(parsed, 'server');
+        console.log('[Games] ✅ Données via proxy');
+        return gamesCache;
+      }
+    } catch { /* essayer le prochain */ }
+  }
+  return gamesCache;
+}
+
 async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
+
+  // 1. Tentative directe
   try {
     const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 8000 });
-    if (!resp.ok) {
-      console.error(`Games fetch HTTP error: ${resp.status}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      const parsed = parseRawData(data);
+      if (parsed) updateCache(parsed, 'server');
       return gamesCache;
     }
-    const data = await resp.json();
-    const parsed = parseRawData(data);
-    if (parsed) updateCache(parsed, 'server');
-    return gamesCache;
-  } catch (err) {
-    console.error('Games fetch error:', err.message);
-    return gamesCache;
-  }
+  } catch {}
+
+  // 2. Fallback : services proxy
+  return fetchGamesViaProxy();
 }
 
 function parseRawData(data) {
@@ -172,6 +204,16 @@ router.post('/client-push', async (req, res) => {
     if (!parsed) return res.status(400).json({ error: 'Données invalides' });
     const changed = updateCache(parsed, 'push');
     res.json({ ok: true, count: parsed.length, changed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/games/trigger-fetch — le navigateur demande au serveur de récupérer les données
+// Le serveur essaie fetch direct + proxies de secours, puis broadcast SSE
+router.get('/trigger-fetch', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    const games = await fetchGames();
+    res.json({ ok: true, count: games.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -319,13 +361,11 @@ router.get('/stream', requireActiveSub, (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  // Envoyer les données actuelles immédiatement à la connexion
-  if (gamesCache.length > 0) {
-    try {
-      res.write(`data: ${JSON.stringify(gamesCache)}\n\n`);
-      if (res.flush) res.flush();
-    } catch {}
-  }
+  // Envoyer les données actuelles immédiatement à la connexion (même vides)
+  try {
+    res.write(`data: ${JSON.stringify(gamesCache)}\n\n`);
+    if (res.flush) res.flush();
+  } catch {}
 
   sseClients.add(res);
 

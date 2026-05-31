@@ -1,16 +1,13 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+require('dotenv').config();
+
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
-// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
-// l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+const DB_URL = process.env.DATABASE_URL || null;
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
-
-require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const CARDS_PG_URL = process.env.CARDS_DATABASE_URL || null;
 let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -40,7 +37,7 @@ let USE_CARDS_PG = true;
 try {
   const { Pool } = require('pg');
   pgPoolCards = new Pool({
-    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
+    connectionString: CARDS_PG_URL,
     ssl: { rejectUnauthorized: false },
     max: 3,
     idleTimeoutMillis: 30000,
