@@ -1062,6 +1062,19 @@ export default function Dashboard() {
                                 ({absences[0].label})
                               </span>
                             )}
+                            {currentStrat?.attente_enabled && (
+                              <span style={{
+                                fontSize: '0.58rem', fontWeight: 800,
+                                letterSpacing: '0.06em', textTransform: 'uppercase',
+                                color: '#a78bfa',
+                                background: 'rgba(167,139,250,0.12)',
+                                border: '1px solid rgba(167,139,250,0.35)',
+                                borderRadius: 999, padding: '2px 8px',
+                                marginLeft: 6,
+                              }}
+                              title={`Filtre d'attente : N=${currentStrat.attente_n ?? 1}, Écart=${currentStrat.attente_ecart ?? 1}, Option=${currentStrat.attente_option ?? 1}, Main=${currentStrat.attente_hand ?? 'joueur'}`}
+                              >⏳ Options activé</span>
+                            )}
                           </div>
                           {/* Indicateur live si les cartes sont en cours de tirage */}
                           {absences.some(a => a.isLive) && (

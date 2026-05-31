@@ -3800,7 +3800,7 @@ function AdminPanel() {
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
     // Filtre d'attente (universel — tous les modes)
-    attente_enabled: false, attente_option: 1, attente_n: 3, attente_main: 'joueur',
+    attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur',
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -4812,7 +4812,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_main: s.attente_main || 'joueur' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur' });
     setStratOpen(true);
   };
 
@@ -4829,7 +4829,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_main: s.attente_main || 'joueur' });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur' });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -8422,6 +8422,13 @@ function AdminPanel() {
                         ⛔ {s.exceptions.length} exception{s.exceptions.length > 1 ? 's' : ''}
                       </span>
                     )}
+                    {s.attente_enabled && (
+                      <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+                        background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.35)',
+                      }} title={`Filtre d'attente activé — N=${s.attente_n}, Écart=${s.attente_ecart ?? 1}, Option ${s.attente_option ?? 1}, Main: ${s.attente_main ?? 'joueur'}`}>
+                        ⏳ Options activé
+                      </span>
+                    )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
                       {s.pred_duration_minutes > 0 && (
                         <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 600, marginRight: 6,
@@ -9635,58 +9642,80 @@ function AdminPanel() {
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {[1,2,3,4,5,6,7,8].map(n => {
-                      const active = (stratForm.prediction_offset || 1) === n;
-                      return (
-                        <button key={n} type="button"
-                          onClick={() => setStratForm(p => ({ ...p, prediction_offset: n }))}
-                          style={{
-                            flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
-                            border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
-                            background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
-                            color: active ? '#e2e8f0' : '#6b7280',
-                            transition: 'all 0.15s',
-                          }}>
-                          +{n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {/* Explication dynamique selon la valeur choisie */}
-                  {(() => {
-                    const off = stratForm.prediction_offset || 1;
-                    const exSignal = 70;
-                    const exTarget = exSignal + off;
-                    return (
-                      <div style={{
-                        marginTop: 10,
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        background: 'rgba(168,85,247,0.08)',
-                        border: '1px solid rgba(168,85,247,0.2)',
-                        fontSize: 12,
-                        color: '#c4b5fd',
-                        lineHeight: 1.7,
-                      }}>
-                        <div style={{ fontWeight: 700, marginBottom: 4, color: '#a78bfa' }}>
-                          📡 Décalage sélectionné : <span style={{ color: '#f0abfc' }}>+{off}</span>
-                        </div>
-                        <div>
-                          Le signal se produit au jeu <strong style={{ color: '#e2e8f0' }}>#{exSignal}</strong>
-                          {' '}→ la prédiction cible le jeu{' '}
-                          <strong style={{ color: '#f0abfc' }}>#{exTarget}</strong>.
-                        </div>
-                        <div style={{ marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
-                          {off === 1
-                            ? 'Idéal pour réagir dès la partie suivante (recommandé).'
-                            : off <= 3
-                            ? `La prédiction est émise ${off} parties à l'avance — laisse le temps de se préparer.`
-                            : `Anticipation longue (+${off}) — adapté aux stratégies à signal lent.`}
-                        </div>
+                  {stratForm.attente_enabled ? (
+                    /* Quand le filtre d'attente est actif : décalage = N + Écart (auto) */
+                    <div style={{
+                      padding: '12px 16px', borderRadius: 10,
+                      background: 'rgba(245,158,11,0.07)',
+                      border: '1px solid rgba(245,158,11,0.35)',
+                      fontSize: 13, color: '#fbbf24', lineHeight: 1.7,
+                    }}>
+                      <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                        ⚙️ Décalage automatique (Filtre d'attente activé)
                       </div>
-                    );
-                  })()}
+                      <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+                        Décalage = N + Écart = <strong>{stratForm.attente_n ?? 1}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong style={{ color: '#f0abfc' }}>+{(stratForm.attente_n ?? 1) + (stratForm.attente_ecart ?? 1)}</strong>
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>
+                        Le décalage est calculé automatiquement à partir de N et Écart définis dans le filtre ci-dessous. Désactivez le filtre pour le saisir manuellement.
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {[1,2,3,4,5,6,7,8].map(n => {
+                          const active = (stratForm.prediction_offset || 1) === n;
+                          return (
+                            <button key={n} type="button"
+                              onClick={() => setStratForm(p => ({ ...p, prediction_offset: n }))}
+                              style={{
+                                flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                                background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
+                                color: active ? '#e2e8f0' : '#6b7280',
+                                transition: 'all 0.15s',
+                              }}>
+                              +{n}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Explication dynamique selon la valeur choisie */}
+                      {(() => {
+                        const off = stratForm.prediction_offset || 1;
+                        const exSignal = 70;
+                        const exTarget = exSignal + off;
+                        return (
+                          <div style={{
+                            marginTop: 10,
+                            padding: '10px 14px',
+                            borderRadius: 10,
+                            background: 'rgba(168,85,247,0.08)',
+                            border: '1px solid rgba(168,85,247,0.2)',
+                            fontSize: 12,
+                            color: '#c4b5fd',
+                            lineHeight: 1.7,
+                          }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: '#a78bfa' }}>
+                              📡 Décalage sélectionné : <span style={{ color: '#f0abfc' }}>+{off}</span>
+                            </div>
+                            <div>
+                              Le signal se produit au jeu <strong style={{ color: '#e2e8f0' }}>#{exSignal}</strong>
+                              {' '}→ la prédiction cible le jeu{' '}
+                              <strong style={{ color: '#f0abfc' }}>#{exTarget}</strong>.
+                            </div>
+                            <div style={{ marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
+                              {off === 1
+                                ? 'Idéal pour réagir dès la partie suivante (recommandé).'
+                                : off <= 3
+                                ? `La prédiction est émise ${off} parties à l'avance — laisse le temps de se préparer.`
+                                : `Anticipation longue (+${off}) — adapté aux stratégies à signal lent.`}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>}
 
                 {/* ── Rattrapages max par stratégie ── */}
@@ -10217,19 +10246,19 @@ function AdminPanel() {
                   </button>
                 </div>
                 {stratForm.attente_enabled && (
-                  <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+                  <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Option</label>
                       <select value={stratForm.attente_option}
                         onChange={e => setStratForm(p => ({ ...p, attente_option: parseInt(e.target.value) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
                         <option value={1}>Option 1 — Costume ABSENT pendant N jeux → émet</option>
-                        <option value={2}>Option 2 — Costume PRÉSENT dans au moins 1 jeu → émet</option>
+                        <option value={2}>Option 2 — Résultat UNIFORME sur N jeux → émet</option>
                       </select>
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b', lineHeight: 1.5 }}>
                         {stratForm.attente_option === 1
                           ? '→ Si le costume prédit reste absent des N jeux suivants, la prédiction est émise.'
-                          : '→ Dès que le costume prédit apparaît dans la main observée, la prédiction est émise.'}
+                          : '→ Tous absents : émet le costume original. Tous présents : émet le mapping. Mélangé : annulé.'}
                       </div>
                     </div>
                     <div>
@@ -10238,6 +10267,13 @@ function AdminPanel() {
                         onChange={e => setStratForm(p => ({ ...p, attente_n: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(245,158,11,0.45)', borderRadius: 8, color: '#fbbf24', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Jeux d'observation (1–20)</div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Écart (min. 1)</label>
+                      <input type="number" min="1" max="20" value={stratForm.attente_ecart ?? 1}
+                        onChange={e => setStratForm(p => ({ ...p, attente_ecart: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(99,102,241,0.5)', borderRadius: 8, color: '#818cf8', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>N + Écart = jeu cible</div>
                     </div>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Main observée</label>
@@ -10250,10 +10286,11 @@ function AdminPanel() {
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Cartes de quelle main</div>
                     </div>
                     <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', fontSize: 11, color: '#fcd34d', lineHeight: 1.7 }}>
-                      🕐 <strong>Résumé :</strong> Quand le signal est détecté, le moteur observe {stratForm.attente_n} jeu{stratForm.attente_n > 1 ? 'x' : ''} sur la main <strong>{stratForm.attente_main}</strong>.
+                      🕐 <strong>Résumé :</strong> Quand le signal est détecté (jeu #X), le moteur observe <strong>{stratForm.attente_n}</strong> jeu{stratForm.attente_n > 1 ? 'x' : ''} sur la main <strong>{stratForm.attente_main}</strong>.
                       {stratForm.attente_option === 1
-                        ? ` Si le costume prédit est absent pendant ces ${stratForm.attente_n} jeu${stratForm.attente_n > 1 ? 'x' : ''} → prédiction émise ✅. Sinon → annulée ❌.`
-                        : ` Dès que le costume prédit apparaît dans la main ${stratForm.attente_main} → prédiction émise ✅. Absent après ${stratForm.attente_n} jeu${stratForm.attente_n > 1 ? 'x' : ''} → annulée ❌.`}
+                        ? ` Si le costume prédit est absent pendant ces ${stratForm.attente_n} jeux → prédiction émise ✅. Sinon → annulée ❌.`
+                        : ` Après ${stratForm.attente_n} jeux : tous absents → émet costume original ✅ | tous présents → émet le mapping ✅ | mélangé → annulé ❌.`}
+                      {' '}<span style={{ color: '#a5b4fc' }}>Jeu cible = #X + <strong>{stratForm.attente_n}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong>#{stratForm.attente_n + (stratForm.attente_ecart ?? 1)}e jeu après le signal</strong>.</span>
                     </div>
                   </div>
                 )}
