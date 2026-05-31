@@ -3795,6 +3795,8 @@ function AdminPanel() {
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
     // Mode first_card_plus6
     proche: 3, banker_card_count: 0, fc_ecart: 2,
+    // Mode gestion_banque (gestion des lots + banque)
+    gb_source_id: '', gb_banque: 5000, gb_mise: 10, gb_taille: 5, gb_cote: 1.9, gb_max_lots: 0, gb_devise: 'USD', gb_nom_boutique: '', gb_url_site: '',
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
   };
@@ -4165,7 +4167,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -4808,7 +4810,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '' });
     setStratOpen(true);
   };
 
@@ -4825,7 +4827,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '' });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -4868,7 +4870,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -5291,7 +5293,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍' };
 
   return (
     <>
@@ -5751,6 +5753,7 @@ function AdminPanel() {
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
+            { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies' },
             { id: 'idees',          icon: '💡', label: 'Idées Stratégies' },
             { id: 'codes-part',      icon: '🤝', label: 'Codes Partenaires' },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
@@ -5863,262 +5866,6 @@ function AdminPanel() {
           </div>
         </div>}
 
-        {/* ── VITRINE / PANNEAU DE VENTE ── */}
-        <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
-          <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
-            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
-            <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
-          </div>
-          <div style={{ padding: '16px 20px' }}>
-            {/* Sélecteur de stratégie */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
-              <select
-                value={promoEditId}
-                onChange={e => {
-                  const id = e.target.value;
-                  setPromoEditId(id);
-                  if (id && promoConfigs[id]) setPromoForm({ ...BLANK_PROMO, ...promoConfigs[id] });
-                  else setPromoForm(BLANK_PROMO);
-                }}
-                style={{ flex: 1, maxWidth: 320, padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}
-              >
-                <option value="">— Choisir une stratégie —</option>
-                {strategies.map(s => (
-                  <option key={s.id} value={String(s.id)}>
-                    S{s.id} — {s.name} {promoConfigs[String(s.id)]?.enabled ? '✅' : ''}
-                  </option>
-                ))}
-              </select>
-              {promoEditId && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: promoForm.enabled ? '#22c55e' : '#64748b', fontWeight: 700 }}>
-                  <input type="checkbox" checked={!!promoForm.enabled}
-                    onChange={e => setPromoForm(p => ({ ...p, enabled: e.target.checked }))}
-                    style={{ accentColor: '#22c55e', width: 15, height: 15 }} />
-                  {promoForm.enabled ? 'Vente activée' : 'Vente désactivée'}
-                </label>
-              )}
-            </div>
-
-            {promoEditId && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                {/* Colonne gauche — formulaire */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 }}>Configuration de la fiche</div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Badge emoji</label>
-                      <select value={promoForm.badge} onChange={e => setPromoForm(p => ({ ...p, badge: e.target.value }))}
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
-                        <option value="🔥">🔥 Populaire</option>
-                        <option value="⭐">⭐ Nouveau</option>
-                        <option value="🏆">🏆 Premium</option>
-                        <option value="💎">💎 Exclusif</option>
-                        <option value="🚀">🚀 Puissant</option>
-                        <option value="🎯">🎯 Précis</option>
-                        <option value="🤖">🤖 Automatique</option>
-                        <option value="">∅ Aucun badge</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Plan requis</label>
-                      <select value={promoForm.plan_requis} onChange={e => setPromoForm(p => ({ ...p, plan_requis: e.target.value }))}
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
-                        <option value="standard">Standard</option>
-                        <option value="premium">Premium ⭐</option>
-                        <option value="pro">Pro 💼</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Titre de la stratégie</label>
-                    <input type="text" value={promoForm.titre} maxLength={60}
-                      onChange={e => setPromoForm(p => ({ ...p, titre: e.target.value }))}
-                      placeholder="Ex : Stratégie Comptages Paire Joueur"
-                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Accroche (tagline)</label>
-                    <input type="text" value={promoForm.tagline} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, tagline: e.target.value }))}
-                      placeholder="Ex : Seuil dynamique basé sur les statistiques réelles"
-                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 1</label>
-                    <input type="text" value={promoForm.bullet1} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet1: e.target.value }))}
-                      placeholder="Ex : Seuil B recalculé automatiquement à chaque tour"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 2</label>
-                    <input type="text" value={promoForm.bullet2} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet2: e.target.value }))}
-                      placeholder="Ex : Déclenché sur les absences longues détectées en live"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 3</label>
-                    <input type="text" value={promoForm.bullet3} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet3: e.target.value }))}
-                      placeholder="Ex : Compatible Telegram et prédictions temps réel"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Prix affiché</label>
-                      <input type="text" value={promoForm.prix_texte} maxLength={30}
-                        onChange={e => setPromoForm(p => ({ ...p, prix_texte: e.target.value }))}
-                        placeholder="Ex : 12$/semaine"
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Texte du bouton</label>
-                      <input type="text" value={promoForm.cta} maxLength={40}
-                        onChange={e => setPromoForm(p => ({ ...p, cta: e.target.value }))}
-                        placeholder="Souscrire maintenant"
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                  </div>
-
-                  {/* Bouton sauvegarder */}
-                  <button
-                    onClick={async () => {
-                      if (!promoEditId) return;
-                      setPromoSaving(true);
-                      try {
-                        const r = await fetch(`/api/admin/strategy-promo/${promoEditId}`, {
-                          method: 'POST', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(promoForm),
-                        });
-                        if (r.ok) {
-                          await loadPromoConfigs();
-                          setPromoMsg({ text: `✅ Fiche de vente S${promoEditId} sauvegardée`, error: false });
-                        } else {
-                          setPromoMsg({ text: '❌ Erreur lors de la sauvegarde', error: true });
-                        }
-                      } catch {
-                        setPromoMsg({ text: '❌ Erreur réseau', error: true });
-                      } finally {
-                        setPromoSaving(false);
-                        setTimeout(() => setPromoMsg({ text: '', error: false }), 4000);
-                      }
-                    }}
-                    disabled={promoSaving}
-                    style={{ padding: '10px 0', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: promoSaving ? 'wait' : 'pointer',
-                      background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
-                      border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24', marginTop: 4 }}
-                  >
-                    {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
-                  </button>
-                  {promoMsg.text && (
-                    <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                      background: promoMsg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-                      border: `1px solid ${promoMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
-                      color: promoMsg.error ? '#f87171' : '#86efac' }}>
-                      {promoMsg.text}
-                    </div>
-                  )}
-                </div>
-
-                {/* Colonne droite — aperçu carte */}
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Aperçu de la carte</div>
-                  <div style={{
-                    borderRadius: 16, overflow: 'hidden',
-                    background: 'linear-gradient(145deg, #0f172a, #1e293b)',
-                    border: promoForm.enabled ? '1.5px solid rgba(250,204,21,0.5)' : '1.5px solid rgba(100,116,139,0.3)',
-                    boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
-                    maxWidth: 340, position: 'relative',
-                  }}>
-                    {/* Badge */}
-                    {promoForm.badge && (
-                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
-                        background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
-                        color: '#fbbf24', padding: '3px 10px', borderRadius: 100, letterSpacing: 0.5 }}>
-                        {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
-                      </div>
-                    )}
-                    {/* Statut */}
-                    {!promoForm.enabled && (
-                      <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
-                        background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
-                        ● Désactivée
-                      </div>
-                    )}
-                    <div style={{ padding: '28px 20px 20px' }}>
-                      {/* ID + plan */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
-                          S{promoEditId}
-                        </span>
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
-                          background: promoForm.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promoForm.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
-                          color: promoForm.plan_requis === 'pro' ? '#c084fc' : promoForm.plan_requis === 'premium' ? '#fbbf24' : '#22c55e' }}>
-                          {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
-                        </span>
-                      </div>
-                      {/* Titre */}
-                      <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
-                        {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
-                      </div>
-                      {/* Tagline */}
-                      {promoForm.tagline && (
-                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
-                      )}
-                      {/* Bullets */}
-                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
-                          <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
-                          <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
-                        </div>
-                      ))}
-                      {/* Prix + CTA */}
-                      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        {promoForm.prix_texte ? (
-                          <div>
-                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>À PARTIR DE</div>
-                            <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{promoForm.prix_texte}</div>
-                          </div>
-                        ) : <div />}
-                        <button disabled style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12,
-                          background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', cursor: 'default',
-                          opacity: promoForm.enabled ? 1 : 0.4 }}>
-                          {promoForm.cta || 'Souscrire'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 10, color: '#475569', lineHeight: 1.6 }}>
-                    💡 Activez la fiche pour qu'elle soit visible. Partagez la capture ou intégrez ce contenu dans votre canal de promotion.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Liste des fiches actives */}
-            {Object.keys(promoConfigs).some(k => promoConfigs[k]?.enabled) && (
-              <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(250,204,21,0.15)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Fiches actives ({Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length})</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => (
-                    <button key={id} onClick={() => { setPromoEditId(id); setPromoForm({ ...BLANK_PROMO, ...cfg }); }}
-                      style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                        background: promoEditId === id ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.07)',
-                        border: `1px solid rgba(250,204,21,${promoEditId === id ? 0.5 : 0.2})`, color: '#fbbf24' }}>
-                      {cfg.badge} S{id} — {cfg.titre || `Stratégie ${id}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* ── USER TABLE ── */}
         <div className="admin-card">
           <div className="admin-card-header">
@@ -6161,7 +5908,8 @@ function AdminPanel() {
                             <span>{u.username}</span>
                             {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
                             {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
-                            {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
+                            {!u.is_pro && !u.is_premium && u.account_type === 'partenaire' && <span title="Compte Partenaire" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(34,211,238,0.15)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.4)', fontWeight: 700 }}>🤝 PARTENAIRE</span>}
+                            {!u.is_pro && !u.is_premium && u.account_type !== 'partenaire' && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
                             {isSuperAdmin && !u.is_pro && (
                               <button
                                 title={u.is_premium ? 'Retirer le statut Premium' : 'Passer en Premium'}
@@ -6753,6 +6501,268 @@ function AdminPanel() {
         </div>}
 
         </>}
+
+        {adminTab === 'vente-strategies' && <>
+        {/* ── VITRINE / PANNEAU DE VENTE ── */}
+        <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
+          <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
+            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
+            <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
+          </div>
+          <div style={{ padding: '16px 20px' }}>
+            {/* ── Notification résultat (toujours visible en haut) ── */}
+            {promoMsg.text && (
+              <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, marginBottom: 12,
+                background: promoMsg.error ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+                border: `1.5px solid ${promoMsg.error ? 'rgba(239,68,68,0.5)' : 'rgba(34,197,94,0.5)'}`,
+                color: promoMsg.error ? '#f87171' : '#86efac', textAlign: 'center' }}>
+                {promoMsg.text}
+              </div>
+            )}
+            {/* Sélecteur de stratégie */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
+              <select
+                value={promoEditId}
+                onChange={e => {
+                  const id = e.target.value;
+                  setPromoEditId(id);
+                  if (id && promoConfigs[id]) setPromoForm({ ...BLANK_PROMO, ...promoConfigs[id] });
+                  else setPromoForm(BLANK_PROMO);
+                }}
+                style={{ flex: 1, maxWidth: 320, padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}
+              >
+                <option value="">— Choisir une stratégie —</option>
+                {strategies.map(s => (
+                  <option key={s.id} value={String(s.id)}>
+                    S{s.id} — {s.name} {promoConfigs[String(s.id)]?.enabled ? '✅' : ''}
+                  </option>
+                ))}
+              </select>
+              {promoEditId && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: promoForm.enabled ? '#22c55e' : '#64748b', fontWeight: 700 }}>
+                  <input type="checkbox" checked={!!promoForm.enabled}
+                    onChange={e => setPromoForm(p => ({ ...p, enabled: e.target.checked }))}
+                    style={{ accentColor: '#22c55e', width: 15, height: 15 }} />
+                  {promoForm.enabled ? 'Vente activée' : 'Vente désactivée'}
+                </label>
+              )}
+            </div>
+
+            {promoEditId && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {/* Colonne gauche — formulaire */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 }}>Configuration de la fiche</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Badge emoji</label>
+                      <select value={promoForm.badge} onChange={e => setPromoForm(p => ({ ...p, badge: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="🔥">🔥 Populaire</option>
+                        <option value="⭐">⭐ Nouveau</option>
+                        <option value="🏆">🏆 Premium</option>
+                        <option value="💎">💎 Exclusif</option>
+                        <option value="🚀">🚀 Puissant</option>
+                        <option value="🎯">🎯 Précis</option>
+                        <option value="🤖">🤖 Automatique</option>
+                        <option value="">∅ Aucun badge</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Plan requis</label>
+                      <select value={promoForm.plan_requis} onChange={e => setPromoForm(p => ({ ...p, plan_requis: e.target.value }))}
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
+                        <option value="standard">Standard</option>
+                        <option value="premium">Premium ⭐</option>
+                        <option value="pro">Pro 💼</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Titre de la stratégie</label>
+                    <input type="text" value={promoForm.titre} maxLength={60}
+                      onChange={e => setPromoForm(p => ({ ...p, titre: e.target.value }))}
+                      placeholder="Ex : Stratégie Comptages Paire Joueur"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Accroche (tagline)</label>
+                    <input type="text" value={promoForm.tagline} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, tagline: e.target.value }))}
+                      placeholder="Ex : Seuil dynamique basé sur les statistiques réelles"
+                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 1</label>
+                    <input type="text" value={promoForm.bullet1} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet1: e.target.value }))}
+                      placeholder="Ex : Seuil B recalculé automatiquement à chaque tour"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 2</label>
+                    <input type="text" value={promoForm.bullet2} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet2: e.target.value }))}
+                      placeholder="Ex : Déclenché sur les absences longues détectées en live"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 3</label>
+                    <input type="text" value={promoForm.bullet3} maxLength={80}
+                      onChange={e => setPromoForm(p => ({ ...p, bullet3: e.target.value }))}
+                      placeholder="Ex : Compatible Telegram et prédictions temps réel"
+                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Prix affiché</label>
+                      <input type="text" value={promoForm.prix_texte} maxLength={30}
+                        onChange={e => setPromoForm(p => ({ ...p, prix_texte: e.target.value }))}
+                        placeholder="Ex : 12$/semaine"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Texte du bouton</label>
+                      <input type="text" value={promoForm.cta} maxLength={40}
+                        onChange={e => setPromoForm(p => ({ ...p, cta: e.target.value }))}
+                        placeholder="Souscrire maintenant"
+                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  {/* Bouton sauvegarder */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!promoEditId) return;
+                      setPromoSaving(true);
+                      try {
+                        const r = await fetch(`/api/admin/strategy-promo/${promoEditId}`, {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(promoForm),
+                        });
+                        if (r.ok) {
+                          await loadPromoConfigs();
+                          setPromoMsg({ text: `✅ Fiche de vente S${promoEditId} sauvegardée`, error: false });
+                        } else {
+                          setPromoMsg({ text: '❌ Erreur lors de la sauvegarde', error: true });
+                        }
+                      } catch {
+                        setPromoMsg({ text: '❌ Erreur réseau', error: true });
+                      } finally {
+                        setPromoSaving(false);
+                        setTimeout(() => setPromoMsg({ text: '', error: false }), 8000);
+                      }
+                    }}
+                    disabled={promoSaving}
+                    style={{ padding: '10px 0', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: promoSaving ? 'wait' : 'pointer',
+                      background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
+                      border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24', marginTop: 4 }}
+                  >
+                    {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
+                  </button>
+                </div>
+
+                {/* Colonne droite — aperçu carte */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Aperçu de la carte</div>
+                  <div style={{
+                    borderRadius: 16, overflow: 'hidden',
+                    background: 'linear-gradient(145deg, #0f172a, #1e293b)',
+                    border: promoForm.enabled ? '1.5px solid rgba(250,204,21,0.5)' : '1.5px solid rgba(100,116,139,0.3)',
+                    boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
+                    maxWidth: 340, position: 'relative',
+                  }}>
+                    {/* Badge */}
+                    {promoForm.badge && (
+                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
+                        background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
+                        color: '#fbbf24', padding: '3px 10px', borderRadius: 100, letterSpacing: 0.5 }}>
+                        {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
+                      </div>
+                    )}
+                    {/* Statut */}
+                    {!promoForm.enabled && (
+                      <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
+                        background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
+                        ● Désactivée
+                      </div>
+                    )}
+                    <div style={{ padding: '28px 20px 20px' }}>
+                      {/* ID + plan */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
+                          S{promoEditId}
+                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
+                          background: promoForm.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promoForm.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
+                          color: promoForm.plan_requis === 'pro' ? '#c084fc' : promoForm.plan_requis === 'premium' ? '#fbbf24' : '#22c55e' }}>
+                          {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
+                        </span>
+                      </div>
+                      {/* Titre */}
+                      <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
+                        {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
+                      </div>
+                      {/* Tagline */}
+                      {promoForm.tagline && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
+                      )}
+                      {/* Bullets */}
+                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
+                          <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
+                          <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
+                        </div>
+                      ))}
+                      {/* Prix + CTA */}
+                      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        {promoForm.prix_texte ? (
+                          <div>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>À PARTIR DE</div>
+                            <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{promoForm.prix_texte}</div>
+                          </div>
+                        ) : <div />}
+                        <button disabled style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12,
+                          background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', cursor: 'default',
+                          opacity: promoForm.enabled ? 1 : 0.4 }}>
+                          {promoForm.cta || 'Souscrire'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 10, color: '#475569', lineHeight: 1.6 }}>
+                    💡 Activez la fiche pour qu'elle soit visible. Partagez la capture ou intégrez ce contenu dans votre canal de promotion.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des fiches actives */}
+            {Object.keys(promoConfigs).some(k => promoConfigs[k]?.enabled) && (
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(250,204,21,0.15)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Fiches actives ({Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length})</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => (
+                    <button key={id} onClick={() => { setPromoEditId(id); setPromoForm({ ...BLANK_PROMO, ...cfg }); }}
+                      style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        background: promoEditId === id ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.07)',
+                        border: `1px solid rgba(250,204,21,${promoEditId === id ? 0.5 : 0.2})`, color: '#fbbf24' }}>
+                      {cfg.badge} S{id} — {cfg.titre || `Stratégie ${id}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        </>}
+
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
 
@@ -8824,6 +8834,8 @@ function AdminPanel() {
                     <option value="gestion_banque">💰 Gestion Banque (lots + bank management)</option>
                     <option value="compteurs_absences">📊 Compteurs Absences</option>
                     <option value="compteur_parite">⚪⚫ Compteur Parité</option>
+                    <option value="pair_impair">🔴⚪ Pair / Impair 🐍 (serpent sur perte)</option>
+                    <option value="carte_2v3">2️⃣3️⃣ 2 vs 3 Cartes 🐍 (serpent sur perte)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
@@ -8892,6 +8904,13 @@ function AdminPanel() {
                       <div style={{ marginTop: 6 }}><strong>Proche</strong> : la prédiction est différée tant que <code>(cible − live) &gt; Proche</code>, puis émise dès que la distance ≤ Proche. Doit être ≤ Décalage.</div>
                       <div style={{ marginTop: 6 }}><strong>Nb cartes banquier</strong> : 0 = indifférent, 2 ou 3 = nombre exact de cartes exigé.</div>
                       <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Le seuil B n'est pas utilisé dans ce mode.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'gestion_banque' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>💰 Mode Gestion Banque</div>
+                      <div>La <strong>stratégie source</strong> doit exister et être active. Elle fournit les signaux de prédiction ; cette stratégie calcule la gestion de lots <code style={{ background: 'rgba(234,179,8,0.15)', padding: '1px 5px', borderRadius: 4 }}>mise × côte × nb lots</code>.</div>
+                      <div style={{ marginTop: 6 }}>Le <strong>Seuil B</strong> est utilisé comme déclencheur interne. La banque, la mise, la taille de lot et la côte permettent de calculer les gains/pertes projetés.</div>
                     </div>
                   )}
                   {stratForm.mode === 'first_card_plus6' && (
@@ -9096,7 +9115,7 @@ function AdminPanel() {
                 </div>
 
                 {/* Seuil B / Différence — masqué pour surveillance_perte, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6 */}
-                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'gestion_banque' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -9387,6 +9406,103 @@ function AdminPanel() {
                   </div>
                 )}
 
+                {/* ── Paramètres — MODE GESTION BANQUE ── */}
+                {stratForm.mode === 'gestion_banque' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '18px', borderRadius: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.3)' }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: '#fbbf24', marginBottom: 16 }}>💰 Configuration Gestion Banque</div>
+
+                    {/* Stratégie source */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Stratégie source <span style={{ color: '#64748b' }}>(fournit les prédictions)</span></label>
+                      <select
+                        value={stratForm.gb_source_id || ''}
+                        onChange={e => setStratForm(p => ({ ...p, gb_source_id: e.target.value }))}
+                        style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '2px solid rgba(234,179,8,0.4)', borderRadius: 8, color: stratForm.gb_source_id ? '#e2e8f0' : '#64748b', fontSize: 13 }}>
+                        <option value="">— sélectionner une stratégie source —</option>
+                        {strategies.filter(s => s.mode !== 'gestion_banque' && s.enabled).map(s => (
+                          <option key={s.id} value={String(s.id)}>S{s.id} — {s.name}</option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: 6, fontSize: 11, color: '#64748b', lineHeight: 1.6 }}>
+                        La stratégie source doit exister et être active. Elle fournit les signaux de prédiction ; cette stratégie calcule la gestion de lots (mise × côte × nb lots).
+                      </div>
+                    </div>
+
+                    {/* Banque + Mise */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Banque initiale</label>
+                        <input type="number" min="1" value={stratForm.gb_banque ?? 5000}
+                          onChange={e => setStratForm(p => ({ ...p, gb_banque: parseFloat(e.target.value) || 5000 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Mise initiale <span style={{ color: '#64748b' }}>(par lot)</span></label>
+                        <input type="number" min="0.1" step="0.1" value={stratForm.gb_mise ?? 10}
+                          onChange={e => setStratForm(p => ({ ...p, gb_mise: parseFloat(e.target.value) || 10 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                    </div>
+
+                    {/* Taille lot + Côte */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Taille lot <span style={{ color: '#64748b' }}>(unités)</span></label>
+                        <input type="number" min="1" value={stratForm.gb_taille ?? 5}
+                          onChange={e => setStratForm(p => ({ ...p, gb_taille: parseInt(e.target.value) || 5 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Côte <span style={{ color: '#64748b' }}>(ex: 1.9)</span></label>
+                        <input type="number" min="1.01" step="0.01" value={stratForm.gb_cote ?? 1.9}
+                          onChange={e => setStratForm(p => ({ ...p, gb_cote: parseFloat(e.target.value) || 1.9 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                    </div>
+
+                    {/* Max lots + Devise */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Max lots par jeu <span style={{ color: '#64748b' }}>(0 = illimité)</span></label>
+                        <input type="number" min="0" value={stratForm.gb_max_lots ?? 0}
+                          onChange={e => setStratForm(p => ({ ...p, gb_max_lots: parseInt(e.target.value) || 0 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Devise</label>
+                        <select value={stratForm.gb_devise || 'USD'}
+                          onChange={e => setStratForm(p => ({ ...p, gb_devise: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
+                          <option value="USD">🇺🇸 USD ($)</option>
+                          <option value="EUR">🇪🇺 EUR (€)</option>
+                          <option value="FCFA">🌍 FCFA</option>
+                          <option value="XOF">🌍 XOF</option>
+                          <option value="GBP">🇬🇧 GBP (£)</option>
+                          <option value="CAD">🇨🇦 CAD ($)</option>
+                          <option value="MAD">🇲🇦 MAD</option>
+                          <option value="DZD">🇩🇿 DZD</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Nom boutique + URL */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Nom boutique <span style={{ color: '#64748b' }}>(affiché Telegram)</span></label>
+                        <input type="text" placeholder="ex: BaccaratPro Store" value={stratForm.gb_nom_boutique || ''}
+                          onChange={e => setStratForm(p => ({ ...p, gb_nom_boutique: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>URL du site <span style={{ color: '#64748b' }}>(lien affiché dans les messages Telegram)</span></label>
+                        <input type="text" placeholder="ex: https://monsite.com" value={stratForm.gb_url_site || ''}
+                          onChange={e => setStratForm(p => ({ ...p, gb_url_site: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── Paramètres — MODE INTERSECTION ── */}
                 {stratForm.mode === 'intersection' && (
                   <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(251,113,133,0.07)', border: '1px solid rgba(251,113,133,0.25)' }}>
@@ -9513,7 +9629,7 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'gestion_banque' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
@@ -9682,7 +9798,7 @@ function AdminPanel() {
                 </div>
               </div>
 
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -9690,7 +9806,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -9711,7 +9827,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -9851,6 +9967,8 @@ function AdminPanel() {
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                     { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
                     { val: 'consec_same_suit_pred', label: '🚫 Prédictions consécutives même costume', desc: 'Bloquer si le même costume a été prédit N fois de suite. Libération automatique si un autre costume est prédit ou après 20 min.' },
+                    { val: 'pre_emit_suit_inverse', label: '🔄 Inverse costume — apparu récemment',  desc: 'Si le costume prédit est apparu à -N dans l\'historique → prédit l\'inverse (♠↔♦ ❤↔♣). Ne bloque pas, redirige.' },
+                    { val: 'offset_suit_inverse',   label: '🔄 Inverse costume — offset ≥ N + apparu', desc: 'Si l\'offset de la stratégie ≥ min_offset ET le costume prédit est apparu à -appear_at → prédit l\'inverse (♠↔♦ ❤↔♣). Ne bloque pas, redirige.' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause','consec_same_suit_pred'].includes(ex.type);
@@ -9860,6 +9978,8 @@ function AdminPanel() {
                   const needsParity = ex.type === 'game_parity';
                   const needsBadHour = ex.type === 'bad_hour';
                   const needsTriggerPos = ex.type === 'trigger_card_position';
+                  const needsPreEmitInverse  = ex.type === 'pre_emit_suit_inverse';
+                  const needsOffsetInverse   = ex.type === 'offset_suit_inverse';
                   const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
 
                   const INP = { padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 };
@@ -10037,6 +10157,40 @@ function AdminPanel() {
                           </div>
                           <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
                             → bloque si la carte prédite est en position {(Array.isArray(ex.positions) ? ex.positions : [1]).sort((a,b)=>a-b).join(', ')} dans la main choisie du jeu déclencheur
+                          </div>
+                        </div>
+                      )}
+
+                      {needsPreEmitInverse && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -N jeux :</label>
+                          <input type="number" min="1" max="20" value={ex.appear_at ?? 1}
+                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
+                            style={{ width: 60, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → si le costume prédit est apparu il y a {ex.appear_at ?? 1} jeu(x) → prédit l'inverse (♠↔♦ ❤↔♣)
+                          </div>
+                          <div style={{ width: '100%', padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#a5b4fc' }}>
+                            💡 Ne bloque pas — redirige silencieusement. Ex : prédit ♠ mais ♠ était présent il y a {ex.appear_at ?? 1} jeu(x) → émet ♦ à la place.
+                          </div>
+                        </div>
+                      )}
+
+                      {needsOffsetInverse && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Offset min. :</label>
+                          <input type="number" min="1" max="20" value={ex.min_offset ?? 3}
+                            onChange={e => setEx({ min_offset: parseInt(e.target.value) || 3 })}
+                            style={{ width: 55, ...INP }} />
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -N :</label>
+                          <input type="number" min="1" max="20" value={ex.appear_at ?? 1}
+                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
+                            style={{ width: 55, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic', width: '100%' }}>
+                            → actif seulement si offset ≥ {ex.min_offset ?? 3} · si costume prédit apparu à -{ex.appear_at ?? 1} → inverse (♠↔♦ ❤↔♣)
+                          </div>
+                          <div style={{ width: '100%', padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#a5b4fc' }}>
+                            💡 Exemple : offset=+3, appear_at=1 → si ♠ était dans le dernier jeu et que l'offset est ≥ 3 → émet ♦ à la place de ♠.
                           </div>
                         </div>
                       )}

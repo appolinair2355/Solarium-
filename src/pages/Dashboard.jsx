@@ -584,14 +584,14 @@ export default function Dashboard() {
   }, [hasAccess]);
 
   useEffect(() => {
-    if (!user?.is_admin && !user?.is_premium && !user?.is_pro) return;
+    if (!user?.is_admin && !user?.is_premium && !user?.is_pro && user?.account_type !== 'partenaire') return;
     const load = () =>
       fetch(`/api/games/absences?channel=${channelId}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : []).then(setAbsences);
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [user?.is_admin, user?.is_premium, user?.is_pro, channelId, isProChannel]);
+  }, [user?.is_admin, user?.is_premium, user?.is_pro, user?.account_type, channelId, isProChannel]);
 
   // ── Polling des logs Pro pour les canaux S5001…S5100 ───────────────────────
   useEffect(() => {
@@ -1034,8 +1034,11 @@ export default function Dashboard() {
                   })()}
                   {(() => {
                     const isOwnProChannel = isProChannel && customStrategies.some(s => `S${s.id}` === channelId && s.owner_user_id === user?.id);
+                    const partnerCounterChannels = Array.isArray(user?.show_counter_channels) ? user.show_counter_channels
+                      : Array.isArray(user?.allowed_channels) ? user.allowed_channels : [];
                     const canSeeCounter = user?.is_admin
                       || (user?.is_premium && Array.isArray(user?.show_counter_channels) && user.show_counter_channels.includes(channelId))
+                      || (user?.account_type === 'partenaire' && partnerCounterChannels.includes(channelId))
                       || (user?.is_pro && isOwnProChannel);
                     return (
                   <div className={`live-grid ${canSeeCounter ? 'live-grid-admin' : 'live-grid-single'}`}>
