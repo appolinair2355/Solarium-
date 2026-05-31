@@ -270,7 +270,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 } };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 }, attenteQueue: [] };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -2628,6 +2628,21 @@ class Engine {
       // Exception C (pre_emit_suit_inverse) : rediriger vers l'inverse si nécessaire
       if (state._exRedirectSuit) { ps = state._exRedirectSuit; state._exRedirectSuit = null; }
 
+      // ── Filtre d'attente : mise en file avant émission ───────────────────
+      if (!force && cfg.attente_enabled && cfg.attente_n > 0) {
+        if (!state.attenteQueue) state.attenteQueue = [];
+        state.attenteQueue.push({
+          ps, triggerSuit: suit,
+          option: cfg.attente_option || 1,
+          main: cfg.attente_main || 'joueur',
+          n: Math.max(1, cfg.attente_n || 3),
+          seen: 0, suitFound: false,
+          offset: cfg.prediction_offset || 1,  // stocké pour recalculer la cible à la libération
+        });
+        console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${cfg.attente_option || 1}, ${cfg.attente_n || 3} jeux sur ${cfg.attente_main || 'joueur'}`);
+        return;
+      }
+
       let inserted = false;
       try {
         inserted = await db.createPrediction({ strategy: channelId, game_number: next, predicted_suit: ps, triggered_by: suit || null });
@@ -2681,6 +2696,41 @@ class Engine {
       console.log(`[${channelId}] Aléatoire ${suit}: pool=[${pool.join(',')}] choix → ${pool[idx]}`);
       return pool[idx];
     };
+
+    // ── Traitement de la file d'attente (filtre d'attente) ───────────────────
+    // Exécuté EN PREMIER à chaque tick, avant la logique du mode, pour toujours
+    // avoir les données du jeu courant (gn, suits, bSuits) fraîches.
+    if (!state.attenteQueue) state.attenteQueue = [];
+    if (state.attenteQueue.length > 0) {
+      const toRemoveAq = [];
+      for (let i = 0; i < state.attenteQueue.length; i++) {
+        const item = state.attenteQueue[i];
+        // Surveiller le costume DÉCLENCHEUR (triggerSuit) dans la main désignée,
+        // pas le costume prédit (ps) qui peut être un alias redirigé.
+        const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
+        if (checkSuitsAq.includes(item.triggerSuit)) item.suitFound = true;
+        item.seen++;
+        let shouldEmitAq = false, shouldCancelAq = false;
+        if (item.option === 2 && item.suitFound) {
+          // Option 2 : le costume est apparu → condition confirmée → émettre immédiatement
+          shouldEmitAq = true;
+        } else if (item.seen >= item.n) {
+          // N jeux écoulés
+          if (item.option === 1 && !item.suitFound) shouldEmitAq = true; // absent tout du long → émettre
+          else shouldCancelAq = true;                                      // présent (opt1) ou absent (opt2) → annuler
+        }
+        if (shouldEmitAq || shouldCancelAq) toRemoveAq.push(i);
+        if (shouldEmitAq) {
+          // Recalculer la cible sur le jeu COURANT + offset (le targetGame original est périmé)
+          const aqTarget = gn + (item.offset || 1);
+          console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[item.ps] || item.ps} (${item.seen}/${item.n} jeux vus, triggerSuit=${item.triggerSuit}, found=${item.suitFound})`);
+          await emitPrediction(aqTarget, item.ps, item.triggerSuit, { force: true });
+        } else if (shouldCancelAq) {
+          console.log(`[${channelId}] [Attente] ❌ opt${item.option} — annulée ${SUIT_DISPLAY[item.ps] || item.ps} (${item.seen}/${item.n} jeux, found=${item.suitFound})`);
+        }
+      }
+      for (let i = toRemoveAq.length - 1; i >= 0; i--) state.attenteQueue.splice(toRemoveAq[i], 1);
+    }
 
     if (mode === 'manquants') {
       for (const suit of ALL_SUITS) {
@@ -5022,7 +5072,8 @@ class Engine {
       if (mode === 'compteur_adverse') {
         const adverseCounts = entry.adverseCounts || {};
         const adverseLabel  = hand === 'banquier' ? 'joueur' : 'banquier';
-        return ALL_SUITS.map(suit => {
+        const _aqAdv = (entry.attenteQueue || []).map(x => ({ ...x }));
+        return ALL_SUITS.map((suit, _aqIdx) => {
           const base    = adverseCounts[suit] || 0;
           let count     = base;
           let isLive    = false;
@@ -5031,12 +5082,14 @@ class Engine {
             isLive = true;
             count  = liveSuits.includes(suit) ? 0 : base + 1;
           }
-          return {
+          const item = {
             suit, display: SUIT_DISPLAY[suit] || suit,
             count, threshold,
             mode, label: `Adverse (${adverseLabel})`,
             isLive,
           };
+          if (_aqIdx === 0) item.attenteQueue = _aqAdv;
+          return item;
         });
       }
 
@@ -5047,10 +5100,11 @@ class Engine {
         const pairs = Array.isArray(rawPairs) && rawPairs.length > 0
           ? rawPairs.map(p => Array.isArray(p) ? { a: p[0], b: p[1] } : p)
           : null;
-        return ALL_SUITS.map(suit => {
+        const _aqMiroir = (entry.attenteQueue || []).map(x => ({ ...x }));
+        return ALL_SUITS.map((suit, _aqIdx) => {
           // Si des paires sont configurées, marquer si ce costume est dans une paire surveillée
           const inPair = !pairs || pairs.some(p => p.a === suit || p.b === suit);
-          return {
+          const item = {
             suit, display: SUIT_DISPLAY[suit] || suit,
             count: mirrorCounts[suit] || 0,
             threshold,
@@ -5058,6 +5112,8 @@ class Engine {
             isLive: false,
             dimmed: !inPair,
           };
+          if (_aqIdx === 0) item.attenteQueue = _aqMiroir;
+          return item;
         });
       }
 
@@ -5091,7 +5147,8 @@ class Engine {
       // ── Mode Absence Confirmée : projection live correcte + état feu tricolore ──
       if (mode === 'absence_confirmee') {
         const confirmPending = entry.confirmPending || {};
-        return ALL_SUITS.map(suit => {
+        const _aqAbsConf = (entry.attenteQueue || []).map(x => ({ ...x }));
+        return ALL_SUITS.map((suit, _aqIdx) => {
           const base = entry.counts[suit] || 0;
           let count  = base;
           let isLive = false;
@@ -5100,7 +5157,7 @@ class Engine {
             isLive = true;
             count  = liveSuits.includes(suit) ? 0 : base + 1;
           }
-          return {
+          const item = {
             suit, display: SUIT_DISPLAY[suit] || suit,
             count, threshold,
             mode, label: 'Absences',
@@ -5108,6 +5165,8 @@ class Engine {
             // true = feu jaune (seuil B atteint, attend confirmation au jeu suivant)
             confirmPending: !!confirmPending[suit],
           };
+          if (_aqIdx === 0) item.attenteQueue = _aqAbsConf;
+          return item;
         });
       }
 
@@ -5329,7 +5388,8 @@ class Engine {
         }];
       }
 
-      return ALL_SUITS.map(suit => {
+      const _aqDefault = (entry.attenteQueue || []).map(x => ({ ...x }));
+      return ALL_SUITS.map((suit, _aqIdx) => {
         const base = entry.counts[suit] || 0;
         let count  = base;
         let isLive = false;
@@ -5349,12 +5409,14 @@ class Engine {
           : mode === 'distribution' ? 'Distribution'
           : 'Absences';
 
-        return {
+        const item = {
           suit, display: SUIT_DISPLAY[suit] || suit,
           count, threshold,
           mode, label: modeLabel,
           isLive,
         };
+        if (_aqIdx === 0) item.attenteQueue = _aqDefault;
+        return item;
       });
     }
     return null;
