@@ -443,7 +443,9 @@ export default function Dashboard() {
     const es = new EventSource('/api/games/stream');
     es.onmessage = e => { setGames(JSON.parse(e.data)); setLoadingGames(false); };
     es.onerror = () => setLoadingGames(false);
-    return () => es.close();
+    // Fallback : si aucun message reçu après 6s, arrêter le chargement
+    const timeout = setTimeout(() => setLoadingGames(false), 6000);
+    return () => { es.close(); clearTimeout(timeout); };
   }, [hasAccess]);
 
   // Fetch visible strategies for this user and enforce access
@@ -1755,6 +1757,47 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
+                    );
+                  })()}
+
+                  {/* ── Filtre d'attente — prédictions en attente de confirmation ── */}
+                  {absences[0]?.attenteQueue?.length > 0 && (() => {
+                    const aq = absences[0].attenteQueue;
+                    if (!Array.isArray(aq) || aq.length === 0) return null;
+                    const SC = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+                    return (
+                      <div className="absence-counter-chip" style={{ borderColor: 'rgba(245,158,11,0.4)', marginTop: 12 }}>
+                        <div className="absence-chip-title">
+                          <span style={{ color: '#f59e0b' }}>⏳</span>
+                          <span style={{ color: '#fbbf24', fontWeight: 700 }}>Prédiction en attente</span>
+                        </div>
+                        {aq.map((item, idx) => {
+                          const pct = Math.min(100, (item.seen / Math.max(1, item.n)) * 100);
+                          const sc = SC[item.ps] || '#e2e8f0';
+                          return (
+                            <div key={idx} style={{ marginBottom: idx < aq.length - 1 ? 10 : 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600 }}>
+                                <span style={{ color: sc, fontWeight: 800, fontSize: '0.78rem' }}>{item.ps}</span>
+                                <span style={{ marginLeft: 2, background: 'rgba(245,158,11,0.15)', borderRadius: 4, padding: '1px 5px', color: '#f59e0b' }}>opt.{item.option}</span>
+                                <span style={{ color: item.main === 'banquier' ? '#60a5fa' : '#a78bfa', marginLeft: 2 }}>{item.main === 'banquier' ? '🏦' : '👤'}</span>
+                                <span style={{ marginLeft: 'auto', color: '#475569' }}>{item.seen}/{item.n} jeux</span>
+                              </div>
+                              <div className="absence-row">
+                                <span className="absence-suit" style={{ fontSize: '0.7rem', color: '#f59e0b' }}>🕐</span>
+                                <div className="absence-bar-wrap">
+                                  <div className="absence-bar-fill" style={{
+                                    width: `${pct}%`,
+                                    background: 'linear-gradient(90deg, #d97706, #f59e0b)',
+                                    transition: 'width 0.4s ease',
+                                    animation: pct >= 100 ? 'pulse 1s infinite' : 'none',
+                                  }} />
+                                </div>
+                                <span className="absence-count" style={{ color: '#f59e0b', fontWeight: 700 }}>{item.seen}/{item.n}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     );
                   })()}
 
