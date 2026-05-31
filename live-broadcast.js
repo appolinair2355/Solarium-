@@ -265,49 +265,43 @@ async function diffuseGame(target, game, finishedNow) {
 
 // ── Hook principal : appelé à chaque mise à jour des jeux ───────────────────
 
-let _busy = false;
-
 async function onGamesUpdate(games) {
-  if (_busy) return;             // évite ré-entrance
   if (!Array.isArray(games) || games.length === 0) return;
 
   const targets = (await loadTargets()).filter(t => t.enabled !== false);
   if (targets.length === 0) return;
 
-  _busy = true;
-  try {
-    // Tri par game_number ascendant pour ordre cohérent
-    const sorted = [...games].sort((a, b) => a.game_number - b.game_number);
+  // Tri par game_number ascendant pour ordre cohérent
+  const sorted = [...games].sort((a, b) => a.game_number - b.game_number);
 
-    for (const g of sorted) {
-      if (!g || !g.game_number) continue;
-      const hasCards = (g.player_cards?.length || 0) > 0 || (g.banker_cards?.length || 0) > 0;
-      if (!hasCards && !g.is_finished) continue;
+  // Filtrer les jeux utiles (avec cartes ou terminés, pas encore finalisés en mémoire)
+  const relevantGames = sorted.filter(g => {
+    if (!g || !g.game_number) return false;
+    const hasCards = (g.player_cards?.length || 0) > 0 || (g.banker_cards?.length || 0) > 0;
+    if (!hasCards && !g.is_finished) return false;
+    const st = gameState.get(g.game_number);
+    return !st?.finalSent;
+  });
 
-      const st = gameState.get(g.game_number);
-      const wasFinal = !!st?.finalSent;
-      const finishedNow = !!g.is_finished;
+  if (relevantGames.length === 0) return;
 
-      // Si déjà finalisé, on n'envoie plus rien
-      if (wasFinal) continue;
+  // Traitement PARALLÈLE : tous les jeux × toutes les cibles simultanément
+  // → latence = max(1 appel Telegram) au lieu de sum(tous les appels)
+  await Promise.allSettled(
+    relevantGames.flatMap(g =>
+      targets.map(t => diffuseGame(t, g, !!g.is_finished))
+    )
+  );
 
-      for (const t of targets) {
-        await diffuseGame(t, g, finishedNow);
-      }
-    }
-
-    // Nettoyage : supprime les entrées trop vieilles ou si trop d'entrées
-    if (gameState.size > MAX_TRACKED_GAMES) {
-      const keys = [...gameState.keys()].sort((a, b) => a - b);
-      const toDelete = keys.slice(0, keys.length - MAX_TRACKED_GAMES);
-      for (const k of toDelete) gameState.delete(k);
-    }
-    const cutoff = Date.now() - FINAL_RETENTION_MS;
-    for (const [k, st] of gameState.entries()) {
-      if (st.finalSent && st.firstSeenAt < cutoff) gameState.delete(k);
-    }
-  } finally {
-    _busy = false;
+  // Nettoyage : supprime les entrées trop vieilles ou si trop d'entrées
+  if (gameState.size > MAX_TRACKED_GAMES) {
+    const keys = [...gameState.keys()].sort((a, b) => a - b);
+    const toDelete = keys.slice(0, keys.length - MAX_TRACKED_GAMES);
+    for (const k of toDelete) gameState.delete(k);
+  }
+  const cutoff = Date.now() - FINAL_RETENTION_MS;
+  for (const [k, st] of gameState.entries()) {
+    if (st.finalSent && st.firstSeenAt < cutoff) gameState.delete(k);
   }
 }
 

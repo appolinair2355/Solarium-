@@ -59,7 +59,7 @@ function _onFailure(msg) {
 
 // ── Connexion ────────────────────────────────────────────────────────
 
-const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+const DEFAULT_RENDER_URL = null;
 
 // ── Pool factory avec gestion d'erreurs robuste ──────────────────────
 function _createPool(url) {
@@ -130,8 +130,10 @@ async function loadRenderUrl() {
     let url = await db.getSetting('render_db_url');
     if (!url || !url.trim()) {
       url = DEFAULT_RENDER_URL;
-      await db.setSetting('render_db_url', url);
-      console.log('[RenderSync] URL par défaut configurée automatiquement');
+      if (url) {
+        await db.setSetting('render_db_url', url);
+        console.log('[RenderSync] URL par défaut configurée automatiquement');
+      }
     }
     if (url && url.trim()) {
       // ── Protection anti-boucle : si l'URL de sync == la DB principale, on désactive ──

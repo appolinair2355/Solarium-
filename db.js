@@ -1,16 +1,13 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+require('dotenv').config();
+
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
-// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
-// l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+const DB_URL = process.env.DATABASE_URL || null;
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
-
-require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const CARDS_PG_URL = process.env.CARDS_DATABASE_URL || null;
 let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -36,22 +33,30 @@ if (USE_PG) {
 
 // ── Pool secondaire : base de données des cartes ─────────────────────────────
 let pgPoolCards = null;
-let USE_CARDS_PG = true;
-try {
-  const { Pool } = require('pg');
-  pgPoolCards = new Pool({
-    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 3,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-  });
-  pgPoolCards.on('error', (err) => {
-    console.error('[CARDS-DB] Erreur pool cartes:', err.message);
-  });
-} catch (e) {
-  console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
-  USE_CARDS_PG = false;
+let USE_CARDS_PG = false;
+const _cardsUrl = process.env.CARDS_DATABASE_URL || CARDS_PG_URL;
+if (_cardsUrl) {
+  try {
+    const { Pool } = require('pg');
+    pgPoolCards = new Pool({
+      connectionString: _cardsUrl,
+      ssl: (_cardsUrl.includes('render.com') || _cardsUrl.includes('sslmode') || process.env.NODE_ENV === 'production' || process.env.REPL_ID)
+        ? { rejectUnauthorized: false }
+        : false,
+      max: 3,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+    pgPoolCards.on('error', (err) => {
+      console.error('[CARDS-DB] Erreur pool cartes:', err.message);
+    });
+    USE_CARDS_PG = true;
+  } catch (e) {
+    console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
+    USE_CARDS_PG = false;
+  }
+} else {
+  console.log('[CARDS-DB] Pas de CARDS_DATABASE_URL — fonctionnalité cartes désactivée');
 }
 
 const jsondb = require('./jsondb');

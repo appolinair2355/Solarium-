@@ -779,6 +779,19 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
           }))
         : [],
+      // Filtre d'attente
+      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
+      attente_option:  [1, 2].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
+      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
+      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
+      attente2_mapping: (() => {
+        const m = req.body.attente2_mapping;
+        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
+        if (!m || typeof m !== 'object') return DEF;
+        const out = {};
+        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
+        return out;
+      })(),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1065,6 +1078,19 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
           }))
         : (list[idx].surveillance_rules || []),
+      // Filtre d'attente
+      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
+      attente_option:  [1, 2].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
+      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
+      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
+      attente2_mapping: (() => {
+        const m = req.body.attente2_mapping;
+        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
+        if (!m || typeof m !== 'object') return DEF;
+        const out = {};
+        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
+        return out;
+      })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);

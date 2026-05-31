@@ -236,13 +236,28 @@ async function requireActiveSub(req, res, next) {
   }
 }
 
+// ── Helper : attache l'attenteQueue au premier élément du résultat ─────────
+// Garantit que tous les modes (y compris FC6, Intersection, etc.) exposent la
+// file d'attente même si getAbsences ne l'a pas encore attachée.
+function _injectAttenteQueue(result, engine, channel) {
+  if (!result || result.length === 0) return;
+  if (result[0].attenteQueue) return; // déjà présente (modes ALL_SUITS)
+  if (!channel.startsWith('S')) return;
+  const state = engine.getStrategyState ? engine.getStrategyState(channel) : null;
+  if (state?.attenteQueue?.length > 0) {
+    result[0].attenteQueue = state.attenteQueue.map(x => ({ ...x }));
+  }
+}
+
 router.get('/absences', requireActiveSub, async (req, res) => {
   const channel = req.query.channel || 'C1';
   const engine  = require('./engine');
 
   // Admin : accès total
   if (req.session.isAdmin) {
-    return res.json(engine.getAbsences(channel) || []);
+    const result = engine.getAbsences(channel) || [];
+    _injectAttenteQueue(result, engine, channel);
+    return res.json(result);
   }
 
   // Recharge le user depuis la DB pour avoir les permissions à jour
@@ -265,7 +280,9 @@ router.get('/absences', requireActiveSub, async (req, res) => {
     if (!Array.isArray(showCounters) || !showCounters.includes(channel)) {
       return res.status(403).json({ error: 'Compteur non autorisé pour ce canal' });
     }
-    return res.json(engine.getAbsences(channel) || []);
+    const result = engine.getAbsences(channel) || [];
+    _injectAttenteQueue(result, engine, channel);
+    return res.json(result);
   }
 
   // Pro : autorisé sur ses propres stratégies (canal S5001…S5100)
@@ -276,7 +293,9 @@ router.get('/absences', requireActiveSub, async (req, res) => {
       if (metaRaw) {
         const meta = JSON.parse(metaRaw);
         if (meta.owner_user_id === req.session.userId) {
-          return res.json(engine.getAbsences(channel) || []);
+          const result = engine.getAbsences(channel) || [];
+          _injectAttenteQueue(result, engine, channel);
+          return res.json(result);
         }
       }
     } catch {}

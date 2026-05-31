@@ -565,12 +565,17 @@ class Engine {
         s.needsInit = true;
         this.custom[cfg.id] = s;
       } else {
-        // Stratégie existante : si la MAIN a changé, reset les compteurs liés à la main
-        // car les données accumulées correspondent à l'ancienne main (mauvaise main)
+        // Stratégie existante : si la MAIN ou le MODE a changé, reset les compteurs
+        // car les données accumulées correspondent à l'ancienne configuration
         const oldHand = this.custom[cfg.id].config?.hand || 'joueur';
         const newHand = cfg.hand || 'joueur';
-        if (oldHand !== newHand) {
-          console.log(`[S${cfg.id}] Main changée (${oldHand} → ${newHand}) — reset compteurs`);
+        const oldMode = this.custom[cfg.id].config?.mode || '';
+        const newMode = cfg.mode || '';
+        const handChanged = oldHand !== newHand;
+        const modeChanged = oldMode !== newMode;
+        if (handChanged || modeChanged) {
+          const reason = handChanged ? `main (${oldHand}→${newHand})` : `mode (${oldMode}→${newMode})`;
+          console.log(`[S${cfg.id}] ${reason} changé — reset compteurs`);
           // Reset counts (absences/apparitions pour manquants, apparents, absence_apparition, apparition_absence)
           const counts = this.custom[cfg.id].counts;
           if (counts) for (const s of ALL_SUITS) counts[s] = 0;
@@ -2633,13 +2638,20 @@ class Engine {
         if (!state.attenteQueue) state.attenteQueue = [];
         state.attenteQueue.push({
           ps, triggerSuit: suit,
+          triggerGame: gn,  // jeu déclencheur original → cible = triggerGame + offset
           option: cfg.attente_option || 1,
           main: cfg.attente_main || 'joueur',
           n: Math.max(1, cfg.attente_n || 3),
           seen: 0, suitFound: false,
-          offset: cfg.prediction_offset || 1,  // stocké pour recalculer la cible à la libération
+          offset: cfg.prediction_offset || 1,
+          // Option 2 : mapping propre — quand le costume ps apparaît, prédit attente2Mapping[ps]
+          attente2Mapping: cfg.attente2_mapping || null,
         });
-        console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${cfg.attente_option || 1}, ${cfg.attente_n || 3} jeux sur ${cfg.attente_main || 'joueur'}`);
+        const opt = cfg.attente_option || 1;
+        const optDesc = opt === 1
+          ? `absent ${cfg.attente_n || 3} jeux → émet`
+          : `apparaît → émet avec mapping propre`;
+        console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${opt} (${optDesc}), ${cfg.attente_n || 3} jeux sur ${cfg.attente_main || 'joueur'}, cible=#${gn + (cfg.prediction_offset || 1)}`);
         return;
       }
 
@@ -2705,28 +2717,46 @@ class Engine {
       const toRemoveAq = [];
       for (let i = 0; i < state.attenteQueue.length; i++) {
         const item = state.attenteQueue[i];
-        // Surveiller le costume DÉCLENCHEUR (triggerSuit) dans la main désignée,
-        // pas le costume prédit (ps) qui peut être un alias redirigé.
+        // Surveiller le costume PRÉDIT (ps) dans la main désignée.
+        // Option 1 : si absent pendant n jeux → émettre la prédiction originale (ps)
+        //            si présent avant n jeux → annuler
+        // Option 2 : dès qu'il apparaît → émettre avec le MAPPING PROPRE (attente2Mapping)
+        //            si absent après n jeux → annuler
         const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
-        if (checkSuitsAq.includes(item.triggerSuit)) item.suitFound = true;
+        if (checkSuitsAq.includes(item.ps)) item.suitFound = true;
         item.seen++;
         let shouldEmitAq = false, shouldCancelAq = false;
-        if (item.option === 2 && item.suitFound) {
-          // Option 2 : le costume est apparu → condition confirmée → émettre immédiatement
-          shouldEmitAq = true;
-        } else if (item.seen >= item.n) {
-          // N jeux écoulés
-          if (item.option === 1 && !item.suitFound) shouldEmitAq = true; // absent tout du long → émettre
-          else shouldCancelAq = true;                                      // présent (opt1) ou absent (opt2) → annuler
+        if (item.option === 1) {
+          if (item.suitFound) {
+            // Opt1 : costume apparu → annuler
+            shouldCancelAq = true;
+          } else if (item.seen >= item.n) {
+            // Opt1 : absent tout du long → émettre la prédiction originale
+            shouldEmitAq = true;
+          }
+        } else {
+          // Option 2
+          if (item.suitFound) {
+            // Opt2 : costume apparu → émettre avec le mapping propre
+            shouldEmitAq = true;
+          } else if (item.seen >= item.n) {
+            // Opt2 : absent après n jeux → annuler
+            shouldCancelAq = true;
+          }
         }
         if (shouldEmitAq || shouldCancelAq) toRemoveAq.push(i);
         if (shouldEmitAq) {
-          // Recalculer la cible sur le jeu COURANT + offset (le targetGame original est périmé)
-          const aqTarget = gn + (item.offset || 1);
-          console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[item.ps] || item.ps} (${item.seen}/${item.n} jeux vus, triggerSuit=${item.triggerSuit}, found=${item.suitFound})`);
-          await emitPrediction(aqTarget, item.ps, item.triggerSuit, { force: true });
+          // Cible = jeu déclencheur original + offset (pas le jeu courant)
+          const aqTarget = (item.triggerGame || gn) + (item.offset || 1);
+          // Option 2 : utiliser le mapping propre (attente2Mapping) si configuré
+          let emitPs = item.ps;
+          if (item.option === 2 && item.attente2Mapping && item.attente2Mapping[item.ps]) {
+            emitPs = item.attente2Mapping[item.ps];
+          }
+          console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[emitPs] || emitPs}${item.option === 2 ? ` (via mapping propre depuis ${item.ps})` : ''} (${item.seen}/${item.n} jeux, found=${item.suitFound}, triggerGame=#${item.triggerGame || gn})`);
+          await emitPrediction(aqTarget, emitPs, item.triggerSuit, { force: true });
         } else if (shouldCancelAq) {
-          console.log(`[${channelId}] [Attente] ❌ opt${item.option} — annulée ${SUIT_DISPLAY[item.ps] || item.ps} (${item.seen}/${item.n} jeux, found=${item.suitFound})`);
+          console.log(`[${channelId}] [Attente] ❌ opt${item.option} — annulée ${SUIT_DISPLAY[item.ps] || item.ps} (${item.seen}/${item.n} jeux, ps=${item.ps}, found=${item.suitFound})`);
         }
       }
       for (let i = toRemoveAq.length - 1; i >= 0; i--) state.attenteQueue.splice(toRemoveAq[i], 1);
