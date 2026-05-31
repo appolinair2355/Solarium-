@@ -618,12 +618,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// Lecture seule — accessible aux comptes admin / Pro / Premium
+// Lecture seule — accessible aux comptes admin / Pro / Premium / Partenaire
 function requireViewer(req, res, next) {
   if (!req.session?.userId)
     return res.status(401).json({ error: 'Non connecté' });
-  if (req.session.isAdmin || req.session.isPro || req.session.isPremium) return next();
-  return res.status(403).json({ error: 'Accès réservé aux comptes Premium / Pro / Admin' });
+  if (req.session.isAdmin || req.session.isPro || req.session.isPremium || req.session.accountType === 'partenaire') return next();
+  return res.status(403).json({ error: 'Accès réservé aux comptes Premium / Pro / Admin / Partenaire' });
 }
 
 // Vue publique (lecture seule, sans config ni token) — admin / pro / premium
