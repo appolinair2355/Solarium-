@@ -42,6 +42,14 @@ function baccaratHandScore(cards) {
 }
 const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
 
+// Mapping naturel pour Option 2 du filtre d'attente sur les ps spéciaux (non-costumes)
+const SPECIAL_ATTENTE_MAPPING = {
+  'pair':  'impair', 'impair': 'pair',
+  'WIN_P': 'WIN_B',  'WIN_B':  'WIN_P',
+  'deux':  'trois',  'trois':  'deux',
+  'distrib': 'distrib',
+};
+
 const C1_B = 5;  const C1_MAP = { '♣':'♦','♦':'♣','♠':'♥','♥':'♠' };
 const C2_B = 8;  const C2_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
 const C3_B = 5;  const C3_MAP = { '♥':'♣','♣':'♥','♠':'♦','♦':'♠' };
@@ -2655,8 +2663,9 @@ class Engine {
         });
         const opt = cfg.attente_option || 1;
         const optDesc = opt === 1
-          ? `absent ${_aN} jeux → émet`
-          : `tous absents→émet / tous présents→mapping / mélangé→annulé`;
+          ? `opt1: absent ${_aN} jeux → émet sans mapping`
+          : opt === 2 ? `opt2: tous présents→mapping / sinon annulé`
+          : `opt3: tous absents→émet / tous présents→mapping / mélangé→annulé`;
         console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${opt} (${optDesc}), ${_aN} jeux sur ${cfg.attente_main || 'joueur'}, cible=#${gn + _aN + _aE} (triggerGame=${gn}+n=${_aN}+écart=${_aE})`);
         return;
       }
@@ -2728,8 +2737,32 @@ class Engine {
         //            si présent avant n jeux → annuler
         // Option 2 : dès qu'il apparaît → émettre avec le MAPPING PROPRE (attente2Mapping)
         //            si absent après n jeux → annuler
-        const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
-        const appearedThisTick = checkSuitsAq.includes(item.ps);
+        // Détection intelligente selon le type de ps prédit
+        let appearedThisTick;
+        const _aqPs = item.ps;
+        if (_aqPs === 'pair' || _aqPs === 'impair') {
+          // Parité : calculer le score de la main configurée
+          const _aqCards = item.main === 'banquier' ? bCards : pCards;
+          const _aqScore = baccaratHandScore(_aqCards);
+          const _aqResult = _aqScore !== null ? (_aqScore % 2 === 0 ? 'pair' : 'impair') : null;
+          appearedThisTick = _aqResult === _aqPs;
+        } else if (_aqPs === 'WIN_P' || _aqPs === 'WIN_B') {
+          // Victoire : vérifier le gagnant
+          appearedThisTick = (_aqPs === 'WIN_P' && winner === 'Player') || (_aqPs === 'WIN_B' && winner === 'Banker');
+        } else if (_aqPs === 'deux' || _aqPs === 'trois') {
+          // Nombre de cartes : vérifier le compte de la main configurée
+          const _aqCards2 = item.main === 'banquier' ? bCards : pCards;
+          const _aqCnt = countValidCards(_aqCards2);
+          appearedThisTick = (_aqPs === 'deux' && _aqCnt === 2) || (_aqPs === 'trois' && _aqCnt === 3);
+        } else if (_aqPs === 'distrib') {
+          // Distribution : vérifier si les deux mains ont le même nombre de cartes
+          const _aqVp = countValidCards(pCards), _aqVb = countValidCards(bCards);
+          appearedThisTick = _aqVp === _aqVb;
+        } else {
+          // Costume standard ♠♥♦♣
+          const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
+          appearedThisTick = checkSuitsAq.includes(_aqPs);
+        }
         if (appearedThisTick) { item.suitFound = true; item.presentCount = (item.presentCount || 0) + 1; }
         item.seen++;
         let shouldEmitAq = false, shouldCancelAq = false;
@@ -2742,20 +2775,35 @@ class Engine {
             // Opt1 : absent tout du long → émettre le costume original
             shouldEmitAq = true;
           }
-        } else {
-          // Option 2 : attend N jeux complets, puis décide selon le résultat uniforme
+        } else if (item.option === 2) {
+          // Option 2 : attend N jeux complets
+          // Tous présents → émet le mapping | Tous absents ou mélangé → annule
           if (item.seen >= item.n) {
             const pc = item.presentCount || 0;
-            if (pc === 0) {
-              // Tous absents → émission du costume original (même comportement qu'opt1)
-              shouldEmitAq = true;
-              emitWithMapping = false;
-            } else if (pc === item.n) {
+            if (pc === item.n) {
               // Tous présents → émission via mapping
               shouldEmitAq = true;
               emitWithMapping = true;
             } else {
-              // Mélangé (absent + présent) → annuler
+              // Tous absents ou mélangé → annuler
+              shouldCancelAq = true;
+            }
+          }
+        } else {
+          // Option 3 : combine opt1 + opt2
+          // Tous absents → émet ps (opt1) | Tous présents → émet mapping (opt2) | Mélangé → annule
+          if (item.seen >= item.n) {
+            const pc = item.presentCount || 0;
+            if (pc === 0) {
+              // Tous absents → émet costume original (opt1)
+              shouldEmitAq = true;
+              emitWithMapping = false;
+            } else if (pc === item.n) {
+              // Tous présents → émet via mapping (opt2)
+              shouldEmitAq = true;
+              emitWithMapping = true;
+            } else {
+              // Mélangé → annuler
               shouldCancelAq = true;
             }
           }
@@ -2764,19 +2812,27 @@ class Engine {
         if (shouldEmitAq) {
           // Cible = jeu déclencheur original + n + écart (formule : triggerGame + n + écart)
           const aqTarget = (item.triggerGame || gn) + (item.n || 1) + (item.ecart || 1);
-          // Option 2 tous présents : utiliser le mapping (attente2Mapping ou mappings de la stratégie)
+          // Option 2 tous présents : utiliser le mapping (attente2Mapping, puis SPECIAL_ATTENTE_MAPPING)
           let emitPs = item.ps;
-          if (emitWithMapping && item.attente2Mapping) {
-            const mapped = item.attente2Mapping[item.ps];
-            if (mapped) emitPs = Array.isArray(mapped) ? mapped[0] : mapped;
+          if (emitWithMapping) {
+            let mapped = null;
+            if (item.attente2Mapping) {
+              const m = item.attente2Mapping[item.ps];
+              if (m) mapped = Array.isArray(m) ? m[0] : m;
+            }
+            // Fallback mapping naturel pour ps spéciaux (pair↔impair, WIN_P↔WIN_B, deux↔trois)
+            if (!mapped && SPECIAL_ATTENTE_MAPPING[item.ps]) mapped = SPECIAL_ATTENTE_MAPPING[item.ps];
+            if (mapped) emitPs = mapped;
           }
-          const logSuffix = item.option === 2
-            ? (emitWithMapping ? ` (tous présents→mapping depuis ${item.ps})` : ` (tous absents→original)`)
-            : '';
+          const logSuffix = item.option === 1 ? ''
+            : item.option === 2 ? ` (opt2: tous présents→mapping depuis ${item.ps})`
+            : emitWithMapping ? ` (opt3: tous présents→mapping depuis ${item.ps})` : ` (opt3: tous absents→original)`;
           console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[emitPs] || emitPs}${logSuffix} (${item.seen}/${item.n} jeux, présents=${item.presentCount || 0}, triggerGame=#${item.triggerGame || gn})`);
           await emitPrediction(aqTarget, emitPs, item.triggerSuit, { force: true });
         } else if (shouldCancelAq) {
-          const reason = item.option === 2 ? ` (mélangé: ${item.presentCount || 0}P/${item.seen - (item.presentCount || 0)}A sur ${item.n})` : ` (${item.seen}/${item.n} jeux, found=${item.suitFound})`;
+          const reason = item.option === 1
+            ? ` (${item.seen}/${item.n} jeux, found=${item.suitFound})`
+            : ` (${item.presentCount || 0}P/${item.seen - (item.presentCount || 0)}A sur ${item.n} — ${item.presentCount === 0 ? 'tous absents' : 'mélangé'} → annulé)`;
           console.log(`[${channelId}] [Attente] ❌ opt${item.option} — annulée ${SUIT_DISPLAY[item.ps] || item.ps}${reason}`);
         }
       }
@@ -2806,12 +2862,13 @@ class Engine {
       }
     } else if (mode === 'absence_apparition') {
       // Compte les absences consécutives (sans seuil max).
-      // Dès que le costume réapparaît après >= B absences → prédit ce même costume.
+      // Dès que le costume réapparaît après >= B absences → prédit le costume mappé (ou le même si pas de mapping).
       for (const suit of ALL_SUITS) {
         if (handSuits.includes(suit)) {
           if ((state.counts[suit] || 0) >= B) {
-            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction`);
-            await emitPrediction(gn + offset, suit, suit);
+            const ps = resolvePredictedSuit(suit) || suit;
+            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction ${ps}`);
+            await emitPrediction(gn + offset, ps, suit);
           }
           state.counts[suit] = 0;
         } else {
@@ -4399,13 +4456,12 @@ class Engine {
       const offset    = Math.max(1, parseInt(prediction_offset) || 1);
       const next      = gn + offset;
 
-      // Résolution du costume prédit via mappings (pour apparition_absence)
+      // Résolution du costume prédit via mappings (absence_apparition et apparition_absence)
       const resolveLivePs = (suit) => {
-        if (mode === 'absence_apparition') return suit; // prédit le même costume
         const raw  = mappings?.[suit];
         const pool = Array.isArray(raw) ? raw.filter(s => ALL_SUITS.includes(s))
                                         : (ALL_SUITS.includes(raw) ? [raw] : []);
-        if (!pool.length) return suit; // fallback même costume
+        if (!pool.length) return suit; // fallback même costume si pas de mapping
         return pool[Math.floor(Math.random() * pool.length)];
       };
 

@@ -26,7 +26,7 @@ let gamesCache     = [];
 let lastFetch      = 0;
 let lastClientPush = 0;
 let lastFingerprint = '';
-const CACHE_TTL    = 1500;
+const CACHE_TTL    = 800;
 
 // ── SSE Broadcaster ──────────────────────────────────────────────────────────
 // Tous les clients SSE connectés sont stockés ici.
@@ -117,10 +117,11 @@ const PROXY_SERVICES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
   url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
 ];
 
 let _lastProxyAttempt = 0;
-const PROXY_COOLDOWN = 8000; // 8s entre deux tentatives proxy
+const PROXY_COOLDOWN = 2500; // 2.5s entre deux tentatives proxy
 
 async function fetchGamesViaProxy() {
   const now = Date.now();
@@ -130,7 +131,7 @@ async function fetchGamesViaProxy() {
   const targetUrl = `${API_URL}?${API_PARAMS}`;
   for (const proxyFn of PROXY_SERVICES) {
     try {
-      const resp = await fetch(proxyFn(targetUrl), { timeout: 12000 });
+      const resp = await fetch(proxyFn(targetUrl), { timeout: 6000 });
       if (!resp.ok) continue;
       const data = await resp.json();
       const parsed = parseRawData(data);
@@ -150,7 +151,7 @@ async function fetchGames() {
 
   // 1. Tentative directe
   try {
-    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 8000 });
+    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
     if (resp.ok) {
       const data = await resp.json();
       const parsed = parseRawData(data);
