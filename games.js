@@ -2,9 +2,21 @@ const express = require('express');
 const fetch = require('node-fetch');
 const router = express.Router();
 
-// ── Nouvel endpoint direct (GetChampZip) — plus simple et plus fiable ─────────
-const CHAMP_API_URL = 'https://1xbet.com/LiveFeed/GetChampZip';
+// ── Endpoints principaux (1xBet + miroirs régionaux) ─────────────────────────
+// Les miroirs partagent la même infrastructure backend — même données, IPs différentes
+// ce qui offre une redondance naturelle quand le nœud principal est lent ou bloqué.
+const CHAMP_PATH   = '/LiveFeed/GetChampZip';
+const CHAMP_PARAMS_STR = 'champ=2050671';
+const CHAMP_API_URL  = 'https://1xbet.com' + CHAMP_PATH;
 const CHAMP_API_PARAMS = new URLSearchParams({ champ: 2050671 });
+
+// Miroirs régionaux 1xBet (même API, nœuds CDN différents)
+const MIRROR_HOSTS = [
+  'https://1xbet-africa.com',
+  'https://1xbet.cm',
+  'https://1xbet.ng',
+  'https://1xbet.gh',
+];
 
 // ── Ancien endpoint de secours (GetSportsShortZip) ───────────────────────────
 const API_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip';
@@ -33,6 +45,72 @@ let lastClientPush = 0;
 let lastFingerprint = '';
 const CACHE_TTL    = 800;
 
+// ── Détection de gap (jeu sauté) ─────────────────────────────────────────────
+// On trace le plus grand game_number vu jusqu'ici.
+// Si l'API passe de N à N+2 sans passer par N+1, on déclenche des refetch rapides.
+let _lastMaxGn = 0;
+let _gapRetryTimer = null;
+const GAP_RETRY_ATTEMPTS = 4;  // nombre de tentatives pour récupérer le jeu manquant
+const GAP_RETRY_INTERVAL = 800; // ms entre chaque tentative
+
+function _detectAndHandleGap(parsed) {
+  const maxGn = parsed.reduce((m, g) => Math.max(m, g.game_number || 0), 0);
+  if (maxGn === 0) return;
+
+  if (_lastMaxGn > 0 && maxGn > _lastMaxGn + 1) {
+    const missing = [];
+    for (let gn = _lastMaxGn + 1; gn < maxGn; gn++) missing.push(gn);
+    if (missing.length > 0 && missing.length <= 3) {
+      console.log(`[Games] ⚠️ Gap détecté : jeu(x) #${missing.join(',')} absent(s) → refetch rapide`);
+      _triggerGapRefetch(missing);
+    }
+  }
+
+  _lastMaxGn = Math.max(_lastMaxGn, maxGn);
+}
+
+function _triggerGapRefetch(missingGns) {
+  if (_gapRetryTimer) return; // déjà en cours
+  let attempt = 0;
+  _gapRetryTimer = setInterval(async () => {
+    attempt++;
+    try {
+      const fresh = await fetchGamesForce();
+      const foundAll = missingGns.every(gn => fresh.some(g => g.game_number === gn));
+      if (foundAll) {
+        console.log(`[Games] ✅ Gap comblé après ${attempt} tentative(s) — jeu(x) #${missingGns.join(',')}`);
+        clearInterval(_gapRetryTimer);
+        _gapRetryTimer = null;
+        return;
+      }
+    } catch {}
+    if (attempt >= GAP_RETRY_ATTEMPTS) {
+      console.log(`[Games] ℹ️ Gap #${missingGns.join(',')} non comblé après ${attempt} tentatives — jeu probablement trop court`);
+      clearInterval(_gapRetryTimer);
+      _gapRetryTimer = null;
+    }
+  }, GAP_RETRY_INTERVAL);
+}
+
+// ── Polling serveur autonome ──────────────────────────────────────────────────
+// Interroge l'API 1xBet toutes les 1.5s côté serveur, indépendamment des
+// client-push. Garantit que les jeux arrivent même quand aucun navigateur
+// n'est connecté (ex : nuit, perte de connexion côté client).
+const SERVER_POLL_INTERVAL = 1500; // ms
+let _serverPollActive = false;
+
+function startServerPoll() {
+  if (_serverPollActive) return;
+  _serverPollActive = true;
+  console.log('[Games] 🔄 Polling serveur démarré (toutes les 1.5s)');
+
+  setInterval(async () => {
+    try {
+      await fetchGames();
+    } catch {}
+  }, SERVER_POLL_INTERVAL);
+}
+
 // ── SSE Broadcaster ──────────────────────────────────────────────────────────
 // Tous les clients SSE connectés sont stockés ici.
 // Dès que le cache change, on leur pousse immédiatement les nouvelles données.
@@ -58,6 +136,10 @@ function broadcastGames(games) {
 function updateCache(parsed, source) {
   const fp = gamesFingerprint(parsed);
   if (fp === lastFingerprint) return false; // rien de nouveau
+
+  // Détecter un éventuel saut de numéro AVANT d'écraser le cache
+  _detectAndHandleGap(parsed);
+
   gamesCache      = parsed;
   lastFetch       = Date.now();
   lastFingerprint = fp;
@@ -127,6 +209,7 @@ const PROXY_SERVICES = [
 
 let _lastProxyAttempt = 0;
 const PROXY_COOLDOWN = 1000; // 1s entre deux séries de tentatives proxy
+let _directApiWarned = false; // logguer le blocage API directe une seule fois
 
 async function fetchGamesViaProxy() {
   const now = Date.now();
@@ -188,31 +271,56 @@ async function fetchGamesViaProxy() {
   return gamesCache;
 }
 
+// ── Fetch depuis un hôte spécifique (principal ou miroir) ────────────────────
+async function _fetchFromHost(host, timeoutMs = 3500) {
+  const url = `${host}${CHAMP_PATH}?${CHAMP_PARAMS_STR}`;
+  const headers = { ...API_HEADERS, Origin: host, Referer: `${host}/fr/live/baccarat` };
+  const resp = await fetch(url, { headers, timeout: timeoutMs });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const parsed = parseChampData(data);
+  if (!parsed || parsed.length === 0) throw new Error('Pas de données');
+  return parsed;
+}
+
+// ── Race entre hôte principal + miroirs régionaux ────────────────────────────
+// Tous lancés simultanément ; le premier qui répond avec des données valides gagne.
+// Si le principal répond en 0–200 ms on l'utilisera presque toujours ;
+// si bloqué, un miroir prend le relais sans délai supplémentaire.
+async function _fetchRaceMirrors() {
+  const allHosts = ['https://1xbet.com', ...MIRROR_HOSTS];
+  const promises = allHosts.map((host, idx) =>
+    _fetchFromHost(host, 3500).then(data => ({ data, host, idx }))
+  );
+  // Promise.any : résout dès qu'un succeed, rejeté si tous échouent
+  try {
+    const winner = await Promise.any(promises);
+    if (winner.host !== 'https://1xbet.com') {
+      console.log(`[Games] 🔀 Miroir utilisé : ${winner.host}`);
+    }
+    return winner.data;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
 
-  // 1. Tentative directe sur le nouvel endpoint GetChampZip — plus simple, moins de données
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const resp = await fetch(`${CHAMP_API_URL}?${CHAMP_API_PARAMS}`, {
-        headers: API_HEADERS,
-        timeout: 4000,
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        const parsed = parseChampData(data);
-        if (parsed && parsed.length > 0) {
-          updateCache(parsed, 'server');
-          if (attempt > 1) console.log(`[Games] ✅ GetChampZip réussi (tentative ${attempt})`);
-          return gamesCache;
-        }
-      }
-    } catch {}
-    if (attempt < 3) await new Promise(r => setTimeout(r, 300));
+  // 1. Race principal + miroirs simultanément (le plus rapide/disponible gagne)
+  try {
+    const parsed = await _fetchRaceMirrors();
+    if (parsed && parsed.length > 0) {
+      updateCache(parsed, 'server');
+      return gamesCache;
+    }
+    if (!_directApiWarned) { _directApiWarned = true; console.log('[Games] ⚠️ API directe 1xBet bloquée (IP serveur) — proxy utilisé en permanent'); }
+  } catch (e) {
+    if (!_directApiWarned) { _directApiWarned = true; console.log(`[Games] ⚠️ API directe inaccessible (${e.message}) — proxy activé`); }
   }
 
-  // 2. Fallback : ancien endpoint GetSportsShortZip
+  // 2. Fallback : ancien endpoint GetSportsShortZip (principal uniquement)
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
@@ -516,4 +624,4 @@ router.get('/stream', requireActiveSub, (req, res) => {
 
 function getGamesCache() { return gamesCache; }
 
-module.exports = { router, fetchGames, fetchGamesForce, getGamesCache };
+module.exports = { router, fetchGames, fetchGamesForce, getGamesCache, startServerPoll };

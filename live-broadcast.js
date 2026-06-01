@@ -1,20 +1,12 @@
 // ════════════════════════════════════════════════════════════════════════════
 //  LIVE BROADCAST — Diffusion en temps réel des parties Baccarat vers Telegram
 // ════════════════════════════════════════════════════════════════════════════
-//  • Aucune persistance des messages : tout est en mémoire.
-//  • Multi-cibles : chaque cible = { id, bot_token, channel_id, label, enabled }.
-//  • Stockage des cibles : DB setting `live_broadcast_targets` (JSON array).
-//  • Pour chaque jeu : envoie un message initial (live) puis l'édite en
-//    temps réel jusqu'à ce que la partie soit terminée.
-//  • Format des messages :
-//      En cours :        ⏰#N{n}. ▶️{p}({pCards}) - {b}({bCards})
-//                        ⏰#N{n}. {p}({pCards}) - ▶️{b}({bCards})
-//      Joueur gagne (2 cartes / 2 cartes) :  #N{n}. ✅{p}({pCards}) - {b}({bCards}) #T{tot} 🔵#R
-//      Joueur gagne (3ᵉ carte tirée) :       #N{n}. ✅{p}({pCards}) - {b}({bCards}) #T{tot} 🔵
-//      Banquier gagne (2/2) :                #N{n}. {p}({pCards}) - ✅{b}({bCards}) #T{tot} 🔴#R
-//      Banquier gagne (3ᵉ carte tirée) :     #N{n}. {p}({pCards}) - ✅{b}({bCards}) #T{tot} 🔴
-//      Égalité :                             #N{n}. {p}({pCards}) 🔰 {b}({bCards}) #T{tot} 🟣#X
-//   Le tag #R signifie "jeu terminé après distribution initiale" (aucune 3ᵉ carte).
+//  Fonctionnalités clés :
+//  • Édition PROGRESSIVE en 5 phases (Distribution → 2+2 → 3e carte → Final → Transition)
+//  • Calcul du timing inter-jeux : moyenne glissante sur les 10 derniers gaps
+//  • Message "⏳ Prochain #N+1 dans ~Xs" après finalisation, édité dès que N+1 arrive
+//  • Protection anti-saut : si l'API saute un numéro, on retente avant de continuer
+//  • Éditions limitées à 1/s par message (respect des limites Telegram)
 // ════════════════════════════════════════════════════════════════════════════
 
 const fetch = require('node-fetch');
@@ -22,24 +14,106 @@ const db    = require('./db');
 
 const TARGETS_KEY = 'live_broadcast_targets';
 
-// Timeout pour chaque appel Telegram (ms) — évite qu'une lenteur bloque tout
-const TG_TIMEOUT_MS = 5000;
+// Timeout pour chaque appel Telegram (ms)
+const TG_TIMEOUT_MS = 6000;
 
-// ── État mémoire (jamais persisté) ──────────────────────────────────────────
+// ── Throttle des éditions Telegram (1 édit par message max toutes les 1.1s) ─
+// Telegram refuse les éditions trop rapides sur le même message_id (429).
+const _editThrottle = new Map(); // messageId → lastEditAt (ms)
+const EDIT_COOLDOWN_MS = 1100;
+
+function canEdit(messageId) {
+  const last = _editThrottle.get(messageId) || 0;
+  return Date.now() - last >= EDIT_COOLDOWN_MS;
+}
+function markEdited(messageId) {
+  _editThrottle.set(messageId, Date.now());
+  // Nettoyage : on purge les entrées > 5 min
+  if (_editThrottle.size > 500) {
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    for (const [k, v] of _editThrottle) { if (v < cutoff) _editThrottle.delete(k); }
+  }
+}
+
+// ── État mémoire ─────────────────────────────────────────────────────────────
 // gameState[gameNumber] = {
-//   targets: { [targetId]: { messageId, lastText, finalSent } },
-//   firstSeenAt: timestamp,
-//   lastKnown: <game object> | null,   — dernier snapshot valide du jeu (avec cartes)
+//   targets    : { [targetId]: { messageId, lastText, finalSent, finalAt } }
+//   firstSeenAt: timestamp (première fois que ce jeu est apparu dans l'API)
+//   finishedAt : timestamp (quand le message final a été envoyé)
+//   lastKnown  : dernier snapshot valide (avec cartes ou terminé)
 // }
 const gameState = new Map();
 const MAX_TRACKED_GAMES  = 200;
-const FINAL_RETENTION_MS = 10 * 60 * 1000; // 10 min après finalisation
+const FINAL_RETENTION_MS = 10 * 60 * 1000;
+
+// nextWaiting[expectedGn] = {
+//   targets  : { [targetId]: { messageId, postedAt } }
+//   expectedAt: timestamp (quand on pense que le jeu arrivera)
+//   fromGn   : numéro du jeu précédent
+// }
+const nextWaiting = new Map();
+const NEXT_WAITING_EXPIRE_MS = 3 * 60 * 1000; // si pas apparu dans 3 min → purge
+
+// ── Statistiques de timing inter-jeux ───────────────────────────────────────
+// On garde les 12 derniers gaps (firstSeen[N+1] − firstSeen[N]) pour
+// calculer une moyenne glissante.
+const _gapHistory   = [];   // ms entre deux jeux consécutifs
+const _gameDuration = [];   // ms du premier snapshot au snapshot final
+const GAP_HISTORY_MAX = 12;
+
+// Enregistre le moment où un jeu est apparu pour la première fois
+const _gameFirstSeen = new Map(); // gn → timestamp
+
+function recordGameFirstSeen(gn, ts) {
+  if (_gameFirstSeen.has(gn)) return;
+  _gameFirstSeen.set(gn, ts);
+
+  // Calculer le gap depuis le jeu précédent
+  const prevGn = gn - 1;
+  const prevTs = _gameFirstSeen.get(prevGn);
+  if (prevTs) {
+    const gap = ts - prevTs;
+    if (gap > 2000 && gap < 180000) { // sanity check : entre 2s et 3 min
+      _gapHistory.push(gap);
+      if (_gapHistory.length > GAP_HISTORY_MAX) _gapHistory.shift();
+    }
+  }
+
+  // Nettoyage : on ne garde que les 30 derniers firstSeen
+  if (_gameFirstSeen.size > 30) {
+    const oldestGn = gn - 30;
+    for (const [k] of _gameFirstSeen) { if (k < oldestGn) _gameFirstSeen.delete(k); }
+  }
+}
+
+function recordGameDuration(gn, firstSeenAt, finishedAt) {
+  const dur = finishedAt - firstSeenAt;
+  if (dur > 5000 && dur < 180000) {
+    _gameDuration.push(dur);
+    if (_gameDuration.length > GAP_HISTORY_MAX) _gameDuration.shift();
+  }
+}
+
+// Retourne l'estimation du délai avant le prochain jeu (ms) depuis la fin du jeu courant
+function estimateNextGameDelay() {
+  if (_gapHistory.length >= 3) {
+    // Moyenne des gaps récents − durée moyenne d'un jeu (≈ temps post-fin avant apparition)
+    const avgGap = _gapHistory.reduce((a, b) => a + b, 0) / _gapHistory.length;
+    const avgDur = _gameDuration.length >= 3
+      ? _gameDuration.reduce((a, b) => a + b, 0) / _gameDuration.length
+      : avgGap * 0.7;
+    const delay = Math.max(5000, avgGap - avgDur);
+    return Math.round(delay / 1000) * 1000; // arrondi à la seconde
+  }
+  // Valeur par défaut si pas assez d'historique : 25 secondes
+  return 25000;
+}
+
+// ── Cibles : load / save ────────────────────────────────────────────────────
 
 let cachedTargets = null;
 let cachedAt = 0;
 const TARGETS_TTL = 5000;
-
-// ── Cibles : load / save ────────────────────────────────────────────────────
 
 async function loadTargets(force = false) {
   if (!force && cachedTargets && Date.now() - cachedAt < TARGETS_TTL) {
@@ -88,6 +162,9 @@ async function removeTarget(id) {
   await saveTargets(next);
   for (const st of gameState.values()) {
     if (st.targets && st.targets[id]) delete st.targets[id];
+  }
+  for (const wt of nextWaiting.values()) {
+    if (wt.targets && wt.targets[id]) delete wt.targets[id];
   }
 }
 
@@ -152,47 +229,82 @@ function fmtCards(cards) {
   return cards.map(c => `${rankLabel(c?.R)}${c?.S || ''}`).join('');
 }
 
-// ── Construction du message ─────────────────────────────────────────────────
+// ── Construction du message — 5 phases progressives ─────────────────────────
+//
+//  PHASE 1 — Aucune carte encore         : 🃏 #N{n}. Distribution...
+//  PHASE 2 — 2+2 cartes initiales        : ⏰ #N{n}. P:{p}({pCards}) ↔ B:{b}({bCards})
+//  PHASE 3 — 3e carte en cours (flèche)  : ⏰ #N{n}. P:▶️{p}({pCards}) ↔ B:{b}({bCards})
+//  PHASE 4 — Résultat final (2/2 → 3/x)  : #N{n}. ✅{p}({pCards}) - {b}({bCards}) 🔵[#R]
+//  (Après phase 4, le caller poste une 5e transition "Prochain jeu")
 
 function buildMessage(g) {
-  const p      = score(g.player_cards);
-  const b      = score(g.banker_cards);
-  const pCards = fmtCards(g.player_cards);
-  const bCards = fmtCards(g.banker_cards);
+  const pCards = Array.isArray(g.player_cards) ? g.player_cards : [];
+  const bCards = Array.isArray(g.banker_cards) ? g.banker_cards : [];
+  const p      = score(pCards);
+  const b      = score(bCards);
+  const pFmt   = fmtCards(pCards);
+  const bFmt   = fmtCards(bCards);
   const total  = p + b;
   const n      = g.game_number;
   const winner = g.winner;
   const finished = !!g.is_finished || winner === 'Player' || winner === 'Banker' || winner === 'Tie';
 
+  // ── PHASE 4 : terminé ────────────────────────────────────────────────────
   if (finished) {
-    const pLen = Array.isArray(g.player_cards) ? g.player_cards.length : 0;
-    const bLen = Array.isArray(g.banker_cards) ? g.banker_cards.length : 0;
-    const naturalEnd = pLen === 2 && bLen === 2;
+    const naturalEnd = pCards.length === 2 && bCards.length === 2;
+    const rTag = naturalEnd ? ' #R' : '';
 
-    if (winner === 'Tie') {
-      return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${naturalEnd ? ' #R' : ''}`;
-    }
-    if (winner === 'Player') {
-      return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
-    }
-    if (winner === 'Banker') {
-      return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
-    }
-    if (p === b) return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${naturalEnd ? ' #R' : ''}`;
-    if (p > b)   return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
-                 return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
+    if (winner === 'Tie')    return `#N${n}. ${p}(${pFmt}) 🔰 ${b}(${bFmt}) #T${total} 🟣#X${rTag}`;
+    if (winner === 'Player') return `#N${n}. ✅${p}(${pFmt}) - ${b}(${bFmt}) #T${total} 🔵${rTag}`.trimEnd();
+    if (winner === 'Banker') return `#N${n}. ${p}(${pFmt}) - ✅${b}(${bFmt}) #T${total} 🔴${rTag}`.trimEnd();
+    // Fallback si winner absent mais is_finished = true
+    if (p === b)   return `#N${n}. ${p}(${pFmt}) 🔰 ${b}(${bFmt}) #T${total} 🟣#X${rTag}`;
+    if (p > b)     return `#N${n}. ✅${p}(${pFmt}) - ${b}(${bFmt}) #T${total} 🔵${rTag}`.trimEnd();
+                   return `#N${n}. ${p}(${pFmt}) - ✅${b}(${bFmt}) #T${total} 🔴${rTag}`.trimEnd();
   }
 
-  // En cours
+  // ── PHASE 1 : aucune carte ───────────────────────────────────────────────
+  if (pCards.length === 0 && bCards.length === 0) {
+    return `🃏 #N${n}. Distribution des cartes...`;
+  }
+
+  // ── PHASE 2 / 3 : cartes en cours ────────────────────────────────────────
   const ph = g.phase || '';
   const playerDrawing = ph === 'PlayerMove';
   const bankerDrawing = ph === 'BankerMove' || ph === 'DealerMove' || ph === 'ThirdCard';
-  const pPart = playerDrawing ? `▶️${p}(${pCards})` : `${p}(${pCards})`;
-  const bPart = bankerDrawing ? `▶️${b}(${bCards})` : `${b}(${bCards})`;
-  return `⏰#N${n}. ${pPart} - ${bPart}`;
+
+  // Si l'une des mains a 3 cartes mais le jeu n'est pas encore marqué terminé :
+  // on indique la 3e carte avec la flèche de la bonne couleur
+  const pHas3 = pCards.length >= 3;
+  const bHas3 = bCards.length >= 3;
+
+  let pPart, bPart;
+  if (playerDrawing || pHas3) {
+    pPart = `▶️${p}(${pFmt})`;
+  } else {
+    pPart = `${p}(${pFmt})`;
+  }
+  if (bankerDrawing || bHas3) {
+    bPart = `▶️${b}(${bFmt})`;
+  } else {
+    bPart = `${b}(${bFmt})`;
+  }
+
+  return `⏰ #N${n}. ${pPart} - ${bPart}`;
 }
 
-// ── Appels Telegram bas niveau (avec timeout) ────────────────────────────────
+// ── Construction du message de transition "Prochain jeu" ────────────────────
+
+function buildNextGameMessage(nextGn, delayMs) {
+  const secs = Math.max(1, Math.round(delayMs / 1000));
+  return `⏳ Prochain jeu #N${nextGn} dans ~${secs}s...`;
+}
+
+function buildNextGameLiveMessage(nextGn) {
+  return `🃏 #N${nextGn}. Distribution des cartes...`;
+}
+
+// ── Appels Telegram bas niveau ───────────────────────────────────────────────
 
 async function tgSendMessage(token, chatId, text) {
   const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -205,7 +317,7 @@ async function tgSendMessage(token, chatId, text) {
   if (!resp.ok || !d?.ok) {
     const desc = d?.description || `HTTP ${resp.status}`;
     const err = new Error(desc);
-    err.code = d?.error_code || resp.status;
+    err.code  = d?.error_code || resp.status;
     throw err;
   }
   return d.result?.message_id || null;
@@ -223,16 +335,21 @@ async function tgEditMessage(token, chatId, messageId, text) {
     const desc = d?.description || `HTTP ${resp.status}`;
     if (/not modified/i.test(desc)) return messageId;
     const err = new Error(desc);
-    err.code = d?.error_code || resp.status;
+    err.code  = d?.error_code || resp.status;
     throw err;
   }
   return messageId;
 }
 
-// ── Diffusion d'un jeu vers UNE cible ───────────────────────────────────────
+// Edition avec throttle
+async function tgEditThrottled(token, chatId, messageId, text) {
+  if (!canEdit(messageId)) return null; // trop tôt — on skip (sera fait au prochain cycle)
+  markEdited(messageId);
+  return tgEditMessage(token, chatId, messageId, text);
+}
 
-// Détermine si les données d'un jeu sont suffisantes pour considérer la partie
-// comme définitivement terminée (gagnant connu OU ≥ 2 cartes par côté + is_finished).
+// ── Détermine si un jeu est complètement terminé (données fiables) ───────────
+
 function isDefinitivelyFinished(g) {
   if (!g.is_finished) return false;
   if (g.winner === 'Player' || g.winner === 'Banker' || g.winner === 'Tie') return true;
@@ -241,56 +358,184 @@ function isDefinitivelyFinished(g) {
   return pLen >= 2 && bLen >= 2;
 }
 
+// ── Diffusion d'un jeu vers UNE cible ───────────────────────────────────────
+
 async function diffuseGame(target, game, finishedNow) {
   const text = buildMessage(game);
   const gn   = game.game_number;
+  const now  = Date.now();
+
   let st = gameState.get(gn);
   if (!st) {
-    st = { targets: {}, firstSeenAt: Date.now(), lastKnown: null };
+    st = { targets: {}, firstSeenAt: now, finishedAt: null, lastKnown: null };
     gameState.set(gn, st);
+    recordGameFirstSeen(gn, now);
   }
 
-  // Mémoriser le dernier état valide du jeu (avec cartes ou terminé)
+  // Mémoriser le dernier état valide
   const hasCards = (game.player_cards?.length || 0) > 0 || (game.banker_cards?.length || 0) > 0;
   if (hasCards || game.is_finished) {
     st.lastKnown = { ...game };
   }
 
   let entry = st.targets[target.id];
-  if (!entry) entry = st.targets[target.id] = { messageId: null, lastText: null, finalSent: false };
+  if (!entry) entry = st.targets[target.id] = { messageId: null, lastText: null, finalSent: false, finalAt: null };
 
   if (entry.finalSent) return;
+
+  // Vérifier si ce jeu avait un message "prochain jeu" en attente → on le réutilise
+  const waitEntry = nextWaiting.get(gn)?.targets?.[target.id];
+
+  // Phase 1 (pas de cartes) : on ne poste que si le message "prochain jeu" est déjà là
+  // Sinon on skip pour éviter les messages vides qui sautent trop vite
+  const hasNoCards = (game.player_cards?.length || 0) === 0 && (game.banker_cards?.length || 0) === 0;
+  if (hasNoCards && !game.is_finished) {
+    if (waitEntry?.messageId && !entry.messageId) {
+      // Réutiliser le message de transition "Prochain jeu" → l'éditer en "Distribution..."
+      const transText = buildNextGameLiveMessage(gn);
+      try {
+        await tgEditThrottled(target.bot_token, target.channel_id, waitEntry.messageId, transText);
+        entry.messageId = waitEntry.messageId;
+        entry.lastText  = transText;
+        // Marquer la transition comme consommée
+        delete nextWaiting.get(gn)?.targets?.[target.id];
+        const lbl = target.label || target.id;
+        console.log(`[LiveBroadcast] 🔄 #${gn} TRANS → [${lbl}] (recycled next-game msg) | ${transText}`);
+      } catch (e) {
+        console.warn(`[LiveBroadcast] ❌ #${gn} [${target.label || target.id}] edit trans: ${e.message}`);
+      }
+    }
+    return; // on attend d'avoir des vraies cartes
+  }
+
   if (entry.lastText === text) return;
 
-  // N'appliquer finalSent=true que si les données sont vraiment complètes
   const definitivelyDone = finishedNow && isDefinitivelyFinished(game);
-
   const lbl = target.label || target.id;
+
   try {
     if (entry.messageId) {
-      await tgEditMessage(target.bot_token, target.channel_id, entry.messageId, text);
-      if (definitivelyDone) {
-        console.log(`[LiveBroadcast] 🏁 #${gn} FINAL → [${lbl}] | ${text}`);
-      } else {
-        console.log(`[LiveBroadcast] ✏️  #${gn} EDIT  → [${lbl}] | ${text}`);
+      // Édition avec throttle anti-429
+      const ok = await tgEditThrottled(target.bot_token, target.channel_id, entry.messageId, text);
+      if (ok !== null) {
+        if (definitivelyDone) {
+          console.log(`[LiveBroadcast] 🏁 #${gn} FINAL → [${lbl}] | ${text}`);
+          st.finishedAt = now;
+          entry.finalAt = now;
+          recordGameDuration(gn, st.firstSeenAt, now);
+        } else {
+          console.log(`[LiveBroadcast] ✏️  #${gn} EDIT  → [${lbl}] | ${text}`);
+        }
+        entry.lastText = text;
+        if (definitivelyDone) entry.finalSent = true;
       }
     } else {
-      const mid = await tgSendMessage(target.bot_token, target.channel_id, text);
+      // Nouveau message : récupérer le messageId du "prochain jeu" si disponible
+      let mid;
+      if (waitEntry?.messageId) {
+        // Éditer le message de transition au lieu d'en envoyer un nouveau
+        await tgEditThrottled(target.bot_token, target.channel_id, waitEntry.messageId, text);
+        mid = waitEntry.messageId;
+        delete nextWaiting.get(gn)?.targets?.[target.id];
+        console.log(`[LiveBroadcast] 🔁 #${gn} RECYCLE → [${lbl}] msgId=${mid} | ${text}`);
+      } else {
+        mid = await tgSendMessage(target.bot_token, target.channel_id, text);
+        console.log(`[LiveBroadcast] 📨 #${gn} ENVOI  → [${lbl}] msgId=${mid} | ${text}`);
+      }
       entry.messageId = mid;
-      console.log(`[LiveBroadcast] 📨 #${gn} ENVOI → [${lbl}] msgId=${mid} | ${text}`);
+      entry.lastText  = text;
+      if (definitivelyDone) {
+        entry.finalSent = true;
+        entry.finalAt   = now;
+        st.finishedAt   = now;
+        recordGameDuration(gn, st.firstSeenAt, now);
+      }
     }
-    entry.lastText = text;
-    if (definitivelyDone) entry.finalSent = true;
   } catch (e) {
     console.warn(`[LiveBroadcast] ❌ #${gn} [${lbl}] erreur: ${e.message}`);
   }
 }
 
-// ── Diffusion d'un jeu vers TOUTES les cibles en parallèle ──────────────────
+// ── Annonce du prochain jeu (message de transition) ──────────────────────────
+// Appelé après la finalisation de tous les messages d'un jeu gn.
+// Poste un message "⏳ Prochain #N+1 dans ~Xs" sur chaque cible qui a un messageId.
+
+async function postNextGameCountdown(targets, gn) {
+  const nextGn    = gn + 1;
+  const delayMs   = estimateNextGameDelay();
+  const text      = buildNextGameMessage(nextGn, delayMs);
+  const expectedAt = Date.now() + delayMs;
+
+  // Ne pas re-poster si déjà en attente
+  if (nextWaiting.has(nextGn)) return;
+
+  const waiting = { targets: {}, expectedAt, fromGn: gn };
+  nextWaiting.set(nextGn, waiting);
+
+  const lbl = (t) => t.label || t.id;
+  await Promise.allSettled(
+    targets.map(async (t) => {
+      const st = gameState.get(gn);
+      if (!st?.targets?.[t.id]?.messageId) return; // pas de messageId → pas de countdown
+      try {
+        const mid = await tgSendMessage(t.bot_token, t.channel_id, text);
+        waiting.targets[t.id] = { messageId: mid, postedAt: Date.now() };
+        console.log(`[LiveBroadcast] ⏳ #${gn}→#${nextGn} COUNTDOWN → [${lbl(t)}] dans ~${Math.round(delayMs/1000)}s | msgId=${mid}`);
+      } catch (e) {
+        console.warn(`[LiveBroadcast] ❌ Countdown #${nextGn} [${lbl(t)}]: ${e.message}`);
+      }
+    })
+  );
+
+  // Mise à jour progressive du compte à rebours (toutes les 5s)
+  _scheduleCountdownUpdates(nextGn, delayMs, targets);
+}
+
+// Met à jour le message de compte à rebours toutes les 5s
+function _scheduleCountdownUpdates(nextGn, totalDelayMs, targets) {
+  const steps = Math.floor(totalDelayMs / 5000) - 1;
+  if (steps <= 0) return;
+
+  let step = 0;
+  const interval = setInterval(async () => {
+    step++;
+    const waiting = nextWaiting.get(nextGn);
+    if (!waiting) { clearInterval(interval); return; }
+
+    // Si le jeu est déjà arrivé → arrêter
+    if (gameState.has(nextGn)) { clearInterval(interval); return; }
+
+    // Vérifier l'expiration
+    if (Date.now() > waiting.expectedAt + NEXT_WAITING_EXPIRE_MS) {
+      clearInterval(interval);
+      nextWaiting.delete(nextGn);
+      return;
+    }
+
+    if (step >= steps) { clearInterval(interval); return; }
+
+    const remainMs = waiting.expectedAt - Date.now();
+    if (remainMs <= 2000) { clearInterval(interval); return; }
+
+    const text = buildNextGameMessage(nextGn, remainMs);
+
+    await Promise.allSettled(
+      targets.map(async (t) => {
+        const entry = waiting.targets[t.id];
+        if (!entry?.messageId) return;
+        if (entry.lastText === text) return;
+        try {
+          await tgEditThrottled(t.bot_token, t.channel_id, entry.messageId, text);
+          entry.lastText = text;
+        } catch {}
+      })
+    );
+  }, 5000);
+}
+
+// ── Diffusion vers TOUTES les cibles en parallèle ────────────────────────────
 
 async function diffuseGameAllTargets(targets, game, finishedNow) {
-  // Toutes les cibles sont indépendantes → on envoie en parallèle
-  // pour qu'une cible lente ne retarde pas les autres.
   await Promise.allSettled(
     targets.map(t => {
       const st    = gameState.get(game.game_number);
@@ -301,73 +546,64 @@ async function diffuseGameAllTargets(targets, game, finishedNow) {
   );
 }
 
-// ── File d'attente interne ───────────────────────────────────────────────────
-// IMPORTANT : on ne garde pas "le dernier snapshot" mais un snapshot FUSIONNÉ.
-// Cela garantit que si le traitement prend 3-5s (appels Telegram) et que
-// plusieurs snapshots arrivent pendant ce temps, aucun jeu n'est perdu :
-// chaque jeu est conservé dans l'état le plus récent entre l'ancien et le nouveau.
-let _processing = false;
-let _pendingGames = null; // toujours le snapshot fusionné le plus complet
+// ── Vérifie si un jeu est entièrement finalisé sur toutes les cibles ─────────
+function isFullyFinalized(gn, targets) {
+  const st = gameState.get(gn);
+  if (!st || Object.keys(st.targets).length === 0) return false;
+  return targets.every(t => st.targets[t.id]?.finalSent === true);
+}
 
-// Fusionne deux listes de jeux : pour chaque game_number on garde l'état
-// le plus "avancé" (terminé > en cours > rien). Les jeux présents dans
-// l'ancien snapshot mais absents du nouveau sont conservés s'ils ne sont
-// pas encore finalisés dans gameState — on ne les perd jamais.
+// ── File d'attente interne ───────────────────────────────────────────────────
+
+let _processing   = false;
+let _pendingGames = null;
+
 function mergeSnapshots(oldGames, newGames) {
   if (!oldGames || oldGames.length === 0) return newGames;
   if (!newGames || newGames.length === 0) return oldGames;
 
   const map = new Map();
 
-  // 1. Charger les anciens jeux
   for (const g of oldGames) {
     if (g?.game_number) map.set(g.game_number, g);
   }
 
-  // 2. Fusionner avec les nouveaux : on garde l'état le plus avancé
   for (const g of newGames) {
     if (!g?.game_number) continue;
     const existing = map.get(g.game_number);
     if (!existing) {
       map.set(g.game_number, g);
     } else {
-      // Préférer l'état terminé, sinon le plus de cartes, sinon le plus récent
       const existFinished = !!existing.is_finished;
       const newFinished   = !!g.is_finished;
       if (newFinished && !existFinished) {
-        map.set(g.game_number, g); // nouveau est terminé → priorité
+        map.set(g.game_number, g);
       } else if (!newFinished && !existFinished) {
-        // Ni l'un ni l'autre terminé → garder celui avec le plus de cartes
         const existCards = (existing.player_cards?.length || 0) + (existing.banker_cards?.length || 0);
-        const newCards   = (g.player_cards?.length || 0) + (g.banker_cards?.length || 0);
+        const newCards   = (g.player_cards?.length || 0)       + (g.banker_cards?.length || 0);
         if (newCards >= existCards) map.set(g.game_number, g);
-        // sinon on garde l'ancien (plus de cartes = plus d'info)
       }
-      // Si existing est terminé et nouveau ne l'est pas → on garde l'ancien
     }
   }
 
-  // 3. Retirer les jeux de l'ancien snapshot qui sont déjà complètement finalisés
-  //    dans gameState (évite de les re-traiter inutilement)
   const result = [];
   for (const [gn, g] of map.entries()) {
     const st = gameState.get(gn);
     if (st) {
       const allDone = Object.keys(st.targets).length > 0 &&
                       Object.values(st.targets).every(e => e.finalSent);
-      if (allDone) continue; // déjà finalisé → inutile de le garder dans la file
+      if (allDone) continue;
     }
     result.push(g);
   }
   return result;
 }
 
-// ── Traitement interne d'un snapshot de jeux ─────────────────────────────────
+// ── Traitement interne d'un snapshot ─────────────────────────────────────────
 
 async function _processSnapshot(games) {
   const targets = (await loadTargets()).filter(t => t.enabled !== false);
   if (targets.length === 0) {
-    // Log une fois toutes les 60s pour ne pas spammer
     const now = Date.now();
     if (!_processSnapshot._lastNoTargetLog || now - _processSnapshot._lastNoTargetLog > 60000) {
       console.log('[LiveBroadcast] ℹ️  Aucune cible active — diffusion désactivée');
@@ -376,7 +612,7 @@ async function _processSnapshot(games) {
     return;
   }
 
-  // Classer les jeux : nouveaux (jamais vus) EN PREMIER, puis connus
+  // Classer : nouveaux EN PREMIER (par ordre croissant), puis connus
   const newGames   = [];
   const knownGames = [];
   const skipped    = [];
@@ -384,7 +620,11 @@ async function _processSnapshot(games) {
   for (const g of games) {
     if (!g || !g.game_number) continue;
     const hasCards = (g.player_cards?.length || 0) > 0 || (g.banker_cards?.length || 0) > 0;
-    if (!hasCards && !g.is_finished) {
+
+    // On accepte aussi les jeux sans cartes s'ils ont un message "prochain jeu" en attente
+    const hasNextWaiting = nextWaiting.has(g.game_number);
+
+    if (!hasCards && !g.is_finished && !hasNextWaiting) {
       skipped.push(g.game_number);
       continue;
     }
@@ -396,7 +636,7 @@ async function _processSnapshot(games) {
   }
 
   if (skipped.length > 0) {
-    console.log(`[LiveBroadcast] ⏳ Jeu(x) #${skipped.join(',')} ignoré(s) — Prematch/pas de cartes`);
+    console.log(`[LiveBroadcast] ⏳ Jeu(x) #${skipped.join(',')} ignoré(s) — pas de cartes encore`);
   }
 
   newGames.sort((a, b) => a.game_number - b.game_number);
@@ -409,29 +649,40 @@ async function _processSnapshot(games) {
     console.log(`[LiveBroadcast] 🎯 ${targets.length} cible(s) | Nouveaux: [${newNums || '—'}] Connus: [${knownNums || '—'}]`);
   }
 
+  // Ensemble des numéros AVANT ce snapshot (pour détecter les jeux finalisés après)
+  const justFinalized = new Set();
+
   for (const g of sorted) {
-    const finishedNow = !!g.is_finished;
+    const finishedNow      = !!g.is_finished;
+    const wasFullyFinal    = isFullyFinalized(g.game_number, targets);
     await diffuseGameAllTargets(targets, g, finishedNow);
+
+    // Si ce jeu vient d'être entièrement finalisé → programmer le countdown
+    if (finishedNow && !wasFullyFinal && isFullyFinalized(g.game_number, targets)) {
+      justFinalized.add(g.game_number);
+    }
   }
 
-  // ── Finalisation des jeux disparus de l'API ────────────────────────────────
-  // Un jeu peut disparaître du snapshot AVANT qu'on ait pu envoyer l'état final
-  // (l'API retire les jeux terminés très vite). On force alors un dernier edit
-  // sur les jeux trackés qui ne sont plus dans le snapshot courant.
+  // Poster les countdowns pour les jeux nouvellement finalisés
+  // (léger délai pour que le message final soit bien envoyé en premier)
+  for (const gn of justFinalized) {
+    setTimeout(() => postNextGameCountdown(targets, gn).catch(() => {}), 800);
+  }
+
+  // ── Finalisation des jeux disparus de l'API ───────────────────────────────
   const snapshotNums = new Set(games.map(g => g.game_number));
   for (const [gn, st] of gameState.entries()) {
-    if (snapshotNums.has(gn)) continue;              // encore dans l'API — géré ci-dessus
-    if (!st.lastKnown) continue;                     // jamais vu avec des cartes — rien à faire
-    // Vérifier s'il reste des cibles non finalisées avec un messageId
+    if (snapshotNums.has(gn)) continue;
+    if (!st.lastKnown) continue;
+
     const pendingTargets = targets.filter(t => {
       const e = st.targets[t.id];
       return e && e.messageId && !e.finalSent;
     });
     if (pendingTargets.length === 0) continue;
 
-    // Construire un état "terminé forcé" basé sur le dernier snapshot connu
+    // Le jeu a disparu sans être finalisé : forcer l'état final
     const forcedGame = { ...st.lastKnown, is_finished: true };
-    // Si le gagnant n'est pas connu, le recalculer depuis les scores
     if (!forcedGame.winner) {
       const p = score(forcedGame.player_cards);
       const b = score(forcedGame.banker_cards);
@@ -439,9 +690,14 @@ async function _processSnapshot(games) {
     }
     console.log(`[LiveBroadcast] 🔍 #${gn} disparu sans finalisation → forçage final (${pendingTargets.length} cible(s))`);
     await Promise.allSettled(pendingTargets.map(t => diffuseGame(t, forcedGame, true)));
+
+    // Countdown si on vient juste de finaliser
+    if (isFullyFinalized(gn, targets)) {
+      setTimeout(() => postNextGameCountdown(targets, gn).catch(() => {}), 800);
+    }
   }
 
-  // Nettoyage : anneau circulaire + expiration des jeux finalisés
+  // ── Nettoyage ─────────────────────────────────────────────────────────────
   if (gameState.size > MAX_TRACKED_GAMES) {
     const keys = [...gameState.keys()].sort((a, b) => a - b);
     const toDelete = keys.slice(0, keys.length - MAX_TRACKED_GAMES);
@@ -453,21 +709,24 @@ async function _processSnapshot(games) {
                     Object.values(st.targets).every(e => e.finalSent);
     if (allDone && st.firstSeenAt < cutoff) gameState.delete(k);
   }
+
+  // Nettoyage des nextWaiting expirés
+  const expireCutoff = Date.now() - NEXT_WAITING_EXPIRE_MS;
+  for (const [gn, wt] of nextWaiting.entries()) {
+    if (wt.expectedAt < expireCutoff || gameState.has(gn)) {
+      nextWaiting.delete(gn);
+    }
+  }
 }
 
-// ── Hook principal : appelé à chaque mise à jour des jeux ───────────────────
+// ── Hook principal ───────────────────────────────────────────────────────────
 
 async function onGamesUpdate(games) {
   if (!Array.isArray(games) || games.length === 0) return;
 
-  // FUSION : on accumule tous les snapshots intermédiaires au lieu d'écraser.
-  // Ainsi aucun jeu vu entre deux cycles de traitement n'est perdu.
   _pendingGames = mergeSnapshots(_pendingGames, games);
-
-  // Si un traitement est déjà en cours, il prendra ce snapshot fusionné dès sa fin
   if (_processing) return;
 
-  // Lancer la boucle de traitement
   _processing = true;
   try {
     while (_pendingGames) {
@@ -482,13 +741,13 @@ async function onGamesUpdate(games) {
   }
 }
 
-// ── Test d'envoi d'un message vers une cible précise ────────────────────────
+// ── Test d'envoi ─────────────────────────────────────────────────────────────
 
 async function sendTestMessage(targetId) {
   const list = await loadTargets(true);
   const t = list.find(x => x.id === targetId);
   if (!t) throw new Error('Cible introuvable');
-  const text = `✅ Test diffusion live — canal connecté\n#N0000. ✅9(8♣️A♥️) - 3(6♥️7♠️) #T12 🔵#R`;
+  const text = `✅ Test diffusion live — canal connecté\n#N0000. ✅9(8♣️A♥️) - 3(6♥️7♠️) #T12 🔵 #R`;
   const mid = await tgSendMessage(t.bot_token, t.channel_id, text);
   return { ok: true, message_id: mid };
 }
@@ -499,4 +758,7 @@ module.exports = {
   sendTestMessage,
   buildMessage,
   _gameState: gameState,
+  _nextWaiting: nextWaiting,
+  _gapHistory,
+  estimateNextGameDelay,
 };

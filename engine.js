@@ -4566,38 +4566,50 @@ class Engine {
   }
 
   // ── Reset des compteurs sur gap API ──────────────────────────────────────
-  // Quand un ou plusieurs jeux sont sautés par l'API, on ne sait pas ce qui
-  // s'est passé → on remet tous les compteurs à zéro et on supprime les
-  // prédictions en attente pour les numéros de jeux manquants.
+  // Stratégie différenciée selon la taille du gap :
+  //   • gap ≤ 2 jeux (PETIT GAP) : jeux trop courts, probablement jamais dans l'API.
+  //     → On annule uniquement les prédictions pendantes pour les jeux sautés.
+  //     → Les compteurs (absences, miroir…) sont PRÉSERVÉS pour ne pas perdre
+  //       la progression accumulée — l'erreur d'un jeu manquant est négligeable.
+  //   • gap ≥ 3 jeux (GRAND GAP) : panne API réelle ou reconnexion.
+  //     → Reset complet des compteurs + suppression des pending (comportement historique).
   _resetCountersOnGap(fromGn, toGn) {
-    console.warn(`[Engine] 🔄 Gap #${fromGn}–#${toGn} : reset compteurs + suppression prédictions pendantes`);
+    const gapSize = toGn - fromGn + 1;
+    const isSmallGap = gapSize <= 2;
 
-    // C1 / C2 / C3 — absences, miroir, pertes consécutives
-    for (const s of ALL_SUITS) {
-      if (this.c1?.absences)      this.c1.absences[s]      = 0;
-      if (this.c2?.absences)      this.c2.absences[s]      = 0;
-      if (this.c3?.absences)      this.c3.absences[s]      = 0;
-      if (this.c1?.mirrorCounts)  this.c1.mirrorCounts[s]  = 0;
-      if (this.c2?.mirrorCounts)  this.c2.mirrorCounts[s]  = 0;
-      if (this.c3?.mirrorCounts)  this.c3.mirrorCounts[s]  = 0;
-    }
-    if (this.c1) { this.c1.consecLosses = 0; }
-    if (this.c2) { this.c2.hadFirstLoss = false; }
-    if (this.c3) { this.c3.consecLosses = 0; }
+    if (isSmallGap) {
+      console.warn(`[Engine] ⚡ Petit gap #${fromGn}–#${toGn} (${gapSize} jeu(x)) — compteurs préservés, pending annulés`);
+    } else {
+      console.warn(`[Engine] 🔄 Grand gap #${fromGn}–#${toGn} (${gapSize} jeux) — reset compteurs + suppression prédictions pendantes`);
 
-    // Stratégies custom — tous les compteurs
-    for (const [, state] of Object.entries(this.custom)) {
+      // C1 / C2 / C3 — absences, miroir, pertes consécutives
       for (const s of ALL_SUITS) {
-        if (state.counts)        state.counts[s]        = 0;
-        if (state.mirrorCounts)  state.mirrorCounts[s]  = 0;
-        if (state.absenceCounts) state.absenceCounts[s] = 0;
-        if (state.mappingIndex)  state.mappingIndex[s]  = 0;
+        if (this.c1?.absences)      this.c1.absences[s]      = 0;
+        if (this.c2?.absences)      this.c2.absences[s]      = 0;
+        if (this.c3?.absences)      this.c3.absences[s]      = 0;
+        if (this.c1?.mirrorCounts)  this.c1.mirrorCounts[s]  = 0;
+        if (this.c2?.mirrorCounts)  this.c2.mirrorCounts[s]  = 0;
+        if (this.c3?.mirrorCounts)  this.c3.mirrorCounts[s]  = 0;
       }
-      if (state.parityCounts)  { state.parityCounts.pair  = 0; state.parityCounts.impair = 0; }
-      if (state.c2v3Counts)    { state.c2v3Counts.deux    = 0; state.c2v3Counts.trois    = 0; }
+      if (this.c1) { this.c1.consecLosses = 0; }
+      if (this.c2) { this.c2.hadFirstLoss = false; }
+      if (this.c3) { this.c3.consecLosses = 0; }
+
+      // Stratégies custom — tous les compteurs
+      for (const [, state] of Object.entries(this.custom)) {
+        for (const s of ALL_SUITS) {
+          if (state.counts)        state.counts[s]        = 0;
+          if (state.mirrorCounts)  state.mirrorCounts[s]  = 0;
+          if (state.absenceCounts) state.absenceCounts[s] = 0;
+          if (state.mappingIndex)  state.mappingIndex[s]  = 0;
+        }
+        if (state.parityCounts)  { state.parityCounts.pair  = 0; state.parityCounts.impair = 0; }
+        if (state.c2v3Counts)    { state.c2v3Counts.deux    = 0; state.c2v3Counts.trois    = 0; }
+      }
     }
 
-    // Supprimer les prédictions en attente pour les jeux sautés
+    // Dans tous les cas : supprimer les prédictions en attente pour les jeux sautés
+    // (leur vérification est impossible sans les cartes du jeu manquant)
     const removeSkipped = (pending, label) => {
       for (let gn = fromGn; gn <= toGn; gn++) {
         if (pending[gn] !== undefined) {

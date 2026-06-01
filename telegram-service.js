@@ -6,6 +6,12 @@ let TOKEN         = process.env.BOT_TOKEN || null;
 let currentFormat = 1;
 let maxRattrapage = 2;
 
+// ── Relay hooks : fonctions appelées sur chaque channel_post/message ──────────
+const _relayHandlers = new Set();
+function registerRelayHandler(fn) { _relayHandlers.add(fn); }
+function unregisterRelayHandler(fn) { _relayHandlers.delete(fn); }
+function getMainToken() { return TOKEN; }
+
 // ── Settings loaders ───────────────────────────────────────────────
 
 async function loadToken() {
@@ -94,9 +100,14 @@ async function startBot() {
   }).catch(err => console.error('Bot getMe error:', err.message));
 
   function handleIncoming(msg) {
-    const chatId   = String(msg.chat.id);
     const chatType = msg.chat.type;
     const text     = msg.text || msg.caption || '(media)';
+    // Appel des handlers de relay (avant tout filtre)
+    if (_relayHandlers.size > 0) {
+      for (const fn of _relayHandlers) {
+        try { fn(msg); } catch {}
+      }
+    }
     if (chatType === 'private') return;
     for (const [tgId, ch] of channelStore.entries()) {
       if (matchesChannel(msg, tgId)) {
@@ -2061,4 +2072,5 @@ module.exports = {
   SUIT_EMOJI, SUIT_NAME,
   buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText, buildBanqueFinalBilanText,
   sendBanqueTgMessage, editBanqueTgMessage,
+  registerRelayHandler, unregisterRelayHandler, getMainToken,
 };

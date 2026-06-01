@@ -118,10 +118,12 @@ const ideaRoutes       = require('./idea-route');
 const tgAnnounceRoutes = require('./tg-announce-route');
 const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
 const { startPubScheduler }        = require('./pub-scheduler');
+const tgRelayRoutes    = require('./tg-relay-route');
 app.use('/api/shop',        shopRoutes);
 app.use('/api/license',     licenseRoutes);
 app.use('/api/ideas',       ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
+app.use('/api/admin/tg-relay', tgRelayRoutes);
 
 // ── Statut admin en ligne ──────────────────────────────────────────
 const db = require('./db');
@@ -459,6 +461,9 @@ async function initBackgroundServices() {
   await telegramService.loadConfig();
   await comptages.init();
   await engine.start(2000);
+  // Démarrer le polling serveur autonome (1.5s) pour la diffusion live Telegram
+  const { startServerPoll } = require('./games');
+  startServerPoll();
   bilan.scheduleMidnight();
   // Initialiser la table hébergement bots + restaurer bots actifs
   await botHost.initDB();
@@ -519,6 +524,13 @@ async function initBackgroundServices() {
   // ── Planificateur annonces Telegram ──────────────────────────────────────
   startTgAnnounceScheduler();
   startPubScheduler();
+  // ── Démarrage du service de relais Telegram ──────────────────────────────
+  try {
+    const tgRelay = require('./tg-relay');
+    await tgRelay.startAll();
+  } catch (e) {
+    console.warn('[TgRelay] Démarrage échoué (non bloquant):', e.message);
+  }
 }
 
 main().catch(err => {
