@@ -395,6 +395,8 @@ export default function Dashboard() {
 
   const gamesRef    = useRef(null);
   const knownPredIds = useRef(new Set());
+  const finishedAtRef = useRef({});
+  const [hiddenGameNums, setHiddenGameNums] = useState(new Set());
   const voiceGenderRef = useRef(voiceGender);
   const voiceVolumeRef = useRef(voiceVolume);
   useEffect(() => { voiceGenderRef.current = voiceGender; }, [voiceGender]);
@@ -447,6 +449,21 @@ export default function Dashboard() {
     const timeout = setTimeout(() => setLoadingGames(false), 6000);
     return () => { es.close(); clearTimeout(timeout); };
   }, [hasAccess]);
+
+  // Auto-masquer les jeux terminés après 8 secondes
+  useEffect(() => {
+    const timers = [];
+    for (const g of games) {
+      if (g.is_finished && !finishedAtRef.current[g.game_number]) {
+        finishedAtRef.current[g.game_number] = Date.now();
+        const t = setTimeout(() => {
+          setHiddenGameNums(prev => new Set([...prev, g.game_number]));
+        }, 8000);
+        timers.push(t);
+      }
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [games]);
 
   // Fetch visible strategies for this user and enforce access
   useEffect(() => {
@@ -924,8 +941,12 @@ export default function Dashboard() {
         {(() => {
           const LIVE_PHASES = ['PlayerMove', 'DealerMove', 'BankerMove', 'ThirdCard'];
           const liveGame    = games.find(g => !g.is_finished && (LIVE_PHASES.includes(g.phase) || g.player_cards?.length > 0));
-          const finishedGames = games.filter(g => g.is_finished).sort((a,b) => b.game_number - a.game_number);
+          const finishedGames = games.filter(g => g.is_finished && !hiddenGameNums.has(g.game_number)).sort((a,b) => b.game_number - a.game_number);
           const upcomingGames = games.filter(g => !g.is_finished && !LIVE_PHASES.includes(g.phase) && !(g.player_cards?.length > 0)).sort((a,b) => a.game_number - b.game_number);
+          // Le jeu affiché dans le grand slot : live en priorité, sinon le premier "à venir"
+          const featuredUpcoming = !liveGame && upcomingGames.length > 0 ? upcomingGames[0] : null;
+          // Mini-cartes : exclure le jeu déjà affiché dans le grand slot
+          const miniUpcoming = featuredUpcoming ? upcomingGames.slice(1) : upcomingGames;
 
           const isRedSuit = s => s && (s.includes('♥') || s.includes('♦') || s === '❤️');
 
@@ -1006,6 +1027,20 @@ export default function Dashboard() {
                 <div className="gmc-timer-label">{g.status_label || autoT('Prochaine partie')}</div>
               </div>
             );
+
+            if (mode === 'upcoming-main') return (
+              <div className="game-live-card upcoming-main">
+                <div className="glc-header">
+                  <span className="glc-badge coming">🕐 {autoT('Prochaine partie')}</span>
+                  <span className="glc-num">Partie #{g.game_number}</span>
+                  {g.status_label && <span className="glc-timer">{g.status_label}</span>}
+                </div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', flex:1, flexDirection:'column', gap:8, padding:'14px 0', opacity:0.65 }}>
+                  <div style={{ fontSize:'2rem' }}>⏳</div>
+                  <span style={{ fontSize:'0.82rem', color:'#94a3b8' }}>{autoT('Mise en place de la partie...')}</span>
+                </div>
+              </div>
+            );
             return null;
           };
 
@@ -1046,6 +1081,8 @@ export default function Dashboard() {
                   <div className={`live-grid ${canSeeCounter ? 'live-grid-admin' : 'live-grid-single'}`}>
                     {liveGame ? (
                       <GameRow g={liveGame} mode="live" />
+                    ) : featuredUpcoming ? (
+                      <GameRow g={featuredUpcoming} mode="upcoming-main" />
                     ) : (
                       <div className="game-live-card empty">
                         <span style={{opacity:0.5, fontSize:'0.85rem'}}>{autoT('En attente de la prochaine partie...')}</span>
@@ -1874,7 +1911,7 @@ export default function Dashboard() {
                   {(finishedGames.length > 0 || upcomingGames.length > 0) && (
                     <div className="game-mini-scroll">
                       {finishedGames.map(g => <GameRow key={g.game_number} g={g} mode="finished" />)}
-                      {upcomingGames.map(g => <GameRow key={g.game_number} g={g} mode="upcoming" />)}
+                      {miniUpcoming.map(g => <GameRow key={g.game_number} g={g} mode="upcoming" />)}
                     </div>
                   )}
                 </div>
