@@ -2755,9 +2755,10 @@ class Engine {
           const _aqCnt = countValidCards(_aqCards2);
           appearedThisTick = (_aqPs === 'deux' && _aqCnt === 2) || (_aqPs === 'trois' && _aqCnt === 3);
         } else if (_aqPs === 'distrib') {
-          // Distribution : vérifier si les deux mains ont le même nombre de cartes
+          // Distribution : vérifier si les deux mains ont EXACTEMENT 2 cartes chacune (main naturelle)
+          // 3-3 n'est PAS une distribution même si les deux compteurs sont égaux
           const _aqVp = countValidCards(pCards), _aqVb = countValidCards(bCards);
-          appearedThisTick = _aqVp === _aqVb;
+          appearedThisTick = _aqVp === 2 && _aqVb === 2;
         } else {
           // Costume standard ♠♥♦♣
           const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
@@ -2844,8 +2845,8 @@ class Engine {
         if (handSuits.includes(suit)) { state.counts[suit] = 0; continue; }
         state.counts[suit] = (state.counts[suit] || 0) + 1;
         if (state.counts[suit] === B) {
-          const ps = resolvePredictedSuit(suit);
-          if (ps) await emitPrediction(gn + offset, ps, suit);
+          const ps = resolvePredictedSuit(suit) || suit;
+          await emitPrediction(gn + offset, ps, suit);
           state.counts[suit] = 0;
         }
       }
@@ -2854,21 +2855,21 @@ class Engine {
         if (handSuits.includes(suit)) {
           state.counts[suit] = (state.counts[suit] || 0) + 1;
           if (state.counts[suit] === B) {
-            const ps = resolvePredictedSuit(suit);
-            if (ps) await emitPrediction(gn + offset, ps, suit);
+            const ps = resolvePredictedSuit(suit) || suit;
+            await emitPrediction(gn + offset, ps, suit);
             state.counts[suit] = 0;
           }
         } else { state.counts[suit] = 0; }
       }
     } else if (mode === 'absence_apparition') {
       // Compte les absences consécutives (sans seuil max).
-      // Dès que le costume réapparaît après >= B absences → prédit le costume mappé (ou le même si pas de mapping).
+      // Dès que le costume réapparaît après >= B absences → prédit CE MÊME costume (pas le mapping).
+      // Le mapping par défaut '♥' sauvegardé en DB ne doit pas interférer.
       for (const suit of ALL_SUITS) {
         if (handSuits.includes(suit)) {
           if ((state.counts[suit] || 0) >= B) {
-            const ps = resolvePredictedSuit(suit) || suit;
-            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction ${ps}`);
-            await emitPrediction(gn + offset, ps, suit);
+            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction ${suit}`);
+            await emitPrediction(gn + offset, suit, suit);
           }
           state.counts[suit] = 0;
         } else {
@@ -3486,9 +3487,10 @@ class Engine {
         console.warn(`[${channelId}] [Pair/Impair] Score indisponible — jeu #${gn} ignoré`);
       } else if (state.snakeActive && state.snakeSuit) {
         // 🐍 Serpent actif : injecter l'opposé pour le prochain jeu
+        // force:true → bypass filtre d'attente (le serpent doit émettre immédiatement gn+1)
         if (Object.keys(state.pending).length === 0) {
           console.log(`[${channelId}] 🐍 Serpent → ${state.snakeSuit} jeu #${gn + 1}`);
-          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit);
+          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit, { force: true });
         }
       } else {
         const isCurPair = piScore % 2 === 0;
@@ -3518,9 +3520,10 @@ class Engine {
         // carte invalide ou 0 cartes — ignorer
       } else if (state.snakeActive && state.snakeSuit) {
         // 🐍 Serpent actif : injecter l'opposé pour le prochain jeu
+        // force:true → bypass filtre d'attente (le serpent doit émettre immédiatement gn+1)
         if (Object.keys(state.pending).length === 0) {
           console.log(`[${channelId}] 🐍 Serpent → ${state.snakeSuit} jeu #${gn + 1}`);
-          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit);
+          await emitPrediction(gn + 1, state.snakeSuit, state.snakeSuit, { force: true });
         }
       } else {
         const curKey = _c2v3Cnt === 2 ? 'deux' : 'trois';
