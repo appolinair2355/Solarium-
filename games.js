@@ -164,19 +164,28 @@ async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
 
-  // 1. Tentative directe
-  try {
-    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
-    if (resp.ok) {
-      const data = await resp.json();
-      const parsed = parseRawData(data);
-      if (parsed) updateCache(parsed, 'server');
-      return gamesCache;
-    }
-  } catch {}
+  // 1. Tentative directe — 3 essais avec 300 ms entre chaque
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseRawData(data);
+        if (parsed) { updateCache(parsed, 'server'); return gamesCache; }
+      }
+    } catch {}
+    if (attempt < 3) await new Promise(r => setTimeout(r, 300));
+  }
 
   // 2. Fallback : services proxy
   return fetchGamesViaProxy();
+}
+
+// Force fetch : bypass le cache TTL et relance immédiatement 3 essais directs + proxies.
+// Utilisé par le moteur pour tenter de récupérer un jeu manquant après détection de gap.
+async function fetchGamesForce() {
+  lastFetch = 0;
+  return fetchGames();
 }
 
 function parseRawData(data) {
@@ -420,4 +429,4 @@ router.get('/stream', requireActiveSub, (req, res) => {
 
 function getGamesCache() { return gamesCache; }
 
-module.exports = { router, fetchGames, getGamesCache };
+module.exports = { router, fetchGames, fetchGamesForce, getGamesCache };

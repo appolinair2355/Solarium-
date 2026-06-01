@@ -22,14 +22,16 @@ const db    = require('./db');
 
 const TARGETS_KEY = 'live_broadcast_targets';
 
+// Timeout pour chaque appel Telegram (ms) — évite qu'une lenteur bloque tout
+const TG_TIMEOUT_MS = 5000;
+
 // ── État mémoire (jamais persisté) ──────────────────────────────────────────
 // gameState[gameNumber] = {
-//   targets: { [targetId]: { messageId, lastText } },
-//   finalSent: bool,
+//   targets: { [targetId]: { messageId, lastText, finalSent } },
 //   firstSeenAt: timestamp,
 // }
 const gameState = new Map();
-const MAX_TRACKED_GAMES = 200;     // anneau circulaire
+const MAX_TRACKED_GAMES  = 200;
 const FINAL_RETENTION_MS = 10 * 60 * 1000; // 10 min après finalisation
 
 let cachedTargets = null;
@@ -63,7 +65,6 @@ async function saveTargets(list) {
 async function addTarget({ bot_token, channel_id, label }) {
   if (!bot_token || !channel_id) throw new Error('bot_token et channel_id requis');
   const list = await loadTargets(true);
-  // Déduplication : (token, channel_id) unique
   if (list.some(t => t.bot_token === bot_token && String(t.channel_id) === String(channel_id))) {
     throw new Error('Cette cible existe déjà (même token + canal)');
   }
@@ -84,7 +85,6 @@ async function removeTarget(id) {
   const next = list.filter(t => t.id !== id);
   if (next.length === list.length) throw new Error('Cible introuvable');
   await saveTargets(next);
-  // Nettoyage mémoire pour cette cible
   for (const st of gameState.values()) {
     if (st.targets && st.targets[id]) delete st.targets[id];
   }
@@ -112,8 +112,6 @@ async function listTargets() {
 
 // ── Calcul du score Baccarat ────────────────────────────────────────────────
 
-// L'API 1xBet envoie les rangs en numérique : 0/1/14=As, 2-9=valeur, 10=10, 11=J, 12=Q, 13=K
-// (1xBet utilise indifféremment 1 ou 14 pour l'As selon l'encodage du paquet)
 function rankValue(r) {
   if (r === null || r === undefined || r === '?') return 0;
   const s = String(r).toUpperCase();
@@ -121,8 +119,8 @@ function rankValue(r) {
   if (s === 'T' || s === 'J' || s === 'Q' || s === 'K') return 0;
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) return 0;
-  if (n === 0 || n === 1 || n === 14) return 1;   // As (encodage bas ou haut)
-  if (n >= 10 && n <= 13) return 0;                // 10, J, Q, K
+  if (n === 0 || n === 1 || n === 14) return 1;
+  if (n >= 10 && n <= 13) return 0;
   if (n >= 2 && n <= 9) return n;
   return 0;
 }
@@ -135,7 +133,7 @@ function rankLabel(r) {
   }
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) return String(r);
-  if (n === 0 || n === 1 || n === 14) return 'A'; // As (encodage bas ou haut)
+  if (n === 0 || n === 1 || n === 14) return 'A';
   if (n === 11) return 'J';
   if (n === 12) return 'Q';
   if (n === 13) return 'K';
@@ -166,14 +164,12 @@ function buildMessage(g) {
   const finished = !!g.is_finished || winner === 'Player' || winner === 'Banker' || winner === 'Tie';
 
   if (finished) {
-    // #R = jeu terminé après distribution initiale (2 cartes chacun, aucune 3ᵉ carte tirée)
     const pLen = Array.isArray(g.player_cards) ? g.player_cards.length : 0;
     const bLen = Array.isArray(g.banker_cards) ? g.banker_cards.length : 0;
     const naturalEnd = pLen === 2 && bLen === 2;
-    const tag = naturalEnd ? ' #R' : '';
 
     if (winner === 'Tie') {
-      return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${tag}`;
+      return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${naturalEnd ? ' #R' : ''}`;
     }
     if (winner === 'Player') {
       return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
@@ -181,8 +177,7 @@ function buildMessage(g) {
     if (winner === 'Banker') {
       return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
     }
-    // Cas limite : finished sans winner explicite → comparer les points
-    if (p === b) return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${tag}`;
+    if (p === b) return `#N${n}. ${p}(${pCards}) 🔰 ${b}(${bCards}) #T${total} 🟣#X${naturalEnd ? ' #R' : ''}`;
     if (p > b)   return `#N${n}. ✅${p}(${pCards}) - ${b}(${bCards}) #T${total} 🔵${naturalEnd ? '#R' : ''}`.trimEnd();
                  return `#N${n}. ${p}(${pCards}) - ✅${b}(${bCards}) #T${total} 🔴${naturalEnd ? '#R' : ''}`.trimEnd();
   }
@@ -196,13 +191,14 @@ function buildMessage(g) {
   return `⏰#N${n}. ${pPart} - ${bPart}`;
 }
 
-// ── Appels Telegram bas niveau ──────────────────────────────────────────────
+// ── Appels Telegram bas niveau (avec timeout) ────────────────────────────────
 
 async function tgSendMessage(token, chatId, text) {
   const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+    body:    JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+    timeout: TG_TIMEOUT_MS,
   });
   const d = await resp.json().catch(() => ({}));
   if (!resp.ok || !d?.ok) {
@@ -216,14 +212,14 @@ async function tgSendMessage(token, chatId, text) {
 
 async function tgEditMessage(token, chatId, messageId, text) {
   const resp = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true }),
+    body:    JSON.stringify({ chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true }),
+    timeout: TG_TIMEOUT_MS,
   });
   const d = await resp.json().catch(() => ({}));
   if (!resp.ok || !d?.ok) {
     const desc = d?.description || `HTTP ${resp.status}`;
-    // Telegram renvoie 400 "message is not modified" si rien n'a changé → silencieux
     if (/not modified/i.test(desc)) return messageId;
     const err = new Error(desc);
     err.code = d?.error_code || resp.status;
@@ -232,34 +228,129 @@ async function tgEditMessage(token, chatId, messageId, text) {
   return messageId;
 }
 
-// ── Diffusion d'un jeu vers une cible ───────────────────────────────────────
+// ── Diffusion d'un jeu vers UNE cible ───────────────────────────────────────
 
 async function diffuseGame(target, game, finishedNow) {
   const text = buildMessage(game);
   const gn   = game.game_number;
   let st = gameState.get(gn);
   if (!st) {
-    st = { targets: {}, finalSent: false, firstSeenAt: Date.now() };
+    st = { targets: {}, firstSeenAt: Date.now() };
     gameState.set(gn, st);
   }
   let entry = st.targets[target.id];
-  if (!entry) entry = st.targets[target.id] = { messageId: null, lastText: null };
+  if (!entry) entry = st.targets[target.id] = { messageId: null, lastText: null, finalSent: false };
 
-  // Aucun changement texte → skip
+  if (entry.finalSent) return;
   if (entry.lastText === text) return;
 
+  const lbl = target.label || target.id;
   try {
     if (entry.messageId) {
       await tgEditMessage(target.bot_token, target.channel_id, entry.messageId, text);
+      if (finishedNow) {
+        console.log(`[LiveBroadcast] 🏁 #${gn} FINAL → [${lbl}] | ${text}`);
+      } else {
+        console.log(`[LiveBroadcast] ✏️  #${gn} EDIT  → [${lbl}] | ${text}`);
+      }
     } else {
       const mid = await tgSendMessage(target.bot_token, target.channel_id, text);
       entry.messageId = mid;
+      console.log(`[LiveBroadcast] 📨 #${gn} ENVOI → [${lbl}] msgId=${mid} | ${text}`);
     }
     entry.lastText = text;
-    if (finishedNow) st.finalSent = true;
+    if (finishedNow) entry.finalSent = true;
   } catch (e) {
-    // Erreurs typiques : 403 (bot pas admin), 400 (chat introuvable). On log sans interrompre.
-    console.warn(`[LiveBroadcast] cible=${target.id} jeu=${gn} erreur: ${e.message}`);
+    console.warn(`[LiveBroadcast] ❌ #${gn} [${lbl}] erreur: ${e.message}`);
+  }
+}
+
+// ── Diffusion d'un jeu vers TOUTES les cibles en parallèle ──────────────────
+
+async function diffuseGameAllTargets(targets, game, finishedNow) {
+  // Toutes les cibles sont indépendantes → on envoie en parallèle
+  // pour qu'une cible lente ne retarde pas les autres.
+  await Promise.allSettled(
+    targets.map(t => {
+      const st    = gameState.get(game.game_number);
+      const entry = st?.targets?.[t.id];
+      if (entry?.finalSent) return Promise.resolve();
+      return diffuseGame(t, game, finishedNow);
+    })
+  );
+}
+
+// ── File d'attente interne ───────────────────────────────────────────────────
+// Remplace l'ancien _busy (drop) : on garde toujours le snapshot le plus récent.
+// Si un traitement est en cours, le nouvel appel stocke ses données dans
+// _pendingGames ; dès que le traitement courant se termine, il traite
+// immédiatement le snapshot en attente.
+let _processing = false;
+let _pendingGames = null;
+
+// ── Traitement interne d'un snapshot de jeux ─────────────────────────────────
+
+async function _processSnapshot(games) {
+  const targets = (await loadTargets()).filter(t => t.enabled !== false);
+  if (targets.length === 0) {
+    // Log une fois toutes les 60s pour ne pas spammer
+    const now = Date.now();
+    if (!_processSnapshot._lastNoTargetLog || now - _processSnapshot._lastNoTargetLog > 60000) {
+      console.log('[LiveBroadcast] ℹ️  Aucune cible active — diffusion désactivée');
+      _processSnapshot._lastNoTargetLog = now;
+    }
+    return;
+  }
+
+  // Classer les jeux : nouveaux (jamais vus) EN PREMIER, puis connus
+  const newGames   = [];
+  const knownGames = [];
+  const skipped    = [];
+
+  for (const g of games) {
+    if (!g || !g.game_number) continue;
+    const hasCards = (g.player_cards?.length || 0) > 0 || (g.banker_cards?.length || 0) > 0;
+    if (!hasCards && !g.is_finished) {
+      skipped.push(g.game_number);
+      continue;
+    }
+    if (!gameState.has(g.game_number)) {
+      newGames.push(g);
+    } else {
+      knownGames.push(g);
+    }
+  }
+
+  if (skipped.length > 0) {
+    console.log(`[LiveBroadcast] ⏳ Jeu(x) #${skipped.join(',')} ignoré(s) — Prematch/pas de cartes`);
+  }
+
+  newGames.sort((a, b) => a.game_number - b.game_number);
+  knownGames.sort((a, b) => a.game_number - b.game_number);
+  const sorted = [...newGames, ...knownGames];
+
+  if (sorted.length > 0) {
+    const newNums   = newGames.map(g => '#' + g.game_number).join(',');
+    const knownNums = knownGames.map(g => '#' + g.game_number).join(',');
+    console.log(`[LiveBroadcast] 🎯 ${targets.length} cible(s) | Nouveaux: [${newNums || '—'}] Connus: [${knownNums || '—'}]`);
+  }
+
+  for (const g of sorted) {
+    const finishedNow = !!g.is_finished;
+    await diffuseGameAllTargets(targets, g, finishedNow);
+  }
+
+  // Nettoyage : anneau circulaire + expiration des jeux finalisés
+  if (gameState.size > MAX_TRACKED_GAMES) {
+    const keys = [...gameState.keys()].sort((a, b) => a - b);
+    const toDelete = keys.slice(0, keys.length - MAX_TRACKED_GAMES);
+    for (const k of toDelete) gameState.delete(k);
+  }
+  const cutoff = Date.now() - FINAL_RETENTION_MS;
+  for (const [k, st] of gameState.entries()) {
+    const allDone = Object.keys(st.targets).length > 0 &&
+                    Object.values(st.targets).every(e => e.finalSent);
+    if (allDone && st.firstSeenAt < cutoff) gameState.delete(k);
   }
 }
 
@@ -268,40 +359,24 @@ async function diffuseGame(target, game, finishedNow) {
 async function onGamesUpdate(games) {
   if (!Array.isArray(games) || games.length === 0) return;
 
-  const targets = (await loadTargets()).filter(t => t.enabled !== false);
-  if (targets.length === 0) return;
+  // Stocker le snapshot le plus récent (écrase le précédent si non encore traité)
+  _pendingGames = games;
 
-  // Tri par game_number ascendant pour ordre cohérent
-  const sorted = [...games].sort((a, b) => a.game_number - b.game_number);
+  // Si un traitement est déjà en cours, il prendra ce snapshot dès sa fin
+  if (_processing) return;
 
-  // Filtrer les jeux utiles (avec cartes ou terminés, pas encore finalisés en mémoire)
-  const relevantGames = sorted.filter(g => {
-    if (!g || !g.game_number) return false;
-    const hasCards = (g.player_cards?.length || 0) > 0 || (g.banker_cards?.length || 0) > 0;
-    if (!hasCards && !g.is_finished) return false;
-    const st = gameState.get(g.game_number);
-    return !st?.finalSent;
-  });
-
-  if (relevantGames.length === 0) return;
-
-  // Traitement PARALLÈLE : tous les jeux × toutes les cibles simultanément
-  // → latence = max(1 appel Telegram) au lieu de sum(tous les appels)
-  await Promise.allSettled(
-    relevantGames.flatMap(g =>
-      targets.map(t => diffuseGame(t, g, !!g.is_finished))
-    )
-  );
-
-  // Nettoyage : supprime les entrées trop vieilles ou si trop d'entrées
-  if (gameState.size > MAX_TRACKED_GAMES) {
-    const keys = [...gameState.keys()].sort((a, b) => a - b);
-    const toDelete = keys.slice(0, keys.length - MAX_TRACKED_GAMES);
-    for (const k of toDelete) gameState.delete(k);
-  }
-  const cutoff = Date.now() - FINAL_RETENTION_MS;
-  for (const [k, st] of gameState.entries()) {
-    if (st.finalSent && st.firstSeenAt < cutoff) gameState.delete(k);
+  // Lancer la boucle de traitement
+  _processing = true;
+  try {
+    while (_pendingGames) {
+      const toProcess = _pendingGames;
+      _pendingGames   = null;
+      await _processSnapshot(toProcess);
+    }
+  } catch (e) {
+    console.error('[LiveBroadcast] erreur traitement:', e.message);
+  } finally {
+    _processing = false;
   }
 }
 
@@ -320,6 +395,6 @@ module.exports = {
   onGamesUpdate,
   loadTargets, listTargets, addTarget, removeTarget, setTargetEnabled,
   sendTestMessage,
-  buildMessage, // exposé pour debug/preview
+  buildMessage,
   _gameState: gameState,
 };
