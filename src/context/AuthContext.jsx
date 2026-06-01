@@ -2,7 +2,10 @@ import { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 const AuthContext = createContext(null);
 
-const XBET_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip?' +
+// Nouvel endpoint direct — retourne Value.G (jeux du championnat uniquement)
+const XBET_CHAMP_URL = 'https://1xbet.com/LiveFeed/GetChampZip?champ=2050671';
+// Ancien endpoint de secours — retourne Value[] (tous les sports)
+const XBET_SPORTS_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip?' +
   'sports=236&champs=2050671&lng=en&gr=285&country=96&virtualSports=true&groupChamps=true';
 
 async function fetchWithRetry(url, opts, retries = 3, delay = 1200) {
@@ -19,12 +22,27 @@ async function fetchWithRetry(url, opts, retries = 3, delay = 1200) {
   return null;
 }
 
-// Relay : le navigateur récupère 1xBet et envoie au serveur
+// Relay : le navigateur récupère 1xBet et envoie au serveur.
+// Essaie d'abord GetChampZip (plus léger et direct), puis GetSportsShortZip en fallback.
 async function relayGames() {
+  let data = null;
   try {
-    const resp = await fetch(XBET_URL, { signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const resp = await fetch(XBET_CHAMP_URL, { signal: AbortSignal.timeout(6000) });
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json?.Value?.G?.length > 0) data = json;
+    }
+  } catch { /* CORS ou réseau — on tente le fallback */ }
+
+  if (!data) {
+    try {
+      const resp = await fetch(XBET_SPORTS_URL, { signal: AbortSignal.timeout(8000) });
+      if (resp.ok) data = await resp.json();
+    } catch { /* les deux ont échoué — on réessaiera au prochain tick */ }
+  }
+
+  if (!data) return;
+  try {
     await fetch('/api/games/client-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -32,7 +50,7 @@ async function relayGames() {
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(5000),
     });
-  } catch { /* CORS ou réseau — on réessaiera dans 5s */ }
+  } catch { /* push échoué — ignoré */ }
 }
 
 export function AuthProvider({ children }) {
