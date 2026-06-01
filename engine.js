@@ -2863,13 +2863,14 @@ class Engine {
       }
     } else if (mode === 'absence_apparition') {
       // Compte les absences consécutives (sans seuil max).
-      // Dès que le costume réapparaît après >= B absences → prédit CE MÊME costume (pas le mapping).
-      // Le mapping par défaut '♥' sauvegardé en DB ne doit pas interférer.
+      // Dès que le costume réapparaît après >= B absences → prédit le costume configuré dans le mapping.
+      // Si aucun mapping configuré → prédit ce même costume (fallback naturel).
       for (const suit of ALL_SUITS) {
         if (handSuits.includes(suit)) {
           if ((state.counts[suit] || 0) >= B) {
-            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction ${suit}`);
-            await emitPrediction(gn + offset, suit, suit);
+            const ps = resolvePredictedSuit(suit) || suit;
+            console.log(`[${channelId}] ${suit} réapparu après ${state.counts[suit]} absences (seuil≥${B}) → prédiction ${ps}`);
+            await emitPrediction(gn + offset, ps, suit);
           }
           state.counts[suit] = 0;
         } else {
@@ -2896,9 +2897,9 @@ class Engine {
         if (state.confirmPending[suit]) {
           // Phase confirmation (feu jaune allumé) : vérifier si le costume réapparaît
           if (handSuits.includes(suit)) {
-            const ps = resolvePredictedSuit(suit);
-            console.log(`[${channelId}] [AbsConf] ✅ ${suit} confirmé (feu VERT) après B=${B} absence(s) → prédiction jeu #${gn + offset} (→${ps || suit})`);
-            if (ps) await emitPrediction(gn + offset, ps, suit);
+            const ps = resolvePredictedSuit(suit) || suit;
+            console.log(`[${channelId}] [AbsConf] ✅ ${suit} confirmé (feu VERT) après B=${B} absence(s) → prédiction jeu #${gn + offset} (→${ps})`);
+            await emitPrediction(gn + offset, ps, suit);
           } else {
             console.log(`[${channelId}] [AbsConf] ❌ ${suit} absent à la confirmation (B=${B}) → feu rouge, reset sans prédiction`);
           }

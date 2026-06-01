@@ -121,7 +121,7 @@ const PROXY_SERVICES = [
 ];
 
 let _lastProxyAttempt = 0;
-const PROXY_COOLDOWN = 2500; // 2.5s entre deux tentatives proxy
+const PROXY_COOLDOWN = 1000; // 1s entre deux séries de tentatives proxy
 
 async function fetchGamesViaProxy() {
   const now = Date.now();
@@ -129,18 +129,33 @@ async function fetchGamesViaProxy() {
   _lastProxyAttempt = now;
 
   const targetUrl = `${API_URL}?${API_PARAMS}`;
-  for (const proxyFn of PROXY_SERVICES) {
+
+  // Tentatives parallèles sur les 3 premiers proxies — on prend le premier qui répond
+  const tryProxy = async (proxyFn) => {
     try {
-      const resp = await fetch(proxyFn(targetUrl), { timeout: 6000 });
-      if (!resp.ok) continue;
+      const resp = await fetch(proxyFn(targetUrl), { timeout: 3000 });
+      if (!resp.ok) return null;
       const data = await resp.json();
       const parsed = parseRawData(data);
-      if (parsed && parsed.length > 0) {
-        updateCache(parsed, 'server');
-        console.log('[Games] ✅ Données via proxy');
-        return gamesCache;
-      }
-    } catch { /* essayer le prochain */ }
+      return (parsed && parsed.length > 0) ? parsed : null;
+    } catch { return null; }
+  };
+
+  // Phase 1 : race sur les 3 premiers proxies en parallèle
+  const results = await Promise.all(PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn)));
+  for (const parsed of results) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données via proxy (parallèle)');
+      return gamesCache;
+    }
+  }
+
+  // Phase 2 : fallback sur le dernier proxy
+  const last = await tryProxy(PROXY_SERVICES[3]);
+  if (last) {
+    updateCache(last, 'server');
+    console.log('[Games] ✅ Données via proxy (fallback)');
   }
   return gamesCache;
 }
