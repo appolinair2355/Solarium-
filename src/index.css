@@ -486,6 +486,20 @@ body {
   display: flex; align-items: center; justify-content: center;
   min-height: 90px;
 }
+.game-live-card.upcoming-main {
+  background: linear-gradient(135deg, #0f172a, #1a2133);
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 14px; padding: 16px 18px;
+  box-shadow: 0 0 16px rgba(245,158,11,0.08);
+}
+@keyframes finishedFadeOut {
+  0%   { opacity: 1; transform: scale(1); }
+  75%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.92); pointer-events: none; }
+}
+.game-mini-card.finished {
+  animation: finishedFadeOut 9s forwards;
+}
 .glc-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
 }
