@@ -302,12 +302,65 @@ async function diffuseGameAllTargets(targets, game, finishedNow) {
 }
 
 // ── File d'attente interne ───────────────────────────────────────────────────
-// Remplace l'ancien _busy (drop) : on garde toujours le snapshot le plus récent.
-// Si un traitement est en cours, le nouvel appel stocke ses données dans
-// _pendingGames ; dès que le traitement courant se termine, il traite
-// immédiatement le snapshot en attente.
+// IMPORTANT : on ne garde pas "le dernier snapshot" mais un snapshot FUSIONNÉ.
+// Cela garantit que si le traitement prend 3-5s (appels Telegram) et que
+// plusieurs snapshots arrivent pendant ce temps, aucun jeu n'est perdu :
+// chaque jeu est conservé dans l'état le plus récent entre l'ancien et le nouveau.
 let _processing = false;
-let _pendingGames = null;
+let _pendingGames = null; // toujours le snapshot fusionné le plus complet
+
+// Fusionne deux listes de jeux : pour chaque game_number on garde l'état
+// le plus "avancé" (terminé > en cours > rien). Les jeux présents dans
+// l'ancien snapshot mais absents du nouveau sont conservés s'ils ne sont
+// pas encore finalisés dans gameState — on ne les perd jamais.
+function mergeSnapshots(oldGames, newGames) {
+  if (!oldGames || oldGames.length === 0) return newGames;
+  if (!newGames || newGames.length === 0) return oldGames;
+
+  const map = new Map();
+
+  // 1. Charger les anciens jeux
+  for (const g of oldGames) {
+    if (g?.game_number) map.set(g.game_number, g);
+  }
+
+  // 2. Fusionner avec les nouveaux : on garde l'état le plus avancé
+  for (const g of newGames) {
+    if (!g?.game_number) continue;
+    const existing = map.get(g.game_number);
+    if (!existing) {
+      map.set(g.game_number, g);
+    } else {
+      // Préférer l'état terminé, sinon le plus de cartes, sinon le plus récent
+      const existFinished = !!existing.is_finished;
+      const newFinished   = !!g.is_finished;
+      if (newFinished && !existFinished) {
+        map.set(g.game_number, g); // nouveau est terminé → priorité
+      } else if (!newFinished && !existFinished) {
+        // Ni l'un ni l'autre terminé → garder celui avec le plus de cartes
+        const existCards = (existing.player_cards?.length || 0) + (existing.banker_cards?.length || 0);
+        const newCards   = (g.player_cards?.length || 0) + (g.banker_cards?.length || 0);
+        if (newCards >= existCards) map.set(g.game_number, g);
+        // sinon on garde l'ancien (plus de cartes = plus d'info)
+      }
+      // Si existing est terminé et nouveau ne l'est pas → on garde l'ancien
+    }
+  }
+
+  // 3. Retirer les jeux de l'ancien snapshot qui sont déjà complètement finalisés
+  //    dans gameState (évite de les re-traiter inutilement)
+  const result = [];
+  for (const [gn, g] of map.entries()) {
+    const st = gameState.get(gn);
+    if (st) {
+      const allDone = Object.keys(st.targets).length > 0 &&
+                      Object.values(st.targets).every(e => e.finalSent);
+      if (allDone) continue; // déjà finalisé → inutile de le garder dans la file
+    }
+    result.push(g);
+  }
+  return result;
+}
 
 // ── Traitement interne d'un snapshot de jeux ─────────────────────────────────
 
@@ -407,10 +460,11 @@ async function _processSnapshot(games) {
 async function onGamesUpdate(games) {
   if (!Array.isArray(games) || games.length === 0) return;
 
-  // Stocker le snapshot le plus récent (écrase le précédent si non encore traité)
-  _pendingGames = games;
+  // FUSION : on accumule tous les snapshots intermédiaires au lieu d'écraser.
+  // Ainsi aucun jeu vu entre deux cycles de traitement n'est perdu.
+  _pendingGames = mergeSnapshots(_pendingGames, games);
 
-  // Si un traitement est déjà en cours, il prendra ce snapshot dès sa fin
+  // Si un traitement est déjà en cours, il prendra ce snapshot fusionné dès sa fin
   if (_processing) return;
 
   // Lancer la boucle de traitement
