@@ -2,6 +2,11 @@ const express = require('express');
 const fetch = require('node-fetch');
 const router = express.Router();
 
+// ── Nouvel endpoint direct (GetChampZip) — plus simple et plus fiable ─────────
+const CHAMP_API_URL = 'https://1xbet.com/LiveFeed/GetChampZip';
+const CHAMP_API_PARAMS = new URLSearchParams({ champ: 2050671 });
+
+// ── Ancien endpoint de secours (GetSportsShortZip) ───────────────────────────
 const API_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip';
 const API_PARAMS = new URLSearchParams({
   sports: 236, champs: 2050671, lng: 'en', gr: 285,
@@ -128,34 +133,57 @@ async function fetchGamesViaProxy() {
   if (now - _lastProxyAttempt < PROXY_COOLDOWN) return gamesCache;
   _lastProxyAttempt = now;
 
-  const targetUrl = `${API_URL}?${API_PARAMS}`;
+  // Essaie d'abord le nouvel endpoint GetChampZip via proxy, puis l'ancien en fallback
+  const champUrl = `${CHAMP_API_URL}?${CHAMP_API_PARAMS}`;
+  const oldUrl   = `${API_URL}?${API_PARAMS}`;
 
-  // Tentatives parallèles sur les 3 premiers proxies — on prend le premier qui répond
-  const tryProxy = async (proxyFn) => {
+  const tryProxy = async (proxyFn, targetUrl, parserFn) => {
     try {
       const resp = await fetch(proxyFn(targetUrl), { timeout: 3000 });
       if (!resp.ok) return null;
       const data = await resp.json();
-      const parsed = parseRawData(data);
+      const parsed = parserFn(data);
       return (parsed && parsed.length > 0) ? parsed : null;
     } catch { return null; }
   };
 
-  // Phase 1 : race sur les 3 premiers proxies en parallèle
-  const results = await Promise.all(PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn)));
-  for (const parsed of results) {
+  // Phase 1 : GetChampZip — race sur les 3 premiers proxies en parallèle
+  const champResults = await Promise.all(
+    PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn, champUrl, parseChampData))
+  );
+  for (const parsed of champResults) {
     if (parsed) {
       updateCache(parsed, 'server');
-      console.log('[Games] ✅ Données via proxy (parallèle)');
+      console.log('[Games] ✅ Données GetChampZip via proxy (parallèle)');
       return gamesCache;
     }
   }
 
-  // Phase 2 : fallback sur le dernier proxy
-  const last = await tryProxy(PROXY_SERVICES[3]);
-  if (last) {
-    updateCache(last, 'server');
-    console.log('[Games] ✅ Données via proxy (fallback)');
+  // Phase 2 : GetChampZip — fallback dernier proxy
+  const champLast = await tryProxy(PROXY_SERVICES[3], champUrl, parseChampData);
+  if (champLast) {
+    updateCache(champLast, 'server');
+    console.log('[Games] ✅ Données GetChampZip via proxy (fallback)');
+    return gamesCache;
+  }
+
+  // Phase 3 : ancien endpoint GetSportsShortZip — race proxies parallèles
+  const oldResults = await Promise.all(
+    PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn, oldUrl, parseRawData))
+  );
+  for (const parsed of oldResults) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données GetSportsShortZip via proxy (parallèle)');
+      return gamesCache;
+    }
+  }
+
+  // Phase 4 : ancien endpoint — dernier proxy
+  const oldLast = await tryProxy(PROXY_SERVICES[3], oldUrl, parseRawData);
+  if (oldLast) {
+    updateCache(oldLast, 'server');
+    console.log('[Games] ✅ Données GetSportsShortZip via proxy (fallback)');
   }
   return gamesCache;
 }
@@ -164,20 +192,44 @@ async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
 
-  // 1. Tentative directe — 3 essais avec 300 ms entre chaque
+  // 1. Tentative directe sur le nouvel endpoint GetChampZip — plus simple, moins de données
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
+      const resp = await fetch(`${CHAMP_API_URL}?${CHAMP_API_PARAMS}`, {
+        headers: API_HEADERS,
+        timeout: 4000,
+      });
       if (resp.ok) {
         const data = await resp.json();
-        const parsed = parseRawData(data);
-        if (parsed) { updateCache(parsed, 'server'); return gamesCache; }
+        const parsed = parseChampData(data);
+        if (parsed && parsed.length > 0) {
+          updateCache(parsed, 'server');
+          if (attempt > 1) console.log(`[Games] ✅ GetChampZip réussi (tentative ${attempt})`);
+          return gamesCache;
+        }
       }
     } catch {}
     if (attempt < 3) await new Promise(r => setTimeout(r, 300));
   }
 
-  // 2. Fallback : services proxy
+  // 2. Fallback : ancien endpoint GetSportsShortZip
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseRawData(data);
+        if (parsed && parsed.length > 0) {
+          updateCache(parsed, 'server');
+          console.log('[Games] ⚠️ Fallback GetSportsShortZip utilisé');
+          return gamesCache;
+        }
+      }
+    } catch {}
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 3. Dernier recours : services proxy
   return fetchGamesViaProxy();
 }
 
@@ -188,6 +240,39 @@ async function fetchGamesForce() {
   return fetchGames();
 }
 
+// ── Parser pour le nouvel endpoint GetChampZip ────────────────────────────────
+// Structure : data.Value.G = [game1, game2, ...]
+function parseChampData(data) {
+  const val = data?.Value;
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  const games = val.G;
+  if (!Array.isArray(games) || games.length === 0) return null;
+  const champName = val.LE || val.L || val.SE || 'Baccarat';
+  const results = [];
+  for (const game of games) {
+    if (!game.DI) continue;
+    const gn = parseInt(game.DI);
+    if (!Number.isFinite(gn) || gn <= 0) continue;
+    const sc  = game.SC || {};
+    const scS = sc.S  || [];
+    const { player, banker } = parseCards(scS);
+    results.push({
+      game_number:  gn,
+      player_cards: player, banker_cards: banker,
+      winner:       parseWinner(scS),
+      is_finished:  isGameFinished(game, scS),
+      phase:        parsePhase(scS),
+      score:        sc.FS || {},
+      championship: champName,
+      status_label: sc.I || sc.SLS || '',
+    });
+  }
+  results.sort((a, b) => b.game_number - a.game_number);
+  return results.length > 0 ? results : null;
+}
+
+// ── Parser pour l'ancien endpoint GetSportsShortZip ───────────────────────────
+// Structure : data.Value = [sport, ...] → sport.L = [champ, ...] → champ.G = [game, ...]
 function parseRawData(data) {
   if (!data?.Value || !Array.isArray(data.Value)) return null;
   let baccaratSport = null;
@@ -200,7 +285,7 @@ function parseRawData(data) {
     for (const game of champ.G || []) {
       if (!game.DI) continue;
       const gn = parseInt(game.DI);
-      if (!Number.isFinite(gn) || gn <= 0) continue; // ignore les DI non-numériques
+      if (!Number.isFinite(gn) || gn <= 0) continue;
       const sc  = game.SC || {};
       const scS = sc.S  || [];
       const { player, banker } = parseCards(scS);
@@ -221,11 +306,13 @@ function parseRawData(data) {
 }
 
 // POST /api/games/client-push — le navigateur envoie les données brutes de 1xBet
+// Accepte les deux formats : GetChampZip (Value.G) et GetSportsShortZip (Value[])
 // Déclenche immédiatement un broadcast SSE si les données ont changé
 router.post('/client-push', async (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
-    const parsed = parseRawData(req.body);
+    // Tente d'abord le nouveau format GetChampZip, puis l'ancien
+    const parsed = parseChampData(req.body) || parseRawData(req.body);
     if (!parsed) return res.status(400).json({ error: 'Données invalides' });
     const changed = updateCache(parsed, 'push');
     res.json({ ok: true, count: parsed.length, changed });

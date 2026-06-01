@@ -4738,7 +4738,10 @@ class Engine {
       if (finished.length > 0 && finished.some(g => !this.c1.processed.has(g.game_number))) {
         console.log(`[Engine] ${games.length} jeux chargés, ${finished.length} terminés`);
       }
-      for (const game of games) {
+      // Traitement en ordre ASCENDANT pour que la détection de gap et maxProcessedGame
+      // soient toujours cohérents (l'API retourne les jeux en ordre descendant).
+      const gamesToProcess = [...games].sort((a, b) => a.game_number - b.game_number);
+      for (const game of gamesToProcess) {
         if (!game.is_finished) {
           if (!this._lastLiveLog || Date.now() - this._lastLiveLog > 30000) {
             console.log(`[Engine] Jeu ${game.game_number} en cours — phase: ${game.phase || '?'} | ${game.status_label || ''}`);

@@ -29,6 +29,7 @@ const TG_TIMEOUT_MS = 5000;
 // gameState[gameNumber] = {
 //   targets: { [targetId]: { messageId, lastText, finalSent } },
 //   firstSeenAt: timestamp,
+//   lastKnown: <game object> | null,   — dernier snapshot valide du jeu (avec cartes)
 // }
 const gameState = new Map();
 const MAX_TRACKED_GAMES  = 200;
@@ -230,25 +231,45 @@ async function tgEditMessage(token, chatId, messageId, text) {
 
 // ── Diffusion d'un jeu vers UNE cible ───────────────────────────────────────
 
+// Détermine si les données d'un jeu sont suffisantes pour considérer la partie
+// comme définitivement terminée (gagnant connu OU ≥ 2 cartes par côté + is_finished).
+function isDefinitivelyFinished(g) {
+  if (!g.is_finished) return false;
+  if (g.winner === 'Player' || g.winner === 'Banker' || g.winner === 'Tie') return true;
+  const pLen = Array.isArray(g.player_cards) ? g.player_cards.length : 0;
+  const bLen = Array.isArray(g.banker_cards) ? g.banker_cards.length : 0;
+  return pLen >= 2 && bLen >= 2;
+}
+
 async function diffuseGame(target, game, finishedNow) {
   const text = buildMessage(game);
   const gn   = game.game_number;
   let st = gameState.get(gn);
   if (!st) {
-    st = { targets: {}, firstSeenAt: Date.now() };
+    st = { targets: {}, firstSeenAt: Date.now(), lastKnown: null };
     gameState.set(gn, st);
   }
+
+  // Mémoriser le dernier état valide du jeu (avec cartes ou terminé)
+  const hasCards = (game.player_cards?.length || 0) > 0 || (game.banker_cards?.length || 0) > 0;
+  if (hasCards || game.is_finished) {
+    st.lastKnown = { ...game };
+  }
+
   let entry = st.targets[target.id];
   if (!entry) entry = st.targets[target.id] = { messageId: null, lastText: null, finalSent: false };
 
   if (entry.finalSent) return;
   if (entry.lastText === text) return;
 
+  // N'appliquer finalSent=true que si les données sont vraiment complètes
+  const definitivelyDone = finishedNow && isDefinitivelyFinished(game);
+
   const lbl = target.label || target.id;
   try {
     if (entry.messageId) {
       await tgEditMessage(target.bot_token, target.channel_id, entry.messageId, text);
-      if (finishedNow) {
+      if (definitivelyDone) {
         console.log(`[LiveBroadcast] 🏁 #${gn} FINAL → [${lbl}] | ${text}`);
       } else {
         console.log(`[LiveBroadcast] ✏️  #${gn} EDIT  → [${lbl}] | ${text}`);
@@ -259,7 +280,7 @@ async function diffuseGame(target, game, finishedNow) {
       console.log(`[LiveBroadcast] 📨 #${gn} ENVOI → [${lbl}] msgId=${mid} | ${text}`);
     }
     entry.lastText = text;
-    if (finishedNow) entry.finalSent = true;
+    if (definitivelyDone) entry.finalSent = true;
   } catch (e) {
     console.warn(`[LiveBroadcast] ❌ #${gn} [${lbl}] erreur: ${e.message}`);
   }
@@ -338,6 +359,33 @@ async function _processSnapshot(games) {
   for (const g of sorted) {
     const finishedNow = !!g.is_finished;
     await diffuseGameAllTargets(targets, g, finishedNow);
+  }
+
+  // ── Finalisation des jeux disparus de l'API ────────────────────────────────
+  // Un jeu peut disparaître du snapshot AVANT qu'on ait pu envoyer l'état final
+  // (l'API retire les jeux terminés très vite). On force alors un dernier edit
+  // sur les jeux trackés qui ne sont plus dans le snapshot courant.
+  const snapshotNums = new Set(games.map(g => g.game_number));
+  for (const [gn, st] of gameState.entries()) {
+    if (snapshotNums.has(gn)) continue;              // encore dans l'API — géré ci-dessus
+    if (!st.lastKnown) continue;                     // jamais vu avec des cartes — rien à faire
+    // Vérifier s'il reste des cibles non finalisées avec un messageId
+    const pendingTargets = targets.filter(t => {
+      const e = st.targets[t.id];
+      return e && e.messageId && !e.finalSent;
+    });
+    if (pendingTargets.length === 0) continue;
+
+    // Construire un état "terminé forcé" basé sur le dernier snapshot connu
+    const forcedGame = { ...st.lastKnown, is_finished: true };
+    // Si le gagnant n'est pas connu, le recalculer depuis les scores
+    if (!forcedGame.winner) {
+      const p = score(forcedGame.player_cards);
+      const b = score(forcedGame.banker_cards);
+      forcedGame.winner = p > b ? 'Player' : b > p ? 'Banker' : 'Tie';
+    }
+    console.log(`[LiveBroadcast] 🔍 #${gn} disparu sans finalisation → forçage final (${pendingTargets.length} cible(s))`);
+    await Promise.allSettled(pendingTargets.map(t => diffuseGame(t, forcedGame, true)));
   }
 
   // Nettoyage : anneau circulaire + expiration des jeux finalisés
