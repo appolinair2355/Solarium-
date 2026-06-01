@@ -115,20 +115,27 @@ function isGameFinished(game, scSList) {
 async function fetchGames() {
   const now = Date.now();
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
-  try {
-    const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 8000 });
-    if (!resp.ok) {
-      console.error(`Games fetch HTTP error: ${resp.status}`);
-      return gamesCache;
-    }
-    const data = await resp.json();
-    const parsed = parseRawData(data);
-    if (parsed) updateCache(parsed, 'server');
-    return gamesCache;
-  } catch (err) {
-    console.error('Games fetch error:', err.message);
-    return gamesCache;
+
+  // 1. Tentative directe — 3 essais avec 300 ms entre chaque
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseRawData(data);
+        if (parsed) { updateCache(parsed, 'server'); return gamesCache; }
+      }
+    } catch {}
+    if (attempt < 3) await new Promise(r => setTimeout(r, 300));
   }
+
+  return gamesCache;
+}
+
+// Force fetch : bypass le cache TTL et relance immédiatement.
+async function fetchGamesForce() {
+  lastFetch = 0;
+  return fetchGames();
 }
 
 function parseRawData(data) {
@@ -345,4 +352,4 @@ router.get('/stream', requireActiveSub, (req, res) => {
 
 function getGamesCache() { return gamesCache; }
 
-module.exports = { router, fetchGames, getGamesCache };
+module.exports = { router, fetchGames, fetchGamesForce, getGamesCache };

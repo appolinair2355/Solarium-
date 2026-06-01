@@ -2,7 +2,7 @@
  * Moteur de prédiction Baccarat
  */
 const db  = require('./db');
-const { fetchGames } = require('./games');
+const { fetchGames, fetchGamesForce } = require('./games');
 const {
   sendPredictionToTargets,
   sendToStrategyChannels,
@@ -4102,6 +4102,18 @@ class Engine {
     if (!liveGame || !this.liveGameCards) return;
     const gn = liveGame.game_number;
 
+    // ── GARDE CONSÉCUTIVITÉ : le jeu live doit être le suivant attendu ────────
+    // Si un jeu a été sauté (ex: API a renvoyé #775 alors qu'on attendait #774),
+    // les compteurs n'ont pas été mis à jour pour le jeu manquant → les seuils
+    // sont faux → on bloque tout déclenchement live jusqu'à stabilisation.
+    const expectedNext = (this.maxProcessedGame || 0) + 1;
+    if (this.maxProcessedGame > 0 && gn !== expectedNext) {
+      if (gn > expectedNext + 1) {
+        console.warn(`[Engine] ⚠️ Live trigger bloqué — jeu #${gn} reçu, attendu #${expectedNext} (gap: ${gn - expectedNext} jeu(x) sauté(s)) — compteurs potentiellement incorrects`);
+      }
+      return;
+    }
+
     for (const [idStr, entry] of Object.entries(this.custom)) {
       const { config } = entry;
       if (!config?.enabled) continue;
@@ -4118,6 +4130,15 @@ class Engine {
       // Distribution / Carte2/3 : pas de déclenchement live — on attend la fin officielle du jeu
       // (comptage fiable seulement quand la main est complètement terminée)
       if (mode === 'distribution' || mode === 'carte_3_vers_2' || mode === 'carte_2_vers_3') continue;
+
+      // ── GARDE CRITIQUE : attendre que LES DEUX mains aient fini de tirer ──
+      // En Baccarat, le banquier peut tirer une 3ème carte selon la carte du joueur.
+      // Si on déclenche avant que les deux mains soient complètes, les costumes
+      // lus sont incomplets → prédictions et compteurs erronés.
+      // On ne déclenche que quand playerDone ET bankerDone sont tous les deux vrais.
+      if (!this.liveGameCards.playerDone || !this.liveGameCards.bankerDone) {
+        continue; // main pas encore complète — attendre le prochain tick
+      }
 
       const handDone  = hand === 'banquier' ? this.liveGameCards.bankerDone  : this.liveGameCards.playerDone;
       const handSuits = hand === 'banquier' ? this.liveGameCards.bankerSuits : this.liveGameCards.playerSuits;
@@ -4209,6 +4230,68 @@ class Engine {
         }
         break; // Une seule prédiction par stratégie par jeu live
       }
+    }
+  }
+
+  // ── Reset des compteurs sur gap API ──────────────────────────────────────
+  _resetCountersOnGap(fromGn, toGn) {
+    console.warn(`[Engine] 🔄 Gap #${fromGn}–#${toGn} : reset compteurs + suppression prédictions pendantes`);
+
+    for (const s of ALL_SUITS) {
+      if (this.c1?.absences)      this.c1.absences[s]      = 0;
+      if (this.c2?.absences)      this.c2.absences[s]      = 0;
+      if (this.c3?.absences)      this.c3.absences[s]      = 0;
+      if (this.c1?.mirrorCounts)  this.c1.mirrorCounts[s]  = 0;
+      if (this.c2?.mirrorCounts)  this.c2.mirrorCounts[s]  = 0;
+      if (this.c3?.mirrorCounts)  this.c3.mirrorCounts[s]  = 0;
+    }
+    if (this.c1) { this.c1.consecLosses = 0; }
+    if (this.c2) { this.c2.hadFirstLoss = false; }
+    if (this.c3) { this.c3.consecLosses = 0; }
+
+    for (const [, state] of Object.entries(this.custom)) {
+      for (const s of ALL_SUITS) {
+        if (state.counts)        state.counts[s]        = 0;
+        if (state.mirrorCounts)  state.mirrorCounts[s]  = 0;
+        if (state.absenceCounts) state.absenceCounts[s] = 0;
+        if (state.mappingIndex)  state.mappingIndex[s]  = 0;
+      }
+      if (state.parityCounts)  { state.parityCounts.pair  = 0; state.parityCounts.impair = 0; }
+      if (state.c2v3Counts)    { state.c2v3Counts.deux    = 0; state.c2v3Counts.trois    = 0; }
+    }
+
+    const removeSkipped = (pending, label) => {
+      for (let gn = fromGn; gn <= toGn; gn++) {
+        if (pending[gn] !== undefined) {
+          console.warn(`[Engine] 🗑️  Prédiction ${label} jeu #${gn} annulée (jeu sauté par l'API)`);
+          delete pending[gn];
+        }
+      }
+    };
+    if (this.c1) removeSkipped(this.c1.pending, 'C1');
+    if (this.c2) removeSkipped(this.c2.pending, 'C2');
+    if (this.c3) removeSkipped(this.c3.pending, 'C3');
+    if (this.dc) removeSkipped(this.dc.pending, 'DC');
+    for (const [id, state] of Object.entries(this.custom)) removeSkipped(state.pending, `S${id}`);
+  }
+
+  // ── Tentative de récupération d'un gap via re-fetch immédiat ─────────────
+  async _tryRecoverGap(fromGn, toGn) {
+    try {
+      console.log(`[Engine] 🔍 Re-fetch pour récupérer jeu(x) #${fromGn}–#${toGn}…`);
+      const freshGames = await fetchGamesForce();
+      const recovered = freshGames
+        .filter(g => g.is_finished && g.game_number >= fromGn && g.game_number <= toGn)
+        .sort((a, b) => a.game_number - b.game_number);
+      if (recovered.length > 0) {
+        console.log(`[Engine] ✅ Re-fetch : ${recovered.length}/${toGn - fromGn + 1} jeu(x) récupéré(s) (#${recovered.map(g => g.game_number).join(',')})`);
+      } else {
+        console.warn(`[Engine] ❌ Re-fetch : aucun jeu récupéré pour #${fromGn}–#${toGn}`);
+      }
+      return recovered;
+    } catch (e) {
+      console.error('[Engine] _tryRecoverGap error:', e.message);
+      return [];
     }
   }
 
@@ -4345,6 +4428,33 @@ class Engine {
         }
 
         if (!this.c1.processed.has(game.game_number)) {
+          // ── DÉTECTION GAP : jeu non-consécutif ────────────────────────────────
+          if (this.maxProcessedGame > 0 && game.game_number > this.maxProcessedGame + 1) {
+            const fromGn  = this.maxProcessedGame + 1;
+            const toGn    = game.game_number - 1;
+            const missing = toGn - fromGn + 1;
+            console.warn(`[Engine] ⚠️ Gap détecté : jeu #${game.game_number} reçu après #${this.maxProcessedGame} — ${missing} jeu(x) manquant(s) (#${fromGn}–#${toGn})`);
+            // 1. Tentative de récupération via re-fetch immédiat
+            const recovered = await this._tryRecoverGap(fromGn, toGn);
+            if (recovered.length > 0) {
+              for (const rg of recovered) {
+                if (rg.player_cards.length < 2 || rg.banker_cards.length < 2) continue;
+                const rSuits  = extractSuits(rg.player_cards  || []);
+                const rbSuits = extractSuits(rg.banker_cards  || []);
+                if (!rSuits.length && !rbSuits.length) continue;
+                console.log(`[Engine] ✅ [Récupéré] Traitement jeu #${rg.game_number} | P:${rSuits.join(',') || '—'} B:${rbSuits.join(',') || '—'}`);
+                await this.processGame(rg.game_number, rSuits, rbSuits, rg.player_cards, rg.banker_cards, rg.winner || null);
+                if (rg.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = rg.game_number;
+              }
+              if (recovered.length < missing) {
+                console.warn(`[Engine] ⚠️ Récupération partielle (${recovered.length}/${missing}) — reset compteurs pour les jeux encore manquants`);
+                this._resetCountersOnGap(fromGn, toGn);
+              }
+            } else {
+              // Aucun jeu récupéré → reset complet des compteurs
+              this._resetCountersOnGap(fromGn, toGn);
+            }
+          }
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
         }
