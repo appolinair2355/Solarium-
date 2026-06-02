@@ -39,6 +39,20 @@ let pool = null;
 let initialized = false;
 let initPromise = null;
 
+// ── Circuit breaker : désactive le module après 5 échecs consécutifs ────────
+let _failCount = 0;
+let _disabled  = false;
+const MAX_FAILS = 5;
+function _onFail(msg) {
+  _failCount++;
+  if (_failCount >= MAX_FAILS && !_disabled) {
+    _disabled = true;
+    console.warn(`[CartesStore] ⚠️ ${MAX_FAILS} échecs consécutifs — module auto-désactivé (DB inaccessible)`);
+    if (pool) { pool.end().catch(() => {}); pool = null; }
+  }
+}
+function _onSuccess() { _failCount = 0; }
+
 function getPool() {
   if (pool) return pool;
   const sslNeeded = URL && (URL.includes('render.com') || URL.includes('sslmode'));
@@ -147,11 +161,11 @@ function deriveWinner(rawWinner, ps, bs, np, nb) {
 
 // ── Enregistrement d'un jeu terminé ────────────────────────────────────────
 async function recordGame(game) {
-  if (!URL) return false;
+  if (!URL || _disabled) return false;
   if (!game || !game.is_finished || game.game_number == null) return false;
   try {
     await init();
-  } catch { return false; }
+  } catch (e) { _onFail(e.message); return false; }
   const p = getPool();
 
   const pCards = game.player_cards || [];
@@ -219,9 +233,11 @@ async function recordGame(game) {
         JSON.stringify({ player_cards: pCards, banker_cards: bCards, raw_winner: game.winner }),
       ]
     );
+    _onSuccess();
     return true;
   } catch (e) {
-    console.warn('[CartesStore] recordGame fail:', e.message);
+    _onFail(e.message);
+    if (!_disabled) console.warn('[CartesStore] recordGame fail:', e.message);
     return false;
   }
 }

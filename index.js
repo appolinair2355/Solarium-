@@ -41,20 +41,36 @@ app.use(cors({ origin: false, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ── Session store ──────────────────────────────────────────────────
-let sessionStore;
-if (USE_PG && pool) {
-  const PgSession = require('connect-pg-simple')(session);
-  sessionStore = new PgSession({ pool, createTableIfMissing: true });
-  console.log('🔑 Sessions stockées en PostgreSQL');
-} else {
-  const MemoryStore = require('memorystore')(session);
-  sessionStore = new MemoryStore({ checkPeriod: 86_400_000 });
-  console.log('🔑 Sessions en mémoire (JSON mode)');
+// ── Session store adaptatif (MemoryStore par défaut → PostgreSQL si DB OK) ──
+// On utilise un proxy-store pour pouvoir migrer vers PgSession après initDB()
+// sans changer la référence déjà capturée par express-session.
+class AdaptiveStore extends session.Store {
+  constructor() {
+    super();
+    const MemoryStore = require('memorystore')(session);
+    this._store = new MemoryStore({ checkPeriod: 86_400_000 });
+    this._mode  = 'memory';
+  }
+  upgradeToPostgres(pgStore) {
+    this._store = pgStore;
+    this._mode  = 'postgres';
+    console.log('🔑 Sessions migrées vers PostgreSQL');
+  }
+  get(sid, fn)       { return this._store.get(sid, fn); }
+  set(sid, sess, fn) { return this._store.set(sid, sess, fn); }
+  destroy(sid, fn)   { return this._store.destroy(sid, fn); }
+  touch(sid, sess, fn) {
+    if (typeof this._store.touch === 'function') return this._store.touch(sid, sess, fn);
+    fn && fn();
+  }
+  length(fn) { if (typeof this._store.length === 'function') return this._store.length(fn); fn && fn(null, 0); }
+  clear(fn)  { if (typeof this._store.clear  === 'function') return this._store.clear(fn);  fn && fn(); }
 }
+const adaptiveStore = new AdaptiveStore();
+console.log('🔑 Sessions en mémoire (démarrage — migration PostgreSQL en attente)');
 
 app.use(session({
-  store: sessionStore,
+  store: adaptiveStore,
   secret: process.env.SESSION_SECRET || 'baccarat-pro-secret-2025',
   resave: false,
   saveUninitialized: false,
@@ -440,6 +456,23 @@ async function main() {
   // ── Phase 1 : init DB (obligatoire avant d'écouter les requêtes) ──
   await initDB();
 
+  // ── Phase 1b : migrer le session store vers PostgreSQL si la DB répond ──
+  {
+    const dbModule = require('./db');
+    if (dbModule.USE_PG && dbModule.pool) {
+      try {
+        await dbModule.pool.query('SELECT 1');
+        const PgSession = require('connect-pg-simple')(session);
+        const pgStore = new PgSession({ pool: dbModule.pool, createTableIfMissing: true });
+        adaptiveStore.upgradeToPostgres(pgStore);
+      } catch (e) {
+        console.warn('[Session] ⚠️ DB inaccessible après initDB — sessions restent en mémoire:', e.message);
+      }
+    } else {
+      console.log('[Session] ℹ️ Mode JSON local — sessions en mémoire');
+    }
+  }
+
   // ── Phase 2 : ouvrir le port IMMÉDIATEMENT pour que Render détecte le port ──
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Serveur démarré sur le port ${PORT} (${IS_PROD ? 'production' : 'développement'}) — DB: ${USE_PG ? 'PostgreSQL' : 'JSON'}`);
@@ -532,6 +565,22 @@ async function initBackgroundServices() {
     console.warn('[TgRelay] Démarrage échoué (non bloquant):', e.message);
   }
 }
+
+// ── Gestionnaire d'erreurs global Express ──────────────────────────────────
+// Capture toutes les erreurs non gérées (ex: session store DB down, etc.)
+// et renvoie une réponse propre au lieu d'un "Internal Server Error" brut.
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  const msg = err?.message || String(err);
+  console.error('[Express] ⚠️ Erreur non gérée:', msg);
+  if (res.headersSent) return;
+  if (req.path.startsWith('/api/')) {
+    return res.status(500).json({ error: 'Erreur serveur temporaire', detail: msg });
+  }
+  // Pour les pages non-API : servir l'app React (le frontend affiche l'écran de login)
+  const indexHtml = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
+  res.status(500).send('Erreur serveur — réessayez dans quelques instants.');
+});
 
 main().catch(err => {
   console.error('Erreur démarrage:', err);
