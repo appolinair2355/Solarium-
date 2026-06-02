@@ -25,6 +25,32 @@ const API_PARAMS = new URLSearchParams({
   country: 96, virtualSports: 'true', groupChamps: 'true',
 });
 
+// ── API secours live renforcée (service-api/LiveFeed/GetChampZip) ─────────────
+// Chemin alternatif avec headers enrichis (x-app-n, x-hd, x-svc-source, etc.)
+const RESCUE_CHAMP_URL    = 'https://1xbet.com/service-api/LiveFeed/GetChampZip';
+const RESCUE_CHAMP_PARAMS = new URLSearchParams({
+  champ: 2050671, lng: 'en', country: 96, groupChamps: 'true',
+});
+const RESCUE_CHAMP_HEADERS = {
+  'accept': 'application/json, text/plain, */*',
+  'accept-language': 'en-GB,en;q=0.9,en-US;q=0.8',
+  'content-type': 'application/json',
+  'is-srv': 'false',
+  'priority': 'u=1, i',
+  'referer': 'https://1xbet.com/en/live/baccarat/2050671-baccara/716400636-player-banker',
+  'sec-ch-ua': '"Microsoft Edge";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0',
+  'x-app-n': 'BETTING_APP',
+  'x-mobile-project-id': '0',
+  'x-requested-with': 'XMLHttpRequest',
+  'x-svc-source': 'BETTING_APP',
+};
+
 const API_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
@@ -216,9 +242,10 @@ async function fetchGamesViaProxy() {
   if (now - _lastProxyAttempt < PROXY_COOLDOWN) return gamesCache;
   _lastProxyAttempt = now;
 
-  // Essaie d'abord le nouvel endpoint GetChampZip via proxy, puis l'ancien en fallback
-  const champUrl = `${CHAMP_API_URL}?${CHAMP_API_PARAMS}`;
-  const oldUrl   = `${API_URL}?${API_PARAMS}`;
+  // ⭐ service-api/GetChampZip est le meilleur endpoint confirmé — priorité absolue
+  const rescueUrl = `${RESCUE_CHAMP_URL}?${RESCUE_CHAMP_PARAMS}`;
+  const champUrl  = `${CHAMP_API_URL}?${CHAMP_API_PARAMS}`;
+  const oldUrl    = `${API_URL}?${API_PARAMS}`;
 
   const tryProxy = async (proxyFn, targetUrl, parserFn) => {
     try {
@@ -230,43 +257,40 @@ async function fetchGamesViaProxy() {
     } catch { return null; }
   };
 
-  // Phase 1 : GetChampZip — race sur les 3 premiers proxies en parallèle
+  // Phase 1 ⭐ : service-api/GetChampZip — race sur les 4 proxies en parallèle
+  const rescueResults = await Promise.all(
+    PROXY_SERVICES.map(fn => tryProxy(fn, rescueUrl, parseChampData))
+  );
+  for (const parsed of rescueResults) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données service-api/GetChampZip via proxy (prioritaire)');
+      return gamesCache;
+    }
+  }
+
+  // Phase 2 : GetChampZip (chemin standard) — race 4 proxies en parallèle
   const champResults = await Promise.all(
-    PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn, champUrl, parseChampData))
+    PROXY_SERVICES.map(fn => tryProxy(fn, champUrl, parseChampData))
   );
   for (const parsed of champResults) {
     if (parsed) {
       updateCache(parsed, 'server');
-      console.log('[Games] ✅ Données GetChampZip via proxy (parallèle)');
+      console.log('[Games] ✅ Données GetChampZip via proxy');
       return gamesCache;
     }
   }
 
-  // Phase 2 : GetChampZip — fallback dernier proxy
-  const champLast = await tryProxy(PROXY_SERVICES[3], champUrl, parseChampData);
-  if (champLast) {
-    updateCache(champLast, 'server');
-    console.log('[Games] ✅ Données GetChampZip via proxy (fallback)');
-    return gamesCache;
-  }
-
-  // Phase 3 : ancien endpoint GetSportsShortZip — race proxies parallèles
+  // Phase 3 : GetSportsShortZip — race 4 proxies en parallèle
   const oldResults = await Promise.all(
-    PROXY_SERVICES.slice(0, 3).map(fn => tryProxy(fn, oldUrl, parseRawData))
+    PROXY_SERVICES.map(fn => tryProxy(fn, oldUrl, parseRawData))
   );
   for (const parsed of oldResults) {
     if (parsed) {
       updateCache(parsed, 'server');
-      console.log('[Games] ✅ Données GetSportsShortZip via proxy (parallèle)');
+      console.log('[Games] ✅ Données GetSportsShortZip via proxy');
       return gamesCache;
     }
-  }
-
-  // Phase 4 : ancien endpoint — dernier proxy
-  const oldLast = await tryProxy(PROXY_SERVICES[3], oldUrl, parseRawData);
-  if (oldLast) {
-    updateCache(oldLast, 'server');
-    console.log('[Games] ✅ Données GetSportsShortZip via proxy (fallback)');
   }
   return gamesCache;
 }
@@ -320,7 +344,39 @@ async function fetchGames() {
     if (!_directApiWarned) { _directApiWarned = true; console.log(`[Games] ⚠️ API directe inaccessible (${e.message}) — proxy activé`); }
   }
 
-  // 2. Fallback : ancien endpoint GetSportsShortZip (principal uniquement)
+  // 2. ⭐ Meilleur endpoint confirmé : service-api/GetChampZip (headers enrichis)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(`${RESCUE_CHAMP_URL}?${RESCUE_CHAMP_PARAMS}`, {
+        headers: RESCUE_CHAMP_HEADERS, timeout: 4000,
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseChampData(data);
+        if (parsed && parsed.length > 0) {
+          updateCache(parsed, 'server');
+          console.log('[Games] ✅ service-api/GetChampZip (prioritaire) OK');
+          return gamesCache;
+        }
+      }
+    } catch {}
+    if (attempt < 3) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 3. Fallback : GetChampZip chemin standard
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const parsed = await _fetchRaceMirrors();
+      if (parsed && parsed.length > 0) {
+        updateCache(parsed, 'server');
+        console.log('[Games] ⚠️ Fallback GetChampZip standard utilisé');
+        return gamesCache;
+      }
+    } catch {}
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 4. Fallback : GetSportsShortZip
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
@@ -337,7 +393,7 @@ async function fetchGames() {
     if (attempt < 2) await new Promise(r => setTimeout(r, 300));
   }
 
-  // 3. Dernier recours : services proxy
+  // 5. Dernier recours : services proxy
   return fetchGamesViaProxy();
 }
 
