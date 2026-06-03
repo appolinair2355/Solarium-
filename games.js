@@ -330,6 +330,17 @@ async function _fetchRaceMirrors() {
 
 async function fetchGames() {
   const now = Date.now();
+
+  // ── API Kouamé — remplace 1xBet quand activée ───────────────────────────
+  try {
+    const kouame = require('./kouame-api');
+    if (kouame.isEnabled()) {
+      const kg = kouame.getGames();
+      if (kg.length > 0) updateCache(kg, 'kouame');
+      return gamesCache;
+    }
+  } catch { /* module absent — ignoré */ }
+
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
 
   // 1. Race principal + miroirs simultanément (le plus rapide/disponible gagne)

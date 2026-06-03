@@ -135,11 +135,13 @@ const tgAnnounceRoutes = require('./tg-announce-route');
 const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
 const { startPubScheduler }        = require('./pub-scheduler');
 const tgRelayRoutes    = require('./tg-relay-route');
+const kouameRoutes     = require('./kouame-route');
 app.use('/api/shop',        shopRoutes);
 app.use('/api/license',     licenseRoutes);
 app.use('/api/ideas',       ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
 app.use('/api/admin/tg-relay', tgRelayRoutes);
+app.use('/api/kouame',      kouameRoutes);
 
 // ── Statut admin en ligne ──────────────────────────────────────────
 const db = require('./db');
@@ -505,6 +507,8 @@ async function initBackgroundServices() {
   setInterval(runAnnouncementsScheduler, 60_000);
   // Démarrer le Rotateur Promo (annonce_sequence)
   startAnnonceSequenceScheduler();
+  // Initialiser l'API Kouamé (lecture Telegram inversée)
+  require('./kouame-api').init().catch(e => console.warn('[KouaméAPI] Init échouée:', e.message));
 
   // ── Nettoyage automatique des logs en mémoire (toutes les 20 min) ──────────
   const CLEANUP_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
