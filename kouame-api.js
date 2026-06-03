@@ -106,10 +106,33 @@ function cardScore(cards) {
   return s % 10;
 }
 
+// ── Calcul du gagnant depuis les cartes (règles Baccarat) ─────────────────────
+//
+// Le vainqueur est déterminé uniquement à partir des points calculés.
+// On ne se fie PAS aux emojis ✅ / 🔵 / 🔴 / 🟣 pour identifier le résultat.
+
+function calcWinner(playerCards, bankerCards) {
+  if (playerCards.length < 2 || bankerCards.length < 2) return null;
+  const S1 = cardScore(playerCards);
+  const S2 = cardScore(bankerCards);
+  if (S1 > S2) return 'Player';
+  if (S2 > S1) return 'Banker';
+  return 'Tie';
+}
+
 // ── Parser principal ──────────────────────────────────────────────────────────
 //
-// Retourne un objet jeu compatible avec le moteur, ou null si le message
-// n'est pas un message de jeu Baccarat.
+// Règles de détection du statut du jeu :
+//   • ⏰ présent dans le message   → jeu EN COURS
+//   • ▶️ présent dans le body      → jeu EN COURS (quelqu'un tire une carte)
+//   • ni ⏰ ni ▶️                  → jeu TERMINÉ
+//
+// Le gagnant est TOUJOURS calculé depuis les cartes (points mod 10).
+// On n'utilise PAS ✅ / 🔵 / 🔴 / 🟣 pour décider du résultat.
+//
+// Cas supplémentaire géré dans mergeGame() :
+//   • Si un nouveau numéro de jeu plus grand arrive, le jeu précédent
+//     non terminé est automatiquement marqué comme terminé.
 
 function parseMessage(text) {
   if (!text || typeof text !== 'string') return null;
@@ -139,48 +162,37 @@ function parseMessage(text) {
   const gameNumber = parseInt(lm[1]);
   const body       = lm[2].trim();
 
-  // ── Résultat du jeu (emojis de couleur de fin) ─────────────────────────────
-  const isPlayerWin = body.includes('🔵');
-  const isBankerWin = body.includes('🔴');
-  const isTie       = body.includes('🟣');
-  const isFinished  = isPlayerWin || isBankerWin || isTie;
+  // ── Détection du statut : EN COURS ou TERMINÉ ─────────────────────────────
+  // ⏰ dans le texte complet OU ▶️ dans le body → jeu encore en cours
+  // Si les deux ont disparu → jeu terminé
+  // #R dans le message → jeu terminé immédiatement (résultat confirmé)
+  const hasHourglass = text.includes('⏰');
+  const hasArrow     = body.includes('▶️');
+  const hasResult    = /\s#R\b/.test(text);
+  const isFinished   = hasResult || (!hasHourglass && !hasArrow);
 
   // ── Détection des tirages en cours (▶️) ────────────────────────────────────
-  // Format des parties non-terminées :
-  //   [▶️]{score}({cartes}) - [▶️]{score}({cartes})
-  //   [▶️]{score}({cartes}) 🔰 [▶️]{score}({cartes})
-  //
-  // ▶️ devant la PREMIÈRE partie  → c'est le joueur qui tire
-  // ▶️ devant la SECONDE partie   → c'est le banquier qui tire
-  //
-  // On cherche la position des deux parties dans le body AVANT nettoyage
-  // du ▶️ pour savoir qui est en train de tirer.
-
   let playerHasArrow = false;
   let bankerHasArrow = false;
 
   if (!isFinished) {
-    // On cherche le séparateur principal : " - " ou " 🔰 "
-    const sepRe = / (?:-|🔰) /;
-    const sepMatch = body.match(sepRe);
+    const sepMatch = body.match(/ (?:-|🔰) /);
     if (sepMatch) {
-      const sepIdx  = body.indexOf(sepMatch[0]);
-      const player  = body.slice(0, sepIdx);
-      const banker  = body.slice(sepIdx + sepMatch[0].length);
-      // On retire le ✅ éventuel avant de vérifier ▶️
-      playerHasArrow = player.replace(/^✅/, '').startsWith('▶️');
-      bankerHasArrow = banker.replace(/^✅/, '').startsWith('▶️');
+      const sepIdx    = body.indexOf(sepMatch[0]);
+      const playerPart = body.slice(0, sepIdx).trim();
+      const bankerPart = body.slice(sepIdx + sepMatch[0].length).trim();
+      // Retirer les emojis de statut en début de chaîne avant de vérifier ▶️
+      playerHasArrow = /^[✅🔵🔴🟣]*▶️/.test(playerPart);
+      bankerHasArrow = /^[✅🔵🔴🟣]*▶️/.test(bankerPart);
     }
   }
 
-  // ── Extraction des scores et cartes ───────────────────────────────────────
-  // Pattern dans le body : [✅][▶️]{score}({cartes})
-  // On extrait les deux groupes (joueur, banquier)
-  const partRe = /(?:✅)?(?:▶️)?(\d+)\(([^)]*)\)/g;
+  // ── Extraction des cartes (format : [✅][▶️]{score}({cartes})) ─────────────
+  const partRe = /(?:[✅▶️🔵🔴🟣])*(\d+)\(([^)]*)\)/g;
   const parts  = [];
   let pm;
   while ((pm = partRe.exec(body)) !== null) {
-    parts.push({ scoreVal: parseInt(pm[1]), cardsStr: pm[2] });
+    parts.push({ cardsStr: pm[2] });
   }
 
   if (parts.length < 2) return null;
@@ -188,19 +200,15 @@ function parseMessage(text) {
   const playerCards = parseCardsStr(parts[0].cardsStr);
   const bankerCards = parseCardsStr(parts[1].cardsStr);
 
-  // ── Détermination du vainqueur ─────────────────────────────────────────────
-  let winner = null;
-  if (isTie)       winner = 'Tie';
-  else if (isPlayerWin) winner = 'Player';
-  else if (isBankerWin) winner = 'Banker';
+  // ── Calcul des points depuis les cartes ────────────────────────────────────
+  const S1 = cardScore(playerCards);
+  const S2 = cardScore(bankerCards);
+
+  // ── Détermination du gagnant (uniquement si jeu terminé et cartes lisibles) ─
+  // On calcule depuis les points — pas depuis ✅ / 🔵 / 🔴 / 🟣
+  const winner = isFinished ? calcWinner(playerCards, bankerCards) : null;
 
   // ── Phase précise ──────────────────────────────────────────────────────────
-  // Correspond aux phases utilisées par le moteur :
-  //   'Normal'      → 2+2 cartes initiales, personne ne tire encore
-  //   'PlayerMove'  → le joueur est encore en train de recevoir sa 3e carte
-  //   'BankerMove'  → le banquier est encore en train de recevoir sa 3e carte
-  //   'Win1'        → jeu terminé
-
   let phase = 'Normal';
   if (isFinished) {
     phase = 'Win1';
@@ -208,8 +216,6 @@ function parseMessage(text) {
     phase = 'PlayerMove';
   } else if (bankerHasArrow || (playerCards.length >= 3 && bankerCards.length < 3)) {
     phase = 'BankerMove';
-  } else if (playerCards.length >= 2 && bankerCards.length >= 2) {
-    phase = 'Normal';
   }
 
   return {
@@ -219,10 +225,7 @@ function parseMessage(text) {
     winner,
     is_finished:  isFinished,
     phase,
-    score: {
-      S1: cardScore(playerCards),
-      S2: cardScore(bankerCards),
-    },
+    score:        { S1, S2 },
   };
 }
 
@@ -283,12 +286,29 @@ async function tgGetUpdates(token, offset) {
 
 function mergeGame(game) {
   const now = Date.now();
+
+  // ── Si un nouveau numéro plus grand arrive → terminer les jeux précédents ──
+  // L'apparition d'un #N+1 dans le canal signifie que le jeu précédent est fini.
+  if (game.game_number > _lastGn) {
+    for (let i = 0; i < _games.length; i++) {
+      const g = _games[i];
+      if (!g.is_finished && g.game_number < game.game_number) {
+        const winner = calcWinner(g.player_cards, g.banker_cards);
+        _games[i] = { ...g, is_finished: true, winner, phase: 'Win1', _auto_finished: true };
+        console.log(
+          `[KouaméAPI] 🏁 #N${g.game_number} auto-terminé (nouveau #N${game.game_number} détecté)` +
+          (winner ? ` → ${winner} (P:${g.score?.S1 ?? '?'} B:${g.score?.S2 ?? '?'})` : ' → résultat incalculable')
+        );
+      }
+    }
+  }
+
   const idx = _games.findIndex(g => g.game_number === game.game_number);
   if (idx >= 0) {
     const ex = _games[idx];
-    // 1. Jeu déjà terminé → on garde (sauf si la mise à jour est aussi terminée)
+    // Jeu déjà terminé → on garde l'état final (pas de retour en arrière)
     if (ex.is_finished && !game.is_finished) return;
-    // 2. Sinon on prend l'état avec plus de cartes OU terminé
+    // Sinon on prend l'état avec plus de cartes OU terminé
     const exCards  = ex.player_cards.length + ex.banker_cards.length;
     const newCards = game.player_cards.length + game.banker_cards.length;
     if (game.is_finished || newCards >= exCards) {
@@ -493,8 +513,14 @@ async function resetConfig() {
 }
 
 function getStatus() {
+  // connected = true si un message a été reçu dans les 3 dernières minutes
+  // (évite que les 409 cycliques faussent l'indicateur)
+  const recentThresholdMs = 3 * 60 * 1000;
+  const lastReceived = _status.last_received_at ? new Date(_status.last_received_at).getTime() : 0;
+  const recentlyConnected = lastReceived > 0 && (Date.now() - lastReceived) < recentThresholdMs;
   return {
     ..._status,
+    connected:  _status.connected || recentlyConnected,
     enabled:    isEnabled(),
     game_count: _games.length,
   };
