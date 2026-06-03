@@ -355,6 +355,7 @@ export default function Dashboard() {
   const [games, setGames] = useState([]);
   const [stats, setStats] = useState([]);
   const [absences, setAbsences] = useState([]);
+  const [absencesLoaded, setAbsencesLoaded] = useState(false);
   const [proLogs, setProLogs] = useState([]);
   // 'compact' (carte sur dashboard) · 'expanded' (modale 960px) · 'fullscreen' (100vw)
   const [proLogsView, setProLogsView] = useState('compact');
@@ -603,10 +604,17 @@ export default function Dashboard() {
   }, [hasAccess]);
 
   useEffect(() => {
+    setAbsencesLoaded(false);
+    setAbsences([]);
+  }, [channelId]);
+
+  useEffect(() => {
     if (!user?.is_admin && !user?.is_premium && !user?.is_pro && user?.account_type !== 'partenaire') return;
     const load = () =>
       fetch(`/api/games/absences?channel=${channelId}`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : []).then(setAbsences);
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data !== null) { setAbsences(data); setAbsencesLoaded(true); } })
+        .catch(() => setAbsencesLoaded(true));
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
@@ -1162,7 +1170,9 @@ export default function Dashboard() {
                             })}
                           </div>
                         ) : absences.length === 0 ? (
-                          <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>Chargement...</div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>
+                            {absencesLoaded ? '— Aucune donnée' : 'Chargement...'}
+                          </div>
                         ) : absences[0]?.isIntersection ? (
                           (() => {
                             const { monitor } = absences[0];

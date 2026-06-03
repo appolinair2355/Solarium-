@@ -3940,6 +3940,8 @@ function AdminPanel() {
   const [kouameMsg, setKouameMsg]         = useState('');
   const [kouameSaving, setKouameSaving]   = useState(false);
   const [kouameTesting, setKouameTesting] = useState(false);
+  const [kouameFeedUrl, setKouameFeedUrl] = useState('');
+  const [kouameFeedCopied, setKouameFeedCopied] = useState(false);
 
   const loadKouame = async () => {
     try {
@@ -12547,6 +12549,92 @@ function AdminPanel() {
               </button>
             </div>
           )}
+
+          {/* ── Générateur de lien API Kouamé (format 1xBet) ── */}
+          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 18 }}>🔗</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#a5b4fc' }}>Générer lien API Kouamé</div>
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
+                  Lien compatible format 1xBet — utilisable dans n'importe quel code Python / Node.js
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = window.location.origin + '/api/kouame/feed';
+                  setKouameFeedUrl(url);
+                  setKouameFeedCopied(false);
+                }}
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.5)', background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', fontWeight: 800, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                ⚡ Générer le lien
+              </button>
+            </div>
+
+            {kouameFeedUrl && (
+              <div>
+                {/* URL box */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                  <code style={{ flex: 1, fontSize: 11, color: '#818cf8', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                    {kouameFeedUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(kouameFeedUrl).then(() => {
+                        setKouameFeedCopied(true);
+                        setTimeout(() => setKouameFeedCopied(false), 2000);
+                      });
+                    }}
+                    style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: kouameFeedCopied ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.15)', color: kouameFeedCopied ? '#4ade80' : '#a5b4fc', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
+                  >
+                    {kouameFeedCopied ? '✅ Copié !' : '📋 Copier'}
+                  </button>
+                </div>
+
+                {/* Exemples d'utilisation */}
+                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7 }}>Exemple d'utilisation</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 7, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: 9, color: '#f59e0b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 5 }}>🐍 Python</div>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{`import requests, json
+data = requests.get(
+  "${kouameFeedUrl}"
+).json()
+games = data["Value"]["G"]
+for g in games:
+  gn   = int(g["DI"])
+  done = bool(g["F"])
+  sc   = g["SC"]["S"]
+  phase = next((e["Value"] for e
+    in sc if e["Key"]=="S"), None)
+  # Win1=Joueur Win2=Banquier Tie`}</pre>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 7, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: 9, color: '#38bdf8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 5 }}>⚡ Node.js</div>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{`const d = await fetch(
+  "${kouameFeedUrl}"
+).then(r=>r.json());
+const games = d.Value.G;
+for (const g of games) {
+  const gn = parseInt(g.DI);
+  const sc = g.SC.S;
+  const ph = sc.find(
+    e=>e.Key==="S")?.Value;
+  // S=0♠ 1♣ 2♦ 3♥`}</pre>
+                  </div>
+                </div>
+
+                {/* Note de compatibilité */}
+                <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 6, background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.2)', fontSize: 10, color: '#86efac' }}>
+                  ✅ <strong>Compatible 1xBet GetChampZip</strong> — même structure <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: 3 }}>Value.G[].DI / F / SC.S / SC.FS / SC.CPS</code>.
+                  Costumes : <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: 3 }}>0=♠ 1=♣ 2=♦ 3=♥</code>
+                </div>
+              </div>
+            )}
+          </div>
         </div>}
 
         {/* ── SECTION 1 : CANAUX PRINCIPAUX DU SITE ── */}
