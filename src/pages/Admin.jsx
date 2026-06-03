@@ -3927,10 +3927,95 @@ function AdminPanel() {
   useEffect(() => {
     if (adminTab === 'canaux') {
       loadLbTargets();
+      loadKouame();
       loadStrategies();
       loadStratStats();
     }
   }, [adminTab]);
+
+  // ── API Kouamé ──
+  const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
+  const [kouameStatus, setKouameStatus]   = useState({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
+  const [kouameForm, setKouameForm]       = useState({ bot_token: '', channel_id: '' });
+  const [kouameMsg, setKouameMsg]         = useState('');
+  const [kouameSaving, setKouameSaving]   = useState(false);
+  const [kouameTesting, setKouameTesting] = useState(false);
+
+  const loadKouame = async () => {
+    try {
+      const [rc, rs] = await Promise.all([
+        fetch('/api/kouame/config',  { credentials: 'include' }).then(r => r.json()),
+        fetch('/api/kouame/status',  { credentials: 'include' }).then(r => r.json()),
+      ]);
+      setKouameConfig(rc);
+      setKouameStatus(rs);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+  };
+
+  const saveKouame = async () => {
+    setKouameSaving(true); setKouameMsg('');
+    try {
+      const body = {};
+      if (kouameForm.bot_token.trim()) body.bot_token = kouameForm.bot_token.trim();
+      if (kouameForm.channel_id.trim()) body.channel_id = kouameForm.channel_id.trim();
+      const r = await fetch('/api/kouame/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameConfig(d);
+      setKouameForm({ bot_token: '', channel_id: '' });
+      setKouameMsg('✅ Configuration sauvegardée');
+      setTimeout(loadKouame, 1000);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameSaving(false); }
+  };
+
+  const toggleKouame = async (enabled) => {
+    setKouameSaving(true); setKouameMsg('');
+    try {
+      const r = await fetch('/api/kouame/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameConfig(d);
+      setKouameMsg(enabled ? '✅ API Kouamé activée — 1xBet suspendu' : '⏸ API Kouamé désactivée — 1xBet reprend');
+      setTimeout(loadKouame, 800);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameSaving(false); }
+  };
+
+  const testKouame = async () => {
+    const token = kouameForm.bot_token.trim() || '(config actuelle)';
+    setKouameTesting(true); setKouameMsg('⏳ Test connexion…');
+    try {
+      const r = await fetch('/api/kouame/test', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: kouameForm.bot_token.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameMsg(`✅ Bot valide : @${d.bot_username} (${d.bot_name})`);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameTesting(false); }
+  };
+
+  const resetKouame = async () => {
+    if (!confirm('Supprimer la configuration API Kouamé ?')) return;
+    try {
+      const r = await fetch('/api/kouame/config', { method: 'DELETE', credentials: 'include' });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error||'Erreur'); }
+      setKouameConfig({ bot_token_preview: null, channel_id: '', enabled: false });
+      setKouameStatus({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
+      setKouameMsg('🗑 Configuration supprimée');
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+  };
 
   // Hébergement Bots
   const [hostedBots, setHostedBots]           = useState([]);
@@ -12322,6 +12407,146 @@ function AdminPanel() {
               </div>
             )}
           </div>
+        </div>}
+
+        {/* ── SECTION 0b : API KOUAMÉ ── */}
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(20,184,166,0.4)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔄</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">API Kouamé</h2>
+              <p className="tg-admin-sub">
+                Lit les parties depuis un canal Telegram (format <em>Diffusion live</em>) et les injecte dans le moteur
+                en remplacement de l'API 1xBet. Quand activée, <strong style={{ color: '#f87171' }}>1xBet n'envoie plus aucune requête</strong>.
+                <br />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  Le bot doit être <strong>administrateur</strong> du canal source pour recevoir les messages.
+                </span>
+              </p>
+            </div>
+            <span className="tg-badge-connected" style={{
+              background: kouameConfig.enabled ? 'rgba(20,184,166,0.15)' : 'rgba(100,116,139,0.12)',
+              color:      kouameConfig.enabled ? '#2dd4bf' : '#94a3b8',
+              border:     `1px solid ${kouameConfig.enabled ? 'rgba(20,184,166,0.4)' : 'rgba(100,116,139,0.25)'}`,
+              fontWeight: 800,
+            }}>
+              {kouameConfig.enabled ? '● ACTIF' : '○ INACTIF'}
+            </span>
+          </div>
+
+          {kouameMsg && (
+            <div className={`tg-alert ${kouameMsg.startsWith('✅') ? 'tg-alert-ok' : kouameMsg.startsWith('⏳') || kouameMsg.startsWith('⏸') ? '' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{kouameMsg}</div>
+          )}
+
+          {/* Statut temps réel */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, marginBottom: 4 }}>
+            <div style={{ flex: 1, minWidth: 140, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Connexion</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: kouameStatus.connected ? '#4ade80' : '#94a3b8' }}>
+                {kouameStatus.connected ? '🟢 Connecté' : kouameStatus.error ? '🔴 Erreur' : '⚪ En attente'}
+              </div>
+              {kouameStatus.error && <div style={{ fontSize: 10, color: '#f87171', marginTop: 3, wordBreak: 'break-all' }}>{kouameStatus.error}</div>}
+            </div>
+            <div style={{ flex: 1, minWidth: 120, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Dernier jeu</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
+                {kouameStatus.last_game_number ? `#N${kouameStatus.last_game_number}` : '—'}
+              </div>
+              {kouameStatus.last_received_at && (
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>
+                  {new Date(kouameStatus.last_received_at).toLocaleTimeString('fr-FR')}
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 110, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Jeux en mémoire</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{kouameStatus.game_count || 0}</div>
+            </div>
+            {kouameConfig.channel_id && (
+              <div style={{ flex: 2, minWidth: 160, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+                <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Canal source</div>
+                <div style={{ fontSize: 12, color: '#a5b4fc', fontFamily: 'monospace' }}>{kouameConfig.channel_id}</div>
+                {kouameConfig.bot_token_preview && (
+                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>🔑 {kouameConfig.bot_token_preview}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Formulaire de configuration */}
+          <div style={{ background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 10, padding: 14, marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#2dd4bf', marginBottom: 10 }}>
+              ⚙️ {kouameConfig.bot_token_preview ? 'Modifier la configuration' : 'Configurer l\'API Kouamé'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 TOKEN BOT LECTEUR</label>
+                <input
+                  value={kouameForm.bot_token}
+                  onChange={e => setKouameForm(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder={kouameConfig.bot_token_preview || '123456:AAF-xxxxx…'}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Bot admin du canal source (lit les messages)</div>
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID CANAL SOURCE</label>
+                <input
+                  value={kouameForm.channel_id}
+                  onChange={e => setKouameForm(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder={kouameConfig.channel_id || '@canal ou -1001234…'}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Canal où live-broadcast.js diffuse les jeux</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={testKouame} disabled={kouameTesting || (!kouameForm.bot_token && !kouameConfig.bot_token_preview)}
+                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.4)', background: 'rgba(20,184,166,0.1)', color: '#5eead4', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: (kouameTesting || (!kouameForm.bot_token && !kouameConfig.bot_token_preview)) ? 0.5 : 1 }}>
+                {kouameTesting ? '⏳…' : '🔌 Tester la connexion'}
+              </button>
+              <button type="button" onClick={saveKouame} disabled={kouameSaving || (!kouameForm.bot_token && !kouameForm.channel_id)}
+                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.5)', background: 'rgba(20,184,166,0.18)', color: '#ccfbf1', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: (kouameSaving || (!kouameForm.bot_token && !kouameForm.channel_id)) ? 0.5 : 1 }}>
+                {kouameSaving ? '⏳…' : '💾 Sauvegarder'}
+              </button>
+              <button type="button" onClick={() => loadKouame()}
+                style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(100,116,139,0.3)', background: 'rgba(100,116,139,0.08)', color: '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                🔁 Actualiser
+              </button>
+              {kouameConfig.bot_token_preview && (
+                <button type="button" onClick={resetKouame}
+                  style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.07)', color: '#f87171', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginLeft: 'auto' }}>
+                  🗑 Supprimer
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Bouton d'activation principal */}
+          {kouameConfig.bot_token_preview && (
+            <div style={{ marginTop: 14, padding: '14px 16px', borderRadius: 10, border: `2px solid ${kouameConfig.enabled ? 'rgba(20,184,166,0.5)' : 'rgba(100,116,139,0.3)'}`, background: kouameConfig.enabled ? 'rgba(20,184,166,0.08)' : 'rgba(15,23,42,0.4)', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
+                  {kouameConfig.enabled ? '🟢 API Kouamé active — 1xBet suspendu' : '⚪ API Kouamé inactive — 1xBet utilisé'}
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                  {kouameConfig.enabled
+                    ? 'Le moteur reçoit les données depuis le canal Telegram. L\'API 1xBet est ignorée.'
+                    : 'Activez pour que le moteur lise les jeux depuis le canal Telegram au lieu de 1xBet.'}
+                </div>
+              </div>
+              <button type="button" onClick={() => toggleKouame(!kouameConfig.enabled)} disabled={kouameSaving}
+                style={{
+                  padding: '10px 22px', borderRadius: 8, fontWeight: 800, fontSize: 13, cursor: kouameSaving ? 'wait' : 'pointer',
+                  border: `1px solid ${kouameConfig.enabled ? 'rgba(251,191,36,0.5)' : 'rgba(20,184,166,0.5)'}`,
+                  background: kouameConfig.enabled ? 'rgba(251,191,36,0.12)' : 'rgba(20,184,166,0.18)',
+                  color: kouameConfig.enabled ? '#fbbf24' : '#2dd4bf',
+                  minWidth: 130,
+                }}>
+                {kouameSaving ? '⏳…' : kouameConfig.enabled ? '⏸ Désactiver' : '▶ Activer'}
+              </button>
+            </div>
+          )}
         </div>}
 
         {/* ── SECTION 1 : CANAUX PRINCIPAUX DU SITE ── */}
