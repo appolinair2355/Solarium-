@@ -16,7 +16,29 @@ const MIRROR_HOSTS = [
   'https://1xbet.cm',
   'https://1xbet.ng',
   'https://1xbet.gh',
+  'https://1xbet.cd',
 ];
+
+// ── Endpoint confirmé non-bloqué : 1xbet.cd service-api ──────────────────────
+const CD_RESCUE_URL    = 'https://1xbet.cd/service-api/LiveFeed/GetChampZip';
+const CD_RESCUE_PARAMS = new URLSearchParams({
+  champ: 2050671, lng: 'en', country: 96, groupChamps: 'true',
+});
+const CD_RESCUE_HEADERS = {
+  'accept': 'application/json, text/plain, */*',
+  'accept-language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
+  'content-type': 'application/json',
+  'is-srv': 'false',
+  'x-app-n': 'BETTING_APP',
+  'x-requested-with': 'XMLHttpRequest',
+  'x-svc-source': 'BETTING_APP',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0',
+  'origin': 'https://1xbet.cd',
+  'referer': 'https://1xbet.cd/fr/live/baccarat/2050671-baccara/726599901-player-banker',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+};
 
 // ── Ancien endpoint de secours (GetSportsShortZip) ───────────────────────────
 const API_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip';
@@ -70,6 +92,7 @@ let lastFetch      = 0;
 let lastClientPush = 0;
 let lastFingerprint = '';
 const CACHE_TTL    = 800;
+let lastDataSource = 'server'; // 'server' (1xBet direct) | 'kouame' | 'proxy'
 
 // ── Détection de gap (jeu sauté) ─────────────────────────────────────────────
 // On trace le plus grand game_number vu jusqu'ici.
@@ -170,6 +193,7 @@ function updateCache(parsed, source) {
   lastFetch       = Date.now();
   lastFingerprint = fp;
   if (source === 'push') lastClientPush = Date.now();
+  if (source && source !== 'push') lastDataSource = source;
   broadcastGames(gamesCache); // push immédiat à tous les clients SSE
   // Diffusion live vers les canaux Telegram configurés (sans bloquer)
   try {
@@ -342,6 +366,21 @@ async function fetchGames() {
   } catch { /* module absent — ignoré */ }
 
   if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
+
+  // 0. ⭐ Priorité absolue : 1xbet.cd/service-api — confirmé non-bloqué sur ce serveur
+  try {
+    const resp = await fetch(`${CD_RESCUE_URL}?${CD_RESCUE_PARAMS}`, {
+      headers: CD_RESCUE_HEADERS, timeout: 4000,
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const parsed = parseChampData(data);
+      if (parsed && parsed.length > 0) {
+        updateCache(parsed, 'server');
+        return gamesCache;
+      }
+    }
+  } catch { /* silencieux — on continue vers fallbacks */ }
 
   // 1. Race principal + miroirs simultanément (le plus rapide/disponible gagne)
   try {
@@ -647,6 +686,19 @@ router.get('/loss-streaks', requireActiveSub, async (req, res) => {
     const sequences = v ? JSON.parse(v) : [];
     res.json({ streaks: engine.lossStreaks || {}, sequences });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/games/source — source actuelle des données (1xbet ou kouame)
+router.get('/source', requireActiveSub, (req, res) => {
+  try {
+    let source = lastDataSource;
+    // Vérifier en temps réel si Kouamé API est active
+    try {
+      const kouame = require('./kouame-api');
+      if (kouame.isEnabled()) source = 'kouame';
+    } catch {}
+    res.json({ source });
+  } catch (e) { res.status(500).json({ source: 'server' }); }
 });
 
 router.get('/live', requireActiveSub, async (req, res) => {

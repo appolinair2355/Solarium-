@@ -2501,6 +2501,11 @@ class Engine {
       const hCnt = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
       resolveHandSuits = hCnt === 2 ? ['deux'] : hCnt === 3 ? ['trois'] : [];
     }
+    // abs_3_vers_2 / abs_3_vers_3 : résolution par comptage de cartes (évite faux-match avec suits)
+    if (cfg.mode === 'abs_3_vers_2' || cfg.mode === 'abs_3_vers_3') {
+      const hCntAbs = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
+      resolveHandSuits = hCntAbs === 2 ? ['deux'] : hCntAbs === 3 ? ['trois'] : [];
+    }
     // gestion_banque : résolution avec la main configurée (cfg.hand), comme les autres modes.
     // NE PAS utiliser les deux mains — cela provoquerait une résolution prématurée (rattrapage=0)
     // si le costume prédit apparaît dans la mauvaise main, alors que la main configurée ne l'a pas.

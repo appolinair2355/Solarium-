@@ -293,13 +293,6 @@ function buildMessage(g) {
   return `⏰ #N${n}. ${pPart} - ${bPart}`;
 }
 
-// ── Construction du message de transition "Prochain jeu" ────────────────────
-
-function buildNextGameMessage(nextGn, delayMs) {
-  const secs = Math.max(1, Math.round(delayMs / 1000));
-  return `⏳ Prochain jeu #N${nextGn} dans ~${secs}s...`;
-}
-
 function buildNextGameLiveMessage(nextGn) {
   return `🃏 #N${nextGn}. Distribution des cartes...`;
 }
@@ -456,18 +449,6 @@ async function diffuseGame(target, game, finishedNow) {
   }
 }
 
-// ── Annonce du prochain jeu (désactivée) ─────────────────────────────────────
-// Les messages "⏳ Prochain jeu #N dans ~Xs" sont désactivés.
-// La fonction est conservée pour ne pas casser les appels existants.
-
-async function postNextGameCountdown(/* targets, gn */) {
-  // Intentionnellement vide — plus d'envoi de messages countdown
-}
-
-// Mise à jour countdown désactivée
-function _scheduleCountdownUpdates(/* nextGn, totalDelayMs, targets */) {
-  // Intentionnellement vide
-}
 
 // ── Diffusion vers TOUTES les cibles en parallèle ────────────────────────────
 
@@ -593,16 +574,6 @@ async function _processSnapshot(games) {
     const wasFullyFinal    = isFullyFinalized(g.game_number, targets);
     await diffuseGameAllTargets(targets, g, finishedNow);
 
-    // Si ce jeu vient d'être entièrement finalisé → programmer le countdown
-    if (finishedNow && !wasFullyFinal && isFullyFinalized(g.game_number, targets)) {
-      justFinalized.add(g.game_number);
-    }
-  }
-
-  // Poster les countdowns pour les jeux nouvellement finalisés
-  // (léger délai pour que le message final soit bien envoyé en premier)
-  for (const gn of justFinalized) {
-    setTimeout(() => postNextGameCountdown(targets, gn).catch(() => {}), 800);
   }
 
   // ── Finalisation des jeux disparus de l'API ───────────────────────────────
@@ -626,11 +597,6 @@ async function _processSnapshot(games) {
     }
     console.log(`[LiveBroadcast] 🔍 #${gn} disparu sans finalisation → forçage final (${pendingTargets.length} cible(s))`);
     await Promise.allSettled(pendingTargets.map(t => diffuseGame(t, forcedGame, true)));
-
-    // Countdown si on vient juste de finaliser
-    if (isFullyFinalized(gn, targets)) {
-      setTimeout(() => postNextGameCountdown(targets, gn).catch(() => {}), 800);
-    }
   }
 
   // ── Nettoyage ─────────────────────────────────────────────────────────────

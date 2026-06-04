@@ -59,7 +59,7 @@ function _onFailure(msg) {
 
 // ── Connexion ────────────────────────────────────────────────────────
 
-const DEFAULT_RENDER_URL = null;
+const DEFAULT_RENDER_URL = process.env.RENDER_SYNC_URL || null;
 
 // ── Pool factory avec gestion d'erreurs robuste ──────────────────────
 function _createPool(url) {
