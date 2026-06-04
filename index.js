@@ -454,9 +454,29 @@ async function autoSaveDeployFiles() {
 }
 
 // ── Démarrage ─────────────────────────────────────────────────────
+// ── Seed stratégies au premier démarrage (si DB vide) ────────────────
+async function seedStrategiesIfEmpty() {
+  try {
+    const { getSetting, setSetting } = require('./db');
+    const raw = await getSetting('custom_strategies').catch(() => null);
+    const existing = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(existing) && existing.length > 0) return; // déjà peuplé
+    const seedPath = require('path').join(__dirname, 'data', 'strategies_seed.json');
+    if (!require('fs').existsSync(seedPath)) return;
+    const seed = JSON.parse(require('fs').readFileSync(seedPath, 'utf8'));
+    if (!Array.isArray(seed) || seed.length === 0) return;
+    await setSetting('custom_strategies', JSON.stringify(seed));
+    console.log(`[Seed] ✅ ${seed.length} stratégie(s) importée(s) depuis strategies_seed.json`);
+  } catch (e) {
+    console.warn('[Seed] Import stratégies échoué:', e.message);
+  }
+}
+
 async function main() {
   // ── Phase 1 : init DB (obligatoire avant d'écouter les requêtes) ──
   await initDB();
+  // ── Phase 1a : seed stratégies si la DB est vide (après déploiement ZIP) ──
+  await seedStrategiesIfEmpty();
 
   // ── Phase 1b : migrer le session store vers PostgreSQL si la DB répond ──
   {

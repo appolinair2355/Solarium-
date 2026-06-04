@@ -1,0 +1,53 @@
+======================================================
+  FICHIER DE DÉPLOIEMENT — kkasbaka (v2)
+  Date : 04/06/2026
+======================================================
+
+FICHIERS MODIFIÉS / CORRIGÉS / AJOUTÉS
+---------------------------------------
+
+1. src/pages/Admin.jsx  [MODIFIÉ - session précédente]
+   - Fix seuil B minimum = 1 pour absence_apparition / apparition_absence
+   - Fix file d'attente : 3 options, mappings dynamiques par type de mode
+   - Fix Comptages : sélecteur réinitialisation horaire / demi-horaire
+   - AJOUT : Historique des prédictions sur chaque carte de stratégie
+
+2. comptages.js  [MODIFIÉ - session précédente]
+   - Support reset_interval = 'half-hourly' (déclenche à H:00 ET H:30)
+
+3. render-sync.js  [MODIFIÉ - session actuelle]
+   - BUG FIX handleGameOne() : si le pool Render est null au moment du
+     jeu #1, le flag _gameOneHandled était bloqué à true et empêchait
+     tout reset ultérieur → désormais libéré pour retry automatique
+
+4. index.js  [MODIFIÉ - session actuelle]
+   - AJOUT fonction seedStrategiesIfEmpty() : au démarrage, si la table
+     settings ne contient pas encore de custom_strategies (ex: premier
+     boot après déploiement ZIP), importe automatiquement les stratégies
+     depuis data/strategies_seed.json
+
+5. data/strategies_seed.json  [NOUVEAU - session actuelle]
+   - Fichier de seed contenant la stratégie H (S7, absence_apparition)
+   - Importé automatiquement par index.js si la DB est vide au démarrage
+   - Garantit que les stratégies sont disponibles après déploiement ZIP
+
+DOSSIERS INCLUS
+---------------
+  dist/   — frontend reconstruit (npm run build) — inchangé cette session
+  src/    — sources React modifiées (Admin.jsx)
+  data/   — strategies_seed.json (nouveau)
+
+PROCESSUS AU DÉMARRAGE (après déploiement)
+------------------------------------------
+  1. initDB() : connexion PostgreSQL (DATABASE_URL)
+  2. seedStrategiesIfEmpty() : si custom_strategies vide → importe seed
+  3. engine.start() : chargement stratégies depuis DB (déjà peuplée)
+  → Stratégie H disponible immédiatement sans config manuelle
+
+CORRECTION RESET JEU #1
+------------------------
+  - handleGameOne() réessaie à chaque jeu #1 si la connexion Render
+    n'est pas encore établie (plus de blocage permanent du flag)
+  - fullReset() local (engine) + clearExternalPredictions() Render
+    s'exécutent correctement au jeu #1
+

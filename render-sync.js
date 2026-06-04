@@ -647,7 +647,11 @@ async function handleGameOne(gameNumber) {
   if (gameNumber !== 1) { _gameOneHandled = false; return; }
   if (_gameOneHandled) return;
   _gameOneHandled = true;
-  if (!renderPool) return;
+  // Si le pool Render n'est pas encore disponible, on libère le flag pour réessayer
+  if (!renderPool) {
+    _gameOneHandled = false;
+    return;
+  }
   try {
     const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
