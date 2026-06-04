@@ -713,6 +713,11 @@ async function clearExternalPredictions() {
   }
 }
 
+async function forceImportFromExternal() {
+  if (!renderPool) throw new Error('Base Render non connectée');
+  await _pullFromExternal();
+}
+
 module.exports = {
   loadRenderUrl,
   syncVerifiedPrediction,
@@ -732,4 +737,5 @@ module.exports = {
   testConnection,
   getRenderStats,
   isConnected,
+  forceImportFromExternal,
 };

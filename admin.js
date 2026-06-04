@@ -2688,6 +2688,15 @@ router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.post('/render-db/import', requireSuperAdmin, async (req, res) => {
+  try {
+    const renderSync = require('./render-sync');
+    if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
+    await renderSync.forceImportFromExternal();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Reset complet (retour usine) ─────────────────────────────────────────────
 // RÈGLE ABSOLUE : n'efface JAMAIS users, custom_strategies, promo_code,
 // telegram_config, bot_token, tg_msg_format, strategy_channel_routes.
