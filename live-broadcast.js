@@ -456,81 +456,17 @@ async function diffuseGame(target, game, finishedNow) {
   }
 }
 
-// ── Annonce du prochain jeu (message de transition) ──────────────────────────
-// Appelé après la finalisation de tous les messages d'un jeu gn.
-// Poste un message "⏳ Prochain #N+1 dans ~Xs" sur chaque cible qui a un messageId.
+// ── Annonce du prochain jeu (désactivée) ─────────────────────────────────────
+// Les messages "⏳ Prochain jeu #N dans ~Xs" sont désactivés.
+// La fonction est conservée pour ne pas casser les appels existants.
 
-async function postNextGameCountdown(targets, gn) {
-  const nextGn    = gn + 1;
-  const delayMs   = estimateNextGameDelay();
-  const text      = buildNextGameMessage(nextGn, delayMs);
-  const expectedAt = Date.now() + delayMs;
-
-  // Ne pas re-poster si déjà en attente
-  if (nextWaiting.has(nextGn)) return;
-
-  const waiting = { targets: {}, expectedAt, fromGn: gn };
-  nextWaiting.set(nextGn, waiting);
-
-  const lbl = (t) => t.label || t.id;
-  await Promise.allSettled(
-    targets.map(async (t) => {
-      const st = gameState.get(gn);
-      if (!st?.targets?.[t.id]?.messageId) return; // pas de messageId → pas de countdown
-      try {
-        const mid = await tgSendMessage(t.bot_token, t.channel_id, text);
-        waiting.targets[t.id] = { messageId: mid, postedAt: Date.now() };
-        console.log(`[LiveBroadcast] ⏳ #${gn}→#${nextGn} COUNTDOWN → [${lbl(t)}] dans ~${Math.round(delayMs/1000)}s | msgId=${mid}`);
-      } catch (e) {
-        console.warn(`[LiveBroadcast] ❌ Countdown #${nextGn} [${lbl(t)}]: ${e.message}`);
-      }
-    })
-  );
-
-  // Mise à jour progressive du compte à rebours (toutes les 5s)
-  _scheduleCountdownUpdates(nextGn, delayMs, targets);
+async function postNextGameCountdown(/* targets, gn */) {
+  // Intentionnellement vide — plus d'envoi de messages countdown
 }
 
-// Met à jour le message de compte à rebours toutes les 5s
-function _scheduleCountdownUpdates(nextGn, totalDelayMs, targets) {
-  const steps = Math.floor(totalDelayMs / 5000) - 1;
-  if (steps <= 0) return;
-
-  let step = 0;
-  const interval = setInterval(async () => {
-    step++;
-    const waiting = nextWaiting.get(nextGn);
-    if (!waiting) { clearInterval(interval); return; }
-
-    // Si le jeu est déjà arrivé → arrêter
-    if (gameState.has(nextGn)) { clearInterval(interval); return; }
-
-    // Vérifier l'expiration
-    if (Date.now() > waiting.expectedAt + NEXT_WAITING_EXPIRE_MS) {
-      clearInterval(interval);
-      nextWaiting.delete(nextGn);
-      return;
-    }
-
-    if (step >= steps) { clearInterval(interval); return; }
-
-    const remainMs = waiting.expectedAt - Date.now();
-    if (remainMs <= 2000) { clearInterval(interval); return; }
-
-    const text = buildNextGameMessage(nextGn, remainMs);
-
-    await Promise.allSettled(
-      targets.map(async (t) => {
-        const entry = waiting.targets[t.id];
-        if (!entry?.messageId) return;
-        if (entry.lastText === text) return;
-        try {
-          await tgEditThrottled(t.bot_token, t.channel_id, entry.messageId, text);
-          entry.lastText = text;
-        } catch {}
-      })
-    );
-  }, 5000);
+// Mise à jour countdown désactivée
+function _scheduleCountdownUpdates(/* nextGn, totalDelayMs, targets */) {
+  // Intentionnellement vide
 }
 
 // ── Diffusion vers TOUTES les cibles en parallèle ────────────────────────────

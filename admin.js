@@ -781,10 +781,11 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         : [],
       // Filtre d'attente
       attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
+      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
       attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
       attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
       attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
+      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
       attente2_mapping: (() => {
         const m = req.body.attente2_mapping;
         const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
@@ -793,6 +794,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
         return out;
       })(),
+      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1081,10 +1083,11 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         : (list[idx].surveillance_rules || []),
       // Filtre d'attente
       attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
+      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
       attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
       attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
       attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
+      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
       attente2_mapping: (() => {
         const m = req.body.attente2_mapping;
         const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
@@ -1093,6 +1096,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
         return out;
       })(),
+      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -1263,6 +1267,16 @@ router.post('/clear-predictions', requireAdmin, async (req, res) => {
     const { deleted, extDeleted } = await eng.fullReset();
     console.log(`[Admin] Reset complet — local: ${deleted}, render: ${extDeleted}`);
     res.json({ ok: true, deleted, extDeleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Supprime uniquement les prédictions résolues (gagne/perdu/expire) ──────────
+// Conserve : prédictions 'en_cours', stratégies, configs, users, absences
+router.post('/delete-resolved-predictions', requireAdmin, async (req, res) => {
+  try {
+    const deleted = await db.deleteResolvedPredictions();
+    console.log(`[Admin] Prédictions résolues supprimées : ${deleted}`);
+    res.json({ ok: true, deleted });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3671,6 +3685,38 @@ async function migrateLegacyProConfigOnce() {
   } catch (e) { console.warn('[Pro] migrateLegacyProConfigOnce:', e.message); }
 }
 migrateLegacyProConfigOnce();
+
+// ── Compteur de costumes → Telegram ──────────────────────────────────────────
+const suitCounterSvc = require('./suit-counter-service');
+
+router.get('/suit-counter-config', requireAdmin, async (req, res) => {
+  try {
+    await suitCounterSvc.loadConfig();
+    res.json({ ...suitCounterSvc.getConfig(), counters: suitCounterSvc.getCounters() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/suit-counter-config', requireAdmin, async (req, res) => {
+  try {
+    const { enabled, bot_token, channel_id, hand, interval, send_on_game_end } = req.body;
+    const patch = {};
+    if (typeof enabled          !== 'undefined') patch.enabled          = !!enabled;
+    if (typeof send_on_game_end !== 'undefined') patch.send_on_game_end = !!send_on_game_end;
+    if (bot_token    !== undefined) patch.bot_token    = String(bot_token    || '').trim();
+    if (channel_id   !== undefined) patch.channel_id   = String(channel_id   || '').trim();
+    if (hand         !== undefined) patch.hand         = ['joueur','banquier'].includes(hand) ? hand : 'joueur';
+    if (interval     !== undefined) patch.interval     = [30, 60].includes(parseInt(interval)) ? parseInt(interval) : 30;
+    await suitCounterSvc.saveConfig(patch);
+    res.json({ ok: true, config: suitCounterSvc.getConfig() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/suit-counter-test', requireAdmin, async (req, res) => {
+  try {
+    await suitCounterSvc.sendNow();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 router.get('/pro-config', requireProOrAdmin, async (req, res) => {
   try {

@@ -79,7 +79,13 @@ function extractSuits(cards) {
 
 function countValidCards(cards) {
   if (!Array.isArray(cards)) return 0;
-  return cards.filter(c => c && c.S && c.S !== '?').length;
+  return cards.filter(c => {
+    if (!c) return false;
+    const s = c.S;
+    // S=0 est valide (♠ en format numérique 1xBet) ; null/undefined/'?'/'' = invalide
+    if (s === null || s === undefined || s === '' || s === '?') return false;
+    return true;
+  }).length;
 }
 
 // ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
@@ -2658,14 +2664,16 @@ class Engine {
           ecart: _aE,
           seen: 0, suitFound: false,
           presentCount: 0,  // Option 2 : nb de jeux où le costume est apparu
-          // Option 2 : mapping propre — quand tous présents, prédit attente2Mapping[ps]
+          // Mappings par option — chacun peut avoir son propre mapping de prédiction
+          attente1Mapping: cfg.attente1_mapping || null,
           attente2Mapping: cfg.attente2_mapping || cfg.mappings || null,
+          attente3Mapping: cfg.attente3_mapping || null,
         });
         const opt = cfg.attente_option || 1;
         const optDesc = opt === 1
-          ? `opt1: absent ${_aN} jeux → émet sans mapping`
-          : opt === 2 ? `opt2: tous présents→mapping / sinon annulé`
-          : `opt3: tous absents→émet / tous présents→mapping / mélangé→annulé`;
+          ? `opt1: absent ${_aN} jeux → émet${cfg.attente1_mapping ? ' via mapping opt1' : ' original'}`
+          : opt === 2 ? `opt2: tous présents→mapping opt2 / sinon annulé`
+          : `opt3: tous absents→mapping opt3(absent) / tous présents→mapping opt3(présent) / mélangé→annulé`;
         console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${opt} (${optDesc}), ${_aN} jeux sur ${cfg.attente_main || 'joueur'}, cible=#${gn + _aN + _aE} (triggerGame=${gn}+n=${_aN}+écart=${_aE})`);
         return;
       }
@@ -2813,21 +2821,41 @@ class Engine {
         if (shouldEmitAq) {
           // Cible = jeu déclencheur original + n + écart (formule : triggerGame + n + écart)
           const aqTarget = (item.triggerGame || gn) + (item.n || 1) + (item.ecart || 1);
-          // Option 2 tous présents : utiliser le mapping (attente2Mapping, puis SPECIAL_ATTENTE_MAPPING)
+          // ── Résolution du mapping par option ───────────────────────────────
           let emitPs = item.ps;
-          if (emitWithMapping) {
-            let mapped = null;
-            if (item.attente2Mapping) {
-              const m = item.attente2Mapping[item.ps];
-              if (m) mapped = Array.isArray(m) ? m[0] : m;
+          const _resolveMappingForOpt = (mappingObj) => {
+            if (!mappingObj) return null;
+            const m = mappingObj[item.ps];
+            if (!m) return null;
+            return Array.isArray(m) ? m[0] : m;
+          };
+          let mapped = null;
+          if (item.option === 1) {
+            // Option 1 : tous absents → utilise attente1Mapping si défini
+            mapped = _resolveMappingForOpt(item.attente1Mapping);
+          } else if (item.option === 2) {
+            // Option 2 : tous présents → attente2Mapping
+            mapped = _resolveMappingForOpt(item.attente2Mapping);
+          } else {
+            // Option 3 : absent → attente3Mapping branche "absent" / présent → branche "présent"
+            if (emitWithMapping) {
+              // Tous présents → mapping opt3 (clé suffixée _present si disponible, sinon attente3Mapping)
+              mapped = _resolveMappingForOpt(item.attente3Mapping?.present ? item.attente3Mapping.present : item.attente3Mapping);
+            } else {
+              // Tous absents → mapping opt3 branche absent
+              mapped = _resolveMappingForOpt(item.attente3Mapping?.absent ? item.attente3Mapping.absent : item.attente3Mapping);
             }
-            // Fallback mapping naturel pour ps spéciaux (pair↔impair, WIN_P↔WIN_B, deux↔trois)
-            if (!mapped && SPECIAL_ATTENTE_MAPPING[item.ps]) mapped = SPECIAL_ATTENTE_MAPPING[item.ps];
-            if (mapped) emitPs = mapped;
           }
-          const logSuffix = item.option === 1 ? ''
-            : item.option === 2 ? ` (opt2: tous présents→mapping depuis ${item.ps})`
-            : emitWithMapping ? ` (opt3: tous présents→mapping depuis ${item.ps})` : ` (opt3: tous absents→original)`;
+          // Fallback : mapping naturel pour ps spéciaux (pair↔impair, WIN_P↔WIN_B, deux↔trois)
+          if (!mapped && (emitWithMapping || item.option !== 1)) {
+            if (SPECIAL_ATTENTE_MAPPING[item.ps]) mapped = SPECIAL_ATTENTE_MAPPING[item.ps];
+          }
+          if (mapped) emitPs = mapped;
+
+          const logSuffix = item.option === 1
+            ? (item.attente1Mapping ? ` (opt1: absent→mapping opt1 ${item.ps}→${emitPs})` : ` (opt1: absent→original)`)
+            : item.option === 2 ? ` (opt2: tous présents→mapping opt2 ${item.ps}→${emitPs})`
+            : emitWithMapping ? ` (opt3: tous présents→mapping opt3 ${item.ps}→${emitPs})` : ` (opt3: tous absents→mapping opt3 ${item.ps}→${emitPs})`;
           console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[emitPs] || emitPs}${logSuffix} (${item.seen}/${item.n} jeux, présents=${item.presentCount || 0}, triggerGame=#${item.triggerGame || gn})`);
           await emitPrediction(aqTarget, emitPs, item.triggerSuit, { force: true });
         } else if (shouldCancelAq) {
@@ -4755,12 +4783,30 @@ class Engine {
       const gamesToProcess = [...games].sort((a, b) => a.game_number - b.game_number);
       for (const game of gamesToProcess) {
         if (!game.is_finished) {
+          // ── Détection jeu bloqué (>80s non terminé) → expiration des prédictions ciblées ──
+          if (!this._unfinishedFirstSeen) this._unfinishedFirstSeen = {};
+          if (!this._unfinishedFirstSeen[game.game_number]) {
+            this._unfinishedFirstSeen[game.game_number] = Date.now();
+          }
+          const stuckMs = Date.now() - this._unfinishedFirstSeen[game.game_number];
+          if (stuckMs > 80_000) {
+            if (!this._stuckExpired) this._stuckExpired = {};
+            if (!this._stuckExpired[game.game_number]) {
+              this._stuckExpired[game.game_number] = true;
+              delete this._unfinishedFirstSeen[game.game_number];
+              console.warn(`[Engine] ⏭️ Jeu #${game.game_number} non terminé depuis ${Math.round(stuckMs/1000)}s → prédictions expirées, passage au jeu suivant`);
+              await this._expireStuckGame(game.game_number);
+            }
+          }
           if (!this._lastLiveLog || Date.now() - this._lastLiveLog > 30000) {
             console.log(`[Engine] Jeu ${game.game_number} en cours — phase: ${game.phase || '?'} | ${game.status_label || ''}`);
             this._lastLiveLog = Date.now();
           }
           continue;
         }
+        // Jeu terminé → nettoyer le tracking "bloqué"
+        if (this._unfinishedFirstSeen) delete this._unfinishedFirstSeen[game.game_number];
+        if (this._stuckExpired) delete this._stuckExpired[game.game_number];
         const suits  = extractSuits(game.player_cards  || []);
         const bSuits = extractSuits(game.banker_cards  || []);
         // T001 : ignorer les jeux dont la main n'est pas encore complète
@@ -4816,6 +4862,8 @@ class Engine {
           hadNew = true;
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
+        // Mise à jour des compteurs globaux de costumes (suit-counter-service)
+        try { require('./suit-counter-service').onGameFinished(game.game_number, suits, bSuits); } catch {}
         // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
         try { require('./comptages').onFinishedGame(game); }
         catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }
@@ -5039,6 +5087,8 @@ class Engine {
     const { deleted, extDeleted } = await this.fullReset();
     // Nettoyer aussi les enregistrements 'expire' résiduels
     const expireDeleted = await db.deleteExpiredPredictions().catch(() => 0);
+    // Reset des compteurs globaux de costumes (suit-counter-service)
+    try { require('./suit-counter-service').resetCounters(); } catch {}
     // Reset des compteurs d'écarts (panneau Comptages) — nouveau jour
     try { await require('./comptages').onGameOneReset(); } catch (e) {
       console.warn('[Engine] reset comptages échoué:', e.message);
@@ -5079,6 +5129,39 @@ class Engine {
     setInterval(() => this.checkProSubscriptions().catch(() => {}), 5 * 60_000);
     // Vérification initiale après 30 secondes (laisse le temps aux connexions de s'établir)
     setTimeout(() => this.checkProSubscriptions().catch(() => {}), 30_000);
+  }
+
+  // ── Expire les prédictions ciblant un jeu bloqué (resté "en cours" >80s) ────
+  async _expireStuckGame(gameNum) {
+    try {
+      const stratBuiltins = [
+        { key: 'C1', state: this.c1 },
+        { key: 'C2', state: this.c2 },
+        { key: 'C3', state: this.c3 },
+        { key: 'DC', state: this.dc },
+      ];
+      for (const { key, state } of stratBuiltins) {
+        if (!state?.pending?.[gameNum]) continue;
+        const suit = state.pending[gameNum].suit;
+        const tgOpts = this.defaultStratTg?.[key] || {};
+        await resolvePrediction(key, gameNum, suit, 'expire', 0, null, null, tgOpts).catch(() => {});
+        delete state.pending[gameNum];
+        console.log(`[Engine] ⏭️ ${key} #${gameNum} expiré (jeu bloqué >80s)`);
+      }
+      for (const [sid, state] of Object.entries(this.custom || {})) {
+        if (!state?.pending?.[gameNum]) continue;
+        const channelId = `S${sid}`;
+        const cfg = state.config || {};
+        const stratMaxR = (cfg?.max_rattrapage !== undefined && cfg?.max_rattrapage !== null) ? parseInt(cfg.max_rattrapage) : 0;
+        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg?.tg_site_url || '', stratName: cfg?.name || '' };
+        const suit = state.pending[gameNum].suit;
+        await resolvePrediction(channelId, gameNum, suit, 'expire', 0, null, null, stratTgOpts).catch(() => {});
+        delete state.pending[gameNum];
+        console.log(`[Engine] ⏭️ ${channelId} #${gameNum} expiré (jeu bloqué >80s)`);
+      }
+      // Avancer maxProcessedGame pour que cleanupStale continue normalement
+      if (gameNum > (this.maxProcessedGame || 0)) this.maxProcessedGame = gameNum;
+    } catch (e) { console.error('[Engine] _expireStuckGame error:', e.message); }
   }
 
   async _clearExpiredByTime() {

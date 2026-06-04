@@ -561,6 +561,10 @@ async function initBackgroundServices() {
   // ── Planificateur annonces Telegram ──────────────────────────────────────
   startTgAnnounceScheduler();
   startPubScheduler();
+  // ── Scheduler compteurs costumes → Telegram ──────────────────────────────
+  try { require('./suit-counter-service').startScheduler(); } catch (e) {
+    console.warn('[SuitCounter] Démarrage échoué (non bloquant):', e.message);
+  }
   // ── Démarrage du service de relais Telegram ──────────────────────────────
   try {
     const tgRelay = require('./tg-relay');
