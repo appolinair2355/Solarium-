@@ -3801,6 +3801,7 @@ function AdminPanel() {
     pred_duration_minutes: 0,
     // Filtre d'attente (universel — tous les modes)
     attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur',
+    attente1_mapping: null, attente2_mapping: null, attente3_mapping: null,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -3928,10 +3929,11 @@ function AdminPanel() {
     if (adminTab === 'canaux') {
       loadLbTargets();
       loadKouame();
+      loadSuitCounter();
       loadStrategies();
       loadStratStats();
     }
-  }, [adminTab]);
+  }, [adminTab, loadSuitCounter]);
 
   // ── API Kouamé ──
   const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
@@ -3942,6 +3944,51 @@ function AdminPanel() {
   const [kouameTesting, setKouameTesting] = useState(false);
   const [kouameFeedUrl, setKouameFeedUrl] = useState('');
   const [kouameFeedCopied, setKouameFeedCopied] = useState(false);
+
+  // ── Compteur de costumes → Telegram ──
+  const [suitCfg, setSuitCfg]           = useState({ enabled: false, bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
+  const [suitCounters, setSuitCounters]  = useState({ joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} });
+  const [suitForm, setSuitForm]          = useState({ bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
+  const [suitMsg, setSuitMsg]            = useState('');
+  const [suitSaving, setSuitSaving]      = useState(false);
+  const [suitTesting, setSuitTesting]    = useState(false);
+
+  const loadSuitCounter = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/suit-counter-config', { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setSuitCfg({ enabled: !!d.enabled, bot_token: d.bot_token || '', channel_id: d.channel_id || '', hand: d.hand || 'joueur', interval: d.interval || 30, send_on_game_end: !!d.send_on_game_end });
+      setSuitForm({ bot_token: d.bot_token || '', channel_id: d.channel_id || '', hand: d.hand || 'joueur', interval: d.interval || 30, send_on_game_end: !!d.send_on_game_end });
+      if (d.counters) setSuitCounters(d.counters);
+    } catch {}
+  }, []);
+
+  const saveSuitCounter = async (patch) => {
+    setSuitSaving(true); setSuitMsg('');
+    try {
+      const body = { ...suitForm, ...patch };
+      const r = await fetch('/api/admin/suit-counter-config', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setSuitCfg(d.config);
+      setSuitMsg('✅ Configuration sauvegardée');
+      setTimeout(() => setSuitMsg(''), 3000);
+    } catch (e) { setSuitMsg('❌ ' + e.message); }
+    finally { setSuitSaving(false); }
+  };
+
+  const testSuitCounter = async () => {
+    setSuitTesting(true); setSuitMsg('');
+    try {
+      const r = await fetch('/api/admin/suit-counter-test', { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setSuitMsg('✅ Message envoyé avec succès !');
+      setTimeout(() => setSuitMsg(''), 4000);
+    } catch (e) { setSuitMsg('❌ ' + e.message); }
+    finally { setSuitTesting(false); }
+  };
 
   const loadKouame = async () => {
     try {
@@ -4899,7 +4946,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
     setStratOpen(true);
   };
 
@@ -4916,7 +4963,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur' });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -10340,12 +10387,15 @@ function AdminPanel() {
                         onChange={e => setStratForm(p => ({ ...p, attente_option: parseInt(e.target.value) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
                         <option value={1}>Option 1 — Costume ABSENT pendant N jeux → émet</option>
-                        <option value={2}>Option 2 — Résultat UNIFORME sur N jeux → émet</option>
+                        <option value={2}>Option 2 — Tous PRÉSENTS sur N jeux → émet via mapping</option>
+                        <option value={3}>Option 3 — Hybride (absent→map absent / présent→map présent)</option>
                       </select>
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b', lineHeight: 1.5 }}>
                         {stratForm.attente_option === 1
-                          ? '→ Si le costume prédit reste absent des N jeux suivants, la prédiction est émise.'
-                          : '→ Tous absents : émet le costume original. Tous présents : émet le mapping. Mélangé : annulé.'}
+                          ? '→ Si le costume prédit reste absent des N jeux suivants, la prédiction est émise via le mapping opt1 (si configuré).'
+                          : stratForm.attente_option === 2
+                          ? '→ Tous présents → émet via mapping opt2. Sinon → annulé.'
+                          : '→ Tous absents → émet via mapping opt3-absent. Tous présents → émet via mapping opt3-présent. Mélangé → annulé.'}
                       </div>
                     </div>
                     <div>
@@ -10376,9 +10426,112 @@ function AdminPanel() {
                       🕐 <strong>Résumé :</strong> Quand le signal est détecté (jeu #X), le moteur observe <strong>{stratForm.attente_n}</strong> jeu{stratForm.attente_n > 1 ? 'x' : ''} sur la main <strong>{stratForm.attente_main}</strong>.
                       {stratForm.attente_option === 1
                         ? ` Si le costume prédit est absent pendant ces ${stratForm.attente_n} jeux → prédiction émise ✅. Sinon → annulée ❌.`
-                        : ` Après ${stratForm.attente_n} jeux : tous absents → émet costume original ✅ | tous présents → émet le mapping ✅ | mélangé → annulé ❌.`}
+                        : stratForm.attente_option === 2
+                        ? ` Après ${stratForm.attente_n} jeux : tous présents → émet via mapping ✅ | sinon → annulé ❌.`
+                        : ` Après ${stratForm.attente_n} jeux : tous absents → émet mapping opt3-absent ✅ | tous présents → émet mapping opt3-présent ✅ | mélangé → annulé ❌.`}
                       {' '}<span style={{ color: '#a5b4fc' }}>Jeu cible = #X + <strong>{stratForm.attente_n}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong>#{stratForm.attente_n + (stratForm.attente_ecart ?? 1)}e jeu après le signal</strong>.</span>
                     </div>
+                    {/* ── Mapping de prédiction par option ── */}
+                    {(() => {
+                      const _SUITS_AT = ['♠','♥','♦','♣'];
+                      const _PRESETS_AT = [
+                        { label: 'Contraire total',  map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+                        { label: 'Même couleur',     map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+                        { label: 'Même forme',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+                        { label: 'Identique',        map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+                      ];
+                      const renderAttenteMapper = (label, mappingValue, setMapping, accentColor) => {
+                        const enabled = !!mappingValue;
+                        const m = mappingValue || { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] };
+                        return (
+                          <div key={label} style={{ gridColumn: '1 / -1', padding: '12px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.18)', border: `1px solid ${enabled ? accentColor + '55' : 'rgba(255,255,255,0.07)'}`, marginTop: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: enabled ? 10 : 0 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: enabled ? accentColor : '#64748b', letterSpacing: 0.3 }}>🗺️ {label}</span>
+                              <button type="button"
+                                onClick={() => setMapping(enabled ? null : { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] })}
+                                style={{ padding: '3px 11px', borderRadius: 14, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: `1px solid ${enabled ? accentColor : 'rgba(255,255,255,0.15)'}`, background: enabled ? accentColor + '22' : 'rgba(255,255,255,0.05)', color: enabled ? accentColor : '#64748b', transition: 'all 0.15s' }}>
+                                {enabled ? '● Activé' : '○ Désactivé (costume original)'}
+                              </button>
+                            </div>
+                            {enabled && (
+                              <>
+                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 9 }}>
+                                  {_PRESETS_AT.map((p, pi) => {
+                                    const isSel = JSON.stringify(m) === JSON.stringify(p.map);
+                                    return (
+                                      <button key={pi} type="button" onClick={() => setMapping({ ...p.map })}
+                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: 10, cursor: 'pointer', border: `1px solid ${isSel ? accentColor : 'rgba(255,255,255,0.1)'}`, background: isSel ? accentColor + '22' : 'rgba(255,255,255,0.04)', color: isSel ? '#e2e8f0' : '#94a3b8', fontWeight: isSel ? 700 : 400 }}>
+                                        {p.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {_SUITS_AT.map(suit => {
+                                  const cur = Array.isArray(m[suit]) ? m[suit][0] : (m[suit] || null);
+                                  const suitColor = ['♥','♦'].includes(suit) ? '#f87171' : '#e2e8f0';
+                                  return (
+                                    <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', marginBottom: 4, background: 'rgba(255,255,255,0.02)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                      <span style={{ color: suitColor, fontSize: 18, minWidth: 22, textAlign: 'center' }}>{suit}</span>
+                                      <span style={{ color: '#374151', fontSize: 14, minWidth: 16 }}>→</span>
+                                      <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                                        {_SUITS_AT.map(target => {
+                                          const sel = cur === target;
+                                          const tColor = ['♥','♦'].includes(target) ? '#f87171' : '#e2e8f0';
+                                          return (
+                                            <button key={target} type="button"
+                                              onClick={() => setMapping({ ...m, [suit]: [target] })}
+                                              style={{ flex: 1, padding: '5px 3px', borderRadius: 6, cursor: 'pointer', border: sel ? `2px solid ${accentColor}` : '1px solid rgba(255,255,255,0.08)', background: sel ? accentColor + '33' : 'rgba(255,255,255,0.04)', color: sel ? '#e2e8f0' : '#6b7280', fontWeight: sel ? 700 : 400, transition: 'all 0.12s', position: 'relative', textAlign: 'center' }}>
+                                              {sel && <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 8, color: accentColor, fontWeight: 800 }}>①</span>}
+                                              <span style={{ color: tColor, fontSize: 16 }}>{target}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      <span style={{ minWidth: 35, fontSize: 10, color: '#64748b', textAlign: 'right' }}>{cur ? 'fixe' : '—'}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4, fontStyle: 'italic' }}>
+                                  Sélection unique = toujours cette carte · cliquez pour changer
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      };
+                      if (stratForm.attente_option === 1) {
+                        return renderAttenteMapper(
+                          'Mapping opt1 — Original → Costume prédit (♠/♥/♦/♣)',
+                          stratForm.attente1_mapping,
+                          m => setStratForm(p => ({ ...p, attente1_mapping: m })),
+                          '#a855f7'
+                        );
+                      }
+                      if (stratForm.attente_option === 2) {
+                        return renderAttenteMapper(
+                          'Mapping opt2 — Original → Costume prédit (tous présents → émet)',
+                          stratForm.attente2_mapping,
+                          m => setStratForm(p => ({ ...p, attente2_mapping: m })),
+                          '#3b82f6'
+                        );
+                      }
+                      return (
+                        <>
+                          {renderAttenteMapper(
+                            'Mapping opt3 — Branche ABSENT (tous absents → émet)',
+                            stratForm.attente3_mapping?.absent ?? null,
+                            m => setStratForm(p => ({ ...p, attente3_mapping: { ...(p.attente3_mapping || {}), absent: m } })),
+                            '#a855f7'
+                          )}
+                          {renderAttenteMapper(
+                            'Mapping opt3 — Branche PRÉSENT (tous présents → émet)',
+                            (stratForm.attente3_mapping?.present) ?? null,
+                            m => setStratForm(p => ({ ...p, attente3_mapping: { ...(p.attente3_mapping || {}), present: m } })),
+                            '#22c55e'
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -11289,6 +11442,20 @@ function AdminPanel() {
                 }}
               >
                 🗑️ Effacer la base externe
+              </button>
+              <button
+                className="btn btn-sm"
+                style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', color: '#818cf8', fontSize: 12 }}
+                onClick={async () => {
+                  if (!confirm('Importer stratégies et utilisateurs depuis la base Render externe vers la base locale ?\n\nLes stratégies déjà existantes ne seront pas écrasées. Les utilisateurs seront mis à jour.')) return;
+                  setRenderDbMsg('⏳ Import en cours…');
+                  const r = await fetch('/api/admin/render-db/import', { method: 'POST', credentials: 'include' });
+                  const d = await r.json().catch(() => ({}));
+                  if (r.ok) { setRenderDbMsg('✅ Import terminé — stratégies et utilisateurs importés depuis Render'); loadStrategies(); }
+                  else setRenderDbMsg(`❌ ${d.error || 'Erreur import'}`);
+                }}
+              >
+                ⬇️ Importer depuis Render
               </button>
               <button
                 className="btn btn-sm"
@@ -12408,6 +12575,166 @@ function AdminPanel() {
                 ))}
               </div>
             )}
+          </div>
+        </div>}
+
+        {/* ── SECTION 0c : COMPTEUR DE COSTUMES → TELEGRAM ── */}
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">📈</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Compteur instantané de costumes</h2>
+              <p className="tg-admin-sub">
+                Envoie le compteur de costumes sur un canal Telegram après chaque jeu et/ou aux heures H:00 / H:30.
+                Le compteur se remet à zéro automatiquement après chaque envoi planifié.
+              </p>
+            </div>
+            <span className="tg-badge-connected" style={{
+              background: suitCfg.enabled ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.12)',
+              color:      suitCfg.enabled ? '#fbbf24' : '#94a3b8',
+              border:     `1px solid ${suitCfg.enabled ? 'rgba(251,191,36,0.4)' : 'rgba(100,116,139,0.25)'}`,
+              fontWeight: 800,
+            }}>
+              {suitCfg.enabled ? '● ACTIF' : '○ INACTIF'}
+            </span>
+          </div>
+
+          {suitMsg && (
+            <div className={`tg-alert ${suitMsg.startsWith('✅') ? 'tg-alert-ok' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{suitMsg}</div>
+          )}
+
+          {/* Compteurs actuels */}
+          <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.18)', borderRadius: 10, padding: 14, marginTop: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+              📊 Compteurs en cours
+            </div>
+            {(() => {
+              const hand = suitCfg.hand || 'joueur';
+              const hCounts = suitCounters[hand] || {};
+              const total = ['♠','♥','♦','♣'].reduce((a, s) => a + (hCounts[s] || 0), 0);
+              const SUIT_EM = { '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️' };
+              return (
+                <div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, fontStyle: 'italic' }}>
+                    Main du <strong style={{ color: '#e2e8f0' }}>{hand}</strong> — {total} cartes comptées
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {['♠','♥','♦','♣'].map(s => {
+                      const cnt = hCounts[s] || 0;
+                      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+                      return (
+                        <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'rgba(15,23,42,0.5)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <span style={{ fontSize: 16 }}>{SUIT_EM[s]}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: '#e2e8f0' }}>{cnt}</div>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>{pct} %</div>
+                          </div>
+                          <div style={{ height: 28, width: 4, borderRadius: 4, background: `rgba(251,191,36,${Math.max(0.1, cnt / Math.max(total, 1))})` }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 10, color: '#475569' }}>
+                    Prévisualisation du message :
+                    <pre style={{ marginTop: 4, padding: '8px 10px', background: 'rgba(0,0,0,0.3)', borderRadius: 7, fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
+{`📈 Compteur instantané (main du ${hand})
+${['♠','♥','♦','♣'].map(s => {
+  const cnt = hCounts[s] || 0;
+  const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+  return `${SUIT_EM[s]} : ${cnt}  (${pct} %)`;
+}).join('\n')}`}
+                    </pre>
+                  </div>
+                </div>
+              );
+            })()}
+            <button type="button" onClick={loadSuitCounter}
+              style={{ marginTop: 10, padding: '6px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+              🔁 Actualiser les compteurs
+            </button>
+          </div>
+
+          {/* Formulaire configuration */}
+          <div style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.15)', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', marginBottom: 12 }}>⚙️ Configuration</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 API TOKEN BOT</label>
+                <input
+                  value={suitForm.bot_token}
+                  onChange={e => setSuitForm(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder="123456:AAF-xxxxx…"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.05)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID CANAL</label>
+                <input
+                  value={suitForm.channel_id}
+                  onChange={e => setSuitForm(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder="@canal ou -1001234…"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.05)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🖐 Main suivie</label>
+                <select
+                  value={suitForm.hand}
+                  onChange={e => setSuitForm(p => ({ ...p, hand: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(20,20,40,0.9)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }}>
+                  <option value="joueur">Main du Joueur</option>
+                  <option value="banquier">Main du Banquier</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>⏰ Envoi planifié</label>
+                <select
+                  value={suitForm.interval}
+                  onChange={e => setSuitForm(p => ({ ...p, interval: parseInt(e.target.value) }))}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(20,20,40,0.9)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }}>
+                  <option value={30}>H:00 et H:30 (toutes les 30 min)</option>
+                  <option value={60}>H:00 uniquement (toutes les heures)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Toggle : envoi après chaque jeu */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.4)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Envoyer après chaque fin de jeu</div>
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>En plus de l'envoi planifié, un message est envoyé à chaque jeu terminé.</div>
+              </div>
+              <button type="button" onClick={() => setSuitForm(p => ({ ...p, send_on_game_end: !p.send_on_game_end }))}
+                style={{ padding: '7px 18px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', border: `1px solid ${suitForm.send_on_game_end ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.35)'}`, background: suitForm.send_on_game_end ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.12)', color: suitForm.send_on_game_end ? '#22c55e' : '#64748b', minWidth: 80 }}>
+                {suitForm.send_on_game_end ? '● ON' : '○ OFF'}
+              </button>
+            </div>
+
+            {/* Boutons d'action */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" onClick={() => saveSuitCounter()} disabled={suitSaving}
+                style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.18)', color: '#fef3c7', fontWeight: 700, fontSize: 12, cursor: suitSaving ? 'wait' : 'pointer', opacity: suitSaving ? 0.6 : 1 }}>
+                {suitSaving ? '⏳…' : '💾 Sauvegarder'}
+              </button>
+              <button type="button" onClick={testSuitCounter} disabled={suitTesting || !suitCfg.bot_token}
+                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', fontWeight: 700, fontSize: 12, cursor: (suitTesting || !suitCfg.bot_token) ? 'not-allowed' : 'pointer', opacity: (suitTesting || !suitCfg.bot_token) ? 0.5 : 1 }}>
+                {suitTesting ? '⏳…' : '📤 Envoyer maintenant'}
+              </button>
+              {/* Toggle activation */}
+              <button type="button"
+                onClick={() => saveSuitCounter({ enabled: !suitCfg.enabled })}
+                disabled={suitSaving || !suitCfg.bot_token}
+                style={{ padding: '9px 20px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', marginLeft: 'auto', border: `1px solid ${suitCfg.enabled ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}`, background: suitCfg.enabled ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.15)', color: suitCfg.enabled ? '#f87171' : '#22c55e', opacity: (!suitCfg.bot_token) ? 0.5 : 1 }}>
+                {suitCfg.enabled ? '⏸ Désactiver' : '▶ Activer'}
+              </button>
+            </div>
+            <div style={{ fontSize: 9, color: '#475569', marginTop: 10 }}>
+              ⚠️ Le compteur se remet à zéro automatiquement après chaque envoi planifié (H:00 / H:30). Il se remet aussi à zéro au début d'une nouvelle session (jeu #1).
+            </div>
           </div>
         </div>}
 
