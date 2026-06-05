@@ -77,6 +77,17 @@ function extractSuits(cards) {
   return [...suits];
 }
 
+// Variante sans déduplication : compte TOUTES les cartes (y compris doublons)
+// Utilisée par le Compteur instantané pour compter 3 trèfles = +3, pas +1
+function extractSuitsAll(cards) {
+  const suits = [];
+  for (const c of (cards || [])) {
+    const n = normalizeSuit(c.S || '');
+    if (ALL_SUITS.includes(n)) suits.push(n);
+  }
+  return suits;
+}
+
 function countValidCards(cards) {
   if (!Array.isArray(cards)) return 0;
   return cards.filter(c => {
@@ -4833,7 +4844,8 @@ class Engine {
           // Après le reset, c1.processed est vidé → le log "Traitement" sera émis
         }
 
-        if (!this.c1.processed.has(game.game_number)) {
+        const isNewGame = !this.c1.processed.has(game.game_number);
+        if (isNewGame) {
           // ── DÉTECTION GAP : jeu non-consécutif ────────────────────────────────
           if (this.maxProcessedGame > 0 && game.game_number > this.maxProcessedGame + 1) {
             const fromGn  = this.maxProcessedGame + 1;
@@ -4867,11 +4879,15 @@ class Engine {
           hadNew = true;
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
-        // Mise à jour des compteurs globaux de costumes (suit-counter-service)
-        try { require('./suit-counter-service').onGameFinished(game.game_number, suits, bSuits); } catch {}
-        // Mise à jour des compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
-        try { require('./comptages').onFinishedGame(game); }
-        catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }
+        // Mise à jour compteurs globaux / écarts : UNE SEULE FOIS par jeu réellement nouveau
+        if (isNewGame) {
+          // Compteur instantané de costumes (suit-counter-service)
+          // extractSuitsAll : sans déduplication → 3 trèfles = +3 (et non +1)
+          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards)); } catch {}
+          // Compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
+          try { require('./comptages').onFinishedGame(game); }
+          catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }
+        }
         // Enregistrement des cartes dans la base séparée `les_cartes`
         cartesStore.recordGame(game).catch(e => {
           console.warn(`[CartesStore] échec recordGame(#${game.game_number}) : ${e?.message || e}`);

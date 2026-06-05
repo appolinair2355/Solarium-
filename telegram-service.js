@@ -704,10 +704,10 @@ function buildTgMessage(formatId, {
       const targetCards = suit === 'deux' ? 2 : 3;
       const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
       const winMsg   = suit === 'deux'
-        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Naturel confirmé 🎯`
-        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmé 🎯`;
+        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 2 cartes confirmées 🎯`
+        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmées 🎯`;
       const lossMsg  = suit === 'deux'
-        ? `❌ Pas de naturel sur ${maxR} jeux`
+        ? `❌ Pas de 2 cartes sur ${maxR} jeux`
         : `❌ Pas de 3 cartes sur ${maxR} jeux`;
       return {
         text:
