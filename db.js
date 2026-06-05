@@ -316,7 +316,6 @@ async function initDB() {
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
-      ALTER TABLE strategy_ideas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
         id                 SERIAL PRIMARY KEY,
@@ -1066,31 +1065,8 @@ async function deleteAllPredictions() {
   }
   const data = require('./jsondb');
   let count = 0;
-  if (data.d) {
-    count = (data.d().predictions || []).length;
-    data.d().predictions = [];
-    try { data._persist(); } catch {}
-  }
+  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
   return count;
-}
-
-async function deleteResolvedPredictions() {
-  if (USE_PG) {
-    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy IN (
-      SELECT DISTINCT strategy FROM predictions WHERE status IN ('gagne','perdu','expire')
-    )`).catch(() => {});
-    const r = await pgPool.query(`DELETE FROM predictions WHERE status IN ('gagne','perdu','expire')`);
-    return r.rowCount;
-  }
-  const data = require('./jsondb');
-  const all = data.d ? (data.d().predictions || []) : [];
-  const before = all.length;
-  const kept = all.filter(p => p.status === 'en_cours');
-  if (data.d) {
-    data.d().predictions = kept;
-    try { data._persist(); } catch {}
-  }
-  return before - kept.length;
 }
 
 async function cleanupOldPredictions(daysOld = 3) {
@@ -1758,7 +1734,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions, deleteResolvedPredictions, cleanupOldPredictions, deleteExpiredPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,

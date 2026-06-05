@@ -6,12 +6,6 @@ let TOKEN         = process.env.BOT_TOKEN || null;
 let currentFormat = 1;
 let maxRattrapage = 2;
 
-// ── Relay hooks : fonctions appelées sur chaque channel_post/message ──────────
-const _relayHandlers = new Set();
-function registerRelayHandler(fn) { _relayHandlers.add(fn); }
-function unregisterRelayHandler(fn) { _relayHandlers.delete(fn); }
-function getMainToken() { return TOKEN; }
-
 // ── Settings loaders ───────────────────────────────────────────────
 
 async function loadToken() {
@@ -100,14 +94,9 @@ async function startBot() {
   }).catch(err => console.error('Bot getMe error:', err.message));
 
   function handleIncoming(msg) {
+    const chatId   = String(msg.chat.id);
     const chatType = msg.chat.type;
     const text     = msg.text || msg.caption || '(media)';
-    // Appel des handlers de relay (avant tout filtre)
-    if (_relayHandlers.size > 0) {
-      for (const fn of _relayHandlers) {
-        try { fn(msg); } catch {}
-      }
-    }
     if (chatType === 'private') return;
     for (const [tgId, ch] of channelStore.entries()) {
       if (matchesChannel(msg, tgId)) {
@@ -431,8 +420,8 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣', 'pair': '🟢', 'impair': '🔴' };
-const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes', 'WIN_B': 'Victoire Banquier', 'WIN_P': 'Victoire Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3', 'pair': 'Pair', 'impair': 'Impair' };
+const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'distrib': '🌀', 'deux': '2️⃣', 'trois': '3️⃣', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣' };
+const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes', 'WIN_B': 'Victoire Banquier', 'WIN_P': 'Victoire Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
 
@@ -499,8 +488,8 @@ function buildTgMessage(formatId, {
 
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
-  // Les modes Carte 2/3 et Pair/Impair utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
-  if ((suit === 'deux' || suit === 'trois' || suit === 'pair' || suit === 'impair') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
+  // Les modes Carte 2/3 utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
+  if ((suit === 'deux' || suit === 'trois') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
 
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -682,32 +671,13 @@ function buildTgMessage(formatId, {
 
     case 12: {
       const handLabel12 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      // Mode Pair / Impair
-      if (suit === 'pair' || suit === 'impair') {
-        const parity      = suit === 'pair' ? 'PAIR' : 'IMPAIR';
-        const parityEmoji = suit === 'pair' ? '🟢' : '🔴';
-        const winMsgP  = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ${parity} confirmé 🎯`;
-        const lossMsgP = `❌ Pas de ${suit} sur ${maxR} jeux`;
-        return {
-          text:
-            `${parityEmoji} PRÉDICTION — ${parity} ${handLabel12.toUpperCase()}\n` +
-            `📌 Jeu #N${gameNumber}\n` +
-            `━━━━━━━━━━━━━━━\n` +
-            `🎯 Total ${handLabel12} : ${parity}\n` +
-            (status === null
-              ? `⌛ En cours de vérification...`
-              : status === 'gagne' ? winMsgP : lossMsgP),
-          parse_mode: null,
-        };
-      }
-      // Mode 2 vs 3 cartes
       const targetCards = suit === 'deux' ? 2 : 3;
       const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
       const winMsg   = suit === 'deux'
-        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 2 cartes confirmées 🎯`
-        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmées 🎯`;
+        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Naturel confirmé 🎯`
+        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmé 🎯`;
       const lossMsg  = suit === 'deux'
-        ? `❌ Pas de 2 cartes sur ${maxR} jeux`
+        ? `❌ Pas de naturel sur ${maxR} jeux`
         : `❌ Pas de 3 cartes sur ${maxR} jeux`;
       return {
         text:
@@ -1337,12 +1307,6 @@ async function _sendOneMessage(token, tgChatId, text, parse_mode) {
 //  • Sinon → envoi sur TOUS les canaux configurés (comportement actuel).
 //  • Dans les deux cas, le message_id est stocké en DB pour édition.
 
-function _siteFooter(siteUrl, stratName) {
-  if (!siteUrl) return '';
-  const nameLine = stratName ? `\n🏷 Cherchez « ${stratName} » dans la boutique` : '\n🛒 Aller dans la boutique';
-  return `\n━━━━━━━━━━━━━━━\n🌐 Pour acquérir cette stratégie vite, cliquez sur le lien :\n🔗 ${siteUrl}${nameLine}`;
-}
-
 async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   if (!TOKEN) {
     console.warn(`[TG] ${strategy} #${gameNumber} — pas de bot token configuré, envoi ignoré`);
@@ -1352,10 +1316,8 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
   // Utilise le format spécifique à la stratégie si fourni, sinon le format global
   const formatId = (tgOpts.formatId !== undefined && tgOpts.formatId !== null && tgOpts.formatId !== '')
     ? parseInt(tgOpts.formatId) : currentFormat;
-  const hand      = tgOpts.hand || null;
-  const maxR      = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
-  const siteUrl   = tgOpts.siteUrl   || '';
-  const stratName = tgOpts.stratName || '';
+  const hand = tgOpts.hand || null;
+  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
 
   // Résolution du template : inline > custom DB (formatId > 18) > built-in
   let tg_template = tgOpts.tg_template || null;
@@ -1363,10 +1325,9 @@ async function sendToStrategyChannels(strategy, gameNumber, suit, tgOpts = {}) {
     try { const row = await db.getCustomFormatById(formatId - 18); if (row) tg_template = row.template; } catch {}
   }
 
-  const { text: rawText, parse_mode } = buildTgMessage(formatId, {
+  const { text, parse_mode } = buildTgMessage(formatId, {
     gameNumber, suit, strategy, maxR, status: null, hand,
   }, tg_template);
-  const text = rawText + _siteFooter(siteUrl, stratName);
 
   // Déterminer les canaux cibles
   let targets;
@@ -1411,10 +1372,8 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
   if (!Array.isArray(targets) || targets.length === 0) return;
 
   const defaultFormatId = tgOpts.formatId || currentFormat;
-  const hand      = tgOpts.hand || null;
-  const maxR      = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
-  const siteUrl   = tgOpts.siteUrl   || '';
-  const stratName = tgOpts.stratName || '';
+  const hand = tgOpts.hand || null;
+  const maxR = tgOpts.maxR !== undefined ? tgOpts.maxR : maxRattrapage;
   // Template inline partagé par tous les canaux custom de la stratégie
   const stratTemplate = tgOpts.tg_template || null;
 
@@ -1428,10 +1387,9 @@ async function sendCustomAndStore(targets, strategyId, gameNumber, suit, tgOpts 
     if (!tg_template && channelFormatId > 18) {
       try { const row = await db.getCustomFormatById(channelFormatId - 18); if (row) tg_template = row.template; } catch {}
     }
-    const { text: rawText, parse_mode } = buildTgMessage(channelFormatId, {
+    const { text, parse_mode } = buildTgMessage(channelFormatId, {
       gameNumber, suit, strategy: strategyId, maxR, status: null, hand,
     }, tg_template);
-    const text = rawText + _siteFooter(siteUrl, stratName);
     try {
       const msgId = await _sendOneMessage(bot_token, channel_id, text, parse_mode);
       if (msgId) {
@@ -1483,8 +1441,6 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
   const maxR        = tgOpts.maxR        !== undefined ? tgOpts.maxR : maxRattrapage;
   const playerCards = tgOpts.playerCards || null;
   const bankerCards = tgOpts.bankerCards || null;
-  const siteUrl     = tgOpts.siteUrl     || '';
-  const stratName   = tgOpts.stratName   || '';
 
   for (const row of stored) {
     const token  = row.bot_token || TOKEN;
@@ -1496,10 +1452,9 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
     if (!tg_template && formatId > 18) {
       try { const dbRow = await db.getCustomFormatById(formatId - 18); if (dbRow) tg_template = dbRow.template; } catch {}
     }
-    const { text: rawResultText, parse_mode } = buildTgMessage(formatId, {
+    const { text: resultText, parse_mode } = buildTgMessage(formatId, {
       gameNumber, suit, strategy, maxR, status, rattrapage, hand, playerCards, bankerCards,
     }, tg_template);
-    const resultText = rawResultText + _siteFooter(siteUrl, stratName);
 
     // ── Phase 1 : texte envoyé immédiatement ────────────────────────────────
     // Pour tous les formats quand gagné : on affiche les cartes reçues en phase 1,
@@ -1722,283 +1677,74 @@ function _bgCurr(currency) { return BANQUE_CURRENCY_MAP[currency] || currency ||
 function _bgRnd(n) { return Math.round(n * 100) / 100; }
 
 /**
- * Message individuel pour UNE prédiction du lot.
- * Envoyé comme nouveau message à chaque signal.
- * Édité une fois la prédiction résolue.
- */
-function buildBanquePredText(pred, bgState, cfg, predIndexOneBased, lotSize) {
-  const curr     = _bgCurr(cfg.bg_currency);
-  const cote     = parseFloat(cfg.bg_cote) || 1.9;
-  const initMise = parseFloat(cfg.bg_mise_initiale) || 1000;
-  const lotNum   = bgState.lot_number || 1;
-  const se       = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
-
-  // Ligne de statut
-  let statusLine;
-  if (pred.status === null) {
-    statusLine = `📣 Signal #${pred.game} ${se}  ⌛`;
-  } else if (pred.status === 'gagne') {
-    const Re     = RATR_EMOJI[pred.ratr] ?? pred.ratr;
-    const profit = _bgRnd(pred.amount_delta);
-    statusLine   = `✅ Signal #${pred.game} ${se}  ${Re}  +${profit}${curr}`;
-  } else {
-    const perte  = _bgRnd(Math.abs(pred.amount_delta));
-    statusLine   = `❌ Signal #${pred.game} ${se}  -${perte}${curr}`;
-  }
-
-  // Lignes mises par rattrapage R0→R3
-  const ratrLines = [0, 1, 2, 3].map(r => {
-    const m        = Math.round(initMise * Math.pow(2.2, r) * 100) / 100;
-    let totalM = 0, mm = initMise;
-    for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
-    totalM = Math.round(totalM * 100) / 100;
-    const gain = Math.round(m * cote * 100) / 100;
-    const net  = Math.round((gain - totalM) * 100) / 100;
-    return `R${r} ➜ ${_bgRnd(m)}${curr}   (+${net}${curr} si gagné)`;
-  }).join('\n');
-
-  return (
-    `🏦 GESTION BANQUE\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🎮 LOT #${lotNum} — ${predIndexOneBased}/${lotSize}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `${statusLine}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🎲 Mises par rattrapage :\n` +
-    `${ratrLines}\n` +
-    `📈 Côte : ×${cote}`
-  );
-}
-
-/**
- * Ligne d'affichage d'une prédiction du lot.
- * ❌ : montre la mise perdue
- * ✅ : montre le profit net (gain - mise)
- * ⌛ : en attente
- */
-function _bgPredLine(pred, cote, curr) {
-  const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
-  if (pred.status === null) {
-    return `${pred.game}- ${se} ⌛`;
-  } else if (pred.status === 'gagne') {
-    const Re     = RATR_EMOJI[pred.ratr] ?? pred.ratr;
-    const profit = _bgRnd(pred.amount_delta);
-    return `${pred.game}- ${se} ✅ ${Re}  +${profit}${curr}`;
-  } else {
-    const perte = _bgRnd(Math.abs(pred.amount_delta));
-    return `${pred.game}- ${se} ❌  -${perte}${curr}`;
-  }
-}
-
-/**
- * Calcule la ligne "BÉNÉFICES" avec formule cumulative sur tout le lot.
- * Ex : 0f + 900f - 1000f = -100f
- * Aucun résultat encore : 0f
- */
-function _bgBankLine(bgState, curr) {
-  const preds     = bgState.lot_predictions || [];
-  const donePreds = preds.filter(p => p.status !== null);
-
-  if (donePreds.length === 0) {
-    return `${_bgRnd(bgState.bank)}${curr}`;
-  }
-
-  const totalDelta = donePreds.reduce((sum, p) => sum + (p.amount_delta || 0), 0);
-  const bankStart  = _bgRnd(bgState.bank - totalDelta);
-
-  let formula = `${bankStart}${curr}`;
-  for (const pred of donePreds) {
-    const d = pred.amount_delta || 0;
-    formula += d < 0 ? ` - ${Math.abs(d)}${curr}` : ` + ${d}${curr}`;
-  }
-  formula += ` = ${_bgRnd(bgState.bank)}${curr}`;
-  return formula;
-}
-
-/**
- * Message initial du lot (première prédiction en attente).
+ * Message initial du lot (avec header banque).
  */
 function buildBanqueInitialText(bgState, cfg, gameNumber, suit) {
-  const curr      = _bgCurr(cfg.bg_currency);
-  const cote      = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR      = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
-  const lotSize   = parseInt(cfg.bg_lot_size) || 5;
-  const lotNum    = bgState.lot_number || 1;
+  const curr = _bgCurr(cfg.bg_currency);
+  const cote = parseFloat(cfg.bg_cote) || 1.9;
   const suitEmoji = SUIT_EMOJI_MAP[suit] || suit;
   return (
     `💰 Montant banque : ${_bgRnd(bgState.bank)}${curr}\n` +
-    `🎲 Mise : ${_bgRnd(bgState.current_mise)}${curr}\n` +
-    `📈 Côté : ×${cote}\n` +
-    `🔋 Rattrapage : ${maxR}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🎮 LOT #${lotNum} — 1/${lotSize}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `\n` +
-    `${gameNumber}- ${suitEmoji} ⌛\n` +
-    `\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🏦 BANQUE ACTUELLE\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `${_bgRnd(bgState.bank)}${curr}`
+    `💵 Mise : ${bgState.current_mise}${curr} | Côté : ×${cote}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `${gameNumber}${suitEmoji} ⌛`
   );
 }
 
 /**
- * Message de lot en cours (résultats + prédiction(s) en attente) — envoyé pour chaque nouvelle pred.
- * Montre TOUT l'historique du lot + la pred courante en ⌛, plus le tableau R0→R3.
+ * Message de lot en cours (résultats + prédiction en attente).
  */
 function buildBanqueLotText(bgState, cfg) {
-  const curr     = _bgCurr(cfg.bg_currency);
-  const cote     = parseFloat(cfg.bg_cote) || 1.9;
-  const initMise = parseFloat(cfg.bg_mise_initiale) || 1000;
-  const maxR     = 3;
-  const lotSize  = parseInt(cfg.bg_lot_size) || 5;
-  const lotNum   = bgState.lot_number || 1;
-  const preds    = bgState.lot_predictions || [];
-  const count    = preds.length;
-
-  const predLines = preds.map(p => _bgPredLine(p, cote, curr));
-
-  const ratrLines = [0, 1, 2, 3].map(r => {
-    const m = Math.round(initMise * Math.pow(2.2, r) * 100) / 100;
-    let totalM = 0, mm = initMise;
-    for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
-    totalM = Math.round(totalM * 100) / 100;
-    const gain = Math.round(m * cote * 100) / 100;
-    const net  = Math.round((gain - totalM) * 100) / 100;
-    return `R${r} ➜ ${_bgRnd(m)}${curr}   (+${net}${curr} si gagné)`;
-  }).join('\n');
-
-  // Nom boutique : priorité au titre issu de strategy_promo_config, sinon bg_boutique_name admin
-  const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-  const siteUrl      = (cfg.bg_site_url || '').trim();
-  const headerLine   = boutiqueName ? `🏪 ${boutiqueName}${siteUrl ? `  |  🔗 ${siteUrl}` : ''}\n` : (siteUrl ? `🔗 ${siteUrl}\n` : '');
-
-  const followLine = siteUrl
-    ? `\n━━━━━━━━━━━━━━━\n🌐 Pour avoir cette stratégie, cliquez sur le lien — allez dans la section boutique, voilà le lien du site :\n🔗 ${siteUrl}`
-    : '';
-
-  return (
-    (headerLine ? headerLine + `━━━━━━━━━━━━━━━\n` : ``) +
-    `💰 Banque : ${_bgRnd(bgState.bank)}${curr}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🎮 LOT #${lotNum} — ${count}/${lotSize}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `\n` +
-    predLines.join('\n') + `\n` +
-    `\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🏦 BANQUE ACTUELLE\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    _bgBankLine(bgState, curr) + `\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `🎲 Paramètres de mise :\n` +
-    ratrLines + `\n` +
-    `📈 Côte : ×${cote}` +
-    followLine
-  );
-}
-
-/**
- * Bilan final après que tous les lots prévus sont terminés.
- */
-function buildBanqueFinalBilanText(lotHistory, cfg, initialBank) {
-  const curr  = _bgCurr(cfg.bg_currency);
-  const cote  = parseFloat(cfg.bg_cote) || 1.9;
+  const curr = _bgCurr(cfg.bg_currency);
+  const cote = parseFloat(cfg.bg_cote) || 1.9;
+  const preds = bgState.lot_predictions || [];
   const lines = [];
-  for (const lot of lotHistory) {
-    const delta    = _bgRnd(lot.bankAfter - lot.bankBefore);
-    const deltaStr = delta >= 0 ? `+${delta}${curr}` : `${delta}${curr}`;
-    const predLines = lot.preds.map(p => _bgPredLine(p, cote, curr)).join('\n');
-    lines.push(
-      `📊 LOT #${lot.lotNumber}\n` +
-      predLines + `\n` +
-      `Résultat : ${deltaStr}`
-    );
+  for (const pred of preds) {
+    const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
+    if (pred.status === null) {
+      lines.push(`${pred.game}${se} ⌛`);
+    } else if (pred.status === 'gagne') {
+      const Re = RATR_EMOJI[pred.ratr] ?? pred.ratr;
+      const gain = _bgRnd(pred.mise * cote);
+      if (pred.ratr === 0) {
+        lines.push(`${pred.game}${se}✅ ${Re} ${pred.mise}×${cote}=${gain}${curr}`);
+      } else {
+        lines.push(`${pred.game}${se}✅ ${Re} (${pred.mise_initial || pred.mise}×${Array(pred.ratr).fill('2.2').join('×')}×${cote}=${gain}${curr})`);
+      }
+    } else {
+      lines.push(`${pred.game}${se}❌ -${pred.mise}${curr}`);
+    }
   }
-  const finalBank  = lotHistory.length > 0 ? lotHistory[lotHistory.length - 1].bankAfter : initialBank;
-  const totalEarned = _bgRnd(finalBank - initialBank);
-  const earnedStr   = totalEarned >= 0 ? `+${totalEarned}${curr}` : `${totalEarned}${curr}`;
-
-  return (
-    `🏦 BILAN FINAL — GESTION BANQUE\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💰 Banque départ : ${_bgRnd(initialBank)}${curr}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `\n` +
-    lines.join('\n\n') + `\n` +
-    `\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💵 Total gagné : ${earnedStr}\n` +
-    `🏦 Banque finale : ${_bgRnd(finalBank)}${curr}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    (() => {
-      const bn  = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-      const url = (cfg.bg_site_url || '').trim();
-      return (
-        `\n🎉 <b>Campagne terminée avec succès !</b>\n\n` +
-        (bn  ? `🏪 <b>${bn}</b>\n` : ``) +
-        (url ? `🔗 ${url}\n\n` : `\n`) +
-        `💎 Veux-tu continuer à gagner ?\n` +
-        `📲 Rejoins notre site et commande ta stratégie dès maintenant !\n` +
-        `🚀 Des centaines de joueurs gagnent déjà — à ton tour !`
-      );
-    })()
-  );
+  return lines.join('\n') || '...';
 }
 
 /**
  * Message de résumé après fin de lot.
  */
 function buildBanqueSummaryText(lotPreds, cfg, lotNumber, bankBefore, bankAfter) {
-  const curr    = _bgCurr(cfg.bg_currency);
-  const cote    = parseFloat(cfg.bg_cote) || 1.9;
-  const maxR    = 3; // gestion_banque : toujours 3 rattrapages fixes (R0→R3)
-
-  const predLines = lotPreds.map(p => _bgPredLine(p, cote, curr));
-
-  const delta    = _bgRnd(bankAfter - bankBefore);
+  const curr = _bgCurr(cfg.bg_currency);
+  const cote = parseFloat(cfg.bg_cote) || 1.9;
+  const lines = [];
+  for (const pred of lotPreds) {
+    const se = SUIT_EMOJI_MAP[pred.suit] || pred.suit;
+    if (pred.status === 'gagne') {
+      const Re = RATR_EMOJI[pred.ratr] ?? pred.ratr;
+      const gain = _bgRnd(pred.mise * cote);
+      if (pred.ratr === 0) {
+        lines.push(`${pred.game}${se}✅ ${Re} ${pred.mise}×${cote}=${gain}${curr}`);
+      } else {
+        lines.push(`${pred.game}${se}✅ ${Re} (${pred.mise_initial || pred.mise}×${Array(pred.ratr).fill('2.2').join('×')}×${cote}=${gain}${curr})`);
+      }
+    } else {
+      lines.push(`${pred.game}${se}❌ -${pred.mise}${curr}`);
+    }
+  }
+  const delta = _bgRnd(bankAfter - bankBefore);
   const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
-  const bankLine = delta < 0
-    ? `${_bgRnd(bankBefore)}${curr} - ${Math.abs(delta)}${curr} = ${_bgRnd(bankAfter)}${curr}`
-    : `${_bgRnd(bankBefore)}${curr} + ${delta}${curr} = ${_bgRnd(bankAfter)}${curr}`;
-
-  const boutiqueName = (cfg.bg_shop_titre || cfg.bg_boutique_name || '').trim();
-  const siteUrl      = (cfg.bg_site_url || '').trim();
-  const stratNom     = (boutiqueName || cfg.name || 'Stratégie Gestion Banque').trim();
-
-  const promoBlock =
-    `\n\n━━━━━━━━━━━━━━━\n` +
-    `✅ Merci d'avoir suivi le montant du lot numéro ${lotNumber} !\n\n` +
-    `📊 Stratégie : <b>${stratNom}</b>\n` +
-    (siteUrl ? `🔗 Lien : ${siteUrl}\n\n` : `\n`) +
-    `🙏 Sossou Kouamé vous remercie !\n\n` +
-    `🛒 <b>Rendez-vous vite sur le site — Section Boutique</b>\npour acquérir cette stratégie exclusive !\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💎 Des centaines de joueurs gagnent déjà grâce à cette méthode\n— rejoignez-les !\n` +
-    `🚀 Ne laissez pas cette opportunité vous échapper !\n` +
-    `📲 Cliquez sur le lien ci-dessus et commencez à gagner dès aujourd'hui !`;
-
-  return (
-    `💰 Montant banque départ : ${_bgRnd(bankBefore)}${curr}\n` +
-    `📈 Côté : ×${cote}\n` +
-    `🔋 Rattrapage : ${maxR}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `📊 BILAN LOT #${lotNumber}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `\n` +
-    predLines.join('\n') + `\n` +
-    `\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💵 Résultat : ${deltaStr}${curr}\n` +
-    `\n` +
-    `🏦 BANQUE ACTUELLE\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    bankLine +
-    promoBlock
-  );
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`📊 Bilan Lot #${lotNumber} : ${deltaStr}${curr}`);
+  lines.push(`💰 Banque : ${_bgRnd(bankAfter)}${curr} (${deltaStr}${curr})`);
+  return lines.join('\n');
 }
 
 /**
@@ -2070,7 +1816,6 @@ module.exports = {
   editRawStoredMessages,
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
-  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText, buildBanqueFinalBilanText,
+  buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText,
   sendBanqueTgMessage, editBanqueTgMessage,
-  registerRelayHandler, unregisterRelayHandler, getMainToken,
 };

@@ -59,7 +59,7 @@ function _onFailure(msg) {
 
 // ── Connexion ────────────────────────────────────────────────────────
 
-const DEFAULT_RENDER_URL = process.env.RENDER_SYNC_URL || null;
+const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
 
 // ── Pool factory avec gestion d'erreurs robuste ──────────────────────
 function _createPool(url) {
@@ -130,10 +130,8 @@ async function loadRenderUrl() {
     let url = await db.getSetting('render_db_url');
     if (!url || !url.trim()) {
       url = DEFAULT_RENDER_URL;
-      if (url) {
-        await db.setSetting('render_db_url', url);
-        console.log('[RenderSync] URL par défaut configurée automatiquement');
-      }
+      await db.setSetting('render_db_url', url);
+      console.log('[RenderSync] URL par défaut configurée automatiquement');
     }
     if (url && url.trim()) {
       // ── Protection anti-boucle : si l'URL de sync == la DB principale, on désactive ──
@@ -647,11 +645,7 @@ async function handleGameOne(gameNumber) {
   if (gameNumber !== 1) { _gameOneHandled = false; return; }
   if (_gameOneHandled) return;
   _gameOneHandled = true;
-  // Si le pool Render n'est pas encore disponible, on libère le flag pour réessayer
-  if (!renderPool) {
-    _gameOneHandled = false;
-    return;
-  }
+  if (!renderPool) return;
   try {
     const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
@@ -713,11 +707,6 @@ async function clearExternalPredictions() {
   }
 }
 
-async function forceImportFromExternal() {
-  if (!renderPool) throw new Error('Base Render non connectée');
-  await _pullFromExternal();
-}
-
 module.exports = {
   loadRenderUrl,
   syncVerifiedPrediction,
@@ -737,5 +726,4 @@ module.exports = {
   testConnection,
   getRenderStats,
   isConnected,
-  forceImportFromExternal,
 };

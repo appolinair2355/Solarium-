@@ -506,6 +506,12 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'relance') {
+    const rules = Array.isArray(body.relance_rules) ? body.relance_rules : [];
+    if (rules.length < 1) return 'Au moins 1 stratégie source requise pour les séquences de relance';
+    return null;
+  }
+
   if (mode === 'aleatoire') {
     return null;
   }
@@ -518,6 +524,12 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'rattrapage_groupe') {
+    const monitored = Array.isArray(body.monitored_strategies) ? body.monitored_strategies : [];
+    if (monitored.length === 0) return 'Cochez au moins une stratégie à surveiller';
+    return null;
+  }
+
   if (mode === 'compteurs_absences') {
     return null;
   }
@@ -527,7 +539,7 @@ function validateStrategyBody(body) {
   }
 
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'rattrapage_groupe'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -536,10 +548,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -631,7 +643,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
     if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
-            strategy_type, multi_source_ids, multi_require, loss_type } = req.body;
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
     const exceptions  = parseExceptions(req.body.exceptions);
     const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
@@ -639,6 +651,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
     const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee     = mode === 'lecture_passee';
     const isIntelligent       = mode === 'intelligent_cartes';
@@ -649,13 +662,11 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isAnnonceSequence   = mode === 'annonce_sequence';
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
-    const isSurveillancePerte = mode === 'surveillance_perte';
+    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const isPairImpair        = mode === 'pair_impair';
-    const isCarte2v3          = mode === 'carte_2v3';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -672,6 +683,27 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
             multi_require:    multi_require || 'any',
             mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:     String(r.strategy_id),
+                losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level: rLevels.length === 1 ? rLevels[0] : null, // legacy
+                rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:    cLevels.length ? cLevels : null,
+                combo_level:     cLevels.length === 1 ? cLevels[0] : null, // legacy
+                combo_count:     Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:      r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:     Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:    r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:    r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:  Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
         : isLecturePassee
@@ -716,6 +748,10 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
         : isCostumeManquant
         ? { threshold: 0, mode: 'costume_manquant', mappings: null }
+        : isRattrapageGroupe
+        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
             c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
@@ -730,10 +766,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             bg_cote:         Math.max(0.1, parseFloat(req.body.bg_cote)        || 1.9),
             bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
             bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.bg_site_url || '') }
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -750,8 +783,6 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
-      tg_site_url: String(req.body.tg_site_url || ''),
-      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -770,31 +801,6 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
-      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
-        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
-            strategy_id: String(r.strategy_id),
-            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
-            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
-            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
-            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-          }))
-        : [],
-      // Filtre d'attente
-      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
-      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
-      attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
-      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
-      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      attente2_mapping: (() => {
-        const m = req.body.attente2_mapping;
-        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
-        if (!m || typeof m !== 'object') return DEF;
-        const out = {};
-        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
-        return out;
-      })(),
-      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -927,7 +933,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
     if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
-            strategy_type, multi_source_ids, multi_require, loss_type } = req.body;
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
     const exceptions  = parseExceptions(req.body.exceptions);
     const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
@@ -935,6 +941,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
     const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee     = mode === 'lecture_passee';
     const isIntelligent       = mode === 'intelligent_cartes';
@@ -945,13 +952,11 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isAnnonceSequence   = mode === 'annonce_sequence';
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
-    const isSurveillancePerte = mode === 'surveillance_perte';
+    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const isPairImpair        = mode === 'pair_impair';
-    const isCarte2v3          = mode === 'carte_2v3';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -968,6 +973,27 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
             multi_require:    multi_require || 'any',
             mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:      String(r.strategy_id),
+                losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level:  rLevels.length === 1 ? rLevels[0] : null,
+                rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:      cLevels.length ? cLevels : null,
+                combo_level:       cLevels.length === 1 ? cLevels[0] : null,
+                combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:       Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
         : isLecturePassee
@@ -1012,6 +1038,10 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
         : isCostumeManquant
         ? { threshold: 0, mode: 'costume_manquant', mappings: null }
+        : isRattrapageGroupe
+        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
             c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
@@ -1026,10 +1056,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             bg_cote:          Math.max(0.1, parseFloat(req.body.bg_cote)         || 1.9),
             bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
             bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.bg_site_url || '') }
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       visibility: visibility || 'admin',
@@ -1052,8 +1079,6 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
         return oldPredDurationStartedAt;
       })(),
-      tg_site_url: String(req.body.tg_site_url || ''),
-      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -1072,31 +1097,6 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
-      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
-        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
-            strategy_id: String(r.strategy_id),
-            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
-            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
-            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
-            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-          }))
-        : (list[idx].surveillance_rules || []),
-      // Filtre d'attente
-      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
-      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
-      attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
-      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
-      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      attente2_mapping: (() => {
-        const m = req.body.attente2_mapping;
-        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
-        if (!m || typeof m !== 'object') return DEF;
-        const out = {};
-        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
-        return out;
-      })(),
-      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -1207,36 +1207,6 @@ router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Compteurs live serpent (pair_impair / carte_2v3) ──────────────
-router.get('/strategies/:id/snake-counts', requireAdmin, (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const entry = engine.custom?.[id];
-    if (!entry) return res.json({ mode: null });
-    const mode = entry.config?.mode || '';
-    const threshold = entry.config?.threshold || 0;
-    if (mode === 'pair_impair') {
-      return res.json({
-        mode,
-        threshold,
-        parityCounts: entry.parityCounts || { pair: 0, impair: 0 },
-        snakeActive: !!entry.snakeActive,
-        snakeSuit: entry.snakeSuit || null,
-      });
-    }
-    if (mode === 'carte_2v3') {
-      return res.json({
-        mode,
-        threshold,
-        c2v3Counts: entry.c2v3Counts || { deux: 0, trois: 0 },
-        snakeActive: !!entry.snakeActive,
-        snakeSuit: entry.snakeSuit || null,
-      });
-    }
-    res.json({ mode });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Reset statistiques par stratégie ──────────────────────────────
 // Supprime tout l'historique de prédictions d'une stratégie (C1, C2, C3, DC ou Sn)
 router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
@@ -1267,16 +1237,6 @@ router.post('/clear-predictions', requireAdmin, async (req, res) => {
     const { deleted, extDeleted } = await eng.fullReset();
     console.log(`[Admin] Reset complet — local: ${deleted}, render: ${extDeleted}`);
     res.json({ ok: true, deleted, extDeleted });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Supprime uniquement les prédictions résolues (gagne/perdu/expire) ──────────
-// Conserve : prédictions 'en_cours', stratégies, configs, users, absences
-router.post('/delete-resolved-predictions', requireAdmin, async (req, res) => {
-  try {
-    const deleted = await db.deleteResolvedPredictions();
-    console.log(`[Admin] Prédictions résolues supprimées : ${deleted}`);
-    res.json({ ok: true, deleted });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1767,16 +1727,18 @@ async function applyUpdateBlock(type, data) {
       } else {
         const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
         const isCombJson    = item.strategy_type === 'combinaison';
+        const isRelanceJson = item.mode === 'relance';
         const isAleatJson   = item.mode === 'aleatoire';
         list.push({
           id: nextId,
           name: item.name.trim(),
           strategy_type: isCombJson ? 'combinaison' : 'simple',
           mode: isCombJson ? 'multi_strategy' : item.mode,
-          threshold: (isAleatJson || isCombJson) ? 0 : (parseInt(item.threshold) || 0),
-          mappings: (isCombJson || isAleatJson) ? null : mappings,
+          threshold: (isAleatJson || isCombJson || isRelanceJson) ? 0 : (parseInt(item.threshold) || 0),
+          mappings: (isCombJson || isRelanceJson || isAleatJson) ? null : mappings,
           multi_source_ids: isCombJson ? (Array.isArray(item.multi_source_ids) ? item.multi_source_ids.map(String) : []) : undefined,
           multi_require: isCombJson ? (item.multi_require || 'any') : undefined,
+          relance_rules: isRelanceJson ? (Array.isArray(item.relance_rules) ? item.relance_rules : []) : undefined,
           visibility: item.visibility || 'admin',
           enabled: item.enabled !== false,
           tg_targets,
@@ -2684,15 +2646,6 @@ router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
     const renderSync = require('./render-sync');
     if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
     await renderSync.handleGameOne(1);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/render-db/import', requireSuperAdmin, async (req, res) => {
-  try {
-    const renderSync = require('./render-sync');
-    if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
-    await renderSync.forceImportFromExternal();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3695,38 +3648,6 @@ async function migrateLegacyProConfigOnce() {
 }
 migrateLegacyProConfigOnce();
 
-// ── Compteur de costumes → Telegram ──────────────────────────────────────────
-const suitCounterSvc = require('./suit-counter-service');
-
-router.get('/suit-counter-config', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.loadConfig();
-    res.json({ ...suitCounterSvc.getConfig(), counters: suitCounterSvc.getCounters() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/suit-counter-config', requireAdmin, async (req, res) => {
-  try {
-    const { enabled, bot_token, channel_id, hand, interval, send_on_game_end } = req.body;
-    const patch = {};
-    if (typeof enabled          !== 'undefined') patch.enabled          = !!enabled;
-    if (typeof send_on_game_end !== 'undefined') patch.send_on_game_end = !!send_on_game_end;
-    if (bot_token    !== undefined) patch.bot_token    = String(bot_token    || '').trim();
-    if (channel_id   !== undefined) patch.channel_id   = String(channel_id   || '').trim();
-    if (hand         !== undefined) patch.hand         = ['joueur','banquier'].includes(hand) ? hand : 'joueur';
-    if (interval     !== undefined) patch.interval     = [30, 60].includes(parseInt(interval)) ? parseInt(interval) : 30;
-    await suitCounterSvc.saveConfig(patch);
-    res.json({ ok: true, config: suitCounterSvc.getConfig() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/suit-counter-test', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.sendNow();
-    res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
 router.get('/pro-config', requireProOrAdmin, async (req, res) => {
   try {
     const ownerId = effectiveOwnerId(req);
@@ -3885,7 +3806,7 @@ function analyzeStrategyFile(ext, content, filename) {
     if (!strategies.length) {
       errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
     }
-    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire','pair_impair','carte_2v3'];
+    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','relance'];
     for (const s of strategies) {
       if (!s || typeof s !== 'object') {
         errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });
@@ -5265,8 +5186,9 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
       let existingStrats = rawExisting ? JSON.parse(rawExisting) : [];
       let changed = false;
 
-      // Champs TG à mettre à jour sur les stratégies existantes
-      const TG_FIELDS = ['tg_targets', 'tg_format', 'pred_duration_minutes'];
+      // Champs TG/relance à mettre à jour sur les stratégies existantes
+      const TG_FIELDS = ['tg_targets', 'tg_format', 'relance_enabled', 'relance_pertes',
+                         'relance_types', 'relance_nombre', 'pred_duration_minutes'];
 
       for (const s of strategies) {
         const nameKey = (s.name || '').toLowerCase();
