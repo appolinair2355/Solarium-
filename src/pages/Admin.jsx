@@ -3925,27 +3925,7 @@ function AdminPanel() {
     } catch (e) { setLbMsg('❌ ' + e.message); }
   };
 
-  useEffect(() => {
-    if (adminTab === 'canaux') {
-      loadLbTargets();
-      loadKouame();
-      loadSuitCounter();
-      loadStrategies();
-      loadStratStats();
-    }
-  }, [adminTab, loadSuitCounter]);
-
-  // ── API Kouamé ──
-  const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
-  const [kouameStatus, setKouameStatus]   = useState({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
-  const [kouameForm, setKouameForm]       = useState({ bot_token: '', channel_id: '' });
-  const [kouameMsg, setKouameMsg]         = useState('');
-  const [kouameSaving, setKouameSaving]   = useState(false);
-  const [kouameTesting, setKouameTesting] = useState(false);
-  const [kouameFeedUrl, setKouameFeedUrl] = useState('');
-  const [kouameFeedCopied, setKouameFeedCopied] = useState(false);
-
-  // ── Compteur de costumes → Telegram ──
+  // ── Compteur de costumes → Telegram (déclaré AVANT le useEffect qui l'utilise) ──
   const [suitCfg, setSuitCfg]           = useState({ enabled: false, bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
   const [suitCounters, setSuitCounters]  = useState({ joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} });
   const [suitForm, setSuitForm]          = useState({ bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
@@ -3989,6 +3969,26 @@ function AdminPanel() {
     } catch (e) { setSuitMsg('❌ ' + e.message); }
     finally { setSuitTesting(false); }
   };
+
+  useEffect(() => {
+    if (adminTab === 'canaux') {
+      loadLbTargets();
+      loadKouame();
+      loadSuitCounter();
+      loadStrategies();
+      loadStratStats();
+    }
+  }, [adminTab, loadSuitCounter]);
+
+  // ── API Kouamé ──
+  const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
+  const [kouameStatus, setKouameStatus]   = useState({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
+  const [kouameForm, setKouameForm]       = useState({ bot_token: '', channel_id: '' });
+  const [kouameMsg, setKouameMsg]         = useState('');
+  const [kouameSaving, setKouameSaving]   = useState(false);
+  const [kouameTesting, setKouameTesting] = useState(false);
+  const [kouameFeedUrl, setKouameFeedUrl] = useState('');
+  const [kouameFeedCopied, setKouameFeedCopied] = useState(false);
 
   const loadKouame = async () => {
     try {
