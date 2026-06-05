@@ -10433,22 +10433,62 @@ function AdminPanel() {
                     </div>
                     {/* ── Mapping de prédiction par option ── */}
                     {(() => {
-                      const _SUITS_AT = ['♠','♥','♦','♣'];
-                      const _PRESETS_AT = [
-                        { label: 'Contraire total',  map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
-                        { label: 'Même couleur',     map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
-                        { label: 'Même forme',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
-                        { label: 'Identique',        map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
-                      ];
+                      // Adapter les suits/presets selon le mode de la stratégie
+                      const _fMode = stratForm.mode;
+                      const _isCarteMode    = ['carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','carte_2v3'].includes(_fMode);
+                      const _isVictoireMode = ['absence_victoire','victoire_adverse'].includes(_fMode);
+                      const _isPariteMode   = ['compteur_parite','pair_impair'].includes(_fMode);
+
+                      let _SUITS_AT, _PRESETS_AT, _getSuitLabel, _getSuitColor, _defaultMap;
+                      if (_isCarteMode) {
+                        _SUITS_AT       = ['deux','trois'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (2↔3)', map: { 'deux':['trois'],'trois':['deux'] } },
+                          { label: 'Identique',       map: { 'deux':['deux'], 'trois':['trois'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'deux' ? '2️⃣ 2 cartes' : '3️⃣ 3 cartes';
+                        _getSuitColor   = () => '#a78bfa';
+                        _defaultMap     = { 'deux':['trois'],'trois':['deux'] };
+                      } else if (_isVictoireMode) {
+                        _SUITS_AT       = ['WIN_P','WIN_B'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (J↔B)', map: { 'WIN_P':['WIN_B'],'WIN_B':['WIN_P'] } },
+                          { label: 'Identique',        map: { 'WIN_P':['WIN_P'],'WIN_B':['WIN_B'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'WIN_P' ? '👤 Joueur' : '🏦 Banquier';
+                        _getSuitColor   = () => '#60a5fa';
+                        _defaultMap     = { 'WIN_P':['WIN_B'],'WIN_B':['WIN_P'] };
+                      } else if (_isPariteMode) {
+                        _SUITS_AT       = ['pair','impair'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (P↔I)', map: { 'pair':['impair'],'impair':['pair'] } },
+                          { label: 'Identique',        map: { 'pair':['pair'],  'impair':['impair'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'pair' ? '🟢 Pair' : '🔴 Impair';
+                        _getSuitColor   = () => '#34d399';
+                        _defaultMap     = { 'pair':['impair'],'impair':['pair'] };
+                      } else {
+                        _SUITS_AT       = ['♠','♥','♦','♣'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire total',  map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+                          { label: 'Même couleur',     map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+                          { label: 'Même forme',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+                          { label: 'Identique',        map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+                        ];
+                        _getSuitLabel   = s => s;
+                        _getSuitColor   = s => ['♥','♦'].includes(s) ? '#f87171' : '#e2e8f0';
+                        _defaultMap     = { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] };
+                      }
+
                       const renderAttenteMapper = (label, mappingValue, setMapping, accentColor) => {
                         const enabled = !!mappingValue;
-                        const m = mappingValue || { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] };
+                        const m = mappingValue || _defaultMap;
                         return (
                           <div key={label} style={{ gridColumn: '1 / -1', padding: '12px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.18)', border: `1px solid ${enabled ? accentColor + '55' : 'rgba(255,255,255,0.07)'}`, marginTop: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: enabled ? 10 : 0 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: enabled ? accentColor : '#64748b', letterSpacing: 0.3 }}>🗺️ {label}</span>
                               <button type="button"
-                                onClick={() => setMapping(enabled ? null : { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] })}
+                                onClick={() => setMapping(enabled ? null : { ..._defaultMap })}
                                 style={{ padding: '3px 11px', borderRadius: 14, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: `1px solid ${enabled ? accentColor : 'rgba(255,255,255,0.15)'}`, background: enabled ? accentColor + '22' : 'rgba(255,255,255,0.05)', color: enabled ? accentColor : '#64748b', transition: 'all 0.15s' }}>
                                 {enabled ? '● Activé' : '○ Désactivé (costume original)'}
                               </button>
@@ -10468,21 +10508,21 @@ function AdminPanel() {
                                 </div>
                                 {_SUITS_AT.map(suit => {
                                   const cur = Array.isArray(m[suit]) ? m[suit][0] : (m[suit] || null);
-                                  const suitColor = ['♥','♦'].includes(suit) ? '#f87171' : '#e2e8f0';
+                                  const suitColor = _getSuitColor(suit);
                                   return (
                                     <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', marginBottom: 4, background: 'rgba(255,255,255,0.02)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.05)' }}>
-                                      <span style={{ color: suitColor, fontSize: 18, minWidth: 22, textAlign: 'center' }}>{suit}</span>
+                                      <span style={{ color: suitColor, fontSize: 14, minWidth: 80, textAlign: 'left', fontWeight: 700 }}>{_getSuitLabel(suit)}</span>
                                       <span style={{ color: '#374151', fontSize: 14, minWidth: 16 }}>→</span>
                                       <div style={{ display: 'flex', gap: 4, flex: 1 }}>
                                         {_SUITS_AT.map(target => {
                                           const sel = cur === target;
-                                          const tColor = ['♥','♦'].includes(target) ? '#f87171' : '#e2e8f0';
+                                          const tColor = _getSuitColor(target);
                                           return (
                                             <button key={target} type="button"
                                               onClick={() => setMapping({ ...m, [suit]: [target] })}
-                                              style={{ flex: 1, padding: '5px 3px', borderRadius: 6, cursor: 'pointer', border: sel ? `2px solid ${accentColor}` : '1px solid rgba(255,255,255,0.08)', background: sel ? accentColor + '33' : 'rgba(255,255,255,0.04)', color: sel ? '#e2e8f0' : '#6b7280', fontWeight: sel ? 700 : 400, transition: 'all 0.12s', position: 'relative', textAlign: 'center' }}>
+                                              style={{ flex: 1, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', border: sel ? `2px solid ${accentColor}` : '1px solid rgba(255,255,255,0.08)', background: sel ? accentColor + '33' : 'rgba(255,255,255,0.04)', color: sel ? '#e2e8f0' : '#6b7280', fontWeight: sel ? 700 : 400, transition: 'all 0.12s', position: 'relative', textAlign: 'center', fontSize: 12 }}>
                                               {sel && <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 8, color: accentColor, fontWeight: 800 }}>①</span>}
-                                              <span style={{ color: tColor, fontSize: 16 }}>{target}</span>
+                                              <span style={{ color: tColor }}>{_getSuitLabel(target)}</span>
                                             </button>
                                           );
                                         })}
@@ -10492,16 +10532,17 @@ function AdminPanel() {
                                   );
                                 })}
                                 <div style={{ fontSize: 10, color: '#64748b', marginTop: 4, fontStyle: 'italic' }}>
-                                  Sélection unique = toujours cette carte · cliquez pour changer
+                                  Sélection unique = toujours ce costume · cliquez pour changer
                                 </div>
                               </>
                             )}
                           </div>
                         );
                       };
+                      const _optLabel = _isCarteMode ? '2️⃣/3️⃣' : _isVictoireMode ? '👤/🏦' : _isPariteMode ? 'P/I' : '♠/♥/♦/♣';
                       if (stratForm.attente_option === 1) {
                         return renderAttenteMapper(
-                          'Mapping opt1 — Original → Costume prédit (♠/♥/♦/♣)',
+                          `Mapping opt1 — Original → Costume prédit (${_optLabel})`,
                           stratForm.attente1_mapping,
                           m => setStratForm(p => ({ ...p, attente1_mapping: m })),
                           '#a855f7'
@@ -10509,7 +10550,7 @@ function AdminPanel() {
                       }
                       if (stratForm.attente_option === 2) {
                         return renderAttenteMapper(
-                          'Mapping opt2 — Original → Costume prédit (tous présents → émet)',
+                          `Mapping opt2 — Original → Costume prédit (${_optLabel}, tous présents → émet)`,
                           stratForm.attente2_mapping,
                           m => setStratForm(p => ({ ...p, attente2_mapping: m })),
                           '#3b82f6'
