@@ -123,6 +123,9 @@ function startScheduler() {
         const text = buildMessage(_config.hand, _counters);
         await _sendTg(text);
         console.log(`[SuitCounter] ⏰ Compteurs envoyés — ${_lastScheduleSent}`);
+        // Reset des compteurs après envoi planifié
+        resetCounters();
+        console.log(`[SuitCounter] 🔄 Compteurs remis à zéro après envoi ${_lastScheduleSent}`);
       }
     } catch (e) {
       console.warn('[SuitCounter] Erreur scheduler:', e.message);
