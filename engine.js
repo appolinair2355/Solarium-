@@ -2460,7 +2460,6 @@ class Engine {
     // en attente contre lui, sinon elles restent bloquées jusqu'à expiration (❌).
     // Pour gestion_banque : toujours 3 rattrapages (bankroll R0→R3 fixe)
     const stratMaxRForResolve = cfg.mode === 'gestion_banque' ? 3
-      : (cfg.mode === 'pair_impair' || cfg.mode === 'carte_2v3') ? 0
       : (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
         ? parseInt(cfg.max_rattrapage)
         : getCurrentMaxRattrapage();
@@ -2767,14 +2766,14 @@ class Engine {
       const toRemoveAq = [];
       for (let i = 0; i < state.attenteQueue.length; i++) {
         const item = state.attenteQueue[i];
-        // Surveiller le costume PRÉDIT (ps) dans la main désignée.
+        // Surveiller le costume DÉCLENCHEUR (triggerSuit) dans la main désignée.
         // Option 1 : si absent pendant n jeux → émettre la prédiction originale (ps)
         //            si présent avant n jeux → annuler
         // Option 2 : dès qu'il apparaît → émettre avec le MAPPING PROPRE (attente2Mapping)
         //            si absent après n jeux → annuler
-        // Détection intelligente selon le type de ps prédit
+        // IMPORTANT: on trace triggerSuit (le costume qui a déclenché le mode), pas ps (le costume prédit)
         let appearedThisTick;
-        const _aqPs = item.ps;
+        const _aqPs = item.triggerSuit || item.ps;
         if (_aqPs === 'pair' || _aqPs === 'impair') {
           // Parité : calculer le score de la main configurée
           const _aqCards = item.main === 'banquier' ? bCards : pCards;
@@ -2852,7 +2851,9 @@ class Engine {
           let emitPs = item.ps;
           const _resolveMappingForOpt = (mappingObj) => {
             if (!mappingObj) return null;
-            const m = mappingObj[item.ps];
+            // Priorité : chercher par triggerSuit (costume détecté), puis par ps (costume prédit)
+            const tKey = item.triggerSuit || item.ps;
+            const m = mappingObj[tKey] !== undefined ? mappingObj[tKey] : mappingObj[item.ps];
             if (!m) return null;
             return Array.isArray(m) ? m[0] : m;
           };
@@ -4910,7 +4911,7 @@ class Engine {
         if (isNewGame) {
           // Compteur instantané de costumes (suit-counter-service)
           // extractSuitsAll : sans déduplication → 3 trèfles = +3 (et non +1)
-          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards)); } catch {}
+          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards), game.player_cards || [], game.banker_cards || [], game.winner || null); } catch {}
           // Compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
           try { require('./comptages').onFinishedGame(game); }
           catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }

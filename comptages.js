@@ -429,7 +429,7 @@ function buildReportText(now, summary, prevSummary) {
     const newRecord = row.maxAll > prevMaxAll;
     const tag = newRecord ? '  🔥' : '';
     lines.push(
-      `   ▸  ${escapeHtml(row.label)}  —  Absence C : <b>${row.maxPeriod}</b>  ·  max : <b>${row.maxAll}</b>${tag}`
+      `   ▸  ${escapeHtml(row.label)}  —  actuel : <b>${row.cur}</b>  ·  max période : <b>${row.maxPeriod}</b>  ·  max : <b>${row.maxAll}</b>${tag}`
     );
   }
 

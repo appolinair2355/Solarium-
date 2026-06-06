@@ -36,7 +36,6 @@ async function requireSuperAdmin(req, res, next) {
       if (uname) req.session.username = uname;
     } catch {}
   }
-  if (uname === 'buzzinfluence') return next();
   return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
 }
 
@@ -3709,14 +3708,25 @@ router.get('/suit-counter-config', requireAdmin, async (req, res) => {
 
 router.post('/suit-counter-config', requireAdmin, async (req, res) => {
   try {
-    const { enabled, bot_token, channel_id, hand, interval, send_on_game_end } = req.body;
+    const { enabled, channels, counter_type, hand, interval, send_on_game_end, send_times, reset_after_send } = req.body;
     const patch = {};
     if (typeof enabled          !== 'undefined') patch.enabled          = !!enabled;
     if (typeof send_on_game_end !== 'undefined') patch.send_on_game_end = !!send_on_game_end;
-    if (bot_token    !== undefined) patch.bot_token    = String(bot_token    || '').trim();
-    if (channel_id   !== undefined) patch.channel_id   = String(channel_id   || '').trim();
+    if (typeof reset_after_send !== 'undefined') patch.reset_after_send = !!reset_after_send;
+    if (channels !== undefined) {
+      patch.channels = (Array.isArray(channels) ? channels : [])
+        .filter(c => c && typeof c === 'object')
+        .map(c => ({
+          bot_token:  String(c.bot_token  || '').trim(),
+          channel_id: String(c.channel_id || '').trim(),
+          label:      String(c.label      || '').trim(),
+        }))
+        .filter(c => c.bot_token && c.channel_id);
+    }
+    if (counter_type !== undefined) patch.counter_type = ['taux_miroir','groupe_joueur','groupe_banquier','valeur_joueur','valeur_banquier','parite_joueur','parite_banquier'].includes(counter_type) ? counter_type : 'taux_miroir';
     if (hand         !== undefined) patch.hand         = ['joueur','banquier'].includes(hand) ? hand : 'joueur';
     if (interval     !== undefined) patch.interval     = [30, 60].includes(parseInt(interval)) ? parseInt(interval) : 30;
+    if (send_times   !== undefined) patch.send_times   = Array.isArray(send_times) ? send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [];
     await suitCounterSvc.saveConfig(patch);
     res.json({ ok: true, config: suitCounterSvc.getConfig() });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3727,6 +3737,13 @@ router.post('/suit-counter-test', requireAdmin, async (req, res) => {
     await suitCounterSvc.sendNow();
     res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/suit-counter/reset', requireAdmin, async (req, res) => {
+  try {
+    suitCounterSvc.resetCounters();
+    res.json({ ok: true, message: 'Compteurs remis à zéro' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/pro-config', requireProOrAdmin, async (req, res) => {
