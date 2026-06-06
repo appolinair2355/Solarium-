@@ -524,10 +524,25 @@ async function syncDeleteStrategy(id) {
 // ── Sync settings clés (messages, bilan, telegram, etc.) ─────────────
 
 const SYNC_SETTINGS_KEYS = [
-  'bilan_last', 'broadcast_message', 'tg_announcements',
-  'user_messages', 'tg_msg_format', 'max_rattrapage',
-  'loss_sequences', 'default_strategies_tg', 'ui_styles', 'custom_css',
-  'bot_token', 'telegram_chat_config',
+  // Telegram & formats
+  'bot_token', 'telegram_chat_config', 'tg_announcements', 'default_strategies_tg',
+  'tg_msg_format', 'user_messages', 'broadcast_message',
+  // Routage & stratégies
+  'strategy_channel_routes', 'loss_sequences', 'strategy_promo_config',
+  // Apparence & UI
+  'ui_styles', 'custom_css',
+  // Diffusion directe (Live Broadcast)
+  'live_broadcast_targets',
+  // API Kouamé
+  'kouame_api_config', 'kouame_feed_key',
+  // Compteurs costumes (Suit Counter)
+  'suit_counter_config',
+  // Module Comptages
+  'comptages_config', 'comptages_extra_channels',
+  // Programmation bots & IA
+  'prog_ai_keys', 'prog_bots',
+  // Divers
+  'bilan_last', 'max_rattrapage', 'engine_absences', 'bot_admin_tg_id',
 ];
 
 async function syncAllSettings() {

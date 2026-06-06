@@ -1916,7 +1916,14 @@ class Engine {
   async _processC1(gn, suits, pCards, bCards) {
     if (this.c1.processed.has(gn)) return;
     this.c1.processed.add(gn);
-    await this._resolvePending(this.c1.pending, 'C1', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    // Résolution sur la main configurée (joueur par défaut, banquier si admin l'a choisi)
+    const _c1TgCfg  = this.defaultStratTg?.['C1'] || {};
+    const _c1Hand   = _c1TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+    const _c1Suits  = _c1Hand === 'banquier'
+      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
+      : suits;
+    const _c1TgOpts = { formatId: _c1TgCfg.tg_format || null, hand: _c1Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C1' };
+    await this._resolvePending(this.c1.pending, 'C1', gn, _c1Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c1.consecLosses = 0; this._onStratWin('C1'); if (rattrapR > 0) this._onStratRattrapage('C1', gn, suit, rattrapR); return; }
       this.c1.consecLosses++;
       this._onStratLoss('C1', gn, suit);
@@ -1928,7 +1935,7 @@ class Engine {
           this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         }
       }
-    });
+    }, getCurrentMaxRattrapage(), _c1TgOpts);
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c1.absences[suit] = 0; continue; }
       this.c1.absences[suit] = (this.c1.absences[suit] || 0) + 1;
@@ -1945,7 +1952,13 @@ class Engine {
   async _processC2(gn, suits, pCards, bCards) {
     if (this.c2.processed.has(gn)) return;
     this.c2.processed.add(gn);
-    await this._resolvePending(this.c2.pending, 'C2', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    const _c2TgCfg  = this.defaultStratTg?.['C2'] || {};
+    const _c2Hand   = _c2TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+    const _c2Suits  = _c2Hand === 'banquier'
+      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
+      : suits;
+    const _c2TgOpts = { formatId: _c2TgCfg.tg_format || null, hand: _c2Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C2' };
+    await this._resolvePending(this.c2.pending, 'C2', gn, _c2Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c2.hadFirstLoss = false; this._onStratWin('C2'); if (rattrapR > 0) this._onStratRattrapage('C2', gn, suit, rattrapR); return; }
       if (!this.c2.hadFirstLoss) { this.c2.hadFirstLoss = true; return; }
       this.c2.hadFirstLoss = false;
@@ -1955,7 +1968,7 @@ class Engine {
         savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
         this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
       }
-    });
+    }, getCurrentMaxRattrapage(), _c2TgOpts);
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c2.absences[suit] = 0; continue; }
       this.c2.absences[suit] = (this.c2.absences[suit] || 0) + 1;
@@ -1972,7 +1985,13 @@ class Engine {
   async _processC3(gn, suits, pCards, bCards) {
     if (this.c3.processed.has(gn)) return;
     this.c3.processed.add(gn);
-    await this._resolvePending(this.c3.pending, 'C3', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    const _c3TgCfg  = this.defaultStratTg?.['C3'] || {};
+    const _c3Hand   = _c3TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+    const _c3Suits  = _c3Hand === 'banquier'
+      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
+      : suits;
+    const _c3TgOpts = { formatId: _c3TgCfg.tg_format || null, hand: _c3Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C3' };
+    await this._resolvePending(this.c3.pending, 'C3', gn, _c3Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c3.consecLosses = 0; this._onStratWin('C3'); if (rattrapR > 0) this._onStratRattrapage('C3', gn, suit, rattrapR); return; }
       this.c3.consecLosses++;
       this._onStratLoss('C3', gn, suit);
@@ -1984,7 +2003,7 @@ class Engine {
           this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         }
       }
-    });
+    }, getCurrentMaxRattrapage(), _c3TgOpts);
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c3.absences[suit] = 0; continue; }
       this.c3.absences[suit] = (this.c3.absences[suit] || 0) + 1;
@@ -1999,25 +2018,17 @@ class Engine {
   }
 
   async _processDC(gn, suits, pCards, bCards) {
-    const maxR = getCurrentMaxRattrapage();
-    for (const [pg, info] of Object.entries(this.dc.pending)) {
-      const pgNum = parseInt(pg);
-      if (gn < pgNum) continue;
-      const ps = info.suit;
-      if (suits.includes(ps)) {
-        await resolvePrediction('DC', pgNum, ps, 'gagne', info.rattrapage, pCards, bCards);
-        delete this.dc.pending[pg];
-        this._onStratWin('DC');
-        if (info.rattrapage > 0) this._onStratRattrapage('DC', gn, ps, info.rattrapage);
-      } else if (gn > pgNum) {
-        if (info.rattrapage < maxR) { info.rattrapage++; }
-        else {
-          await resolvePrediction('DC', pgNum, ps, 'perdu', info.rattrapage, pCards, bCards);
-          delete this.dc.pending[pg];
-          this._onStratLoss('DC', gn, ps);
-        }
-      }
-    }
+    // Résolution sur la main configurée (cohérente avec C1/C2/C3) + rattrapage gn-pgNum
+    const _dcTgCfg  = this.defaultStratTg?.['DC'] || {};
+    const _dcHand   = _dcTgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+    const _dcSuits  = _dcHand === 'banquier'
+      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
+      : suits;
+    const _dcTgOpts = { formatId: _dcTgCfg.tg_format || null, hand: _dcHand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'DC' };
+    await this._resolvePending(this.dc.pending, 'DC', gn, _dcSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
+      if (won) { this._onStratWin('DC'); if (rattrapR > 0) this._onStratRattrapage('DC', gn, ps, rattrapR); }
+      else { this._onStratLoss('DC', gn, ps); }
+    }, getCurrentMaxRattrapage(), _dcTgOpts);
   }
 
   /**
@@ -3087,15 +3098,17 @@ class Engine {
       // Remise à zéro UNIQUEMENT à l'heure pile.
       // ─────────────────────────────────────────────────────────────────
 
-      // 0. Remise à zéro automatique toutes les heures pile (UTC epoch-hours — fiable)
+      // 0. Remise à zéro automatique : à chaque heure pile (H:00) ou aussi à H:30 si mirror_reset_half activé
       if (!state.mirrorCounts) state.mirrorCounts = {};
-      const currentEpochHour = Math.floor(Date.now() / 3_600_000);
+      const _mirrorHalfHour  = !!cfg.mirror_reset_half;
+      const _mirrorEpochUnit = _mirrorHalfHour ? 1_800_000 : 3_600_000;
+      const currentEpochHour = Math.floor(Date.now() / _mirrorEpochUnit);
       if (state.mirrorLastHour === null || state.mirrorLastHour === undefined) {
         state.mirrorLastHour = currentEpochHour;
       } else if (state.mirrorLastHour !== currentEpochHour) {
-        const prevH = state.mirrorLastHour % 24;
-        const newH  = currentEpochHour % 24;
-        console.log(`[${channelId}] MiroirTaux ⏰ Nouvelle heure (${prevH}h→${newH}h) — compteurs remis à zéro`);
+        const nowMin = new Date().getMinutes();
+        const label  = _mirrorHalfHour ? (nowMin < 30 ? 'H:00' : 'H:30') : 'H:00';
+        console.log(`[${channelId}] MiroirTaux ⏰ Reset ${label} — compteurs remis à zéro`);
         for (const suit of ALL_SUITS) state.mirrorCounts[suit] = 0;
         state.mirrorLastHour = currentEpochHour;
       }
@@ -4419,17 +4432,25 @@ class Engine {
         if (pgNum > gn) continue;           // prédit pour un jeu futur → skip
         if (!handSuits.includes(info.suit)) continue; // costume absent de la main live → attend
         const rattrapage = gn - pgNum;
+        // Vérifier que le rattrapage ne dépasse pas le maxR de la prédiction
+        const predMaxR = (info.maxR !== undefined && info.maxR !== null) ? info.maxR : getCurrentMaxRattrapage();
+        if (rattrapage > predMaxR) continue; // déjà au-delà du maxR → la perte sera enregistrée par le cycle régulier
         console.log(`[${strategyId}] ⚡ Live: costume ${info.suit} trouvé jeu #${gn} → gagne immédiat (R${rattrapage})`);
         await resolvePrediction(strategyId, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, tgOpts);
         delete pending[pg];
       }
     };
 
-    // Stratégies par défaut C1/C2/C3/DC → main joueur
-    await tryResolve(this.c1.pending, 'C1', playerSuits, playerDone);
-    await tryResolve(this.c2.pending, 'C2', playerSuits, playerDone);
-    await tryResolve(this.c3.pending, 'C3', playerSuits, playerDone);
-    await tryResolve(this.dc.pending, 'DC', playerSuits, playerDone);
+    // Stratégies par défaut C1/C2/C3/DC → main selon config (joueur par défaut)
+    for (const chId of ['C1', 'C2', 'C3', 'DC']) {
+      const chTgCfg  = this.defaultStratTg?.[chId] || {};
+      const chHand   = chTgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+      const chSuits  = chHand === 'banquier' ? bankerSuits : playerSuits;
+      const chDone   = chHand === 'banquier' ? bankerDone  : playerDone;
+      const chState  = chId === 'C1' ? this.c1 : chId === 'C2' ? this.c2 : chId === 'C3' ? this.c3 : this.dc;
+      const chTgOpts = { formatId: chTgCfg.tg_format || null, hand: chHand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: chId };
+      await tryResolve(chState.pending, chId, chSuits, chDone, chTgOpts);
+    }
 
     // Stratégies custom → main selon config, avec les bonnes options Telegram
     for (const [idStr, entry] of Object.entries(this.custom)) {
@@ -4454,14 +4475,18 @@ class Engine {
       // ── Résolution live spéciale pour les modes Carte 2/3 ───────────
       if (cfg.mode === 'carte_3_vers_2' || cfg.mode === 'carte_2_vers_3') {
         const hCards = hand === 'banquier' ? bankerCards : playerCards;
-        if (handDone && Array.isArray(hCards)) {
+        // Attendre que les DEUX mains soient terminées pour avoir le compte de cartes définitif
+        if (playerDone && bankerDone && Array.isArray(hCards)) {
           for (const [pg, info] of Object.entries(entry.pending)) {
             if (info.suit !== 'deux' && info.suit !== 'trois') continue;
             const pgNum = parseInt(pg);
             if (pgNum > gn) continue;
+            const rattrapage = gn - pgNum;
+            // Vérifier que le rattrapage ne dépasse pas le maxR de la prédiction
+            const predMaxR = (info.maxR !== undefined && info.maxR !== null) ? info.maxR : stratMaxR;
+            if (rattrapage > predMaxR) continue;
             const targetCount = info.suit === 'deux' ? 2 : 3;
             if (countValidCards(hCards) === targetCount) {
-              const rattrapage = gn - pgNum;
               console.log(`[S${idStr}] ⚡ Live: ${targetCount} cartes (${hand}) jeu #${gn} → gagne immédiat (R${rattrapage})`);
               await resolvePrediction(`S${idStr}`, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, stratTgOpts);
               delete entry.pending[pg];
@@ -4691,24 +4716,26 @@ class Engine {
     }
   }
 
-  // ── Reset horaire des compteurs taux_miroir ──────────────────────────────
+  // ── Reset horaire (ou demi-horaire) des compteurs taux_miroir ──────────────
   // Appelé à chaque tick (indépendant des jeux terminés) pour garantir
-  // la remise à zéro dès le passage à la nouvelle heure, même entre deux jeux.
+  // la remise à zéro dès le passage à la nouvelle heure (ou demi-heure), même entre deux jeux.
   _checkHourlyMirrorReset() {
-    const currentEpochHour = Math.floor(Date.now() / 3_600_000);
     for (const [id, entry] of Object.entries(this.custom)) {
       if (entry.config?.mode !== 'taux_miroir') continue;
       if (!entry.mirrorCounts) entry.mirrorCounts = {};
+      const _halfHour    = !!entry.config?.mirror_reset_half;
+      const _epochUnit   = _halfHour ? 1_800_000 : 3_600_000;
+      const currentEpoch = Math.floor(Date.now() / _epochUnit);
       if (entry.mirrorLastHour === null || entry.mirrorLastHour === undefined) {
-        entry.mirrorLastHour = currentEpochHour;
+        entry.mirrorLastHour = currentEpoch;
         continue;
       }
-      if (entry.mirrorLastHour !== currentEpochHour) {
-        const prevH = entry.mirrorLastHour % 24;
-        const newH  = currentEpochHour % 24;
-        console.log(`[S${id}] MiroirTaux ⏰ Heure ${prevH}h→${newH}h — compteurs remis à zéro (tick horaire)`);
+      if (entry.mirrorLastHour !== currentEpoch) {
+        const nowMin = new Date().getMinutes();
+        const label  = _halfHour ? (nowMin < 30 ? 'H:00' : 'H:30') : 'H:00';
+        console.log(`[S${id}] MiroirTaux ⏰ Reset ${label} — compteurs remis à zéro (tick)`);
         for (const suit of ALL_SUITS) entry.mirrorCounts[suit] = 0;
-        entry.mirrorLastHour = currentEpochHour;
+        entry.mirrorLastHour = currentEpoch;
       }
     }
   }

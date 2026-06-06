@@ -736,6 +736,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             bg_site_url:      String(req.body.bg_site_url || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
+      mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -1032,6 +1033,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             bg_site_url:      String(req.body.bg_site_url || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
+      mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
