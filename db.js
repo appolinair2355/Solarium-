@@ -4,10 +4,10 @@
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
 // Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
 // l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://start_p6pm_user:zNQmje8N9rTL2D4l9rN23ZsnKm9cZkr9@dpg-d8hpvivlk1mc73fe3h0g-a.oregon-postgres.render.com/start_p6pm';
+const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
+const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
 
 require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
@@ -316,7 +316,6 @@ async function initDB() {
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
-      ALTER TABLE strategy_ideas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
         id                 SERIAL PRIMARY KEY,
@@ -1066,31 +1065,8 @@ async function deleteAllPredictions() {
   }
   const data = require('./jsondb');
   let count = 0;
-  if (data.d) {
-    count = (data.d().predictions || []).length;
-    data.d().predictions = [];
-    try { data._persist(); } catch {}
-  }
+  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
   return count;
-}
-
-async function deleteResolvedPredictions() {
-  if (USE_PG) {
-    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy IN (
-      SELECT DISTINCT strategy FROM predictions WHERE status IN ('gagne','perdu','expire')
-    )`).catch(() => {});
-    const r = await pgPool.query(`DELETE FROM predictions WHERE status IN ('gagne','perdu','expire')`);
-    return r.rowCount;
-  }
-  const data = require('./jsondb');
-  const all = data.d ? (data.d().predictions || []) : [];
-  const before = all.length;
-  const kept = all.filter(p => p.status === 'en_cours');
-  if (data.d) {
-    data.d().predictions = kept;
-    try { data._persist(); } catch {}
-  }
-  return before - kept.length;
 }
 
 async function cleanupOldPredictions(daysOld = 3) {
@@ -1758,7 +1734,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions, deleteResolvedPredictions, cleanupOldPredictions, deleteExpiredPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
