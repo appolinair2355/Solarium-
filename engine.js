@@ -530,12 +530,29 @@ class Engine {
   }
 
   // Injecte une prédiction forcée (relance) sur le prochain jeu
-  _forceNextPrediction(stratId, nextGn, suit) {
+    async _forceNextPrediction(stratId, nextGn, suit) {
     if (!suit) return;
     if (nextGn > MAX_GAME_NUMBER) {
       console.warn(`[${stratId}] ⛔ _forceNextPrediction ignorée — jeu #${nextGn} dépasse MAX (${MAX_GAME_NUMBER})`);
       return;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FIX CRITIQUE : Bloquer si une prédiction est déjà en cours
+    // ═══════════════════════════════════════════════════════════════════════
+    const pending = this._getPendingFor(stratId);
+    if (Object.keys(pending).length > 0) {
+      console.log(`[${stratId}] ⛔ _forceNextPrediction bloquée — ${Object.keys(pending).length} prédiction(s) en attente de résolution`);
+      return;
+    }
+
+    // FIX CRITIQUE : Respecter la garde des 10 minutes
+    if (!(await canEmitNewPrediction(stratId))) {
+      console.log(`[${stratId}] ⛔ _forceNextPrediction bloquée — garde 10 min active (dernière prédiction < 10 min)`);
+      return;
+    }
+    // ═══════════════════════════════════════════════════════════════════════
+
     const globalMaxR = getCurrentMaxRattrapage();
     if (stratId === 'C1' || stratId === 'C2' || stratId === 'C3' || stratId === 'DC') {
       const customTg = this.defaultStratTg[stratId] || {};
@@ -548,21 +565,27 @@ class Engine {
       const id = parseInt(stratId.slice(1));
       const state = this.custom[id];
       if (!state || !state.config?.enabled) return;
-      // Ne bloquer que si une prédiction existe déjà pour le jeu cible ou au-delà.
-      // Les pending pour des jeux <= nextGn-1 (jeu courant ou passé) seront résolus en Passe 3
-      // et ne doivent pas empêcher l'injection d'une nouvelle prédiction future.
-      if (Object.keys(state.pending).some(g => parseInt(g) >= nextGn)) return;
+
+      // FIX : Sécurité supplémentaire — ne jamais émettre si pending existe
+      if (Object.keys(state.pending).length > 0) {
+        console.log(`[${stratId}] ⛔ _forceNextPrediction bloquée — pending non vide (sécurité)`);
+        return;
+      }
+
       // Calcul du maxR effectif : priorité à la config de la stratégie, sinon global
       const stratMaxR = (state.config.max_rattrapage !== undefined && state.config.max_rattrapage !== null)
         ? parseInt(state.config.max_rattrapage) : globalMaxR;
+
       // ── Vérification des exceptions (relance forcée) ─────────────────────
       const forceExceptions = Array.isArray(state.config.exceptions) ? state.config.exceptions : [];
       if (forceExceptions.length > 0 && this._checkExceptions(forceExceptions, suit, suit, state, {}, nextGn)) {
         console.log(`[${stratId}] _forceNextPrediction #${nextGn} bloquée par exception`);
         return;
       }
+
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
       const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR, siteUrl: state.config.tg_site_url || '', stratName: state.config.name || '' };
+
       db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(async inserted => {
         if (!inserted) {
           console.warn(`[${stratId}] _forceNextPrediction #${nextGn} déjà existante — Telegram ignoré`);
@@ -575,10 +598,12 @@ class Engine {
           sendToStrategyChannels(stratId, nextGn, suit, stratTgOpts).catch(() => {});
         }
       }).catch(() => {});
+
       // Stocker maxR dans le pending pour que la résolution utilise la même valeur
       state.pending[nextGn] = { suit, rattrapage: 0, maxR: stratMaxR, created_at: new Date().toISOString() };
     }
   }
+
 
   reloadCustomStrategies(list) {
     for (const rawCfg of list) {
