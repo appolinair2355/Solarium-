@@ -4,10 +4,10 @@
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
 // Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
 // l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+const DEFAULT_PG_URL = 'postgresql://start_p6pm_user:zNQmje8N9rTL2D4l9rN23ZsnKm9cZkr9@dpg-d8hpvivlk1mc73fe3h0g-a.oregon-postgres.render.com/start_p6pm';
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
 
 require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
@@ -376,15 +376,15 @@ async function initDB() {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
     `);
-    // Compte admin secondaire : buzzinfluence (admin_level=2)
+    // Compte buzzinfluence : compte standard (non-admin)
     {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-         VALUES ($1, $2, $3, TRUE, TRUE, 2)
-         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
-        ['buzzinfluence', 'admin@baccarat.pro', hash]
+         VALUES ($1, $2, $3, FALSE, TRUE, 0)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = FALSE, is_approved = TRUE, admin_level = 0`,
+        ['buzzinfluence', 'buzz@baccarat.pro', hash]
       );
     }
     // Compte super admin : sossoukouam (admin_level=1)
@@ -398,7 +398,7 @@ async function initDB() {
         ['sossoukouam', 'sossoukouam@gmail.com', hash]
       );
     }
-    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
+    console.log('✅ Comptes initialisés (buzzinfluence=standard, sossoukouam=super-admin)');
     // ── Initialisation de la base de données des cartes ─────────────────
     if (USE_CARDS_PG && pgPoolCards) {
       try {
@@ -485,9 +485,9 @@ async function reinitAdmins() {
     const h2 = await bcrypt.hash('arrow2026', 10);
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-       VALUES ($1,$2,$3,TRUE,TRUE,2)
-       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
-      ['buzzinfluence', 'admin@baccarat.pro', h1]
+       VALUES ($1,$2,$3,FALSE,TRUE,0)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=FALSE, is_approved=TRUE, admin_level=0`,
+      ['buzzinfluence', 'buzz@baccarat.pro', h1]
     );
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)

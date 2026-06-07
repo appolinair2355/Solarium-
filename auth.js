@@ -199,7 +199,8 @@ router.post('/login', async (req, res) => {
     req.session.isPro       = user.is_pro || false;
     req.session.adminLevel  = user.admin_level || 2;
     req.session.accountType = user.account_type || 'simple';
-    res.json({ user: publicUser(user) });
+    req.session.isBuzz      = user.username === 'buzzinfluence';
+    res.json({ user: { ...publicUser(user), isBuzz: req.session.isBuzz } });
   } catch (err) {
     console.error('login error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -233,10 +234,10 @@ router.get('/me', async (req, res) => {
       req.session.isPremium   = freshIsPremium;
       req.session.accountType = freshAccountType;
       // Persiste immédiatement la session mise à jour avant de répondre
-      req.session.save(() => res.json(publicUser(user)));
+      req.session.save(() => res.json({ ...publicUser(user), isBuzz: !!req.session.isBuzz }));
       return;
     }
-    res.json(publicUser(user));
+    res.json({ ...publicUser(user), isBuzz: !!req.session.isBuzz });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
