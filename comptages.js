@@ -107,6 +107,18 @@ const CATEGORIES = [
   { key: 'cv_b_J',  group: '🂡 Valeurs Banquier', label: 'J',      match: c => c.ranksB.has('J')  },
   { key: 'cv_b_Q',  group: '🂡 Valeurs Banquier', label: 'Q',      match: c => c.ranksB.has('Q')  },
   { key: 'cv_b_K',  group: '🂡 Valeurs Banquier', label: 'K',      match: c => c.ranksB.has('K')  },
+
+  // ── Score Exact combiné (Joueur + Banquier, 0-18) ──────────────────────
+  // Événement : le score exact (ps + bs) est égal à la valeur cible.
+  // Les valeurs extrêmes (0, 1, 17, 18) sont très rares → les écarts peuvent être longs.
+  ...Array.from({ length: 19 }, (_, n) => ({
+    key:   `score_exact_${n}`,
+    group: '🔢 Score Exact (J+B)',
+    label: `Score ${n}`,
+    match: (function(target) {
+      return c => c.ps !== null && c.bs !== null && (c.ps + c.bs) === target;
+    }(n)),
+  })),
 ];
 
 // ── Score baccarat ─────────────────────────────────────────────────────────

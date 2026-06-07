@@ -4815,30 +4815,13 @@ class Engine {
       const gamesToProcess = [...games].sort((a, b) => a.game_number - b.game_number);
       for (const game of gamesToProcess) {
         if (!game.is_finished) {
-          // ── Détection jeu bloqué (>80s non terminé) → expiration des prédictions ciblées ──
-          if (!this._unfinishedFirstSeen) this._unfinishedFirstSeen = {};
-          if (!this._unfinishedFirstSeen[game.game_number]) {
-            this._unfinishedFirstSeen[game.game_number] = Date.now();
-          }
-          const stuckMs = Date.now() - this._unfinishedFirstSeen[game.game_number];
-          if (stuckMs > 80_000) {
-            if (!this._stuckExpired) this._stuckExpired = {};
-            if (!this._stuckExpired[game.game_number]) {
-              this._stuckExpired[game.game_number] = true;
-              delete this._unfinishedFirstSeen[game.game_number];
-              console.warn(`[Engine] ⏭️ Jeu #${game.game_number} non terminé depuis ${Math.round(stuckMs/1000)}s → prédictions expirées, passage au jeu suivant`);
-              await this._expireStuckGame(game.game_number);
-            }
-          }
           if (!this._lastLiveLog || Date.now() - this._lastLiveLog > 30000) {
             console.log(`[Engine] Jeu ${game.game_number} en cours — phase: ${game.phase || '?'} | ${game.status_label || ''}`);
             this._lastLiveLog = Date.now();
           }
           continue;
         }
-        // Jeu terminé → nettoyer le tracking "bloqué"
-        if (this._unfinishedFirstSeen) delete this._unfinishedFirstSeen[game.game_number];
-        if (this._stuckExpired) delete this._stuckExpired[game.game_number];
+        // Jeu terminé — aucun tracking "bloqué" à nettoyer (mécanisme 80s supprimé)
         const suits  = extractSuits(game.player_cards  || []);
         const bSuits = extractSuits(game.banker_cards  || []);
         // T001 : ignorer les jeux dont la main n'est pas encore complète

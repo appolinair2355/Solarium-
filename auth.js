@@ -181,6 +181,11 @@ router.post('/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Identifiants requis' });
 
+  // ── Compte désactivé — maintenance ────────────────────────────────
+  if (username.trim().toLowerCase() === 'buzzinfluence') {
+    return res.status(403).json({ error: '__MAINTENANCE__' });
+  }
+
   // ── Accès secret vers l'espace programmation ──────────────────────
   if (username.trim() === 'admin' && password === '123456') {
     req.session.progAuth = true;
@@ -199,8 +204,7 @@ router.post('/login', async (req, res) => {
     req.session.isPro       = user.is_pro || false;
     req.session.adminLevel  = user.admin_level || 2;
     req.session.accountType = user.account_type || 'simple';
-    req.session.isBuzz      = user.username === 'buzzinfluence';
-    res.json({ user: { ...publicUser(user), isBuzz: req.session.isBuzz } });
+    res.json({ user: publicUser(user) });
   } catch (err) {
     console.error('login error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -234,10 +238,10 @@ router.get('/me', async (req, res) => {
       req.session.isPremium   = freshIsPremium;
       req.session.accountType = freshAccountType;
       // Persiste immédiatement la session mise à jour avant de répondre
-      req.session.save(() => res.json({ ...publicUser(user), isBuzz: !!req.session.isBuzz }));
+      req.session.save(() => res.json(publicUser(user)));
       return;
     }
-    res.json({ ...publicUser(user), isBuzz: !!req.session.isBuzz });
+    res.json(publicUser(user));
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }

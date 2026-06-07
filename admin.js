@@ -26,16 +26,6 @@ async function requireSuperAdmin(req, res, next) {
     return res.status(403).json({ error: 'Accès admin requis' });
   // Admin principal (admin_level=1) : accès complet
   if ((req.session.adminLevel || 2) === 1) return next();
-  // Compte 'buzzinfluence' : pouvoirs étendus identiques au super admin
-  // (cohérent avec l'UI qui lui montre tous les boutons d'action)
-  let uname = req.session.username;
-  if (!uname) {
-    try {
-      const u = await db.getUser(req.session.userId);
-      uname = u?.username;
-      if (uname) req.session.username = uname;
-    } catch {}
-  }
   return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
 }
 
@@ -1151,12 +1141,7 @@ router.delete('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres stratégies' });
     // Super admin requis pour supprimer les stratégies système (sans partner_owner_id)
     if (!isPartnerSession(req) && (req.session.adminLevel || 2) !== 1) {
-      const uname = req.session.username || '';
-      if (uname !== 'buzzinfluence') {
-        const u = await db.getUser(req.session.userId).catch(() => null);
-        if (!u || ((u.admin_level || 2) !== 1 && u.username !== 'buzzinfluence'))
-          return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
-      }
+      return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
     }
     const before = list.length;
     list = list.filter(s => s.id !== id);
@@ -3720,7 +3705,7 @@ router.post('/suit-counters', requireAdmin, async (req, res) => {
       channel_id:       String(c.channel_id || '').trim(),
       counter_type:     suitCounterSvc.VALID_TYPES.includes(c.counter_type) ? c.counter_type : 'taux_miroir',
       hand:             ['joueur','banquier'].includes(c.hand) ? c.hand : 'joueur',
-      interval:         [30,60].includes(parseInt(c.interval)) ? parseInt(c.interval) : 30,
+      interval:         (Number.isInteger(parseInt(c.interval)) && parseInt(c.interval) >= 1 && parseInt(c.interval) <= 1440) ? parseInt(c.interval) : 30,
       send_times:       Array.isArray(c.send_times) ? c.send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [],
       send_on_game_end: !!c.send_on_game_end,
       reset_after_send: c.reset_after_send !== false,
@@ -5253,7 +5238,7 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
     };
 
     // ── Import utilisateurs (fusion intelligente — ne touche JAMAIS aux comptes existants) ──
-    const PROTECTED_ADMINS = ['buzzinfluence', 'sossoukouam'];
+    const PROTECTED_ADMINS = ['sossoukouam'];
     if (Array.isArray(users)) {
       for (const u of users) {
         if (!u.username) { results.errors.push(`Utilisateur sans nom ignoré`); continue; }

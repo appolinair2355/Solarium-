@@ -22,10 +22,14 @@ const ALL_SUITS  = ['♠', '♥', '♦', '♣'];
 const SUIT_EMOJI = { '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️' };
 const CARD_RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const VALID_TYPES = [
-  'taux_miroir', 'valeur_joueur', 'valeur_banquier',
+  'taux_miroir',
+  'parite',
+  'valeur_joueur', 'valeur_banquier',
+  'score_exact',
+  // types hérités (toujours acceptés pour la rétrocompatibilité)
   'parite_joueur', 'parite_banquier',
   'groupe_joueur', 'groupe_banquier',
-  'score_joueur', 'score_banquier', 'score_exact',
+  'score_joueur', 'score_banquier',
 ];
 
 const GROUPE_JOUEUR_CATEGORIES = [
@@ -94,20 +98,21 @@ function _makeState() {
   const scoreExactKeys = {};
   for (let i = 0; i <= 18; i++) scoreExactKeys[i] = 0;
   return {
-    suitCounters:      { joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} },
-    groupeJoueur:      Object.fromEntries(GROUPE_JOUEUR_CATEGORIES.map(c => [c.key, 0])),
-    groupeBanquier:    Object.fromEntries(GROUPE_BANQUIER_CATEGORIES.map(c => [c.key, 0])),
-    valeurJoueur:      Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
-    valeurBanquier:    Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
-    pariteJoueur:      { pair: 0, impair: 0 },
-    pariteBanquier:    { pair: 0, impair: 0 },
-    scoreJoueur:       { ...scoreKeys },
-    scoreBanquier:     { ...scoreKeys },
-    scoreExact:        { ...scoreExactKeys },
-    gameCount:         0,
-    lastGameNumber:    null,
-    lastScheduleSent:  null,
-    lastSentTimes:     {},
+    suitCounters:        { joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} },
+    groupeJoueur:        Object.fromEntries(GROUPE_JOUEUR_CATEGORIES.map(c => [c.key, 0])),
+    groupeBanquier:      Object.fromEntries(GROUPE_BANQUIER_CATEGORIES.map(c => [c.key, 0])),
+    valeurJoueur:        Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
+    valeurBanquier:      Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
+    pariteJoueur:        { pair: 0, impair: 0 },
+    pariteBanquier:      { pair: 0, impair: 0 },
+    scoreJoueur:         { ...scoreKeys },
+    scoreBanquier:       { ...scoreKeys },
+    scoreExact:          { ...scoreExactKeys },
+    gameCount:           0,
+    lastGameNumber:      null,
+    lastScheduleSent:    null,
+    lastScheduleSentMs:  0,      // timestamp ms du dernier envoi planifié (pour intervalles libres)
+    lastSentTimes:       {},
   };
 }
 
@@ -330,6 +335,18 @@ function buildMessage(counter) {
     return `🃏 Valeurs de cartes — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
   }
 
+  if (ct === 'parite') {
+    const parJ  = s.pariteJoueur  || { pair: 0, impair: 0 };
+    const parB  = s.pariteBanquier || { pair: 0, impair: 0 };
+    const totJ  = (parJ.pair || 0) + (parJ.impair || 0);
+    const totB  = (parB.pair || 0) + (parB.impair || 0);
+    const pctJ  = (n) => totJ > 0 ? ((n / totJ) * 100).toFixed(1) : '0.0';
+    const pctB  = (n) => totB > 0 ? ((n / totB) * 100).toFixed(1) : '0.0';
+    return (
+      `⚖️ Parité Score — 👤 Joueur\n━━━━━━━━━━━━━━━━━━\n🔵 Pair   : ${parJ.pair||0}  (${pctJ(parJ.pair||0)}%)\n🔴 Impair : ${parJ.impair||0}  (${pctJ(parJ.impair||0)}%)\n📊 Total jeux : ${totJ}\n\n⚖️ Parité Score — 🏦 Banquier\n━━━━━━━━━━━━━━━━━━\n🔵 Pair   : ${parB.pair||0}  (${pctB(parB.pair||0)}%)\n🔴 Impair : ${parB.impair||0}  (${pctB(parB.impair||0)}%)\n📊 Total jeux : ${totB}${footer}`
+    );
+  }
+
   if (ct === 'parite_joueur' || ct === 'parite_banquier') {
     const par   = ct === 'parite_joueur' ? s.pariteJoueur : s.pariteBanquier;
     const total = (par.pair || 0) + (par.impair || 0);
@@ -446,12 +463,14 @@ async function sendCounterById(id) {
 function _shouldSendByInterval(counter, now) {
   if (!counter.enabled) return false;
   if (!counter.bot_token || !counter.channel_id) return false;
-  const s  = _countersState[counter.id];
-  if (!s)  return false;
-  const mm       = now.getMinutes();
+  const s = _countersState[counter.id];
+  if (!s) return false;
   const interval = parseInt(counter.interval) || 30;
-  const match    = interval === 30 ? (mm === 0 || mm === 30) : (mm === 0);
-  if (!match) return false;
+  const nowMs    = now.getTime();
+  const lastMs   = s.lastScheduleSentMs || 0;
+  // Vérifier que l'intervalle configuré s'est écoulé depuis le dernier envoi
+  if (nowMs - lastMs < interval * 60 * 1000) return false;
+  // Anti-doublon : ne pas envoyer deux fois dans la même minute
   return s.lastScheduleSent !== _getHHMM(now);
 }
 
@@ -483,10 +502,11 @@ function startScheduler() {
         let sent = false;
 
         if (_shouldSendByInterval(counter, now)) {
-          s.lastScheduleSent = hhmm;
+          s.lastScheduleSent   = hhmm;
+          s.lastScheduleSentMs = now.getTime();
           try {
             await _sendCounter(counter);
-            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi intervalle — ${hhmm}`);
+            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi intervalle ${counter.interval}min — ${hhmm}`);
             sent = true;
           } catch (e) {
             console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi intervalle: ${e.message}`);
@@ -505,7 +525,15 @@ function startScheduler() {
         }
 
         if (sent && counter.reset_after_send !== false) {
-          _countersState[counter.id] = _makeState();
+          // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
+          const prevSentMs    = s.lastScheduleSentMs || now.getTime();
+          const prevSentHhmm  = s.lastScheduleSent   || hhmm;
+          const prevSentTimes = { ...s.lastSentTimes };
+          const newState = _makeState();
+          newState.lastScheduleSentMs = prevSentMs;
+          newState.lastScheduleSent   = prevSentHhmm;
+          newState.lastSentTimes      = prevSentTimes;
+          _countersState[counter.id] = newState;
           console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}`);
         }
 
