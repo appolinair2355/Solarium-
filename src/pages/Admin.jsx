@@ -3409,8 +3409,8 @@ export default function Admin() {
 function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
-  const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
+  const isSuperAdmin = user?.admin_level === 1;
+  const canSeeSystem = user?.admin_level === 1;
   const isProOnly = !user?.is_admin && !!user?.is_pro;
   const isPartner = !user?.is_admin && user?.account_type === 'partenaire';
 
@@ -3925,60 +3925,138 @@ function AdminPanel() {
     } catch (e) { setLbMsg('❌ ' + e.message); }
   };
 
-  // ── Compteur de costumes → Telegram (déclaré AVANT le useEffect qui l'utilise) ──
-  const [suitCfg, setSuitCfg]           = useState({ enabled: false, bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
-  const [suitCounters, setSuitCounters]  = useState({ joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} });
-  const [suitForm, setSuitForm]          = useState({ bot_token: '', channel_id: '', hand: 'joueur', interval: 30, send_on_game_end: false });
-  const [suitMsg, setSuitMsg]            = useState('');
-  const [suitSaving, setSuitSaving]      = useState(false);
-  const [suitTesting, setSuitTesting]    = useState(false);
+  // ── Compteurs instantanés v2 (multi-compteurs indépendants) ──────────────────
+  const SC_COUNTER_TYPES = [
+    { value: 'taux_miroir',      label: '📈 Taux Miroir',              desc: 'Couleurs ♠♥♦♣ Joueur + Banquier dans 1 message' },
+    { value: 'parite',           label: '⚖️ Parité',                    desc: 'Pair/Impair Joueur + Banquier dans 1 message' },
+    { value: 'valeur_joueur',    label: '🃏 Carte de valeur — Joueur',  desc: 'Distribution A-K côté Joueur uniquement' },
+    { value: 'valeur_banquier',  label: '🃏 Carte de valeur — Banquier',desc: 'Distribution A-K côté Banquier uniquement' },
+    { value: 'score_exact',      label: '🔢 Score Exact (J+B)',         desc: 'Somme des scores Joueur + Banquier (0→18)' },
+  ];
+  const SC_INTERVALS = [
+    { v: 5,  l: '5 min' }, { v: 10, l: '10 min' }, { v: 15, l: '15 min' },
+    { v: 20, l: '20 min' }, { v: 30, l: '30 min' }, { v: 45, l: '45 min' },
+    { v: 60, l: '1 heure' }, { v: 90, l: '1h 30' }, { v: 120, l: '2 heures' },
+    { v: 180, l: '3 heures' }, { v: 240, l: '4 heures' }, { v: 360, l: '6 heures' },
+    { v: 720, l: '12 heures' }, { v: 1440, l: '24 heures' },
+  ];
+  const SC_EMPTY_FORM = {
+    label: '', bot_token: '', channel_id: '',
+    counter_type: 'taux_miroir', interval: 30,
+    send_times: [], send_on_game_end: false, reset_after_send: true, enabled: true,
+  };
+  const [scList, setScList]           = useState([]);
+  const [scStates, setScStates]       = useState({});
+  const [scMsg, setScMsg]             = useState('');
+  const [scLoading, setScLoading]     = useState(false);
+  const [scSaving, setScSaving]       = useState(false);
+  const [scEditId, setScEditId]       = useState(null);
+  const [scShowForm, setScShowForm]   = useState(false);
+  const [scForm, setScForm]           = useState({ ...SC_EMPTY_FORM });
+  const [scNewTime, setScNewTime]     = useState('');
 
-  const loadSuitCounter = useCallback(async () => {
+  const loadSuitCounters = useCallback(async () => {
+    setScLoading(true);
     try {
-      const r = await fetch('/api/admin/suit-counter-config', { credentials: 'include' });
+      const r = await fetch('/api/admin/suit-counters', { credentials: 'include' });
       if (!r.ok) return;
       const d = await r.json();
-      setSuitCfg({ enabled: !!d.enabled, bot_token: d.bot_token || '', channel_id: d.channel_id || '', hand: d.hand || 'joueur', interval: d.interval || 30, send_on_game_end: !!d.send_on_game_end });
-      setSuitForm({ bot_token: d.bot_token || '', channel_id: d.channel_id || '', hand: d.hand || 'joueur', interval: d.interval || 30, send_on_game_end: !!d.send_on_game_end });
-      if (d.counters) setSuitCounters(d.counters);
+      setScList(Array.isArray(d.counters) ? d.counters : []);
+      setScStates(d.states || {});
     } catch {}
+    finally { setScLoading(false); }
   }, []);
 
-  const saveSuitCounter = async (patch) => {
-    setSuitSaving(true); setSuitMsg('');
+  const _saveSuitCountersList = async (newList) => {
+    setScSaving(true); setScMsg('');
     try {
-      const body = { ...suitForm, ...patch };
-      const r = await fetch('/api/admin/suit-counter-config', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await fetch('/api/admin/suit-counters', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counters: newList }),
+      });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Erreur');
-      setSuitCfg(d.config);
-      setSuitMsg('✅ Configuration sauvegardée');
-      setTimeout(() => setSuitMsg(''), 3000);
-    } catch (e) { setSuitMsg('❌ ' + e.message); }
-    finally { setSuitSaving(false); }
+      setScList(Array.isArray(d.counters) ? d.counters : newList);
+      setScMsg('✅ Sauvegardé');
+      setTimeout(() => setScMsg(''), 3000);
+    } catch (e) { setScMsg('❌ ' + e.message); }
+    finally { setScSaving(false); }
   };
 
-  const testSuitCounter = async () => {
-    setSuitTesting(true); setSuitMsg('');
+  const scSubmitForm = async () => {
+    if (!scForm.bot_token || !scForm.channel_id) {
+      setScMsg('❌ Bot Token et ID Canal obligatoires'); return;
+    }
+    const id = scEditId || `sc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const newCounter = { ...scForm, id };
+    const newList = scEditId
+      ? scList.map(c => c.id === scEditId ? newCounter : c)
+      : [...scList, newCounter];
+    await _saveSuitCountersList(newList);
+    setScShowForm(false); setScEditId(null); setScForm({ ...SC_EMPTY_FORM });
+    await loadSuitCounters();
+  };
+
+  const scDeleteCounter = async (id) => {
+    if (!window.confirm('Supprimer ce compteur ?')) return;
+    await _saveSuitCountersList(scList.filter(c => c.id !== id));
+    await loadSuitCounters();
+  };
+
+  const scToggleEnabled = async (id, enabled) => {
+    const newList = scList.map(c => c.id === id ? { ...c, enabled } : c);
+    await _saveSuitCountersList(newList);
+    setScList(newList);
+  };
+
+  const scTestCounter = async (id) => {
+    setScMsg('⏳ Envoi…');
     try {
-      const r = await fetch('/api/admin/suit-counter-test', { method: 'POST', credentials: 'include' });
+      const r = await fetch(`/api/admin/suit-counters/${id}/test`, { method: 'POST', credentials: 'include' });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Erreur');
-      setSuitMsg('✅ Message envoyé avec succès !');
-      setTimeout(() => setSuitMsg(''), 4000);
-    } catch (e) { setSuitMsg('❌ ' + e.message); }
-    finally { setSuitTesting(false); }
+      setScMsg('✅ Message test envoyé !');
+      setTimeout(() => setScMsg(''), 4000);
+    } catch (e) { setScMsg('❌ ' + e.message); }
+  };
+
+  const scResetCounter = async (id) => {
+    try {
+      const r = await fetch(`/api/admin/suit-counters/${id}/reset`, { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setScMsg('✅ Compteur remis à zéro');
+      setTimeout(() => setScMsg(''), 3000);
+      await loadSuitCounters();
+    } catch (e) { setScMsg('❌ ' + e.message); }
+  };
+
+  const scStartEdit = (counter) => {
+    setScEditId(counter.id);
+    setScForm({
+      label: counter.label || '',
+      bot_token: counter.bot_token || '',
+      channel_id: counter.channel_id || '',
+      counter_type: counter.counter_type || 'taux_miroir',
+      interval: counter.interval || 30,
+      send_times: Array.isArray(counter.send_times) ? counter.send_times : [],
+      send_on_game_end: !!counter.send_on_game_end,
+      reset_after_send: counter.reset_after_send !== false,
+      enabled: !!counter.enabled,
+    });
+    setScShowForm(true);
   };
 
   useEffect(() => {
     if (adminTab === 'canaux') {
       loadLbTargets();
       loadKouame();
-      loadSuitCounter();
+      loadSuitCounters();
       loadStrategies();
       loadStratStats();
     }
-  }, [adminTab, loadSuitCounter]);
+  }, [adminTab, loadSuitCounters]);
 
   // ── API Kouamé ──
   const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
@@ -12619,164 +12697,233 @@ function AdminPanel() {
           </div>
         </div>}
 
-        {/* ── SECTION 0c : COMPTEUR DE COSTUMES → TELEGRAM ── */}
+        {/* ── SECTION : COMPTEURS INSTANTANÉS v2 ── */}
         {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
           <div className="tg-admin-header">
             <span className="tg-admin-icon">📈</span>
             <div style={{ flex: 1 }}>
-              <h2 className="tg-admin-title">Compteur instantané de costumes</h2>
+              <h2 className="tg-admin-title">Compteurs instantanés</h2>
               <p className="tg-admin-sub">
-                Envoie le compteur de costumes sur un canal Telegram après chaque jeu et/ou aux heures H:00 / H:30.
-                Le compteur se remet à zéro automatiquement après chaque envoi planifié.
+                Chaque compteur est <strong>indépendant</strong> : son propre type, canal, bot et calendrier d'envoi.
+                Ils coexistent sans interférer. Créez-en autant que nécessaire.
               </p>
             </div>
-            <span className="tg-badge-connected" style={{
-              background: suitCfg.enabled ? 'rgba(251,191,36,0.15)' : 'rgba(100,116,139,0.12)',
-              color:      suitCfg.enabled ? '#fbbf24' : '#94a3b8',
-              border:     `1px solid ${suitCfg.enabled ? 'rgba(251,191,36,0.4)' : 'rgba(100,116,139,0.25)'}`,
-              fontWeight: 800,
-            }}>
-              {suitCfg.enabled ? '● ACTIF' : '○ INACTIF'}
-            </span>
-          </div>
-
-          {suitMsg && (
-            <div className={`tg-alert ${suitMsg.startsWith('✅') ? 'tg-alert-ok' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{suitMsg}</div>
-          )}
-
-          {/* Compteurs actuels */}
-          <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.18)', borderRadius: 10, padding: 14, marginTop: 12, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.7 }}>
-              📊 Compteurs en cours
-            </div>
-            {(() => {
-              const hand = suitCfg.hand || 'joueur';
-              const hCounts = suitCounters[hand] || {};
-              const total = ['♠','♥','♦','♣'].reduce((a, s) => a + (hCounts[s] || 0), 0);
-              const SUIT_EM = { '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️' };
-              return (
-                <div>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, fontStyle: 'italic' }}>
-                    Main du <strong style={{ color: '#e2e8f0' }}>{hand}</strong> — {total} cartes comptées
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    {['♠','♥','♦','♣'].map(s => {
-                      const cnt = hCounts[s] || 0;
-                      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
-                      return (
-                        <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'rgba(15,23,42,0.5)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.06)' }}>
-                          <span style={{ fontSize: 16 }}>{SUIT_EM[s]}</span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 800, color: '#e2e8f0' }}>{cnt}</div>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{pct} %</div>
-                          </div>
-                          <div style={{ height: 28, width: 4, borderRadius: 4, background: `rgba(251,191,36,${Math.max(0.1, cnt / Math.max(total, 1))})` }} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 10, color: '#475569' }}>
-                    Prévisualisation du message :
-                    <pre style={{ marginTop: 4, padding: '8px 10px', background: 'rgba(0,0,0,0.3)', borderRadius: 7, fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
-{`📈 Compteur instantané (main du ${hand})
-${['♠','♥','♦','♣'].map(s => {
-  const cnt = hCounts[s] || 0;
-  const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
-  return `${SUIT_EM[s]} : ${cnt}  (${pct} %)`;
-}).join('\n')}`}
-                    </pre>
-                  </div>
-                </div>
-              );
-            })()}
-            <button type="button" onClick={loadSuitCounter}
-              style={{ marginTop: 10, padding: '6px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
-              🔁 Actualiser les compteurs
+            <button type="button" onClick={loadSuitCounters} disabled={scLoading}
+              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+              {scLoading ? '⏳' : '🔁'}
             </button>
           </div>
 
-          {/* Formulaire configuration */}
-          <div style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.15)', borderRadius: 10, padding: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', marginBottom: 12 }}>⚙️ Configuration</div>
+          {scMsg && (
+            <div className={`tg-alert ${scMsg.startsWith('✅') ? 'tg-alert-ok' : scMsg.startsWith('⏳') ? '' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{scMsg}</div>
+          )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 API TOKEN BOT</label>
-                <input
-                  value={suitForm.bot_token}
-                  onChange={e => setSuitForm(p => ({ ...p, bot_token: e.target.value }))}
-                  placeholder="123456:AAF-xxxxx…"
-                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.05)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID CANAL</label>
-                <input
-                  value={suitForm.channel_id}
-                  onChange={e => setSuitForm(p => ({ ...p, channel_id: e.target.value }))}
-                  placeholder="@canal ou -1001234…"
-                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.05)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                />
-              </div>
+          {/* ── Liste des compteurs sauvegardés ── */}
+          {scList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14, marginBottom: 14 }}>
+              {scList.map(c => {
+                const st = scStates[c.id] || {};
+                const typeInfo = SC_COUNTER_TYPES.find(t => t.value === c.counter_type);
+                const intLabel = SC_INTERVALS.find(i => i.v === c.interval)?.l || `${c.interval} min`;
+                return (
+                  <div key={c.id} style={{
+                    background: 'rgba(15,23,42,0.5)',
+                    border: `1px solid ${c.enabled ? 'rgba(251,191,36,0.3)' : 'rgba(100,116,139,0.2)'}`,
+                    borderRadius: 10, padding: '12px 14px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 180 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <span style={{ fontSize: 16 }}>{c.enabled ? '🟢' : '⚪'}</span>
+                          <span style={{ fontWeight: 800, fontSize: 13, color: '#e2e8f0' }}>
+                            {c.label || <em style={{ color: '#64748b' }}>Sans nom</em>}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#a78bfa', marginBottom: 3, fontWeight: 600 }}>
+                          {typeInfo?.label || c.counter_type}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>
+                          📢 <code style={{ color: '#94a3b8' }}>{c.channel_id || '—'}</code>
+                          {' · '}⏰ Reset toutes les <strong style={{ color: '#94a3b8' }}>{intLabel}</strong>
+                          {c.send_on_game_end && <span style={{ color: '#fbbf24', marginLeft: 6 }}>+ après chaque jeu</span>}
+                        </div>
+                        {st.gameCount > 0 && (
+                          <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>
+                            🎮 {st.gameCount} jeu(x) depuis dernier reset · dernier jeu #{st.lastGameNumber || '—'}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button type="button" onClick={() => scTestCounter(c.id)}
+                          title="Envoyer maintenant"
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          📤
+                        </button>
+                        <button type="button" onClick={() => scResetCounter(c.id)}
+                          title="Remettre le compteur à zéro"
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.07)', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          🔄
+                        </button>
+                        <button type="button" onClick={() => scStartEdit(c)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(148,163,184,0.07)', color: '#94a3b8', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          ✏️
+                        </button>
+                        <button type="button" onClick={() => scToggleEnabled(c.id, !c.enabled)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${c.enabled ? 'rgba(251,191,36,0.4)' : 'rgba(34,197,94,0.4)'}`, background: c.enabled ? 'rgba(251,191,36,0.08)' : 'rgba(34,197,94,0.1)', color: c.enabled ? '#fbbf24' : '#4ade80', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          {c.enabled ? '⏸' : '▶'}
+                        </button>
+                        <button type="button" onClick={() => scDeleteCounter(c.id)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🖐 Main suivie</label>
-                <select
-                  value={suitForm.hand}
-                  onChange={e => setSuitForm(p => ({ ...p, hand: e.target.value }))}
+          {scList.length === 0 && !scShowForm && (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#475569', fontSize: 13 }}>
+              Aucun compteur configuré. Cliquez sur <strong style={{ color: '#fbbf24' }}>+ Nouveau compteur</strong> pour commencer.
+            </div>
+          )}
+
+          {/* ── Formulaire création / édition ── */}
+          {scShowForm && (
+            <div style={{ background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 10, padding: 16, marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 14 }}>
+                {scEditId ? '✏️ Modifier le compteur' : '➕ Nouveau compteur'}
+              </div>
+
+              {/* Nom */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🏷 Nom du compteur</label>
+                <input value={scForm.label} onChange={e => setScForm(p => ({ ...p, label: e.target.value }))}
+                  placeholder="Ex : Parité Canal Sénégal"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Type de compteur */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>📊 Type de compteur</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {SC_COUNTER_TYPES.map(t => (
+                    <label key={t.value} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 12px', borderRadius: 8, cursor: 'pointer',
+                      border: `1px solid ${scForm.counter_type === t.value ? 'rgba(251,191,36,0.5)' : 'rgba(255,255,255,0.06)'}`,
+                      background: scForm.counter_type === t.value ? 'rgba(251,191,36,0.1)' : 'rgba(15,23,42,0.4)',
+                    }}>
+                      <input type="radio" name="sc_counter_type" value={t.value}
+                        checked={scForm.counter_type === t.value}
+                        onChange={() => setScForm(p => ({ ...p, counter_type: t.value }))}
+                        style={{ accentColor: '#fbbf24' }} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: scForm.counter_type === t.value ? '#fbbf24' : '#e2e8f0' }}>{t.label}</div>
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>{t.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bot token + Canal */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 API Token Bot</label>
+                  <input value={scForm.bot_token} onChange={e => setScForm(p => ({ ...p, bot_token: e.target.value }))}
+                    placeholder="123456:AAF-xxxxx…"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID Canal</label>
+                  <input value={scForm.channel_id} onChange={e => setScForm(p => ({ ...p, channel_id: e.target.value }))}
+                    placeholder="@canal ou -1001234…"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Intervalle de reset */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>⏰ Reset automatique toutes les…</label>
+                <select value={scForm.interval} onChange={e => setScForm(p => ({ ...p, interval: parseInt(e.target.value) }))}
                   style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(20,20,40,0.9)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }}>
-                  <option value="joueur">Main du Joueur</option>
-                  <option value="banquier">Main du Banquier</option>
+                  {SC_INTERVALS.map(i => <option key={i.v} value={i.v}>{i.l}</option>)}
                 </select>
               </div>
-              <div>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>⏰ Envoi planifié</label>
-                <select
-                  value={suitForm.interval}
-                  onChange={e => setSuitForm(p => ({ ...p, interval: parseInt(e.target.value) }))}
-                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(20,20,40,0.9)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }}>
-                  <option value={30}>H:00 et H:30 (toutes les 30 min)</option>
-                  <option value={60}>H:00 uniquement (toutes les heures)</option>
-                </select>
+
+              {/* Heures fixes */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📅 Heures fixes d'envoi (optionnel)</label>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {(scForm.send_times || []).map(t => (
+                    <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 5, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 11, color: '#fbbf24' }}>
+                      {t}
+                      <button type="button" onClick={() => setScForm(p => ({ ...p, send_times: p.send_times.filter(x => x !== t) }))}
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="time" value={scNewTime} onChange={e => setScNewTime(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 12 }} />
+                  <button type="button" onClick={() => {
+                    if (scNewTime && !/^\d{2}:\d{2}$/.test(scNewTime)) return;
+                    if (scNewTime && !(scForm.send_times || []).includes(scNewTime)) {
+                      setScForm(p => ({ ...p, send_times: [...(p.send_times || []), scNewTime].sort() }));
+                      setScNewTime('');
+                    }
+                  }} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                    + Ajouter
+                  </button>
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                {[
+                  { key: 'send_on_game_end', icon: '🎮', label: 'Envoyer après chaque fin de jeu', desc: 'En plus du planifié, un message à chaque partie terminée.' },
+                  { key: 'reset_after_send', icon: '🔄', label: 'Remettre à zéro après envoi', desc: 'Les compteurs repartent de zéro après chaque envoi planifié.' },
+                  { key: 'enabled',          icon: '✅', label: 'Compteur actif',                  desc: 'Désactiver pour suspendre sans supprimer.' },
+                ].map(({ key, icon, label, desc }) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', background: 'rgba(15,23,42,0.4)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>{icon} {label}</div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>{desc}</div>
+                    </div>
+                    <button type="button" onClick={() => setScForm(p => ({ ...p, [key]: !p[key] }))}
+                      style={{ padding: '6px 16px', borderRadius: 7, fontWeight: 800, fontSize: 12, cursor: 'pointer', border: `1px solid ${scForm[key] ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.35)'}`, background: scForm[key] ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.1)', color: scForm[key] ? '#22c55e' : '#64748b', minWidth: 64 }}>
+                      {scForm[key] ? '● ON' : '○ OFF'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Boutons */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={scSubmitForm} disabled={scSaving}
+                  style={{ padding: '9px 22px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.18)', color: '#fef3c7', fontWeight: 700, fontSize: 12, cursor: scSaving ? 'wait' : 'pointer', opacity: scSaving ? 0.6 : 1 }}>
+                  {scSaving ? '⏳…' : scEditId ? '💾 Mettre à jour' : '💾 Sauvegarder'}
+                </button>
+                <button type="button" onClick={() => { setScShowForm(false); setScEditId(null); setScForm({ ...SC_EMPTY_FORM }); }}
+                  style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(100,116,139,0.3)', background: 'rgba(100,116,139,0.08)', color: '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  Annuler
+                </button>
               </div>
             </div>
+          )}
 
-            {/* Toggle : envoi après chaque jeu */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.4)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>Envoyer après chaque fin de jeu</div>
-                <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>En plus de l'envoi planifié, un message est envoyé à chaque jeu terminé.</div>
-              </div>
-              <button type="button" onClick={() => setSuitForm(p => ({ ...p, send_on_game_end: !p.send_on_game_end }))}
-                style={{ padding: '7px 18px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', border: `1px solid ${suitForm.send_on_game_end ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.35)'}`, background: suitForm.send_on_game_end ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.12)', color: suitForm.send_on_game_end ? '#22c55e' : '#64748b', minWidth: 80 }}>
-                {suitForm.send_on_game_end ? '● ON' : '○ OFF'}
+          {/* Bouton Nouveau */}
+          {!scShowForm && (
+            <div style={{ marginTop: 14 }}>
+              <button type="button" onClick={() => { setScEditId(null); setScForm({ ...SC_EMPTY_FORM }); setScShowForm(true); }}
+                style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                ➕ Nouveau compteur
               </button>
             </div>
-
-            {/* Boutons d'action */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button type="button" onClick={() => saveSuitCounter()} disabled={suitSaving}
-                style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.18)', color: '#fef3c7', fontWeight: 700, fontSize: 12, cursor: suitSaving ? 'wait' : 'pointer', opacity: suitSaving ? 0.6 : 1 }}>
-                {suitSaving ? '⏳…' : '💾 Sauvegarder'}
-              </button>
-              <button type="button" onClick={testSuitCounter} disabled={suitTesting || !suitCfg.bot_token}
-                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', fontWeight: 700, fontSize: 12, cursor: (suitTesting || !suitCfg.bot_token) ? 'not-allowed' : 'pointer', opacity: (suitTesting || !suitCfg.bot_token) ? 0.5 : 1 }}>
-                {suitTesting ? '⏳…' : '📤 Envoyer maintenant'}
-              </button>
-              {/* Toggle activation */}
-              <button type="button"
-                onClick={() => saveSuitCounter({ enabled: !suitCfg.enabled })}
-                disabled={suitSaving || !suitCfg.bot_token}
-                style={{ padding: '9px 20px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', marginLeft: 'auto', border: `1px solid ${suitCfg.enabled ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}`, background: suitCfg.enabled ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.15)', color: suitCfg.enabled ? '#f87171' : '#22c55e', opacity: (!suitCfg.bot_token) ? 0.5 : 1 }}>
-                {suitCfg.enabled ? '⏸ Désactiver' : '▶ Activer'}
-              </button>
-            </div>
-            <div style={{ fontSize: 9, color: '#475569', marginTop: 10 }}>
-              ⚠️ Le compteur se remet à zéro automatiquement après chaque envoi planifié (H:00 / H:30). Il se remet aussi à zéro au début d'une nouvelle session (jeu #1).
-            </div>
-          </div>
+          )}
         </div>}
 
         {/* ── SECTION 0b : API KOUAMÉ ── */}

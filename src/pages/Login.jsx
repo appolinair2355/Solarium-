@@ -29,6 +29,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [welcome, setWelcome] = useState(null);
+  const [maintenance, setMaintenance] = useState(false);
   const progressTimer = useRef(null);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -67,7 +68,11 @@ export default function Login() {
       }
       setWelcome({ user: result, redirect: '/choisir' });
     } catch (err) {
-      setError(err.message);
+      if (err.message === '__MAINTENANCE__') {
+        setMaintenance(true);
+      } else {
+        setError(err.message);
+      }
       setProgress(0);
     } finally {
       setLoading(false);
@@ -149,6 +154,36 @@ export default function Login() {
             onClick={() => navigate(welcome.redirect, { replace: true })}
           >
             {t('action.continue')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Modal maintenance ──────────────────────────────────────────────
+  if (maintenance) {
+    return (
+      <div className="auth-page">
+        <div className="auth-bg-orb orb1" />
+        <div className="auth-bg-orb orb2" />
+        <div className="auth-box" style={{ textAlign: 'center', maxWidth: 440 }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🔧</div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f59e0b', marginBottom: 12 }}>
+            Maintenance en cours
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: 8 }}>
+            Nous sommes actuellement en maintenance.
+          </p>
+          <p style={{ color: '#cbd5e1', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: 28 }}>
+            Veuillez contacter l'administrateur{' '}
+            <strong style={{ color: '#fbbf24' }}>Sossou Kouamé</strong>{' '}
+            pour toute assistance.
+          </p>
+          <button
+            className="btn btn-gold btn-auth"
+            onClick={() => window.location.reload()}
+          >
+            🔄 Actualiser
           </button>
         </div>
       </div>
