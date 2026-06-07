@@ -25,7 +25,7 @@ const VALID_TYPES = [
   'taux_miroir', 'valeur_joueur', 'valeur_banquier',
   'parite_joueur', 'parite_banquier',
   'groupe_joueur', 'groupe_banquier',
-  'score_joueur', 'score_banquier',
+  'score_joueur', 'score_banquier', 'score_exact',
 ];
 
 const GROUPE_JOUEUR_CATEGORIES = [
@@ -91,6 +91,8 @@ let _configLoaded   = false;
 function _makeState() {
   const scoreKeys = {};
   for (let i = 0; i <= 9; i++) scoreKeys[i] = 0;
+  const scoreExactKeys = {};
+  for (let i = 0; i <= 18; i++) scoreExactKeys[i] = 0;
   return {
     suitCounters:      { joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} },
     groupeJoueur:      Object.fromEntries(GROUPE_JOUEUR_CATEGORIES.map(c => [c.key, 0])),
@@ -101,6 +103,7 @@ function _makeState() {
     pariteBanquier:    { pair: 0, impair: 0 },
     scoreJoueur:       { ...scoreKeys },
     scoreBanquier:     { ...scoreKeys },
+    scoreExact:        { ...scoreExactKeys },
     gameCount:         0,
     lastGameNumber:    null,
     lastScheduleSent:  null,
@@ -256,6 +259,11 @@ function onGameFinished(gn, pSuits, bSuits, pCards, bCards, winner) {
     s.scoreJoueur[scoreJ]  = (s.scoreJoueur[scoreJ]  || 0) + 1;
     s.scoreBanquier[scoreB] = (s.scoreBanquier[scoreB] || 0) + 1;
 
+    // Score exact combiné (joueur + banquier, 0-18)
+    const scoreExactVal = scoreJ + scoreB;
+    if (!s.scoreExact) s.scoreExact = {};
+    s.scoreExact[scoreExactVal] = (s.scoreExact[scoreExactVal] || 0) + 1;
+
     // Groupe Joueur
     if (w === 'Player')      s.groupeJoueur.vic_joueur++;
     else if (w === 'Tie')    s.groupeJoueur.egalite++;
@@ -293,15 +301,21 @@ function buildMessage(counter) {
   const footer = _buildFooter(s, counter);
 
   if (ct === 'taux_miroir') {
-    const hCounts = s.suitCounters[hand] || {};
-    const total   = ALL_SUITS.reduce((a, suit) => a + (hCounts[suit] || 0), 0);
-    const label   = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-    const lines   = ALL_SUITS.map(suit => {
-      const cnt = hCounts[suit] || 0;
-      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+    const joueur  = s.suitCounters.joueur  || {};
+    const banquier = s.suitCounters.banquier || {};
+    const totalJ  = ALL_SUITS.reduce((a, suit) => a + (joueur[suit]  || 0), 0);
+    const totalB  = ALL_SUITS.reduce((a, suit) => a + (banquier[suit] || 0), 0);
+    const linesJ  = ALL_SUITS.map(suit => {
+      const cnt = joueur[suit] || 0;
+      const pct = totalJ > 0 ? ((cnt / totalJ) * 100).toFixed(1) : '0.0';
       return `${SUIT_EMOJI[suit]} : ${cnt}  (${pct}%)`;
     });
-    return `📈 Taux Miroir — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
+    const linesB  = ALL_SUITS.map(suit => {
+      const cnt = banquier[suit] || 0;
+      const pct = totalB > 0 ? ((cnt / totalB) * 100).toFixed(1) : '0.0';
+      return `${SUIT_EMOJI[suit]} : ${cnt}  (${pct}%)`;
+    });
+    return `📈 Taux Miroir — 👤 Joueur\n━━━━━━━━━━━━━━━━━━\n${linesJ.join('\n')}\n📊 Total : ${totalJ} cartes\n\n📈 Taux Miroir — 🏦 Banquier\n━━━━━━━━━━━━━━━━━━\n${linesB.join('\n')}\n📊 Total : ${totalB} cartes${footer}`;
   }
 
   if (ct === 'valeur_joueur' || ct === 'valeur_banquier') {
@@ -336,6 +350,19 @@ function buildMessage(counter) {
       lines.push(`${i} : ${String(cnt).padStart(4)}  (${pct}%)  ${bar}`);
     }
     return `🎯 Score Total — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total jeux : ${total}${footer}`;
+  }
+
+  if (ct === 'score_exact') {
+    const scores = s.scoreExact || {};
+    const total  = Object.values(scores).reduce((a, v) => a + v, 0);
+    const lines  = [];
+    for (let i = 0; i <= 18; i++) {
+      const cnt = scores[i] || 0;
+      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+      const bar = cnt > 0 ? '█'.repeat(Math.min(Math.round((cnt / Math.max(total, 1)) * 10), 10)) : '░';
+      lines.push(`${String(i).padStart(2)} : ${String(cnt).padStart(4)}  (${pct}%)  ${bar}`);
+    }
+    return `🔢 Nombre Exact (J+B)\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total jeux : ${total}${footer}`;
   }
 
   if (ct === 'groupe_joueur' || ct === 'groupe_banquier') {
@@ -538,6 +565,7 @@ function getCounters() {
     parite_banquier: { ...s.pariteBanquier },
     score_joueur:    { ...s.scoreJoueur },
     score_banquier:  { ...s.scoreBanquier },
+    score_exact:     { ...(s.scoreExact || {}) },
     meta: { game_count: s.gameCount, last_game_number: s.lastGameNumber },
   };
 }

@@ -1794,8 +1794,8 @@ class Engine {
 
       // ── Résolution spéciale mode Distribution ──────────────────────────
       if (ps === 'distrib') {
-        const vp = countValidCards(pCards), vb = countValidCards(bCards);
-        const isNatural = vp === 2 && vb === 2;
+        const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
+          && pCards.length === 2 && bCards.length === 2;
         if (isNatural) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
@@ -1812,9 +1812,9 @@ class Engine {
 
       // ── Résolution spéciale mode Carte 2/3 ─────────────────────────────
       } else if (ps === 'deux' || ps === 'trois') {
-        const hcRaw = Array.isArray(handCards) ? handCards : Array.isArray(pCards) ? pCards : [];
+        const hc = Array.isArray(handCards) ? handCards : Array.isArray(pCards) ? pCards : [];
         const targetCount = ps === 'deux' ? 2 : 3;
-        if (countValidCards(hcRaw) === targetCount) {
+        if (hc.length === targetCount) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Carte${targetCount}] Jeu #${gn} = ${targetCount} cartes → gagne (R${rattrapage})`);
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -1847,8 +1847,8 @@ class Engine {
 
       // ── Résolution spéciale mode Écart 2/3 ─────────────────────────────
       } else if (ps === 'TWO_THREE') {
-        const vpTT = countValidCards(pCards), vbTT = countValidCards(bCards);
-        const isMixed = (vpTT === 2 && vbTT === 3) || (vpTT === 3 && vbTT === 2);
+        const isMixed = Array.isArray(pCards) && Array.isArray(bCards) &&
+          ((pCards.length === 2 && bCards.length === 3) || (pCards.length === 3 && bCards.length === 2));
         if (isMixed) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Écart 2/3] ✅ Jeu mixte → gagne (R${rattrapage})`);
@@ -1880,12 +1880,11 @@ class Engine {
       // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
       } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
         const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
-        const vpC = countValidCards(pCards), vbC = countValidCards(bCards);
         const isMatch = ps === 'DEUX_TROIS'
-          ? (vpC === 2 && vbC === 3)
+          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 2 && bCards.length === 3)
           : ps === 'TROIS_DEUX'
-          ? (vpC === 3 && vbC === 2)
-          : (vpC === 3 && vbC === 3);
+          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 2)
+          : (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 3);
         if (isMatch) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [${combLabel}] ✅ Combinaison confirmée → gagne (R${rattrapage})`);
@@ -1916,14 +1915,7 @@ class Engine {
   async _processC1(gn, suits, pCards, bCards) {
     if (this.c1.processed.has(gn)) return;
     this.c1.processed.add(gn);
-    // Résolution sur la main configurée (joueur par défaut, banquier si admin l'a choisi)
-    const _c1TgCfg  = this.defaultStratTg?.['C1'] || {};
-    const _c1Hand   = _c1TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
-    const _c1Suits  = _c1Hand === 'banquier'
-      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
-      : suits;
-    const _c1TgOpts = { formatId: _c1TgCfg.tg_format || null, hand: _c1Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C1' };
-    await this._resolvePending(this.c1.pending, 'C1', gn, _c1Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    await this._resolvePending(this.c1.pending, 'C1', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c1.consecLosses = 0; this._onStratWin('C1'); if (rattrapR > 0) this._onStratRattrapage('C1', gn, suit, rattrapR); return; }
       this.c1.consecLosses++;
       this._onStratLoss('C1', gn, suit);
@@ -1935,7 +1927,7 @@ class Engine {
           this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         }
       }
-    }, getCurrentMaxRattrapage(), _c1TgOpts);
+    });
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c1.absences[suit] = 0; continue; }
       this.c1.absences[suit] = (this.c1.absences[suit] || 0) + 1;
@@ -1952,13 +1944,7 @@ class Engine {
   async _processC2(gn, suits, pCards, bCards) {
     if (this.c2.processed.has(gn)) return;
     this.c2.processed.add(gn);
-    const _c2TgCfg  = this.defaultStratTg?.['C2'] || {};
-    const _c2Hand   = _c2TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
-    const _c2Suits  = _c2Hand === 'banquier'
-      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
-      : suits;
-    const _c2TgOpts = { formatId: _c2TgCfg.tg_format || null, hand: _c2Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C2' };
-    await this._resolvePending(this.c2.pending, 'C2', gn, _c2Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    await this._resolvePending(this.c2.pending, 'C2', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c2.hadFirstLoss = false; this._onStratWin('C2'); if (rattrapR > 0) this._onStratRattrapage('C2', gn, suit, rattrapR); return; }
       if (!this.c2.hadFirstLoss) { this.c2.hadFirstLoss = true; return; }
       this.c2.hadFirstLoss = false;
@@ -1968,7 +1954,7 @@ class Engine {
         savePrediction('DC', next, suit, suit, this.defaultStratTg['DC']);
         this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
       }
-    }, getCurrentMaxRattrapage(), _c2TgOpts);
+    });
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c2.absences[suit] = 0; continue; }
       this.c2.absences[suit] = (this.c2.absences[suit] || 0) + 1;
@@ -1985,13 +1971,7 @@ class Engine {
   async _processC3(gn, suits, pCards, bCards) {
     if (this.c3.processed.has(gn)) return;
     this.c3.processed.add(gn);
-    const _c3TgCfg  = this.defaultStratTg?.['C3'] || {};
-    const _c3Hand   = _c3TgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
-    const _c3Suits  = _c3Hand === 'banquier'
-      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
-      : suits;
-    const _c3TgOpts = { formatId: _c3TgCfg.tg_format || null, hand: _c3Hand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'C3' };
-    await this._resolvePending(this.c3.pending, 'C3', gn, _c3Suits, pCards, bCards, (won, suit, pg, rattrapR) => {
+    await this._resolvePending(this.c3.pending, 'C3', gn, suits, pCards, bCards, (won, suit, pg, rattrapR) => {
       if (won) { this.c3.consecLosses = 0; this._onStratWin('C3'); if (rattrapR > 0) this._onStratRattrapage('C3', gn, suit, rattrapR); return; }
       this.c3.consecLosses++;
       this._onStratLoss('C3', gn, suit);
@@ -2003,7 +1983,7 @@ class Engine {
           this.dc.pending[next] = { suit, rattrapage: 0, maxR: getCurrentMaxRattrapage() };
         }
       }
-    }, getCurrentMaxRattrapage(), _c3TgOpts);
+    });
     for (const suit of ALL_SUITS) {
       if (suits.includes(suit)) { this.c3.absences[suit] = 0; continue; }
       this.c3.absences[suit] = (this.c3.absences[suit] || 0) + 1;
@@ -2018,17 +1998,25 @@ class Engine {
   }
 
   async _processDC(gn, suits, pCards, bCards) {
-    // Résolution sur la main configurée (cohérente avec C1/C2/C3) + rattrapage gn-pgNum
-    const _dcTgCfg  = this.defaultStratTg?.['DC'] || {};
-    const _dcHand   = _dcTgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
-    const _dcSuits  = _dcHand === 'banquier'
-      ? (bCards || []).map(c => normalizeSuit(c.S || '')).filter(s => ALL_SUITS.includes(s))
-      : suits;
-    const _dcTgOpts = { formatId: _dcTgCfg.tg_format || null, hand: _dcHand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: 'DC' };
-    await this._resolvePending(this.dc.pending, 'DC', gn, _dcSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
-      if (won) { this._onStratWin('DC'); if (rattrapR > 0) this._onStratRattrapage('DC', gn, ps, rattrapR); }
-      else { this._onStratLoss('DC', gn, ps); }
-    }, getCurrentMaxRattrapage(), _dcTgOpts);
+    const maxR = getCurrentMaxRattrapage();
+    for (const [pg, info] of Object.entries(this.dc.pending)) {
+      const pgNum = parseInt(pg);
+      if (gn < pgNum) continue;
+      const ps = info.suit;
+      if (suits.includes(ps)) {
+        await resolvePrediction('DC', pgNum, ps, 'gagne', info.rattrapage, pCards, bCards);
+        delete this.dc.pending[pg];
+        this._onStratWin('DC');
+        if (info.rattrapage > 0) this._onStratRattrapage('DC', gn, ps, info.rattrapage);
+      } else if (gn > pgNum) {
+        if (info.rattrapage < maxR) { info.rattrapage++; }
+        else {
+          await resolvePrediction('DC', pgNum, ps, 'perdu', info.rattrapage, pCards, bCards);
+          delete this.dc.pending[pg];
+          this._onStratLoss('DC', gn, ps);
+        }
+      }
+    }
   }
 
   /**
