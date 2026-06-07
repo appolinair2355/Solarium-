@@ -1,7 +1,19 @@
 /**
- * Compteur instantané → Telegram
- * Types : taux_miroir, groupe_joueur, groupe_banquier,
- *         valeur_joueur, valeur_banquier, parite_joueur, parite_banquier
+ * Compteurs instantanés → Telegram (v2 — architecture multi-compteurs indépendants)
+ *
+ * Chaque compteur est INDÉPENDANT : label, bot_token, channel_id, counter_type,
+ * hand, interval, send_times, send_on_game_end, reset_after_send propres.
+ *
+ * Types disponibles :
+ *   taux_miroir      – costumes ♠♥♦♣ (apparitions par main)
+ *   valeur_joueur    – valeurs de cartes A-K (joueur)
+ *   valeur_banquier  – valeurs de cartes A-K (banquier)
+ *   parite_joueur    – parité du score (pair/impair) côté joueur
+ *   parite_banquier  – parité du score (pair/impair) côté banquier
+ *   groupe_joueur    – groupe de statistiques côté joueur
+ *   groupe_banquier  – groupe de statistiques côté banquier
+ *   score_joueur     – total Baccarat 0-9 côté joueur
+ *   score_banquier   – total Baccarat 0-9 côté banquier
  */
 const db    = require('./db');
 const fetch = require('node-fetch');
@@ -9,8 +21,13 @@ const fetch = require('node-fetch');
 const ALL_SUITS  = ['♠', '♥', '♦', '♣'];
 const SUIT_EMOJI = { '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️' };
 const CARD_RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const VALID_TYPES = [
+  'taux_miroir', 'valeur_joueur', 'valeur_banquier',
+  'parite_joueur', 'parite_banquier',
+  'groupe_joueur', 'groupe_banquier',
+  'score_joueur', 'score_banquier',
+];
 
-// ─── Catégories Groupe Joueur ─────────────────────────────────────────────────
 const GROUPE_JOUEUR_CATEGORIES = [
   { key: 'vic_joueur', label: '👤 Victoire Joueur' },
   { key: 'egalite',    label: '🤝 Égalité' },
@@ -21,8 +38,6 @@ const GROUPE_JOUEUR_CATEGORIES = [
   { key: 'dist_32',    label: '3️⃣2️⃣ J:3  B:2' },
   { key: 'dist_33',    label: '3️⃣3️⃣ Tirage 3-3' },
 ];
-
-// ─── Catégories Groupe Banquier ───────────────────────────────────────────────
 const GROUPE_BANQUIER_CATEGORIES = [
   { key: 'vic_banquier', label: '🏦 Victoire Banquier' },
   { key: 'egalite',      label: '🤝 Égalité' },
@@ -34,49 +49,7 @@ const GROUPE_BANQUIER_CATEGORIES = [
   { key: 'dist_33',      label: '3️⃣3️⃣ Tirage 3-3' },
 ];
 
-function _makeGroupeCounters(cats) {
-  const c = {};
-  for (const { key } of cats) c[key] = 0;
-  return c;
-}
-function _makeValeurCounters() {
-  const c = {};
-  for (const r of CARD_RANKS) c[r] = 0;
-  return c;
-}
-
-// ─── État interne ─────────────────────────────────────────────────────────────
-let _config = {
-  enabled:          false,
-  channels:         [],
-  counter_type:     'taux_miroir',
-  hand:             'joueur',
-  interval:         30,
-  send_on_game_end: false,
-  send_times:       [],
-  reset_after_send: true,
-};
-
-let _suitCounters = {
-  joueur:   { '♠': 0, '♥': 0, '♦': 0, '♣': 0 },
-  banquier: { '♠': 0, '♥': 0, '♦': 0, '♣': 0 },
-};
-let _groupeJoueurCounters   = _makeGroupeCounters(GROUPE_JOUEUR_CATEGORIES);
-let _groupeBanquierCounters = _makeGroupeCounters(GROUPE_BANQUIER_CATEGORIES);
-let _valeurJoueurCounters   = _makeValeurCounters();
-let _valeurBanquierCounters = _makeValeurCounters();
-let _pariteJoueurCounters   = { pair: 0, impair: 0 };
-let _pariteBanquierCounters = { pair: 0, impair: 0 };
-
-let _gameCount      = 0;
-let _lastGameNumber = null;
-
-let _lastScheduleSent  = null;
-let _lastSentTimes     = {};
-let _schedulerInterval = null;
-let _configLoaded      = false;
-
-// ─── Helpers cartes ───────────────────────────────────────────────────────────
+// ─── Helpers cartes ────────────────────────────────────────────────────────────
 function _getCardRank(card) {
   if (!card || typeof card !== 'object') return null;
   let r = String(card.R || card.r || card.rang || '').toUpperCase().trim();
@@ -87,170 +60,320 @@ function _getCardRank(card) {
   if (CARD_RANKS.includes(r)) return r;
   return null;
 }
-
 function _baccaratCardValue(rank) {
   if (!rank) return 0;
   if (['10', 'J', 'Q', 'K'].includes(rank)) return 0;
   if (rank === 'A') return 1;
   return parseInt(rank) || 0;
 }
-
 function _handBaccaratScore(cards) {
   if (!Array.isArray(cards)) return 0;
   return cards.reduce((s, c) => s + _baccaratCardValue(_getCardRank(c)), 0) % 10;
 }
-
 function _countCards(cards) {
   if (!Array.isArray(cards)) return 0;
   return cards.filter(c => c && (c.R !== undefined || c.S !== undefined || c.r !== undefined)).length;
 }
-
 function _getHHMM(d) {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function _makeId() {
+  return `sc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// ─── État global ────────────────────────────────────────────────────────────────
+let _countersList   = [];   // array of counter config objects
+let _countersState  = {};   // { [id]: { suitCounters, groupeJoueur, ..., gameCount, lastGameNumber, lastScheduleSent, lastSentTimes } }
+let _schedulerInterval = null;
+let _configLoaded   = false;
+
+// ─── Fabrique d'état vierge pour un compteur ──────────────────────────────────
+function _makeState() {
+  const scoreKeys = {};
+  for (let i = 0; i <= 9; i++) scoreKeys[i] = 0;
+  return {
+    suitCounters:      { joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} },
+    groupeJoueur:      Object.fromEntries(GROUPE_JOUEUR_CATEGORIES.map(c => [c.key, 0])),
+    groupeBanquier:    Object.fromEntries(GROUPE_BANQUIER_CATEGORIES.map(c => [c.key, 0])),
+    valeurJoueur:      Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
+    valeurBanquier:    Object.fromEntries(CARD_RANKS.map(r => [r, 0])),
+    pariteJoueur:      { pair: 0, impair: 0 },
+    pariteBanquier:    { pair: 0, impair: 0 },
+    scoreJoueur:       { ...scoreKeys },
+    scoreBanquier:     { ...scoreKeys },
+    gameCount:         0,
+    lastGameNumber:    null,
+    lastScheduleSent:  null,
+    lastSentTimes:     {},
+  };
+}
+
+// ─── S'assure qu'un état existe pour chaque compteur ──────────────────────────
+function _ensureStates() {
+  for (const c of _countersList) {
+    if (!_countersState[c.id]) {
+      _countersState[c.id] = _makeState();
+    }
+  }
+  // Nettoie les états orphelins
+  const ids = new Set(_countersList.map(c => c.id));
+  for (const id of Object.keys(_countersState)) {
+    if (!ids.has(id)) delete _countersState[id];
+  }
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 async function loadConfig() {
   try {
-    const raw = await db.getSetting('suit_counter_config');
+    const raw = await db.getSetting('suit_counters_v2');
     if (raw) {
       const saved = JSON.parse(raw);
-      if (!Array.isArray(saved.channels)) {
-        saved.channels = [];
-        if (saved.bot_token && saved.channel_id) {
-          saved.channels.push({ bot_token: saved.bot_token, channel_id: saved.channel_id, label: 'Canal 1' });
-        }
-        delete saved.bot_token;
-        delete saved.channel_id;
+      if (Array.isArray(saved)) {
+        _countersList = saved;
       }
-      Object.assign(_config, saved);
+    } else {
+      // Migration depuis l'ancienne config globale
+      const oldRaw = await db.getSetting('suit_counter_config');
+      if (oldRaw) {
+        try {
+          const old = JSON.parse(oldRaw);
+          if (old && (old.channels || old.counter_type)) {
+            const channels = Array.isArray(old.channels) ? old.channels : [];
+            if (channels.length > 0) {
+              _countersList = channels.map((ch, i) => ({
+                id:               _makeId() + i,
+                label:            ch.label || `Canal ${i + 1}`,
+                enabled:          !!old.enabled,
+                bot_token:        ch.bot_token  || '',
+                channel_id:       ch.channel_id || '',
+                counter_type:     old.counter_type     || 'taux_miroir',
+                hand:             old.hand             || 'joueur',
+                interval:         old.interval         || 30,
+                send_times:       old.send_times        || [],
+                send_on_game_end: !!old.send_on_game_end,
+                reset_after_send: old.reset_after_send !== false,
+              }));
+            } else if (old.bot_token && old.channel_id) {
+              _countersList = [{
+                id:               _makeId(),
+                label:            'Compteur 1',
+                enabled:          !!old.enabled,
+                bot_token:        old.bot_token  || '',
+                channel_id:       old.channel_id || '',
+                counter_type:     old.counter_type     || 'taux_miroir',
+                hand:             old.hand             || 'joueur',
+                interval:         old.interval         || 30,
+                send_times:       old.send_times        || [],
+                send_on_game_end: !!old.send_on_game_end,
+                reset_after_send: old.reset_after_send !== false,
+              }];
+            }
+          }
+        } catch {}
+      }
     }
   } catch (e) {
     console.warn('[SuitCounter] Erreur chargement config:', e.message);
   }
+  _ensureStates();
   _configLoaded = true;
 }
 
-async function saveConfig(cfg) {
-  Object.assign(_config, cfg);
-  await db.setSetting('suit_counter_config', JSON.stringify(_config));
+async function saveCountersList(list) {
+  _countersList = list;
+  _ensureStates();
+  await db.setSetting('suit_counters_v2', JSON.stringify(_countersList));
 }
 
-function getConfig() { return JSON.parse(JSON.stringify(_config)); }
-
-function getCounters() {
-  return {
-    taux_miroir: {
-      joueur:   { ..._suitCounters.joueur },
-      banquier: { ..._suitCounters.banquier },
-    },
-    groupe_joueur:   { ..._groupeJoueurCounters },
-    groupe_banquier: { ..._groupeBanquierCounters },
-    valeur_joueur:   { ..._valeurJoueurCounters },
-    valeur_banquier: { ..._valeurBanquierCounters },
-    parite_joueur:   { ..._pariteJoueurCounters },
-    parite_banquier: { ..._pariteBanquierCounters },
-    meta: {
-      game_count:       _gameCount,
-      last_game_number: _lastGameNumber,
-    },
-  };
+function getCountersList() {
+  return JSON.parse(JSON.stringify(_countersList));
 }
 
-function resetCounters() {
-  _suitCounters = {
-    joueur:   { '♠': 0, '♥': 0, '♦': 0, '♣': 0 },
-    banquier: { '♠': 0, '♥': 0, '♦': 0, '♣': 0 },
-  };
-  _groupeJoueurCounters   = _makeGroupeCounters(GROUPE_JOUEUR_CATEGORIES);
-  _groupeBanquierCounters = _makeGroupeCounters(GROUPE_BANQUIER_CATEGORIES);
-  _valeurJoueurCounters   = _makeValeurCounters();
-  _valeurBanquierCounters = _makeValeurCounters();
-  _pariteJoueurCounters   = { pair: 0, impair: 0 };
-  _pariteBanquierCounters = { pair: 0, impair: 0 };
-  _gameCount              = 0;
-  // NE PAS réinitialiser _lastScheduleSent et _lastSentTimes ici —
-  // ces variables appartiennent au planificateur, pas aux compteurs.
-  // Les réinitialiser provoquerait un double envoi immédiat après reset.
+function getCounterState(id) {
+  const s = _countersState[id];
+  if (!s) return null;
+  return JSON.parse(JSON.stringify(s));
 }
 
-// ─── Mise à jour compteurs après chaque jeu ───────────────────────────────────
+function getAllStates() {
+  const out = {};
+  for (const [id, s] of Object.entries(_countersState)) {
+    out[id] = JSON.parse(JSON.stringify(s));
+  }
+  return out;
+}
+
+function resetCounterState(id) {
+  _countersState[id] = _makeState();
+}
+
+function resetAllStates() {
+  for (const c of _countersList) {
+    _countersState[c.id] = _makeState();
+  }
+}
+
+// ─── Mise à jour des compteurs après chaque jeu ───────────────────────────────
 function onGameFinished(gn, pSuits, bSuits, pCards, bCards, winner) {
-  _lastGameNumber = gn;
-  _gameCount++;
-
-  // Taux miroir (costumes)
-  for (const s of (pSuits || [])) {
-    if (ALL_SUITS.includes(s)) _suitCounters.joueur[s] = (_suitCounters.joueur[s] || 0) + 1;
-  }
-  for (const s of (bSuits || [])) {
-    if (ALL_SUITS.includes(s)) _suitCounters.banquier[s] = (_suitCounters.banquier[s] || 0) + 1;
-  }
-
-  // Valeurs de cartes
-  for (const card of (pCards || [])) {
-    const r = _getCardRank(card);
-    if (r) _valeurJoueurCounters[r] = (_valeurJoueurCounters[r] || 0) + 1;
-  }
-  for (const card of (bCards || [])) {
-    const r = _getCardRank(card);
-    if (r) _valeurBanquierCounters[r] = (_valeurBanquierCounters[r] || 0) + 1;
-  }
-
-  // Parité (score Baccarat de la main)
-  const scoreJoueur  = _handBaccaratScore(pCards || []);
-  const scoreBanquier = _handBaccaratScore(bCards || []);
-  if (scoreJoueur % 2 === 0)  _pariteJoueurCounters.pair++;
-  else                         _pariteJoueurCounters.impair++;
-  if (scoreBanquier % 2 === 0) _pariteBanquierCounters.pair++;
-  else                          _pariteBanquierCounters.impair++;
-
-  // Groupe Joueur
+  const scoreJ = _handBaccaratScore(pCards || []);
+  const scoreB = _handBaccaratScore(bCards || []);
   const np = _countCards(pCards);
   const nb = _countCards(bCards);
   const w  = winner || '';
-  if (w === 'Player')     _groupeJoueurCounters.vic_joueur++;
-  else if (w === 'Tie')   _groupeJoueurCounters.egalite++;
-  if (np === 2)           _groupeJoueurCounters.p2k++;
-  else if (np === 3)      _groupeJoueurCounters.p3k++;
-  if      (np === 2 && nb === 2) _groupeJoueurCounters.dist_22++;
-  else if (np === 2 && nb === 3) _groupeJoueurCounters.dist_23++;
-  else if (np === 3 && nb === 2) _groupeJoueurCounters.dist_32++;
-  else if (np === 3 && nb === 3) _groupeJoueurCounters.dist_33++;
 
-  // Groupe Banquier
-  if (w === 'Banker')     _groupeBanquierCounters.vic_banquier++;
-  else if (w === 'Tie')   _groupeBanquierCounters.egalite++;
-  if (nb === 2)           _groupeBanquierCounters.b2k++;
-  else if (nb === 3)      _groupeBanquierCounters.b3k++;
-  if      (np === 2 && nb === 2) _groupeBanquierCounters.dist_22++;
-  else if (np === 2 && nb === 3) _groupeBanquierCounters.dist_23++;
-  else if (np === 3 && nb === 2) _groupeBanquierCounters.dist_32++;
-  else if (np === 3 && nb === 3) _groupeBanquierCounters.dist_33++;
+  for (const counter of _countersList) {
+    const s = _countersState[counter.id];
+    if (!s) continue;
 
-  // Envoi après chaque jeu
-  if (_config.enabled && _config.send_on_game_end) {
-    const channels = Array.isArray(_config.channels) ? _config.channels : [];
-    if (channels.length > 0) {
-      _sendToAllChannels(buildMessage(_config.counter_type, _config.hand)).catch(() => {});
+    s.lastGameNumber = gn;
+    s.gameCount++;
+
+    // Taux miroir — costumes
+    for (const suit of (pSuits || [])) {
+      if (ALL_SUITS.includes(suit)) s.suitCounters.joueur[suit] = (s.suitCounters.joueur[suit] || 0) + 1;
+    }
+    for (const suit of (bSuits || [])) {
+      if (ALL_SUITS.includes(suit)) s.suitCounters.banquier[suit] = (s.suitCounters.banquier[suit] || 0) + 1;
+    }
+
+    // Valeurs
+    for (const card of (pCards || [])) {
+      const r = _getCardRank(card);
+      if (r) s.valeurJoueur[r] = (s.valeurJoueur[r] || 0) + 1;
+    }
+    for (const card of (bCards || [])) {
+      const r = _getCardRank(card);
+      if (r) s.valeurBanquier[r] = (s.valeurBanquier[r] || 0) + 1;
+    }
+
+    // Parité
+    if (scoreJ % 2 === 0) s.pariteJoueur.pair++;
+    else                   s.pariteJoueur.impair++;
+    if (scoreB % 2 === 0) s.pariteBanquier.pair++;
+    else                   s.pariteBanquier.impair++;
+
+    // Score total (Baccarat 0-9)
+    s.scoreJoueur[scoreJ]  = (s.scoreJoueur[scoreJ]  || 0) + 1;
+    s.scoreBanquier[scoreB] = (s.scoreBanquier[scoreB] || 0) + 1;
+
+    // Groupe Joueur
+    if (w === 'Player')      s.groupeJoueur.vic_joueur++;
+    else if (w === 'Tie')    s.groupeJoueur.egalite++;
+    if (np === 2)            s.groupeJoueur.p2k++;
+    else if (np === 3)       s.groupeJoueur.p3k++;
+    if      (np===2&&nb===2) s.groupeJoueur.dist_22++;
+    else if (np===2&&nb===3) s.groupeJoueur.dist_23++;
+    else if (np===3&&nb===2) s.groupeJoueur.dist_32++;
+    else if (np===3&&nb===3) s.groupeJoueur.dist_33++;
+
+    // Groupe Banquier
+    if (w === 'Banker')      s.groupeBanquier.vic_banquier++;
+    else if (w === 'Tie')    s.groupeBanquier.egalite++;
+    if (nb === 2)            s.groupeBanquier.b2k++;
+    else if (nb === 3)       s.groupeBanquier.b3k++;
+    if      (np===2&&nb===2) s.groupeBanquier.dist_22++;
+    else if (np===2&&nb===3) s.groupeBanquier.dist_23++;
+    else if (np===3&&nb===2) s.groupeBanquier.dist_32++;
+    else if (np===3&&nb===3) s.groupeBanquier.dist_33++;
+
+    // Envoi après chaque jeu (si activé pour ce compteur)
+    if (counter.enabled && counter.send_on_game_end && counter.bot_token && counter.channel_id) {
+      _sendCounter(counter).catch(() => {});
     }
   }
 }
 
-// ─── Prochain reset ───────────────────────────────────────────────────────────
-function _getNextResetInfo() {
+// ─── Construction du message ──────────────────────────────────────────────────
+function buildMessage(counter) {
+  const s = _countersState[counter.id];
+  if (!s) return '❌ État introuvable';
+  const ct   = counter.counter_type || 'taux_miroir';
+  const hand = counter.hand || 'joueur';
+
+  const footer = _buildFooter(s, counter);
+
+  if (ct === 'taux_miroir') {
+    const hCounts = s.suitCounters[hand] || {};
+    const total   = ALL_SUITS.reduce((a, suit) => a + (hCounts[suit] || 0), 0);
+    const label   = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+    const lines   = ALL_SUITS.map(suit => {
+      const cnt = hCounts[suit] || 0;
+      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+      return `${SUIT_EMOJI[suit]} : ${cnt}  (${pct}%)`;
+    });
+    return `📈 Taux Miroir — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
+  }
+
+  if (ct === 'valeur_joueur' || ct === 'valeur_banquier') {
+    const vals  = ct === 'valeur_joueur' ? s.valeurJoueur : s.valeurBanquier;
+    const total = CARD_RANKS.reduce((a, r) => a + (vals[r] || 0), 0);
+    const label = ct === 'valeur_joueur' ? '👤 Joueur' : '🏦 Banquier';
+    const lines = CARD_RANKS.map(r => {
+      const cnt = vals[r] || 0;
+      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+      return `${r.padEnd(2)} : ${String(cnt).padStart(4)}  (${pct}%)`;
+    });
+    return `🃏 Valeurs de cartes — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
+  }
+
+  if (ct === 'parite_joueur' || ct === 'parite_banquier') {
+    const par   = ct === 'parite_joueur' ? s.pariteJoueur : s.pariteBanquier;
+    const total = (par.pair || 0) + (par.impair || 0);
+    const pct   = (n) => total > 0 ? ((n / total) * 100).toFixed(1) : '0.0';
+    const label = ct === 'parite_joueur' ? '👤 Joueur' : '🏦 Banquier';
+    return `⚖️ Parité Score — ${label}\n━━━━━━━━━━━━━━━━━━\n🔵 Pair   : ${par.pair||0}  (${pct(par.pair||0)}%)\n🔴 Impair : ${par.impair||0}  (${pct(par.impair||0)}%)\n📊 Total jeux : ${total}${footer}`;
+  }
+
+  if (ct === 'score_joueur' || ct === 'score_banquier') {
+    const scores = ct === 'score_joueur' ? s.scoreJoueur : s.scoreBanquier;
+    const label  = ct === 'score_joueur' ? '👤 Joueur' : '🏦 Banquier';
+    const total  = Object.values(scores).reduce((a, v) => a + v, 0);
+    const lines  = [];
+    for (let i = 0; i <= 9; i++) {
+      const cnt = scores[i] || 0;
+      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+      const bar = cnt > 0 ? '█'.repeat(Math.min(Math.round((cnt / Math.max(total, 1)) * 10), 10)) : '░';
+      lines.push(`${i} : ${String(cnt).padStart(4)}  (${pct}%)  ${bar}`);
+    }
+    return `🎯 Score Total — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total jeux : ${total}${footer}`;
+  }
+
+  if (ct === 'groupe_joueur' || ct === 'groupe_banquier') {
+    const isJ   = ct === 'groupe_joueur';
+    const cats  = isJ ? GROUPE_JOUEUR_CATEGORIES : GROUPE_BANQUIER_CATEGORIES;
+    const grp   = isJ ? s.groupeJoueur : s.groupeBanquier;
+    const label = isJ ? '👤 Joueur' : '🏦 Banquier';
+    const total = cats.reduce((a, c) => a + (grp[c.key] || 0), 0);
+    const lines = cats.map(c => `${c.label} : ${grp[c.key] || 0}`);
+    return `📊 Groupe — ${label}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📌 Total jeux : ${total}${footer}`;
+  }
+
+  return '❌ Type de compteur inconnu';
+}
+
+function _buildFooter(s, counter) {
+  const lines = [];
+  if (s.lastGameNumber) lines.push(`🎮 Jeu #${s.lastGameNumber}  |  📊 ${s.gameCount} jeu(x) depuis dernier reset`);
+  if (counter.reset_after_send !== false) {
+    const info = _getNextResetInfo(counter);
+    lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
+  } else {
+    lines.push('♾️ Pas de reset automatique');
+  }
+  return `\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}`;
+}
+
+function _getNextResetInfo(counter) {
   const now      = new Date();
-  const interval = parseInt(_config.interval) || 30;
+  const interval = parseInt(counter.interval) || 30;
   const mm       = now.getMinutes();
   const ss       = now.getSeconds();
   const candidates = [];
 
-  // Intervalle
   const nextIntervalMin = interval === 30 ? (mm < 30 ? 30 - mm : 60 - mm) : (60 - mm);
   candidates.push({ ms: (nextIntervalMin * 60 - ss) * 1000, label: `Intervalle ${interval}min` });
 
-  // Heures fixes
-  for (const t of (Array.isArray(_config.send_times) ? _config.send_times : [])) {
+  for (const t of (Array.isArray(counter.send_times) ? counter.send_times : [])) {
     const [hh, mm2] = t.split(':').map(Number);
     const target = new Date(now);
     target.setHours(hh, mm2, 0, 0);
@@ -261,145 +384,59 @@ function _getNextResetInfo() {
   candidates.sort((a, b) => a.ms - b.ms);
   const next = candidates[0];
   if (!next) return { label: 'Non planifié', timeStr: '—' };
-
   const totalSec = Math.round(next.ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const timeStr = h > 0 ? `${h}h ${m}min` : m > 0 ? `${m}min ${s}s` : `${s}s`;
+  const sec = totalSec % 60;
+  const timeStr = h > 0 ? `${h}h ${m}min` : m > 0 ? `${m}min ${sec}s` : `${sec}s`;
   return { label: next.label, timeStr };
 }
 
-function _buildFooter() {
-  const lines = [];
-  if (_lastGameNumber) lines.push(`🎮 Jeu #${_lastGameNumber}  |  📊 ${_gameCount} jeu(x) depuis dernier reset`);
-  if (_config.reset_after_send !== false) {
-    const info = _getNextResetInfo();
-    lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
-  } else {
-    lines.push(`♾️ Pas de reset automatique`);
+// ─── Envoi Telegram pour un compteur ─────────────────────────────────────────
+async function _sendCounter(counter) {
+  if (!counter.bot_token || !counter.channel_id) {
+    throw new Error(`Compteur "${counter.label || counter.id}" : bot_token ou channel_id manquant`);
   }
-  return `\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}`;
+  const text = buildMessage(counter);
+  const url  = `https://api.telegram.org/bot${counter.bot_token}/sendMessage`;
+  const r    = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ chat_id: String(counter.channel_id), text }),
+  });
+  const d = await r.json();
+  if (!d.ok) throw new Error(d.description || 'Erreur Telegram');
+  return d;
 }
 
-// ─── Construction du message ──────────────────────────────────────────────────
-function buildMessage(counterType, hand) {
-  const ct = counterType || _config.counter_type || 'taux_miroir';
-  const h  = hand || _config.hand || 'joueur';
-  const footer = _buildFooter();
-
-  if (ct === 'taux_miroir') {
-    const hCounts   = _suitCounters[h] || {};
-    const total     = ALL_SUITS.reduce((a, s) => a + (hCounts[s] || 0), 0);
-    const handLabel = h === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-    const lines     = ALL_SUITS.map(s => {
-      const cnt = hCounts[s] || 0;
-      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
-      return `${SUIT_EMOJI[s]} : ${cnt}  (${pct}%)`;
-    });
-    return `📈 Taux Miroir — ${handLabel}\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
-  }
-
-  if (ct === 'groupe_joueur') {
-    const cats  = GROUPE_JOUEUR_CATEGORIES;
-    const total = cats.reduce((a, c) => a + (_groupeJoueurCounters[c.key] || 0), 0);
-    const lines = cats.map(c => `${c.label} : ${_groupeJoueurCounters[c.key] || 0}`);
-    return `📊 Groupe — 👤 Joueur\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📌 Total jeux : ${total}${footer}`;
-  }
-
-  if (ct === 'groupe_banquier') {
-    const cats  = GROUPE_BANQUIER_CATEGORIES;
-    const total = cats.reduce((a, c) => a + (_groupeBanquierCounters[c.key] || 0), 0);
-    const lines = cats.map(c => `${c.label} : ${_groupeBanquierCounters[c.key] || 0}`);
-    return `📊 Groupe — 🏦 Banquier\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📌 Total jeux : ${total}${footer}`;
-  }
-
-  if (ct === 'valeur_joueur') {
-    const total = CARD_RANKS.reduce((a, r) => a + (_valeurJoueurCounters[r] || 0), 0);
-    const lines = CARD_RANKS.map(r => {
-      const cnt = _valeurJoueurCounters[r] || 0;
-      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
-      return `${r.padEnd(2)} : ${String(cnt).padStart(4)}  (${pct}%)`;
-    });
-    return `🃏 Valeurs de cartes — 👤 Joueur\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
-  }
-
-  if (ct === 'valeur_banquier') {
-    const total = CARD_RANKS.reduce((a, r) => a + (_valeurBanquierCounters[r] || 0), 0);
-    const lines = CARD_RANKS.map(r => {
-      const cnt = _valeurBanquierCounters[r] || 0;
-      const pct = total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
-      return `${r.padEnd(2)} : ${String(cnt).padStart(4)}  (${pct}%)`;
-    });
-    return `🃏 Valeurs de cartes — 🏦 Banquier\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n📊 Total : ${total} cartes${footer}`;
-  }
-
-  if (ct === 'parite_joueur') {
-    const pair   = _pariteJoueurCounters.pair   || 0;
-    const impair = _pariteJoueurCounters.impair  || 0;
-    const total  = pair + impair;
-    const pct = (n) => total > 0 ? ((n / total) * 100).toFixed(1) : '0.0';
-    return `⚖️ Parité Score — 👤 Joueur\n━━━━━━━━━━━━━━━━━━\n🔵 Pair   : ${pair}  (${pct(pair)}%)\n🔴 Impair : ${impair}  (${pct(impair)}%)\n📊 Total jeux : ${total}${footer}`;
-  }
-
-  if (ct === 'parite_banquier') {
-    const pair   = _pariteBanquierCounters.pair   || 0;
-    const impair = _pariteBanquierCounters.impair  || 0;
-    const total  = pair + impair;
-    const pct = (n) => total > 0 ? ((n / total) * 100).toFixed(1) : '0.0';
-    return `⚖️ Parité Score — 🏦 Banquier\n━━━━━━━━━━━━━━━━━━\n🔵 Pair   : ${pair}  (${pct(pair)}%)\n🔴 Impair : ${impair}  (${pct(impair)}%)\n📊 Total jeux : ${total}${footer}`;
-  }
-
-  return '❌ Type de compteur inconnu';
-}
-
-// ─── Envoi Telegram ───────────────────────────────────────────────────────────
-async function _sendToAllChannels(text) {
-  const channels = Array.isArray(_config.channels) ? _config.channels : [];
-  for (const ch of channels) {
-    if (!ch.bot_token || !ch.channel_id) continue;
-    try {
-      const url = `https://api.telegram.org/bot${ch.bot_token}/sendMessage`;
-      const r   = await fetch(url, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ chat_id: String(ch.channel_id), text }),
-      });
-      const d = await r.json();
-      if (!d.ok) console.warn(`[SuitCounter] Telegram erreur canal ${ch.channel_id}:`, d.description);
-    } catch (e) {
-      console.warn('[SuitCounter] Erreur envoi canal:', e.message);
-    }
-  }
-}
-
-async function sendNow() {
-  if (!_configLoaded) await loadConfig();
-  const channels = Array.isArray(_config.channels) ? _config.channels : [];
-  if (channels.length === 0) throw new Error('Aucun canal configuré');
-  await _sendToAllChannels(buildMessage(_config.counter_type, _config.hand));
+async function sendCounterById(id) {
+  const counter = _countersList.find(c => c.id === id);
+  if (!counter) throw new Error(`Compteur introuvable : ${id}`);
+  return _sendCounter(counter);
 }
 
 // ─── Planificateur ────────────────────────────────────────────────────────────
-function _shouldSendByInterval(now) {
-  if (!_config.enabled) return false;
-  const channels = Array.isArray(_config.channels) ? _config.channels : [];
-  if (channels.length === 0) return false;
+function _shouldSendByInterval(counter, now) {
+  if (!counter.enabled) return false;
+  if (!counter.bot_token || !counter.channel_id) return false;
+  const s  = _countersState[counter.id];
+  if (!s)  return false;
   const mm       = now.getMinutes();
-  const interval = parseInt(_config.interval) || 30;
+  const interval = parseInt(counter.interval) || 30;
   const match    = interval === 30 ? (mm === 0 || mm === 30) : (mm === 0);
   if (!match) return false;
-  return _lastScheduleSent !== _getHHMM(now);
+  return s.lastScheduleSent !== _getHHMM(now);
 }
 
-function _shouldSendByFixedTime(now) {
-  if (!_config.enabled) return false;
-  const channels = Array.isArray(_config.channels) ? _config.channels : [];
-  if (channels.length === 0) return false;
-  const times = Array.isArray(_config.send_times) ? _config.send_times : [];
+function _shouldSendByFixedTime(counter, now) {
+  if (!counter.enabled) return false;
+  if (!counter.bot_token || !counter.channel_id) return false;
+  const s     = _countersState[counter.id];
+  if (!s)     return false;
+  const times = Array.isArray(counter.send_times) ? counter.send_times : [];
   if (times.length === 0) return false;
-  const hhmm = _getHHMM(now);
-  return times.includes(hhmm) && !_lastSentTimes[hhmm];
+  const hhmm  = _getHHMM(now);
+  return times.includes(hhmm) && !s.lastSentTimes[hhmm];
 }
 
 function startScheduler() {
@@ -410,33 +447,129 @@ function startScheduler() {
       if (!_configLoaded) await loadConfig();
       const now  = new Date();
       const hhmm = _getHHMM(now);
-      let sent   = false;
 
-      if (_shouldSendByInterval(now)) {
-        _lastScheduleSent = hhmm;
-        await _sendToAllChannels(buildMessage(_config.counter_type, _config.hand));
-        console.log(`[SuitCounter] ⏰ Envoi intervalle — ${hhmm}`);
-        sent = true;
+      for (const counter of _countersList) {
+        if (!counter.enabled) continue;
+        const s = _countersState[counter.id];
+        if (!s) continue;
+
+        let sent = false;
+
+        if (_shouldSendByInterval(counter, now)) {
+          s.lastScheduleSent = hhmm;
+          try {
+            await _sendCounter(counter);
+            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi intervalle — ${hhmm}`);
+            sent = true;
+          } catch (e) {
+            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi intervalle: ${e.message}`);
+          }
+        }
+
+        if (_shouldSendByFixedTime(counter, now)) {
+          s.lastSentTimes[hhmm] = true;
+          try {
+            await _sendCounter(counter);
+            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi heure fixe — ${hhmm}`);
+            sent = true;
+          } catch (e) {
+            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi heure fixe: ${e.message}`);
+          }
+        }
+
+        if (sent && counter.reset_after_send !== false) {
+          _countersState[counter.id] = _makeState();
+          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}`);
+        }
+
+        // Reset des heures déjà envoyées à minuit
+        if (now.getHours() === 0 && now.getMinutes() === 0) {
+          s.lastSentTimes = {};
+        }
       }
-
-      if (_shouldSendByFixedTime(now)) {
-        _lastSentTimes[hhmm] = true;
-        await _sendToAllChannels(buildMessage(_config.counter_type, _config.hand));
-        console.log(`[SuitCounter] ⏰ Envoi heure fixe — ${hhmm}`);
-        sent = true;
-      }
-
-      if (sent && _config.reset_after_send !== false) {
-        resetCounters();
-        console.log(`[SuitCounter] 🔄 Remise à zéro — ${hhmm}`);
-      }
-
-      if (now.getHours() === 0 && now.getMinutes() === 0) _lastSentTimes = {};
     } catch (e) {
       console.warn('[SuitCounter] Erreur scheduler:', e.message);
     }
   }, 60 * 1000);
-  console.log('[SuitCounter] ⏱ Scheduler démarré (vérif. toutes les 60s)');
+  console.log('[SuitCounter] ⏱ Scheduler v2 démarré (vérif. toutes les 60s)');
+}
+
+// ─── Rétrocompatibilité ancienne API ─────────────────────────────────────────
+// Ces fonctions permettent au reste du code qui utilisait l'ancienne API
+// de continuer à fonctionner sans modification.
+function getConfig() {
+  const first = _countersList[0];
+  if (!first) return {
+    enabled: false, channels: [], counter_type: 'taux_miroir', hand: 'joueur',
+    interval: 30, send_on_game_end: false, send_times: [], reset_after_send: true,
+  };
+  return {
+    enabled:          first.enabled,
+    channels:         _countersList.map(c => ({ bot_token: c.bot_token, channel_id: c.channel_id, label: c.label })),
+    counter_type:     first.counter_type,
+    hand:             first.hand,
+    interval:         first.interval,
+    send_on_game_end: first.send_on_game_end,
+    send_times:       first.send_times,
+    reset_after_send: first.reset_after_send,
+  };
+}
+
+function getCounters() {
+  const firstId = _countersList[0]?.id;
+  if (!firstId || !_countersState[firstId]) {
+    return {
+      taux_miroir: { joueur: {'♠':0,'♥':0,'♦':0,'♣':0}, banquier: {'♠':0,'♥':0,'♦':0,'♣':0} },
+      groupe_joueur: {}, groupe_banquier: {},
+      valeur_joueur: {}, valeur_banquier: {},
+      parite_joueur: { pair: 0, impair: 0 }, parite_banquier: { pair: 0, impair: 0 },
+      score_joueur: {}, score_banquier: {},
+      meta: { game_count: 0, last_game_number: null },
+    };
+  }
+  const s = _countersState[firstId];
+  return {
+    taux_miroir:     { joueur: { ...s.suitCounters.joueur }, banquier: { ...s.suitCounters.banquier } },
+    groupe_joueur:   { ...s.groupeJoueur },
+    groupe_banquier: { ...s.groupeBanquier },
+    valeur_joueur:   { ...s.valeurJoueur },
+    valeur_banquier: { ...s.valeurBanquier },
+    parite_joueur:   { ...s.pariteJoueur },
+    parite_banquier: { ...s.pariteBanquier },
+    score_joueur:    { ...s.scoreJoueur },
+    score_banquier:  { ...s.scoreBanquier },
+    meta: { game_count: s.gameCount, last_game_number: s.lastGameNumber },
+  };
+}
+
+async function saveConfig(cfg) {
+  if (!_countersList.length) return;
+  const first = _countersList[0];
+  const updated = { ...first };
+  if (cfg.enabled          !== undefined) updated.enabled          = !!cfg.enabled;
+  if (cfg.counter_type     !== undefined) updated.counter_type     = cfg.counter_type;
+  if (cfg.hand             !== undefined) updated.hand             = cfg.hand;
+  if (cfg.interval         !== undefined) updated.interval         = cfg.interval;
+  if (cfg.send_on_game_end !== undefined) updated.send_on_game_end = !!cfg.send_on_game_end;
+  if (cfg.send_times       !== undefined) updated.send_times       = cfg.send_times;
+  if (cfg.reset_after_send !== undefined) updated.reset_after_send = cfg.reset_after_send;
+  _countersList[0] = updated;
+  await db.setSetting('suit_counters_v2', JSON.stringify(_countersList));
+}
+
+async function sendNow() {
+  if (!_configLoaded) await loadConfig();
+  if (_countersList.length === 0) throw new Error('Aucun compteur configuré');
+  const errors = [];
+  for (const counter of _countersList) {
+    if (!counter.enabled) continue;
+    try { await _sendCounter(counter); } catch (e) { errors.push(e.message); }
+  }
+  if (errors.length > 0) throw new Error(errors.join('; '));
+}
+
+function resetCounters() {
+  resetAllStates();
 }
 
 module.exports = {
@@ -444,6 +577,12 @@ module.exports = {
   getCounters, resetCounters,
   onGameFinished, buildMessage, sendNow,
   startScheduler,
+  // ── API v2 multi-compteurs ──
+  getCountersList, saveCountersList, getCounterState, getAllStates,
+  resetCounterState, resetAllStates,
+  sendCounterById,
+  _makeId,
+  VALID_TYPES,
   GROUPE_JOUEUR_CATEGORIES,
   GROUPE_BANQUIER_CATEGORIES,
   CARD_RANKS,

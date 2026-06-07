@@ -3696,34 +3696,71 @@ async function migrateLegacyProConfigOnce() {
 }
 migrateLegacyProConfigOnce();
 
-// ── Compteur de costumes → Telegram ──────────────────────────────────────────
+// ── Compteurs instantanés → Telegram (v2 multi-compteurs indépendants) ───────
 const suitCounterSvc = require('./suit-counter-service');
 
+// GET  /api/admin/suit-counters  — liste des compteurs + états courants
+router.get('/suit-counters', requireAdmin, async (req, res) => {
+  try {
+    await suitCounterSvc.loadConfig();
+    res.json({ counters: suitCounterSvc.getCountersList(), states: suitCounterSvc.getAllStates() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/suit-counters  — sauvegarde la liste complète
+router.post('/suit-counters', requireAdmin, async (req, res) => {
+  try {
+    const { counters } = req.body;
+    if (!Array.isArray(counters)) return res.status(400).json({ error: 'counters doit être un tableau' });
+    const sanitized = counters.map(c => ({
+      id:               String(c.id || suitCounterSvc._makeId()),
+      label:            String(c.label      || '').trim() || 'Compteur',
+      enabled:          !!c.enabled,
+      bot_token:        String(c.bot_token  || '').trim(),
+      channel_id:       String(c.channel_id || '').trim(),
+      counter_type:     suitCounterSvc.VALID_TYPES.includes(c.counter_type) ? c.counter_type : 'taux_miroir',
+      hand:             ['joueur','banquier'].includes(c.hand) ? c.hand : 'joueur',
+      interval:         [30,60].includes(parseInt(c.interval)) ? parseInt(c.interval) : 30,
+      send_times:       Array.isArray(c.send_times) ? c.send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [],
+      send_on_game_end: !!c.send_on_game_end,
+      reset_after_send: c.reset_after_send !== false,
+    }));
+    await suitCounterSvc.saveCountersList(sanitized);
+    res.json({ ok: true, counters: suitCounterSvc.getCountersList() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/suit-counters/:id/test  — envoie un message test pour un compteur
+router.post('/suit-counters/:id/test', requireAdmin, async (req, res) => {
+  try {
+    await suitCounterSvc.sendCounterById(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/admin/suit-counters/:id/reset  — remet à zéro les compteurs d'un compteur
+router.post('/suit-counters/:id/reset', requireAdmin, async (req, res) => {
+  try {
+    suitCounterSvc.resetCounterState(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Rétrocompatibilité ancienne API (conserve les routes existantes) ──────────
 router.get('/suit-counter-config', requireAdmin, async (req, res) => {
   try {
     await suitCounterSvc.loadConfig();
     res.json({ ...suitCounterSvc.getConfig(), counters: suitCounterSvc.getCounters() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
 router.post('/suit-counter-config', requireAdmin, async (req, res) => {
   try {
-    const { enabled, channels, counter_type, hand, interval, send_on_game_end, send_times, reset_after_send } = req.body;
+    const { enabled, counter_type, hand, interval, send_on_game_end, send_times, reset_after_send } = req.body;
     const patch = {};
     if (typeof enabled          !== 'undefined') patch.enabled          = !!enabled;
     if (typeof send_on_game_end !== 'undefined') patch.send_on_game_end = !!send_on_game_end;
     if (typeof reset_after_send !== 'undefined') patch.reset_after_send = !!reset_after_send;
-    if (channels !== undefined) {
-      patch.channels = (Array.isArray(channels) ? channels : [])
-        .filter(c => c && typeof c === 'object')
-        .map(c => ({
-          bot_token:  String(c.bot_token  || '').trim(),
-          channel_id: String(c.channel_id || '').trim(),
-          label:      String(c.label      || '').trim(),
-        }))
-        .filter(c => c.bot_token && c.channel_id);
-    }
-    if (counter_type !== undefined) patch.counter_type = ['taux_miroir','groupe_joueur','groupe_banquier','valeur_joueur','valeur_banquier','parite_joueur','parite_banquier'].includes(counter_type) ? counter_type : 'taux_miroir';
+    if (counter_type !== undefined) patch.counter_type = suitCounterSvc.VALID_TYPES.includes(counter_type) ? counter_type : 'taux_miroir';
     if (hand         !== undefined) patch.hand         = ['joueur','banquier'].includes(hand) ? hand : 'joueur';
     if (interval     !== undefined) patch.interval     = [30, 60].includes(parseInt(interval)) ? parseInt(interval) : 30;
     if (send_times   !== undefined) patch.send_times   = Array.isArray(send_times) ? send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [];
@@ -3731,19 +3768,13 @@ router.post('/suit-counter-config', requireAdmin, async (req, res) => {
     res.json({ ok: true, config: suitCounterSvc.getConfig() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
 router.post('/suit-counter-test', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.sendNow();
-    res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  try { await suitCounterSvc.sendNow(); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
-
 router.post('/suit-counter/reset', requireAdmin, async (req, res) => {
-  try {
-    suitCounterSvc.resetCounters();
-    res.json({ ok: true, message: 'Compteurs remis à zéro' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { suitCounterSvc.resetCounters(); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/pro-config', requireProOrAdmin, async (req, res) => {
