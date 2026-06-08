@@ -4381,7 +4381,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍', '2k-3k':'2️⃣3️⃣ 2k-3k Tendance' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -5084,7 +5084,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -5507,7 +5507,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍', '2k-3k': '2️⃣3️⃣ 2k-3k' };
 
   return (
     <>
@@ -9057,6 +9057,7 @@ function AdminPanel() {
                     <option value="compteur_parite">⚪⚫ Compteur Parité</option>
                     <option value="pair_impair">🔴⚪ Pair / Impair 🐍 (serpent sur perte)</option>
                     <option value="carte_2v3">2️⃣3️⃣ 2 vs 3 Cartes 🐍 (serpent sur perte)</option>
+                    <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
@@ -9387,6 +9388,38 @@ function AdminPanel() {
                     </div>
                   )}
                 </div>}
+
+                {/* ── Seuil B2 — MODE 2k-3k uniquement ── */}
+                {stratForm.mode === '2k-3k' && (
+                <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.25)' }}>
+                  <label style={{ display: 'block', color: '#67e8f9', fontSize: 12, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    2️⃣3️⃣ Seuils 2k-3k
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+                        B1 — Absences de 2 cartes → prédit <b>3 cartes</b>
+                      </label>
+                      <input type="number" min={1} max={50} value={stratForm.threshold || 3}
+                        onChange={e => setStratForm(p => ({ ...p, threshold: Math.max(1, parseInt(e.target.value) || 1) }))}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,211,238,0.3)', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+                        B2 — Absences de 3 cartes → prédit <b>2 cartes</b>
+                      </label>
+                      <input type="number" min={1} max={50} value={stratForm.threshold_b2 ?? stratForm.threshold ?? 3}
+                        onChange={e => setStratForm(p => ({ ...p, threshold_b2: Math.max(1, parseInt(e.target.value) || 1) }))}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,211,238,0.3)', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#67e8f9', opacity: 0.75 }}>
+                    Les deux compteurs sont indépendants. Quand B1 jeux consécutifs ont eu 3 cartes → prédit 3 cartes. Quand B2 jeux consécutifs ont eu 2 cartes → prédit 2 cartes.
+                  </div>
+                </div>
+                )}
 
                 {/* ── Stratégies sources — MODE UNION ENSEIGNES ── */}
                 {stratForm.mode === 'union_enseignes' && (
@@ -10513,7 +10546,7 @@ function AdminPanel() {
                     {(() => {
                       // Adapter les suits/presets selon le mode de la stratégie
                       const _fMode = stratForm.mode;
-                      const _isCarteMode    = ['carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','carte_2v3'].includes(_fMode);
+                      const _isCarteMode    = ['carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','carte_2v3','2k-3k'].includes(_fMode);
                       const _isVictoireMode = ['absence_victoire','victoire_adverse'].includes(_fMode);
                       const _isPariteMode   = ['compteur_parite','pair_impair'].includes(_fMode);
 
@@ -10858,6 +10891,44 @@ function AdminPanel() {
         })()}
 
         </>}
+
+        {/* ── EXPORT JSON DES STRATÉGIES ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.45)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">📤</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Exporter les stratégies (JSON)</h2>
+              <p className="tg-admin-sub">
+                Télécharge toutes les stratégies personnalisées en fichier <code style={{ background: 'rgba(34,197,94,0.15)', padding: '1px 6px', borderRadius: 4 }}>.json</code>.<br/>
+                <span style={{ color: '#86efac', fontSize: 12 }}>Ce fichier peut ensuite être réimporté dans le panneau "Fichier de mise à jour système" ci-dessous.</span>
+              </p>
+            </div>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{
+              background: 'linear-gradient(135deg,#166534,#22c55e)',
+              border: 'none', color: '#fff', fontWeight: 700, fontSize: 13,
+              padding: '10px 28px', borderRadius: 10, cursor: 'pointer', marginTop: 8,
+            }}
+            onClick={async () => {
+              try {
+                const r = await fetch('/api/admin/strategies/export-json', { credentials: 'include' });
+                if (!r.ok) { alert('❌ Erreur export : ' + (await r.json().catch(() => ({}))).error); return; }
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `strategies_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (e) { alert('❌ Erreur réseau : ' + e.message); }
+            }}
+          >
+            📥 Télécharger strategies.json
+          </button>
+        </div>)}
 
         {/* ── EFFACEMENT MANUEL DES PRÉDICTIONS ── */}
         {/* ── EFFACER DONNÉES D'UNE STRATÉGIE SPÉCIFIQUE ── */}

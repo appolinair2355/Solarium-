@@ -184,7 +184,26 @@ const BASE_CHANNELS = {
   DC: { name: 'Double Canal', emoji: '♣', color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   desc: 'Escalade progressive' },
 };
 
-const SUIT_LABELS = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', '♠️': 'Pique', '❤️': 'Cœur', '♦️': 'Carreau', '♣️': 'Trèfle' };
+const SUIT_LABELS = {
+  '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle',
+  '♠️': 'Pique', '❤️': 'Cœur', '♦️': 'Carreau', '♣️': 'Trèfle',
+  'WIN_B': 'Banquier gagne', 'WIN_BANKER': 'Banquier gagne',
+  'WIN_P': 'Joueur gagne',   'WIN_PLAYER': 'Joueur gagne',
+  'deux':  '2 cartes',       'trois': '3 cartes',
+  'pair':  'Pair',           'impair': 'Impair',
+  'distrib': 'Distribution',
+  'c3v2': '3→2 cartes',     'c2v3': '2→3 cartes',
+  'abs3': 'Abs 3 cartes',
+};
+
+const SPECIAL_SUIT_ORBS = {
+  'WIN_B': '🏦', 'WIN_BANKER': '🏦',
+  'WIN_P': '👤', 'WIN_PLAYER': '👤',
+  'deux':  '2️⃣', 'trois': '3️⃣',
+  'pair':  '🟢', 'impair': '🔴',
+  'distrib': '📊',
+  'c3v2': '3️⃣', 'c2v3': '2️⃣', 'abs3': '2️⃣',
+};
 
 function suitLabel(s) { return SUIT_LABELS[s] || s || '—'; }
 
@@ -711,7 +730,15 @@ export default function Dashboard() {
   const channelPreds = predictions.filter(p => p.strategy === channelId);
   const activePred = channelPreds.find(p => p.status === 'en_cours') || null;
   const predCardBg = activePred?.status === 'gagne' ? '#f0fdf4' : activePred?.status === 'perdu' ? '#fff5f5' : '#ffffff';
-  const PRED_SUIT_COLORS = { '♥': '#dc2626', '♦': '#ea580c', '♠': '#1e293b', '♣': '#15803d' };
+  const PRED_SUIT_COLORS = {
+    '♥': '#dc2626', '♦': '#ea580c', '♠': '#1e293b', '♣': '#15803d',
+    'WIN_B': '#3b82f6', 'WIN_BANKER': '#3b82f6',
+    'WIN_P': '#a855f7', 'WIN_PLAYER': '#a855f7',
+    'deux':  '#f59e0b', 'trois': '#06b6d4',
+    'pair':  '#22c55e', 'impair': '#ef4444',
+    'distrib': '#6366f1',
+    'c3v2':  '#06b6d4', 'c2v3': '#f59e0b',
+  };
   const activeSuitColor = PRED_SUIT_COLORS[activePred?.predicted_suit] || '#1d4ed8';
   const historyPreds = channelPreds.filter(p => p.status !== 'en_cours');
   const tabStats = getStats(channelId);
@@ -1742,14 +1769,23 @@ export default function Dashboard() {
 
                                 return (
                                   <div key={a.suit} className="absence-row" style={{ opacity: a.dimmed ? 0.35 : 1 }}>
-                                    <span className="absence-suit">{a.display}</span>
+                                    <span className="absence-suit">
+                                      {a.display}
+                                      {/* Indicateur serpent pour pair_impair / carte_2v3 */}
+                                      {(a.mode === 'pair_impair' || a.mode === 'carte_2v3') && a.snakeActive && a.snakeSuit === a.suit && (
+                                        <span style={{ fontSize: '0.7rem', marginLeft: 3, animation: 'feuBlink 0.8s infinite' }}>🐍</span>
+                                      )}
+                                    </span>
                                     <div className="absence-bar-wrap">
                                       <div
                                         className="absence-bar-fill"
                                         style={{
                                           width: `${Math.min(100, (a.count / (a.threshold || 1)) * 100)}%`,
-                                          background: barColor,
+                                          background: (a.mode === 'pair_impair' || a.mode === 'carte_2v3') && a.snakeActive && a.snakeSuit === a.suit
+                                            ? '#22c55e'
+                                            : barColor,
                                           transition: 'width 0.4s ease, background 0.3s ease',
+                                          animation: (a.mode === 'pair_impair' || a.mode === 'carte_2v3') && a.snakeActive && a.snakeSuit === a.suit ? 'pulse 1s infinite' : 'none',
                                         }}
                                       />
                                     </div>
@@ -2002,7 +2038,7 @@ export default function Dashboard() {
                          style={{ '--pred-glow': channel.glow }}>
                       <span className="pred-suit-orb-inner"
                             style={{ color: activeSuitColor }}>
-                        {activePred.suit_display || activePred.predicted_suit}
+                        {SPECIAL_SUIT_ORBS[activePred.predicted_suit] || activePred.suit_display || activePred.predicted_suit}
                       </span>
                     </div>
 

@@ -163,25 +163,67 @@ export default function Login() {
   // ── Modal maintenance ──────────────────────────────────────────────
   if (maintenance) {
     return (
-      <div className="auth-page">
-        <div className="auth-bg-orb orb1" />
-        <div className="auth-bg-orb orb2" />
-        <div className="auth-box" style={{ textAlign: 'center', maxWidth: 440 }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>🔧</div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f59e0b', marginBottom: 12 }}>
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0b0b14 0%, #1a1035 50%, #0b0b14 100%)',
+        padding: 24,
+      }}>
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(30,15,60,0.95))',
+          border: '2px solid rgba(245,158,11,0.4)',
+          borderRadius: 20,
+          padding: '48px 40px',
+          textAlign: 'center',
+          maxWidth: 460,
+          width: '100%',
+          boxShadow: '0 0 60px rgba(245,158,11,0.15), 0 20px 60px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontSize: 64, marginBottom: 20, lineHeight: 1 }}>🔧</div>
+          <h2 style={{
+            fontSize: '1.6rem',
+            fontWeight: 800,
+            color: '#f59e0b',
+            marginBottom: 16,
+            marginTop: 0,
+            letterSpacing: '-0.02em',
+          }}>
             Maintenance en cours
           </h2>
-          <p style={{ color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: 8 }}>
+          <div style={{
+            width: 60,
+            height: 3,
+            background: 'linear-gradient(90deg, #f59e0b, #fbbf24)',
+            borderRadius: 2,
+            margin: '0 auto 20px',
+          }} />
+          <p style={{ color: '#cbd5e1', fontSize: '1rem', lineHeight: 1.7, marginBottom: 10 }}>
             Nous sommes actuellement en maintenance.
           </p>
-          <p style={{ color: '#cbd5e1', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: 28 }}>
+          <p style={{ color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.7, marginBottom: 32 }}>
             Veuillez contacter l'administrateur{' '}
-            <strong style={{ color: '#fbbf24' }}>Sossou Kouamé</strong>{' '}
+            <strong style={{ color: '#fbbf24', fontWeight: 700 }}>Sossou Kouamé</strong>{' '}
             pour toute assistance.
           </p>
           <button
-            className="btn btn-gold btn-auth"
+            style={{
+              padding: '14px 32px',
+              borderRadius: 12,
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '1rem',
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, #92400e, #f59e0b)',
+              color: '#fff',
+              width: '100%',
+              boxShadow: '0 4px 20px rgba(245,158,11,0.3)',
+              transition: 'opacity 0.2s',
+            }}
             onClick={() => window.location.reload()}
+            onMouseOver={e => e.currentTarget.style.opacity = '0.85'}
+            onMouseOut={e => e.currentTarget.style.opacity = '1'}
           >
             🔄 Actualiser
           </button>
