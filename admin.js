@@ -525,10 +525,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -590,6 +590,21 @@ router.get('/pro-strategies', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Export toutes les stratégies en JSON (admin) ────────────────────────────
+router.get('/strategies/export-json', requireAdmin, async (req, res) => {
+  try {
+    const list = await getStrategies();
+    const payload = {
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      strategies: list,
+    };
+    res.setHeader('Content-Disposition', `attachment; filename="strategies_${new Date().toISOString().slice(0,10)}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(payload, null, 2));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
@@ -644,7 +659,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isGestionBanque     = mode === 'gestion_banque';
     const isPairImpair        = mode === 'pair_impair';
     const isCarte2v3          = mode === 'carte_2v3';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
+    const is2k3k              = mode === '2k-3k';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -749,6 +765,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       // CM+t paramètres
       cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
+      // 2k-3k : seuil B2 indépendant
+      threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -941,7 +959,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isGestionBanque     = mode === 'gestion_banque';
     const isPairImpair        = mode === 'pair_impair';
     const isCarte2v3          = mode === 'carte_2v3';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3) ? null : normalizeMappings(mappings);
+    const is2k3k              = mode === '2k-3k';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1052,6 +1071,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       // CM+t paramètres
       cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
+      // 2k-3k : seuil B2 indépendant
+      threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -3920,7 +3941,7 @@ function analyzeStrategyFile(ext, content, filename) {
     if (!strategies.length) {
       errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
     }
-    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire','pair_impair','carte_2v3'];
+    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire','pair_impair','carte_2v3','2k-3k'];
     for (const s of strategies) {
       if (!s || typeof s !== 'object') {
         errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });

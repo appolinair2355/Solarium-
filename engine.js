@@ -617,6 +617,8 @@ class Engine {
           this.custom[cfg.id].snakeActive = false;
           this.custom[cfg.id].snakeSuit   = null;
           if (this.custom[cfg.id].c2v3Counts) { this.custom[cfg.id].c2v3Counts.deux = 0; this.custom[cfg.id].c2v3Counts.trois = 0; }
+          // Reset 2k-3k
+          if (this.custom[cfg.id].abs2k3k) { this.custom[cfg.id].abs2k3k.abs_deux = 0; this.custom[cfg.id].abs2k3k.abs_trois = 0; }
           // Reset histoire (basée sur la main surveillée)
           this.custom[cfg.id].history = [];
           // Reset lastHour pour forcer la réinitialisation de mirrorLastHour
@@ -3584,6 +3586,41 @@ class Engine {
         }
       }
 
+    } else if (mode === '2k-3k') {
+      // ── Mode 2k-3k : Tendance cartes (sans serpent) ───────────────────────
+      // Deux compteurs indépendants sur la main configurée :
+      //   abs_deux  → jeux consécutifs où la main a eu 3 cartes (2 cartes absentes)
+      //               Quand abs_deux ≥ B1 (threshold) → prédit "trois" (tendance confirmée)
+      //   abs_trois → jeux consécutifs où la main a eu 2 cartes (3 cartes absentes)
+      //               Quand abs_trois ≥ B2 (threshold_b2) → prédit "deux" (tendance confirmée)
+      // Pas de serpent, pas de mapping — prédiction directe deux/trois.
+      const B1 = parseInt(cfg.threshold) || 3;
+      const B2 = parseInt(cfg.threshold_b2) || B1;
+      if (!state.abs2k3k) state.abs2k3k = { abs_deux: 0, abs_trois: 0 };
+      const _2k3kCards = cfg.hand === 'banquier' ? bCards : pCards;
+      const _2k3kCnt   = countValidCards(_2k3kCards);
+      if (_2k3kCnt === 2) {
+        // Main a 2 cartes → reset abs_deux, incrémenter abs_trois
+        state.abs2k3k.abs_deux  = 0;
+        state.abs2k3k.abs_trois = (state.abs2k3k.abs_trois || 0) + 1;
+        if (state.abs2k3k.abs_trois >= B2 && Object.keys(state.pending).length === 0) {
+          console.log(`[${channelId}] [2k-3k] 3 cartes absent ${state.abs2k3k.abs_trois}× (≥B2=${B2}) → prédit 2 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'deux', 'deux');
+          state.abs2k3k.abs_deux  = 0;
+          state.abs2k3k.abs_trois = 0;
+        }
+      } else if (_2k3kCnt === 3) {
+        // Main a 3 cartes → reset abs_trois, incrémenter abs_deux
+        state.abs2k3k.abs_trois = 0;
+        state.abs2k3k.abs_deux  = (state.abs2k3k.abs_deux || 0) + 1;
+        if (state.abs2k3k.abs_deux >= B1 && Object.keys(state.pending).length === 0) {
+          console.log(`[${channelId}] [2k-3k] 2 cartes absent ${state.abs2k3k.abs_deux}× (≥B1=${B1}) → prédit 3 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'trois', 'trois');
+          state.abs2k3k.abs_deux  = 0;
+          state.abs2k3k.abs_trois = 0;
+        }
+      }
+
     } else if (mode === 'compteurs_absences') {
       // ── MODE COMPTEURS D'ABSENCES (3 Compteurs) ──────────────────────────
       // Algorithme basé sur 3 compteurs travaillant ensemble.
@@ -5661,6 +5698,29 @@ class Engine {
             description: sna && entry.snakeSuit === 'trois'
               ? `🐍 Serpent actif → 3 cartes prédit`
               : `${c2.trois || 0}/${threshold} absences 3 cartes`,
+          },
+        ];
+      }
+
+      // Mode 2k-3k → afficher compteurs abs_deux/abs_trois avec seuils B1/B2
+      if (mode === '2k-3k') {
+        const ab = entry.abs2k3k || { abs_deux: 0, abs_trois: 0 };
+        const B1 = parseInt(cfg.threshold) || 3;
+        const B2 = parseInt(cfg.threshold_b2) || B1;
+        return [
+          {
+            suit: 'trois', display: '3️⃣ 3 cartes',
+            count: ab.abs_deux || 0, threshold: B1,
+            mode, label: '2k-3k',
+            isLive: false, singleCounter: false,
+            description: `${ab.abs_deux || 0}/${B1} absences 2 cartes → prédit 3`,
+          },
+          {
+            suit: 'deux', display: '2️⃣ 2 cartes',
+            count: ab.abs_trois || 0, threshold: B2,
+            mode, label: '2k-3k',
+            isLive: false, singleCounter: false,
+            description: `${ab.abs_trois || 0}/${B2} absences 3 cartes → prédit 2`,
           },
         ];
       }

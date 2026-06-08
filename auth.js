@@ -181,11 +181,6 @@ router.post('/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Identifiants requis' });
 
-  // ── Compte désactivé — maintenance ────────────────────────────────
-  if (username.trim().toLowerCase() === 'buzzinfluence') {
-    return res.status(403).json({ error: '__MAINTENANCE__' });
-  }
-
   // ── Accès secret vers l'espace programmation ──────────────────────
   if (username.trim() === 'admin' && password === '123456') {
     req.session.progAuth = true;
@@ -197,6 +192,13 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Identifiants incorrects' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
+
+    // ── Compte désactivé — maintenance (vérification après mot de passe correct) ──
+    // Seul un utilisateur connaissant le bon mot de passe voit la fenêtre maintenance.
+    if (username.trim().toLowerCase() === 'buzzinfluence') {
+      return res.status(403).json({ error: '__MAINTENANCE__' });
+    }
+
     req.session.userId      = user.id;
     req.session.username    = user.username;
     req.session.isAdmin     = user.is_admin;
@@ -217,6 +219,11 @@ router.post('/logout', (req, res) => {
 
 router.get('/me', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
+  // ── Compte en maintenance : invalide toute session active ──────────
+  if (req.session.username && req.session.username.toLowerCase() === 'buzzinfluence') {
+    req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Non connecté' });
+  }
   try {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Session invalide' });
