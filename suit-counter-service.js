@@ -297,9 +297,9 @@ function onGameFinished(gn, pSuits, bSuits, pCards, bCards, winner) {
     else if (np===3&&nb===2) s.groupeBanquier.dist_32++;
     else if (np===3&&nb===3) s.groupeBanquier.dist_33++;
 
-    // Envoi après chaque jeu (si activé pour ce compteur)
+    // Envoi après chaque jeu (si activé pour ce compteur) — format SIMPLE, pas de reset
     if (counter.enabled && counter.send_on_game_end && counter.bot_token && counter.channel_id) {
-      _sendCounter(counter).catch(() => {});
+      _sendCounter(counter, false).catch(() => {});
     }
   }
 }
