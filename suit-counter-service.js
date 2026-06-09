@@ -561,12 +561,8 @@ function buildMessage(counter) {
 function _buildFooter(s, counter) {
   const lines = [];
   if (s.lastGameNumber) lines.push(`🎮 Jeu #${s.lastGameNumber}  |  📊 ${s.gameCount} jeu(x) depuis dernier reset`);
-  if (counter.reset_after_send !== false) {
-    const info = _getNextResetInfo(counter);
-    lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
-  } else {
-    lines.push('♾️ Pas de reset automatique');
-  }
+  const info = _getNextResetInfo(counter);
+  lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
   return `\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}`;
 }
 
