@@ -478,6 +478,28 @@ async function sendOne(bot_token, channel_id, text) {
   return resp.json();
 }
 
+// Envoie un texte potentiellement long en le découpant en morceaux ≤ 4000 chars
+// Le découpage se fait sur les limites de groupes (lignes vides) pour préserver la lisibilité
+async function sendSplit(bot_token, channel_id, text) {
+  const MAX = 4000;
+  if (text.length <= MAX) return sendOne(bot_token, channel_id, text);
+  const lines  = text.split('\n');
+  const chunks = [];
+  let cur      = '';
+  for (const line of lines) {
+    if (cur.length + line.length + 1 > MAX && cur.length > 0) {
+      chunks.push(cur);
+      cur = line;
+    } else {
+      cur = cur ? cur + '\n' + line : line;
+    }
+  }
+  if (cur) chunks.push(cur);
+  let last;
+  for (const chunk of chunks) last = await sendOne(bot_token, channel_id, chunk);
+  return last;
+}
+
 // Envoie le bilan sur tous les canaux actifs (principal + extras).
 // Retourne la liste des résultats par canal.
 async function sendToAllChannels(text) {
@@ -493,7 +515,7 @@ async function sendToAllChannels(text) {
   }
   const results = [];
   for (const t of targets) {
-    try { await sendOne(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
+    try { await sendSplit(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
     catch (e) { results.push({ id: t.id, label: t.label, sent: false, error: e.message }); }
   }
   return results;
@@ -514,7 +536,7 @@ async function sendToPerGameChannels(text) {
   if (targets.length === 0) return [];
   const results = [];
   for (const t of targets) {
-    try { await sendOne(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
+    try { await sendSplit(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
     catch (e) { results.push({ id: t.id, label: t.label, sent: false, error: e.message }); }
   }
   return results;
@@ -852,7 +874,7 @@ router.post('/extra-channels/:id/test', requireAdmin, async (req, res) => {
     const now = new Date();
     const summary = buildSummary();
     const text = '🧪 <b>Test de canal Comptages</b>\n\n' + buildReportText(now, summary, null);
-    await sendOne(target.bot_token, target.channel_id, text);
+    await sendSplit(target.bot_token, target.channel_id, text);
     res.json({ ok: true, label: target.label || target.channel_id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -4448,20 +4448,29 @@ class Engine {
   // Les pertes restent gérées à la fin officielle du jeu (pas de résolution négative live).
   async _verifyPendingLive() {
     if (!this.liveGameCards) return;
-    const { gameNumber: gn, playerSuits, bankerSuits, playerDone, bankerDone, playerCards, bankerCards } = this.liveGameCards;
+    const { gameNumber: gn, playerSuits, bankerSuits, playerSuitsRaw, bankerSuitsRaw, playerDone, bankerDone, playerCards, bankerCards } = this.liveGameCards;
 
     // Helper : tente de résoudre live un seul objet pending (ex: this.c1.pending)
-    const tryResolve = async (pending, strategyId, handSuits, handDone, tgOpts = {}) => {
-      if (!handDone || handSuits.length === 0) return;
+    // rawSuits : costumes bruts de la main même si la donne n'est pas encore terminée.
+    // Principe de vérification dynamique :
+    //   - Si le costume prédit est déjà présent dans les cartes partielles → victoire immédiate
+    //     (le costume est confirmé, peu importe si une 3ème carte peut encore venir)
+    //   - S'il n'est PAS encore dans la main partielle → on attend la fin du jeu
+    //     (_resolvePending traitera l'issue finale : victoire sur 3ème carte ou défaite)
+    const tryResolve = async (pending, strategyId, handSuits, handDone, tgOpts = {}, rawSuits = null) => {
+      // Utilise les costumes bruts (partiels) pour la détection de victoire ;
+      // si rawSuits est vide (aucune carte encore), on attend.
+      const suitsForWin = (Array.isArray(rawSuits) && rawSuits.length > 0) ? rawSuits : handSuits;
+      if (suitsForWin.length === 0) return;
       for (const [pg, info] of Object.entries(pending)) {
         const pgNum = parseInt(pg);
         if (pgNum > gn) continue;           // prédit pour un jeu futur → skip
-        if (!handSuits.includes(info.suit)) continue; // costume absent de la main live → attend
+        if (!suitsForWin.includes(info.suit)) continue; // costume absent des cartes actuelles → attend fin de jeu
         const rattrapage = gn - pgNum;
         // Vérifier que le rattrapage ne dépasse pas le maxR de la prédiction
         const predMaxR = (info.maxR !== undefined && info.maxR !== null) ? info.maxR : getCurrentMaxRattrapage();
         if (rattrapage > predMaxR) continue; // déjà au-delà du maxR → la perte sera enregistrée par le cycle régulier
-        console.log(`[${strategyId}] ⚡ Live: costume ${info.suit} trouvé jeu #${gn} → gagne immédiat (R${rattrapage})`);
+        console.log(`[${strategyId}] ⚡ Live dynamique: costume ${info.suit} trouvé jeu #${gn} (${suitsForWin === rawSuits && !handDone ? 'main partielle' : 'main complète'}) → gagne immédiat (R${rattrapage})`);
         await resolvePrediction(strategyId, pgNum, info.suit, 'gagne', rattrapage, playerCards, bankerCards, tgOpts);
         delete pending[pg];
       }
@@ -4470,21 +4479,23 @@ class Engine {
     // Stratégies par défaut C1/C2/C3/DC → main selon config (joueur par défaut)
     for (const chId of ['C1', 'C2', 'C3', 'DC']) {
       const chTgCfg  = this.defaultStratTg?.[chId] || {};
-      const chHand   = chTgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
-      const chSuits  = chHand === 'banquier' ? bankerSuits : playerSuits;
-      const chDone   = chHand === 'banquier' ? bankerDone  : playerDone;
-      const chState  = chId === 'C1' ? this.c1 : chId === 'C2' ? this.c2 : chId === 'C3' ? this.c3 : this.dc;
-      const chTgOpts = { formatId: chTgCfg.tg_format || null, hand: chHand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: chId };
-      await tryResolve(chState.pending, chId, chSuits, chDone, chTgOpts);
+      const chHand      = chTgCfg.hand === 'banquier' ? 'banquier' : 'joueur';
+      const chSuits     = chHand === 'banquier' ? bankerSuits    : playerSuits;
+      const chSuitsRaw  = chHand === 'banquier' ? bankerSuitsRaw : playerSuitsRaw;
+      const chDone      = chHand === 'banquier' ? bankerDone     : playerDone;
+      const chState     = chId === 'C1' ? this.c1 : chId === 'C2' ? this.c2 : chId === 'C3' ? this.c3 : this.dc;
+      const chTgOpts    = { formatId: chTgCfg.tg_format || null, hand: chHand, maxR: getCurrentMaxRattrapage(), siteUrl: '', stratName: chId };
+      await tryResolve(chState.pending, chId, chSuits, chDone, chTgOpts, chSuitsRaw);
     }
 
     // Stratégies custom → main selon config, avec les bonnes options Telegram
     for (const [idStr, entry] of Object.entries(this.custom)) {
       if (!entry.config?.enabled) continue;
       const cfg       = entry.config;
-      const hand      = cfg.hand === 'banquier' ? 'banquier' : 'joueur';
-      const handSuits = hand === 'banquier' ? bankerSuits : playerSuits;
-      const handDone  = hand === 'banquier' ? bankerDone  : playerDone;
+      const hand         = cfg.hand === 'banquier' ? 'banquier' : 'joueur';
+      const handSuits    = hand === 'banquier' ? bankerSuits    : playerSuits;
+      const handSuitsRaw = hand === 'banquier' ? bankerSuitsRaw : playerSuitsRaw;
+      const handDone     = hand === 'banquier' ? bankerDone     : playerDone;
       const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
       const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
@@ -4499,6 +4510,8 @@ class Engine {
       }
 
       // ── Résolution live spéciale pour les modes Carte 2/3 ───────────
+      // Ces modes nécessitent le COMPTE FINAL de cartes → attendre que les deux mains soient terminées.
+      // On ne peut pas utiliser rawSuits ici : il faut countValidCards() sur la main complète.
       if (cfg.mode === 'carte_3_vers_2' || cfg.mode === 'carte_2_vers_3') {
         const hCards = hand === 'banquier' ? bankerCards : playerCards;
         // Attendre que les DEUX mains soient terminées pour avoir le compte de cartes définitif
@@ -4522,7 +4535,9 @@ class Engine {
         continue; // ne pas appeler tryResolve pour ces modes
       }
 
-      await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone, stratTgOpts);
+      // Vérification dynamique : passe rawSuits pour détecter le costume dès son apparition
+      // même si la main n'est pas encore complète (avant la 3ème carte).
+      await tryResolve(entry.pending, `S${idStr}`, handSuits, handDone, stratTgOpts, handSuitsRaw);
     }
   }
 
@@ -4826,14 +4841,16 @@ class Engine {
         );
 
         this.liveGameCards = {
-          gameNumber:  liveGame.game_number,
-          phase:       ph,
-          playerSuits: playerDone ? pSuits : [],
-          bankerSuits: bankerDone ? bSuits : [],
+          gameNumber:      liveGame.game_number,
+          phase:           ph,
+          playerSuits:     playerDone ? pSuits : [],
+          bankerSuits:     bankerDone ? bSuits : [],
+          playerSuitsRaw:  pSuits,   // costumes bruts même si main pas encore terminée
+          bankerSuitsRaw:  bSuits,
           playerDone,
           bankerDone,
-          playerCards: liveGame.player_cards || [],
-          bankerCards: liveGame.banker_cards || [],
+          playerCards:     liveGame.player_cards || [],
+          bankerCards:     liveGame.banker_cards || [],
         };
         // Vérification live des prédictions en attente (gagne immédiat si costume trouvé)
         await this._verifyPendingLive();

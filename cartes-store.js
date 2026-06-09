@@ -38,6 +38,8 @@ const URL = process.env.LES_CARTES_DATABASE_URL
 let pool = null;
 let initialized = false;
 let initPromise = null;
+let _retryCount  = 0;
+let _lastFailAt  = 0;
 
 function getPool() {
   if (pool) return pool;
@@ -60,6 +62,12 @@ async function init() {
   }
   if (initialized) return;
   if (initPromise) return initPromise;
+
+  // Backoff exponentiel : 10s → 20s → 40s → 80s → 160s → max 5min
+  const now     = Date.now();
+  const backoff = Math.min(10000 * Math.pow(2, Math.min(_retryCount, 5)), 300000);
+  if (_lastFailAt > 0 && now - _lastFailAt < backoff) return;
+
   initPromise = (async () => {
     const p = getPool();
     await p.query(`
@@ -95,8 +103,14 @@ async function init() {
     initialized = true;
     console.log('[CartesStore] ✅ Table cartes_jeu prête (db=les_cartes)');
   })().catch((e) => {
-    initPromise = null;
-    console.error('[CartesStore] ❌ init error:', e.message);
+    initPromise  = null;
+    _retryCount++;
+    _lastFailAt  = Date.now();
+    if (_retryCount <= 3) {
+      console.error('[CartesStore] ❌ init error:', e.message);
+    } else if (_retryCount === 4) {
+      console.error('[CartesStore] ❌ init error (trop d\'échecs — backoff actif, logs supprimés):', e.message);
+    }
     throw e;
   });
   return initPromise;
