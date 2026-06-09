@@ -332,14 +332,9 @@ const COUNTER_TYPE_LABELS = {
 };
 
 function _buildBilanFooter(s, counter) {
-  const lines = [];
-  if (counter.reset_after_send !== false) {
-    const info = _getNextResetInfo(counter);
-    lines.push(`⏭ Prochain reset dans ${info.timeStr}  (${info.label})`);
-  } else {
-    lines.push('♾️ Pas de reset automatique');
-  }
-  return `\n━━━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}`;
+  const info = _getNextResetInfo(counter);
+  const line = `⏭ Prochain reset dans ${info.timeStr}  (${info.label})`;
+  return `\n━━━━━━━━━━━━━━━━━━━━\n${line}`;
 }
 
 function buildBilanMessage(counter) {
@@ -720,7 +715,8 @@ function startScheduler() {
           }
         }
 
-        if (sent && counter.reset_after_send !== false) {
+        if (sent) {
+          // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
           const prevSentMs    = s.lastScheduleSentMs || now.getTime();
           const prevSentHhmm  = s.lastScheduleSent   || hhmm;
