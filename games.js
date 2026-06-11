@@ -200,6 +200,13 @@ function updateCache(parsed, source) {
     require('./live-broadcast').onGamesUpdate(gamesCache).catch(e =>
       console.warn('[LiveBroadcast] hook error:', e.message));
   } catch (e) { /* module absent — ignoré */ }
+  // Notifier le wallet des jeux terminés (pour résolution persistante des mises)
+  try {
+    const { notifyGameResult } = require('./baccara-wallet-route');
+    if (typeof notifyGameResult === 'function') {
+      for (const g of gamesCache) if (g.is_finished && g.winner) notifyGameResult(g);
+    }
+  } catch(_) {}
   return true;
 }
 

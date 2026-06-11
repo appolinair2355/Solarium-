@@ -193,12 +193,6 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
 
-    // ── Compte désactivé — maintenance (vérification après mot de passe correct) ──
-    // Seul un utilisateur connaissant le bon mot de passe voit la fenêtre maintenance.
-    if (username.trim().toLowerCase() === 'buzzinfluence') {
-      return res.status(403).json({ error: '__MAINTENANCE__' });
-    }
-
     req.session.userId      = user.id;
     req.session.username    = user.username;
     req.session.isAdmin     = user.is_admin;

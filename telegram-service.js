@@ -12,6 +12,154 @@ function registerRelayHandler(fn) { _relayHandlers.add(fn); }
 function unregisterRelayHandler(fn) { _relayHandlers.delete(fn); }
 function getMainToken() { return TOKEN; }
 
+// ── Réactions automatiques multi-stratégies ───────────────────────────────────
+// Chaque stratégie/mode reçoit un emoji unique basé sur son nom.
+// Les réactions de plusieurs stratégies sur le même message sont fusionnées
+// en un seul appel après 2 s (fenêtre de debounce).
+// ── Liste STRICTEMENT valide des réactions Telegram (Bot API 7+) ─────────────
+// Seuls ces emojis sont acceptés par setMessageReaction — tout autre est rejeté.
+// Source : https://core.telegram.org/bots/api#reactiontypeemoji
+
+// Emoji unique par mode (persona fixe — uniquement des emojis Telegram valides)
+const _MODE_EMOJIS_WIN = {
+  manquants:           '🤩',
+  apparents:           '🥰',
+  absence_apparition:  '🐳',
+  absence_confirmee:   '🦄',
+  apparition_absence:  '😍',
+  taux_miroir:         '⚡',
+  compteur_adverse:    '🏆',
+  absence_victoire:    '🎉',
+  distribution:        '🤣',
+  carte_3_vers_2:      '💯',
+  carte_2_vers_3:      '🌚',
+  abs_3_vers_2:        '🤯',
+  abs_3_vers_3:        '😱',
+  compteur_parite:     '🙏',
+  pair_impair:         '👌',
+  carte_2v3:           '🔥',
+  '2k-3k':             '❤️‍🔥',
+  compteurs_absences:  '🌭',
+  carte_valeur:        '🍌',
+  comptages_ecart:     '🍓',
+  first_card_plus6:    '🍾',
+  costume_manquant:    '🕊️',
+  gestion_banque:      '💋',
+  lecture_passee:      '😇',
+  intelligent_cartes:  '👻',
+  annonce_sequence:    '🎃',
+  surveillance_perte:  '👀',
+  multi_strategy:      '🤝',
+  union_enseignes:     '🤗',
+  intersection:        '🫡',
+  proche:              '🆒',
+};
+const _MODE_EMOJIS_LOSS = {
+  manquants:           '😢',
+  apparents:           '💔',
+  absence_apparition:  '😭',
+  absence_confirmee:   '😴',
+  apparition_absence:  '😨',
+  taux_miroir:         '🤬',
+  compteur_adverse:    '😱',
+  absence_victoire:    '🤮',
+  distribution:        '🥱',
+  carte_3_vers_2:      '🥴',
+  carte_2_vers_3:      '🤡',
+  abs_3_vers_2:        '😐',
+  abs_3_vers_3:        '🤨',
+  compteur_parite:     '🙈',
+  pair_impair:         '😈',
+  carte_2v3:           '👎',
+  '2k-3k':             '😮',
+  compteurs_absences:  '🤔',
+  carte_valeur:        '💩',
+  comptages_ecart:     '😁',
+  first_card_plus6:    '🙉',
+  costume_manquant:    '🙊',
+  gestion_banque:      '🤓',
+  lecture_passee:      '👾',
+  intelligent_cartes:  '😎',
+  annonce_sequence:    '🗿',
+  surveillance_perte:  '💅',
+  multi_strategy:      '🤪',
+  union_enseignes:     '💊',
+  intersection:        '😘',
+  proche:              '😡',
+};
+
+// Pool pour les stratégies — UNIQUEMENT emojis Telegram valides
+const _WIN_EMOJIS  = ['👍','👏','😁','🥰','🤩','🎉','🏆','🔥','💯','⚡','🌚','🌭','🍌','🍓','🍾','😍','🐳','🤣'];
+const _LOSS_EMOJIS = ['👎','😢','💔','😭','🤬','😱','🥴','🤡','😴','😨'];
+const _reactAccum  = new Map(); // key → Set<emoji>
+const _reactTimers = new Map(); // key → timer
+
+function _modeEmoji(mode, status) {
+  if (!mode) return null;
+  return status === 'gagne'
+    ? (_MODE_EMOJIS_WIN[mode]  || null)
+    : (_MODE_EMOJIS_LOSS[mode] || null);
+}
+
+function _strategyEmoji(strategyName, status) {
+  const pool = status === 'gagne' ? _WIN_EMOJIS : _LOSS_EMOJIS;
+  let h = 0;
+  for (let i = 0; i < strategyName.length; i++) h = (h * 31 + strategyName.charCodeAt(i)) >>> 0;
+  return pool[h % pool.length];
+}
+
+async function _doReact(token, chatId, messageId, emojis) {
+  const res = await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      reactions: emojis.map(e => ({ type: 'emoji', emoji: e })),
+      is_big: emojis.length >= 3,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, body };
+}
+
+function _scheduleReaction(token, chatId, messageId, emoji, fallbackEmoji) {
+  if (!emoji) return;
+  const key = `${token}:${chatId}:${messageId}`;
+  if (!_reactAccum.has(key)) _reactAccum.set(key, { emojis: new Set(), fallback: fallbackEmoji || '👍' });
+  const entry = _reactAccum.get(key);
+  entry.emojis.add(emoji);
+  if (fallbackEmoji) entry.fallback = fallbackEmoji;
+  if (_reactTimers.has(key)) clearTimeout(_reactTimers.get(key));
+  _reactTimers.set(key, setTimeout(async () => {
+    _reactTimers.delete(key);
+    const acc = _reactAccum.get(key);
+    _reactAccum.delete(key);
+    if (!acc) return;
+    const emojis   = [...acc.emojis];
+    const fallback = acc.fallback;
+    if (!emojis.length) return;
+    try {
+      const { ok, body } = await _doReact(token, chatId, messageId, emojis);
+      if (ok) {
+        console.log(`[TG React] ✅ ${chatId}/${messageId} [${emojis.join('')}]`);
+      } else {
+        const desc = body?.description || '';
+        console.warn(`[TG React] ⚠️  ${chatId}/${messageId} [${emojis.join('')}]: ${desc} — retry avec ${fallback}`);
+        // Retry avec réaction universelle (👍 ou 👎)
+        const { ok: ok2, body: b2 } = await _doReact(token, chatId, messageId, [fallback]);
+        if (ok2) {
+          console.log(`[TG React] ✅ fallback ${chatId}/${messageId} [${fallback}]`);
+        } else {
+          console.warn(`[TG React] ❌ fallback échoué ${chatId}/${messageId}: ${b2?.description || '?'}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[TG React] Exception: ${e.message}`);
+    }
+  }, 2000));
+}
+
 // ── Settings loaders ───────────────────────────────────────────────
 
 async function loadToken() {
@@ -499,8 +647,9 @@ function buildTgMessage(formatId, {
 
   // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
   if (suit === 'distrib') formatId = 11;
-  // Les modes Carte 2/3 et Pair/Impair utilisent le format 12 par défaut (sauf si un format ≥12 a été choisi)
-  if ((suit === 'deux' || suit === 'trois' || suit === 'pair' || suit === 'impair') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
+  // deux/trois → format 76 par défaut | pair/impair → format 12 par défaut
+  if ((suit === 'deux' || suit === 'trois') && (!formatId || parseInt(formatId) < 12)) formatId = 76;
+  if ((suit === 'pair' || suit === 'impair') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
 
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -1242,6 +1391,27 @@ function buildTgMessage(formatId, {
       return { text: `🌟 ═══ ULTRA PRO BACCARAT ═══ 🌟\n📍 Jeu #N${gameNumber}\n🎯 ${ct75}\n🔰 Dogon max : ×${maxR}\n━━━━━━━━━━━━━━━━━━━━━━\n${sl75}`, parse_mode: null };
     }
 
+    // ── Format 76 : Cartes Signature ────────────────────────────────────────
+    case 76: {
+      const h76 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const ct76 = suit === 'deux' ? '2 cartes'
+                 : suit === 'trois' ? '3 cartes'
+                 : suit === 'pair' ? 'Pair'
+                 : suit === 'impair' ? 'Impair'
+                 : name;
+      const sl76 = status === null    ? '⌛'
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+                 :                      '❌';
+      return {
+        text:
+          `💠Jeux №${gameNumber}\n` +
+          `🎯${h76} recevra ${ct76}\n` +
+          `🌤 Rattrapages +${maxR}\n` +
+          `🗯️Résultats : ${sl76}`,
+        parse_mode: null,
+      };
+    }
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {
@@ -1486,6 +1656,16 @@ async function editStoredMessages(strategy, gameNumber, suit, status, rattrapage
       });
       if (resp.ok) {
         console.log(`[TG Edit] ${strategy} #${gameNumber} → ${row.channel_tg_id} (${status} R${rattrapage})`);
+
+        // ── Réaction automatique après vérification ──────────────────────────────
+        // 1 seule réaction (limite bot Telegram) : emoji du mode, fallback 👍/👎
+        if (status === 'gagne' || status === 'perdu') {
+          const msgId    = parseInt(row.message_id);
+          const fallback = status === 'gagne' ? '👍' : '👎';
+          // 1 seule réaction (limite Telegram bots) : mode emoji en priorité, sinon stratégie
+          const mEmoji = _modeEmoji(tgOpts.mode || '', status) || _strategyEmoji(strategy, status);
+          _scheduleReaction(token, row.channel_tg_id, msgId, mEmoji || fallback, fallback);
+        }
 
         if (status === 'gagne') {
           const capturedToken  = token;

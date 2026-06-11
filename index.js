@@ -142,6 +142,8 @@ app.use('/api/ideas',       ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
 app.use('/api/admin/tg-relay', tgRelayRoutes);
 app.use('/api/kouame',      kouameRoutes);
+const baccaraWalletRoutes = require('./baccara-wallet-route');
+app.use('/api/baccara-wallet', baccaraWalletRoutes);
 
 // ── Statut admin en ligne ──────────────────────────────────────────
 const db = require('./db');

@@ -487,7 +487,7 @@ class Engine {
     const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
     const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
 
     // ── FIX : vérifier les flags d'attente — copier la prochaine pred source dès qu'elle est disponible
     if (state.survWaitingFrom) {
@@ -562,7 +562,7 @@ class Engine {
         return;
       }
       const tgs = Array.isArray(state.config.tg_targets) ? state.config.tg_targets : [];
-      const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR, siteUrl: state.config.tg_site_url || '', stratName: state.config.name || '' };
+      const stratTgOpts = { formatId: state.config.tg_format || null, hand: state.config.hand || 'joueur', maxR: stratMaxR, siteUrl: state.config.tg_site_url || '', stratName: state.config.name || '', mode: state.config.mode || '' };
       db.createPrediction({ strategy: stratId, game_number: nextGn, predicted_suit: suit, triggered_by: suit }).then(async inserted => {
         if (!inserted) {
           console.warn(`[${stratId}] _forceNextPrediction #${nextGn} déjà existante — Telegram ignoré`);
@@ -951,7 +951,7 @@ class Engine {
     if (!this.custom[id]) return;
     const channelId = `S${id}`;
     const stratMaxR = cfg.max_rattrapage !== undefined ? parseInt(cfg.max_rattrapage) : 3;
-    const stratTgOpts = { formatId: cfg.tg_format || null, tg_template: cfg.tg_template || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+    const stratTgOpts = { formatId: cfg.tg_format || null, tg_template: cfg.tg_template || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
     const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : (suits || []);
 
     // 1. Résoudre les prédictions en attente
@@ -1429,7 +1429,7 @@ class Engine {
     const handSuits = cfg.hand === 'banquier' ? (bSuits || []) : suits;
     const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
 
     if (Object.keys(state.pending).length > 0) {
       await this._resolvePending(state.pending, channelId, gn, handSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
@@ -1536,7 +1536,7 @@ class Engine {
     const handSuits  = cfg.hand === 'banquier' ? (bSuits || []) : suits;
     const stratMaxR  = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand: cfg.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
     const offset      = Math.max(1, parseInt(cfg.prediction_offset) || 1);
     const targetGame  = gn + offset;
     const B           = parseInt(cfg.threshold) || 2; // nb min de stratégies en accord
@@ -1641,7 +1641,7 @@ class Engine {
     const handSuits  = hand === 'banquier' ? (bSuits || []) : suits;
     const stratMaxR  = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
       ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-    const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+    const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
 
     // ── Départ à zéro : mémoriser le jeu de départ au premier appel ──────
     if (state.interStartGame === null || state.interStartGame === undefined) {
@@ -2461,6 +2461,7 @@ class Engine {
       maxR:      stratMaxRForResolve,
       siteUrl:   cfg.tg_site_url || '',
       stratName: cfg.name        || '',
+      mode:      cfg.mode        || '',
     };
 
     // ── Exception mi-vol : decalage_suit_check ────────────────────────────────
@@ -2651,12 +2652,6 @@ class Engine {
       // ── Garde 10 min : vérifie aussi en DB (résiste aux redémarrages) ─
       // force=true contourne ce garde (CM+4 : la vérification N+2 garantit l'émission N+4)
       if (!force && !(await canEmitNewPrediction(channelId))) return;
-      // ── Bloque si le live trigger a déjà émis pour ce jeu (évite le doublon) ─
-      // force=true contourne ce garde (la cible CM+4 est un jeu futur, pas le jeu courant)
-      if (!force && state.liveTriggeredGame === gn) {
-        console.log(`[${channelId}] Bloqué — déjà déclenché en live pour jeu #${gn}`);
-        return;
-      }
       // ── Bloqueur automatique de mauvaises prédictions ─────────────
       // force=true contourne ce garde (CM+4 a déjà attendu la vérification N+2)
       if (!force && this._isBadPredBlocked(channelId, gn, state)) return;
@@ -2675,7 +2670,7 @@ class Engine {
           ps, triggerSuit: suit,
           triggerGame: gn,  // jeu déclencheur original → cible = triggerGame + n + écart
           option: cfg.attente_option || 1,
-          main: cfg.attente_main || 'joueur',
+          main: cfg.attente_main || cfg.hand || 'joueur',
           n: _aN,
           ecart: _aE,
           seen: 0, suitFound: false,
@@ -4498,7 +4493,7 @@ class Engine {
       const handDone     = hand === 'banquier' ? bankerDone     : playerDone;
       const stratMaxR = (cfg.max_rattrapage !== undefined && cfg.max_rattrapage !== null)
         ? parseInt(cfg.max_rattrapage) : getCurrentMaxRattrapage();
-      const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '' };
+      const stratTgOpts = { formatId: cfg.tg_format || null, hand, maxR: stratMaxR, siteUrl: cfg.tg_site_url || '', stratName: cfg.name || '', mode: cfg.mode || '' };
 
       // ── Mode Distribution / Gestion Banque : résolution en fin de jeu uniquement ─────
       // Distribution : on attend que le jeu soit terminé pour vérifier 2+2 cartes.
@@ -4854,8 +4849,6 @@ class Engine {
         };
         // Vérification live des prédictions en attente (gagne immédiat si costume trouvé)
         await this._verifyPendingLive();
-        // Vérification en temps réel pour absence_apparition / apparition_absence
-        await this._checkLiveTriggers(liveGame);
       } else {
         this.liveGameCards = null;
       }
@@ -4972,7 +4965,7 @@ class Engine {
           ? parseInt(cfg.max_rattrapage)
           : globalMaxR;
         const channelId = `S${idStr}`;
-        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg?.tg_site_url || '', stratName: cfg?.name || '' };
+        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg?.tg_site_url || '', stratName: cfg?.name || '', mode: cfg?.mode || '' };
 
         for (const [pgStr, info] of Object.entries(state.pending)) {
           const pgNum = parseInt(pgStr);
@@ -5227,7 +5220,7 @@ class Engine {
         const channelId = `S${sid}`;
         const cfg = state.config || {};
         const stratMaxR = (cfg?.max_rattrapage !== undefined && cfg?.max_rattrapage !== null) ? parseInt(cfg.max_rattrapage) : 0;
-        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg?.tg_site_url || '', stratName: cfg?.name || '' };
+        const stratTgOpts = { formatId: cfg?.tg_format || null, hand: cfg?.hand || 'joueur', maxR: stratMaxR, siteUrl: cfg?.tg_site_url || '', stratName: cfg?.name || '', mode: cfg?.mode || '' };
         const suit = state.pending[gameNum].suit;
         await resolvePrediction(channelId, gameNum, suit, 'expire', 0, null, null, stratTgOpts).catch(() => {});
         delete state.pending[gameNum];

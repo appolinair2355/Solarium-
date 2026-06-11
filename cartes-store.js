@@ -29,47 +29,21 @@
 // l'écart entre déclencheur et numéro à prédire), « proche de » se base sur le
 // numéro EN LIVE et autorise une fenêtre de tolérance ±p.
 
-const { Pool } = require('pg');
-
-const URL = process.env.LES_CARTES_DATABASE_URL
-  || process.env.CARDS_DATABASE_URL
-  || process.env.DATABASE_URL;
-
-let pool = null;
-let initialized = false;
-let initPromise = null;
-let _retryCount  = 0;
-let _lastFailAt  = 0;
-
+// Utilise pgPoolCards (base baccara, Singapore) depuis db.js — plus de pool séparé
 function getPool() {
-  if (pool) return pool;
-  const sslNeeded = URL && (URL.includes('render.com') || URL.includes('sslmode'));
-  pool = new Pool({
-    connectionString: URL,
-    ssl: sslNeeded ? { rejectUnauthorized: false } : false,
-    max: 5,
-    idleTimeoutMillis: 30_000,
-  });
-  pool.on('error', (e) => console.error('[CartesStore] pg error:', e.message));
-  return pool;
+  return require('./db').pgPoolCards;
 }
 
+let initialized = false;
+let initPromise = null;
+
 async function init() {
-  if (!URL) {
-    console.log('[CartesStore] LES_CARTES_DATABASE_URL non défini — module désactivé');
-    initialized = true;
-    return;
-  }
   if (initialized) return;
   if (initPromise) return initPromise;
 
-  // Backoff exponentiel : 10s → 20s → 40s → 80s → 160s → max 5min
-  const now     = Date.now();
-  const backoff = Math.min(10000 * Math.pow(2, Math.min(_retryCount, 5)), 300000);
-  if (_lastFailAt > 0 && now - _lastFailAt < backoff) return;
-
   initPromise = (async () => {
     const p = getPool();
+    if (!p) throw new Error('pgPoolCards non disponible');
     await p.query(`
       CREATE TABLE IF NOT EXISTS cartes_jeu (
         game_number   INTEGER PRIMARY KEY,
@@ -101,16 +75,10 @@ async function init() {
     await p.query(`CREATE INDEX IF NOT EXISTS idx_cartes_jeu_winner ON cartes_jeu(winner)`);
     await p.query(`CREATE INDEX IF NOT EXISTS idx_cartes_jeu_dist ON cartes_jeu(dist)`);
     initialized = true;
-    console.log('[CartesStore] ✅ Table cartes_jeu prête (db=les_cartes)');
+    console.log('[CartesStore] ✅ Table cartes_jeu prête (db=baccara/Singapore)');
   })().catch((e) => {
-    initPromise  = null;
-    _retryCount++;
-    _lastFailAt  = Date.now();
-    if (_retryCount <= 3) {
-      console.error('[CartesStore] ❌ init error:', e.message);
-    } else if (_retryCount === 4) {
-      console.error('[CartesStore] ❌ init error (trop d\'échecs — backoff actif, logs supprimés):', e.message);
-    }
+    initPromise = null;
+    console.error('[CartesStore] ❌ init error:', e.message);
     throw e;
   });
   return initPromise;
@@ -161,7 +129,6 @@ function deriveWinner(rawWinner, ps, bs, np, nb) {
 
 // ── Enregistrement d'un jeu terminé ────────────────────────────────────────
 async function recordGame(game) {
-  if (!URL) return false;
   if (!game || !game.is_finished || game.game_number == null) return false;
   try {
     await init();
