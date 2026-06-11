@@ -3435,6 +3435,13 @@ function AdminPanel() {
   const [paymentScreenshot, setPaymentScreenshot] = useState(null); // { id, image, ai }
   const [paymentBusy, setPaymentBusy] = useState(null);
 
+  // ── Demandes de fonds Baccara Kouamé ──────────────────────────────
+  const [baccaraDemandes, setBaccaraDemandes] = useState([]);
+  const [baccaraDemandesBusy, setBaccaraDemandesBusy] = useState({});
+  const [baccaraDemandesNote, setBaccaraDemandesNote] = useState({});
+  const [baccaraDemandesAmount, setBaccaraDemandesAmount] = useState({});
+  const [baccaraDemandesMsg, setBaccaraDemandesMsg] = useState({});
+
   // ── Achats de Stratégies (admin) ──────────────────────────────────
   const [stratPurchases, setStratPurchases]     = useState([]);
   const [stratPurchLoading, setStratPurchLoading] = useState(false);
@@ -3565,6 +3572,53 @@ function AdminPanel() {
     const i = setInterval(loadPendingPayments, 30000);
     return () => clearInterval(i);
   }, [loadPendingPayments]);
+
+  const loadBaccaraDemandes = useCallback(async () => {
+    try {
+      const r = await fetch('/api/baccara-wallet/admin/fund-requests', { credentials: 'include' });
+      if (r.ok) setBaccaraDemandes(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadBaccaraDemandes();
+    const i = setInterval(loadBaccaraDemandes, 20000);
+    return () => clearInterval(i);
+  }, [loadBaccaraDemandes]);
+
+  const approveBaccaraDemande = async (id) => {
+    setBaccaraDemandesBusy(p => ({ ...p, [id]: true }));
+    try {
+      const amount = baccaraDemandesAmount[id];
+      const r = await fetch(`/api/baccara-wallet/admin/fund-requests/${id}/approve`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, admin_note: baccaraDemandesNote[id] || null }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: true, text: `✅ Approuvé ! ${d.credited} ${d.currency} crédité.` } }));
+        loadBaccaraDemandes();
+      } else {
+        setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: d.error || 'Erreur' } }));
+      }
+    } catch { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: 'Erreur réseau' } })); }
+    finally { setBaccaraDemandesBusy(p => ({ ...p, [id]: false })); }
+  };
+
+  const rejectBaccaraDemande = async (id) => {
+    setBaccaraDemandesBusy(p => ({ ...p, [id]: true }));
+    try {
+      const r = await fetch(`/api/baccara-wallet/admin/fund-requests/${id}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_note: baccaraDemandesNote[id] || null }),
+      });
+      if (r.ok) { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: true, text: '❌ Demande rejetée.' } })); loadBaccaraDemandes(); }
+      else { const d = await r.json(); setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: d.error || 'Erreur' } })); }
+    } catch { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: 'Erreur réseau' } })); }
+    finally { setBaccaraDemandesBusy(p => ({ ...p, [id]: false })); }
+  };
 
   const viewPaymentScreenshot = async (id) => {
     try {
@@ -3779,6 +3833,7 @@ function AdminPanel() {
     { value: '53', label: '#53 — 💎 Diamant Court' },
     { value: '54', label: '#54 — 🚀 Fusée Futur' },
     { value: '55', label: '#55 — 🌊 Cascade Pro' },
+    { value: '76', label: '#76 — 💠 Cartes Signature' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -3797,6 +3852,8 @@ function AdminPanel() {
     proche: 3, banker_card_count: 0, fc_ecart: 2,
     // Mode gestion_banque (gestion des lots + banque)
     gb_source_id: '', gb_banque: 5000, gb_mise: 10, gb_taille: 5, gb_cote: 1.9, gb_max_lots: 0, gb_devise: 'USD', gb_nom_boutique: '', gb_url_site: '',
+    // Mode compteurs_absences (3 compteurs)
+    c3_b: 4, c3_seuil3: 3, c3_jj: 2,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
     // Filtre d'attente (universel — tous les modes)
@@ -5024,7 +5081,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
     setStratOpen(true);
   };
 
@@ -5041,7 +5098,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5966,6 +6023,7 @@ function AdminPanel() {
             { id: 'pro-accounts',      icon: '💎', label: 'Comptes PRO',     badge: onlineUsers.filter(u => u.is_pro).length || null },
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
+            { id: 'demandes-baccara', icon: '🎰', label: 'Mes Demandes',     badge: baccaraDemandes.filter(d => d.status === 'pending').length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
             { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies' },
             { id: 'idees',          icon: '💡', label: 'Idées Stratégies' },
@@ -7916,6 +7974,155 @@ function AdminPanel() {
           </div>
         )}
 
+        {/* ── TAB : DEMANDES BACCARA KOUAMÉ ── */}
+        {adminTab === 'demandes-baccara' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{ padding: '12px 16px', marginBottom: 16, borderRadius: 12,
+              background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(251,191,36,0.15)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
+            }}>
+              <div>
+                <div style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>🎰 DEMANDES DE RECHARGE — BACCARA KOUAMÉ</div>
+                <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
+                  Approuvez ou rejetez les demandes de fonds des utilisateurs. Le montant est crédité instantanément.
+                </div>
+              </div>
+              <button onClick={loadBaccaraDemandes} style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                🔄 Actualiser
+              </button>
+            </div>
+
+            {baccaraDemandes.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: '#475569', fontSize: 14 }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🎰</div>
+                Aucune demande de recharge pour l'instant.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {baccaraDemandes.map(d => {
+                  const isPending = d.status === 'pending';
+                  const isApproved = d.status === 'approved';
+                  const isRejected = d.status === 'rejected';
+                  const msg = baccaraDemandesMsg[d.id];
+                  const busy = baccaraDemandesBusy[d.id];
+                  return (
+                    <div key={d.id} style={{
+                      borderRadius: 12, overflow: 'hidden',
+                      border: isPending ? '1.5px solid rgba(251,191,36,0.35)' : isApproved ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(239,68,68,0.25)',
+                      background: isPending ? 'rgba(251,191,36,0.04)' : isApproved ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.03)',
+                    }}>
+                      {/* Header */}
+                      <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                          👤
+                        </div>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0' }}>
+                            {d.username}
+                            {(d.first_name || d.last_name) && (
+                              <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>
+                                {[d.first_name, d.last_name].filter(Boolean).join(' ')}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                            {new Date(d.created_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })}
+                          </div>
+                        </div>
+                        {/* Montant demandé */}
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>DEMANDE</div>
+                          <div style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24' }}>
+                            {parseFloat(d.amount).toLocaleString()} {d.currency}
+                          </div>
+                        </div>
+                        {/* Badge statut */}
+                        <div style={{
+                          padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 800, letterSpacing: 0.5,
+                          background: isPending ? 'rgba(251,191,36,0.15)' : isApproved ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                          color: isPending ? '#fbbf24' : isApproved ? '#4ade80' : '#f87171',
+                          border: isPending ? '1px solid rgba(251,191,36,0.35)' : isApproved ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(239,68,68,0.35)',
+                        }}>
+                          {isPending ? '⏳ En attente' : isApproved ? '✅ Approuvé' : '❌ Rejeté'}
+                        </div>
+                      </div>
+
+                      {/* Note utilisateur */}
+                      {d.note && (
+                        <div style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 12, color: '#94a3b8' }}>
+                          💬 {d.note}
+                        </div>
+                      )}
+
+                      {/* Actions (seulement si pending) */}
+                      {isPending && (
+                        <div style={{ padding: '12px 16px', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <div style={{ flex: 1, minWidth: 140 }}>
+                            <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>
+                              MONTANT À CRÉDITER ({d.currency})
+                            </label>
+                            <input
+                              type="number"
+                              value={baccaraDemandesAmount[d.id] ?? d.amount}
+                              onChange={e => setBaccaraDemandesAmount(p => ({ ...p, [d.id]: e.target.value }))}
+                              style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.06)', color: '#fbbf24', fontSize: 14, fontWeight: 700, outline: 'none' }}
+                            />
+                          </div>
+                          <div style={{ flex: 2, minWidth: 180 }}>
+                            <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>
+                              NOTE ADMIN (optionnel)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Ex: Validé via WhatsApp"
+                              value={baccaraDemandesNote[d.id] || ''}
+                              onChange={e => setBaccaraDemandesNote(p => ({ ...p, [d.id]: e.target.value }))}
+                              style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => approveBaccaraDemande(d.id)}
+                            disabled={busy}
+                            style={{ padding: '8px 18px', borderRadius: 8, border: 'none', cursor: busy ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800, background: busy ? 'rgba(100,116,139,0.2)' : 'linear-gradient(135deg,#166534,#4ade80)', color: busy ? '#4b5563' : '#fff' }}>
+                            {busy ? '⏳' : '✅ Approuver'}
+                          </button>
+                          <button
+                            onClick={() => rejectBaccaraDemande(d.id)}
+                            disabled={busy}
+                            style={{ padding: '8px 18px', borderRadius: 8, cursor: busy ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}>
+                            ❌ Rejeter
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Info si approuvé */}
+                      {isApproved && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: '#4ade80' }}>
+                          ✅ Crédité : {parseFloat(d.approved_amount || d.amount).toLocaleString()} {d.currency}
+                          {d.admin_note && <span style={{ color: '#64748b', marginLeft: 8 }}>— {d.admin_note}</span>}
+                        </div>
+                      )}
+                      {isRejected && d.admin_note && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: '#94a3b8' }}>
+                          Motif : {d.admin_note}
+                        </div>
+                      )}
+
+                      {/* Message résultat action */}
+                      {msg && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600,
+                          color: msg.ok ? '#4ade80' : '#f87171',
+                          borderTop: '1px solid rgba(255,255,255,0.05)',
+                        }}>{msg.text}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
@@ -8263,6 +8470,12 @@ function AdminPanel() {
               preview: `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ⌛`,
               result:  `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ✅ ${RE[0]}`,
               perdu:   `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ❌`,
+            },
+            {
+              id: 76, label: 'Cartes Signature', icon: '💠',
+              preview: `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ⌛`,
+              result:  `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ✅ ${RE[0]}`,
+              perdu:   `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ❌`,
             },
           ];
 
@@ -9135,6 +9348,15 @@ function AdminPanel() {
                       <div style={{ marginTop: 6 }}>Le <strong>Seuil B</strong> est utilisé comme déclencheur interne. La banque, la mise, la taille de lot et la côte permettent de calculer les gains/pertes projetés.</div>
                     </div>
                   )}
+                  {stratForm.mode === 'compteurs_absences' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📊 Mode Compteurs Absences (3 Compteurs)</div>
+                      <div><strong>Compteur 2 (C2)</strong> : absences consécutives d'une enseigne. Quand ≥ <strong>C2</strong> → déclenche la décision.</div>
+                      <div style={{ marginTop: 4 }}><strong>Compteur 3 (Seuil3)</strong> : apparences consécutives de l'inverse (♠↔♦, ♥↔♣). Si inverse ≥ <strong>Seuil3</strong> → prédit le <em>manquant lui-même</em>. Sinon → prédit <em>l'inverse</em>.</div>
+                      <div style={{ marginTop: 4 }}><strong>Compteur 4 (JJ Bloqueur)</strong> : si les 2 enseignes d'une paire (♠+♦ ou ♥+♣) sont absentes ensemble ≥ <strong>JJ</strong> jeux → prédit l'<em>image</em> du manquant (♠→♣, ♦→♥, ♥→♦, ♣→♠).</div>
+                      <div style={{ marginTop: 6, color: '#34d399', fontWeight: 600 }}>Priorité : Bloqueur (JJ) &gt; Tendance (Seuil3) &gt; Inverse</div>
+                    </div>
+                  )}
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
@@ -9792,6 +10014,39 @@ function AdminPanel() {
                     </div>
                     <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(251,113,133,0.08)', borderRadius: 7, fontSize: 11, color: '#fda4af', lineHeight: 1.6 }}>
                       💡 Résumé : surveille toutes les strats. (même main, catégorie <strong>{stratForm.inter_category || 'costume'}</strong>) · se déclenche si ≥<strong>{stratForm.inter_hi ?? 2}</strong> strats. prédisent le même résultat sur des jeux dont l'écart est ≤ <strong>{stratForm.inter_max_ecart ?? 2}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Paramètres 3 Compteurs — MODE COMPTEURS ABSENCES ── */}
+                {stratForm.mode === 'compteurs_absences' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#34d399', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>📊 Paramètres des 3 Compteurs</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#34d399', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>C2 — Seuil absences</label>
+                        <input type="number" min="1" max="30" value={stratForm.c3_b ?? 4}
+                          onChange={e => setStratForm(p => ({ ...p, c3_b: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(16,185,129,0.5)', borderRadius: 7, color: '#34d399', fontSize: 14, fontWeight: 700 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Absences consécutives avant décision (déf. 4)</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Seuil3 — Tendance inverse</label>
+                        <input type="number" min="1" max="20" value={stratForm.c3_seuil3 ?? 3}
+                          onChange={e => setStratForm(p => ({ ...p, c3_seuil3: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Apparences inverse ≥ Seuil3 → prédit le manquant (déf. 3)</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>JJ — Bloqueur de paire</label>
+                        <input type="number" min="1" max="20" value={stratForm.c3_jj ?? 2}
+                          onChange={e => setStratForm(p => ({ ...p, c3_jj: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Les 2 d'une paire absents ≥ JJ → prédit l'image (déf. 2)</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(16,185,129,0.08)', borderRadius: 7, fontSize: 11, color: '#6ee7b7', lineHeight: 1.6 }}>
+                      💡 Résumé : enseigne absente ≥ <strong>{stratForm.c3_b ?? 4}</strong> jeux → si bloqueur paire ≥ <strong>{stratForm.c3_jj ?? 2}</strong> → prédit image · sinon si inverse ≥ <strong>{stratForm.c3_seuil3 ?? 3}</strong> → prédit manquant · sinon → prédit inverse
                     </div>
                   </div>
                 )}

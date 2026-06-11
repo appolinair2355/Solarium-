@@ -167,6 +167,7 @@ export default function StrategySelect() {
           {!user?.is_admin && (
             <Link to="/boutique" className="btn btn-ghost btn-sm" style={{ color: '#a78bfa', borderColor: 'rgba(167,139,250,0.4)' }}>🛒 Acheter Stratégie</Link>
           )}
+          <Link to="/baccara-kouame" className="btn btn-ghost btn-sm" style={{ color: '#f97316', borderColor: 'rgba(249,115,22,0.45)', fontWeight: 800 }}>🎰 Baccara Kouamé</Link>
           {!user?.is_admin && (
             <Link to="/paiement" className="btn btn-ghost btn-sm" style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)' }}>💳 Paiement</Link>
           )}
