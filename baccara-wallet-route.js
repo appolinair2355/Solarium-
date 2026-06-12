@@ -509,29 +509,45 @@ router.delete('/bets/:id', requireLogin, async (req, res) => {
 });
 
 // ── GET /past-games — historique des jeux terminés (50 derniers) ──────────────
+// FIX numérotation : on lit la table `cartes_jeu` (alimentée par cartes-store
+// avec le VRAI game_number 1xBet, identique au LIVE en haut de page), au lieu
+// de l'ancienne table `game_cards` dont les numéros sont désynchronisés.
 router.get('/past-games', requireLogin, async (req, res) => {
   try {
-    // 1. Depuis le cache persistant en mémoire (plus récent)
+    // 1. Cache mémoire (jeux fraîchement terminés, indexés par le vrai DI 1xBet)
     const fromMem = [..._finishedGamesMap.entries()]
       .sort((a,b)=>b[0]-a[0])
       .slice(0, 80)
       .map(([gn, g]) => ({ game_number:gn, ...g }));
 
-    // 2. Depuis la DB game_cards si disponible (fallback + complément)
+    // 2. Fallback DB : table `cartes_jeu` via cartes-store (numéros = DI 1xBet)
     let fromDb = [];
     try {
-      const { getLastGameCards } = require('./db');
-      const rows = await getLastGameCards('', 80);
+      const cartesStore = require('./cartes-store');
+      const rows = await cartesStore.listRecent(80, {});
       if (rows && rows.length) {
-        fromDb = rows.map(r => ({
-          game_number:  r.game_number,
-          winner:       r.winner,
-          player_cards: r.player_cards || [],
-          banker_cards: r.banker_cards || [],
-          is_finished:  true,
-        }));
+        fromDb = rows.map(r => {
+          const mk = (prefix) => {
+            const out = [];
+            for (let i = 1; i <= 3; i++) {
+              const R = r[`${prefix}${i}_r`];
+              const S = r[`${prefix}${i}_s`];
+              if (R != null || S != null) out.push({ R, S });
+            }
+            return out;
+          };
+          return {
+            game_number:  r.game_number,
+            winner:       r.winner,
+            player_cards: mk('p'),
+            banker_cards: mk('b'),
+            is_finished:  true,
+          };
+        });
       }
-    } catch(_) {}
+    } catch(e) {
+      console.warn('[BaccaraWallet] past-games cartes_jeu fallback fail:', e.message);
+    }
 
     // Fusionner : mémoire prioritaire, DB en supplément
     const seen = new Set(fromMem.map(g=>g.game_number));
