@@ -41,6 +41,7 @@ const SystemLogs    = lazyWithRetry(() => import('./pages/SystemLogs'));
 const Comptages     = lazyWithRetry(() => import('./pages/Comptages'));
 const Payment       = lazyWithRetry(() => import('./pages/Payment'));
 const Shop          = lazyWithRetry(() => import('./pages/Shop'));
+const BaccaraKouame = lazyWithRetry(() => import('./pages/BaccaraKouame'));
 
 class AppErrorBoundary extends Component {
   constructor(props) {
@@ -187,6 +188,7 @@ export default function App() {
             <Route path="/system-logs" element={<ProtectedRoute adminOrPro><SystemLogs /></ProtectedRoute>} />
             <Route path="/comptages" element={<ProtectedRoute adminProOrPremium><Comptages /></ProtectedRoute>} />
             <Route path="/boutique" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
+            <Route path="/baccara-kouame" element={<ProtectedRoute><BaccaraKouame /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
