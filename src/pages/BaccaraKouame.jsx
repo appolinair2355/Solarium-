@@ -262,15 +262,18 @@ export default function BaccaraKouame() {
     prevHistLen.current = newLen;
   },[wallet.history.length]);
 
-  // ── Construction des 3 jeux à afficher ────────────────────────────────────
-  // Fusionner jeux live + jeux passés (sans doublon, live prioritaire)
-  const allGames = (() => {
-    const map = new Map();
-    for (const g of pastGames) map.set(g.game_number, g);
-    for (const g of games)     map.set(g.game_number, g); // live écrase
-    return [...map.values()].sort((a,b)=>b.game_number-a.game_number);
-  })();
-  const liveGame = allGames.find(g=>!g.is_finished) || null;
+  // ── Construction des jeux à afficher ──────────────────────────────────────
+  // Uniquement les jeux du moteur principal (/api/games/live).
+  // Les pastGames viennent d'une table différente (numéros incompatibles) —
+  // on ne les mélange plus ici pour éviter la désynchronisation de l'affichage.
+  const allGames = [...games].sort((a,b)=>b.game_number-a.game_number);
+  // Parmi les jeux non-terminés, le vrai jeu "LIVE" (en cours de distribution sur 1xBet)
+  // est celui avec le PLUS PETIT numéro : c'est le premier démarré, donc en cours de deal.
+  // Les jeux avec un numéro plus élevé sont en "Prematch" (paris ouverts mais pas encore distribués).
+  // L'ancien code prenait le numéro le PLUS HAUT (allGames.find → décroissant), ce qui donnait
+  // un écart de 3-4 parties entre le live affiché en haut et le dernier jeu terminé en bas.
+  const _unfinished = allGames.filter(g=>!g.is_finished);
+  const liveGame = _unfinished.length > 0 ? _unfinished[_unfinished.length - 1] : null;
   const finished = allGames.filter(g=>g.is_finished);
   const baseNum      = liveGame?.game_number ?? (finished[0]?.game_number??0);
 
@@ -289,9 +292,9 @@ export default function BaccaraKouame() {
     { game_number: baseNum+3, _label:'APRÈS',    _status:'upcoming', player_cards:[], banker_cards:[] },
   ];
 
-  // Sélectionner automatiquement le jeu live au démarrage
+  // Auto-suivre le jeu live : mise à jour à chaque nouveau jeu live
   useEffect(()=>{
-    if(selectedGN===null && displayGames[0]?.game_number) {
+    if(displayGames[0]?.game_number) {
       setSelectedGN(displayGames[0].game_number);
     }
   },[displayGames[0]?.game_number]);
