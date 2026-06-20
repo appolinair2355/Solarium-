@@ -2530,6 +2530,9 @@ class Engine {
       const _banqueArgsList = [];
       // FIX : utiliser cfg.mode (disponible via closure sur cfg) au lieu de `mode` (non encore déclaré à ce stade)
       const _cfgMode = cfg.mode;
+      // 🔁 Relance sur perte : file de prédictions à injecter après _resolvePending
+      const _relanceSurPerteQueue = [];
+      if (!state.relanceSurPerteCount) state.relanceSurPerteCount = 0;
       await this._resolvePending(state.pending, channelId, gn, resolveHandSuits, pCards, bCards, (won, ps, pg, rattrapR) => {
         state.lastOutcomes.push({ won, suit: ps });
         if (state.lastOutcomes.length > 10) state.lastOutcomes.shift();
@@ -2543,6 +2546,8 @@ class Engine {
             if (_cfgMode === 'pair_impair') state.parityCounts = { pair: 0, impair: 0 };
             if (_cfgMode === 'carte_2v3')  state.c2v3Counts   = { deux: 0, trois: 0 };
           }
+          // 🔁 Relance sur perte : réinitialiser le compteur sur victoire
+          if (cfg.relance_sur_perte) state.relanceSurPerteCount = 0;
         } else {
           this._onStratLoss(channelId, gn, ps);
           // 🐍 Serpent : activer sur perte ; continuer jusqu'à victoire
@@ -2559,6 +2564,18 @@ class Engine {
               console.log(`[${channelId}] 🐍 Serpent activé — prédit ${state.snakeSuit} jusqu'à victoire`);
             }
           }
+          // 🔁 Relance sur perte : si activé, mettre en file la relance du même costume
+          if (cfg.relance_sur_perte) {
+            const maxRelances = Math.max(1, parseInt(cfg.relance_sur_perte_max) || 3);
+            if (state.relanceSurPerteCount < maxRelances) {
+              const nextGn = pg + rattrapR + 1;
+              _relanceSurPerteQueue.push({ suit: ps, nextGn });
+              state.relanceSurPerteCount++;
+              console.log(`[${channelId}] 🔁 Relance sur perte — même costume ${ps} au jeu #${nextGn} (${state.relanceSurPerteCount}/${maxRelances})`);
+            } else {
+              console.log(`[${channelId}] 🔁 Relance sur perte — max ${maxRelances} atteint, en attente d'une victoire`);
+            }
+          }
         }
         // Évaluer si le bloqueur doit s'activer
         this._updateBadPredBlocker(channelId, gn, state);
@@ -2571,6 +2588,10 @@ class Engine {
       // Cela garantit que la vérification de clôture de lot se fait avant tout ajout au lot
       for (const args of _banqueArgsList) {
         await this._resolveBanqueOnResult(channelId, args.pg, args.ps, args.won, args.rattrapR, cfg, state);
+      }
+      // 🔁 Injecter les relances sur perte (même costume, jeu suivant)
+      for (const { suit, nextGn } of _relanceSurPerteQueue) {
+        this._forceNextPrediction(channelId, nextGn, suit);
       }
     }
 

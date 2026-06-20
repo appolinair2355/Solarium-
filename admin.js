@@ -392,6 +392,8 @@ async function getStrategies() {
   return list.map(s => ({
     pred_duration_minutes:    0,
     pred_duration_started_at: null,
+    relance_sur_perte:        false,
+    relance_sur_perte_max:    3,
     ...s,
   }));
 }
@@ -767,6 +769,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
       // 2k-3k : seuil B2 indépendant
       threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
+      // Relance sur perte
+      relance_sur_perte: req.body.relance_sur_perte === true || req.body.relance_sur_perte === 'true',
+      relance_sur_perte_max: Math.max(1, Math.min(10, parseInt(req.body.relance_sur_perte_max) || 3)),
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -1073,6 +1078,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
       // 2k-3k : seuil B2 indépendant
       threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
+      // Relance sur perte
+      relance_sur_perte: req.body.relance_sur_perte === true || req.body.relance_sur_perte === 'true',
+      relance_sur_perte_max: Math.max(1, Math.min(10, parseInt(req.body.relance_sur_perte_max) || 3)),
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -1238,6 +1246,15 @@ router.get('/strategies/:id/snake-counts', requireAdmin, (req, res) => {
         c2v3Counts: entry.c2v3Counts || { deux: 0, trois: 0 },
         snakeActive: !!entry.snakeActive,
         snakeSuit: entry.snakeSuit || null,
+      });
+    }
+    if (mode === '2k-3k') {
+      const cfg2 = entry.config || {};
+      return res.json({
+        mode,
+        threshold,
+        threshold2: cfg2.threshold2 || threshold,
+        abs2k3k: entry.abs2k3k || { abs_deux: 0, abs_trois: 0 },
       });
     }
     res.json({ mode });

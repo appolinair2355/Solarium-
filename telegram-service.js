@@ -2179,6 +2179,15 @@ async function editBanqueTgMessage(msgIds, text) {
   }
 }
 
+// ── Payment handler registry (approve/reject via bot callbacks) ───────────
+let _paymentHandlers = null;
+function registerPaymentHandlers(handlers) {
+  if (handlers && typeof handlers.approve === 'function' && typeof handlers.reject === 'function') {
+    _paymentHandlers = handlers;
+  }
+}
+function getPaymentHandlers() { return _paymentHandlers; }
+
 module.exports = {
   loadConfig, addChannel, removeChannel, testChannel,
   getChannels, getMessages, getStatus,
@@ -2204,4 +2213,5 @@ module.exports = {
   buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText, buildBanqueFinalBilanText,
   sendBanqueTgMessage, editBanqueTgMessage,
   registerRelayHandler, unregisterRelayHandler, getMainToken,
+  registerPaymentHandlers, getPaymentHandlers,
 };
