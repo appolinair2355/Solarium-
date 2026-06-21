@@ -18,6 +18,7 @@ const {
   buildBanqueSummaryText,
   buildBanquePredText,
   buildBanqueFinalBilanText,
+  buildBanqueCompactSummary,
 } = require('./telegram-service');
 const renderSync = require('./render-sync');
 const cartesStore = require('./cartes-store');
@@ -4293,13 +4294,7 @@ class Engine {
         const _bgGlobalSiteUrl1 = (await db.getSetting('site_url').catch(() => '')) || '';
         const cfgWithBoutique = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl1 || 'http://solarium-1-6a5p.onrender.com' };
 
-        // Envoyer un nouveau message Telegram pour cette prédiction (montre tout le lot)
-        const newPred = bgS.lot_predictions[bgS.lot_predictions.length - 1];
-        if (Array.isArray(tg_targets) && tg_targets.length > 0) {
-          const predText = buildBanqueLotText(bgS, cfgWithBoutique);
-          const msgIds   = await sendBanqueTgMessage(tg_targets, predText);
-          newPred.msg_ids = msgIds;
-        }
+        // Aucun message individuel pendant le lot — le résumé compact est envoyé uniquement à la fin du lot
 
         console.log(`[${channelId}] [BanqueGestion] Miroir ${srcId} #${srcGn} ${suit} (mise: ${bgS.current_mise})`);
         break; // un seul miroir par tick
@@ -4377,13 +4372,7 @@ class Engine {
       console.log(`[${channelId}] [BanqueGestion] ❌ #${gameNum} R${rattrapR} totalMisé=-${totalMise}  reset mise→${initMise}  banque=${bgS.bank}`);
     }
 
-    // Éditer le message de CETTE prédiction avec le lot complet mis à jour
-    if (!fromArchive && Array.isArray(pred.msg_ids) && pred.msg_ids.length > 0) {
-      const _bgGlobalSiteUrl2 = (await db.getSetting('site_url').catch(() => '')) || '';
-      const cfgRich = { ...cfg, bg_shop_titre: bgS.boutique_titre || cfg.bg_boutique_name || '', bg_site_url: cfg.bg_site_url || _bgGlobalSiteUrl2 || 'http://solarium-1-6a5p.onrender.com' };
-      const text = buildBanqueLotText(bgS, cfgRich);
-      await editBanqueTgMessage(pred.msg_ids, text).catch(() => {});
-    }
+    // Pas d'édition de message individuel — le résumé compact est envoyé uniquement à la fin du lot
 
     // Vérifier si le lot est terminé (seulement pour le lot courant)
     if (!fromArchive) {
@@ -4443,8 +4432,9 @@ class Engine {
                 const finalText = buildBanqueFinalBilanText(capturedLotHistory, cfgRich2, capturedInitialBank);
                 await sendBanqueTgMessage(capturedTargets, finalText);
               } else {
-                const summaryText = buildBanqueSummaryText(lotPreds, cfgRich2, capturedLotNum, bankBefore, finalBankAfter);
-                await sendBanqueTgMessage(capturedTargets, summaryText);
+                // Résumé compact : Joueur+3 / 29♥✅1️⃣ / 30♥✅0️⃣ ...
+                const compactText = buildBanqueCompactSummary(lotPreds, cfgRich2);
+                await sendBanqueTgMessage(capturedTargets, compactText);
               }
             }
             if (bgS.archived_lot === lotPreds) bgS.archived_lot = null;
@@ -5486,24 +5476,18 @@ class Engine {
       }
 
       // Mode Compteur Adverse → afficher les compteurs d'absences de la main OPPOSÉE
+      // Les compteurs ne se mettent à jour qu'après la fin officielle du jeu (pas de projection live)
       if (mode === 'compteur_adverse') {
         const adverseCounts = entry.adverseCounts || {};
         const adverseLabel  = hand === 'banquier' ? 'joueur' : 'banquier';
         const _aqAdv = (entry.attenteQueue || []).map(x => ({ ...x }));
         return ALL_SUITS.map((suit, _aqIdx) => {
-          const base    = adverseCounts[suit] || 0;
-          let count     = base;
-          let isLive    = false;
-          // liveSuits ici = suits de la main adverse (déjà corrigé plus haut)
-          if (liveSuits !== null) {
-            isLive = true;
-            count  = liveSuits.includes(suit) ? 0 : base + 1;
-          }
+          const count = adverseCounts[suit] || 0;
           const item = {
             suit, display: SUIT_DISPLAY[suit] || suit,
             count, threshold,
             mode, label: `Adverse (${adverseLabel})`,
-            isLive,
+            isLive: false,
           };
           if (_aqIdx === 0) item.attenteQueue = _aqAdv;
           return item;
@@ -5736,8 +5720,8 @@ class Engine {
       // Mode 2k-3k → afficher compteurs abs_deux/abs_trois avec seuils B1/B2
       if (mode === '2k-3k') {
         const ab = entry.abs2k3k || { abs_deux: 0, abs_trois: 0 };
-        const B1 = parseInt(cfg.threshold) || 3;
-        const B2 = parseInt(cfg.threshold_b2) || B1;
+        const B1 = parseInt(threshold) || 3;
+        const B2 = parseInt(entry.config.threshold_b2) || B1;
         return [
           {
             suit: 'trois', display: '3️⃣ 3 cartes',

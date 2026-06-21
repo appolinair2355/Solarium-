@@ -2179,6 +2179,31 @@ async function editBanqueTgMessage(msgIds, text) {
   }
 }
 
+/**
+ * Résumé compact du lot — envoyé en une seule fois quand le lot est terminé.
+ * Format :
+ *   Joueur+3
+ *   29♥✅1️⃣
+ *   30♥✅0️⃣
+ *   31♥❌2️⃣
+ */
+function buildBanqueCompactSummary(lotPreds, cfg) {
+  const handLabel = cfg.hand === 'banquier' ? 'Banquier' : 'Joueur';
+  const delta     = lotPreds.reduce((acc, p) => acc + (p.amount_delta || 0), 0);
+  const deltaRnd  = Math.round(delta * 100) / 100;
+  const deltaStr  = deltaRnd >= 0 ? `+${deltaRnd}` : `${deltaRnd}`;
+  const header    = `${handLabel}${deltaStr}`;
+
+  const lines = lotPreds.map(p => {
+    const sym    = p.suit || '?';
+    const result = p.status === 'gagne' ? '✅' : p.status === 'perdu' ? '❌' : '⏳';
+    const ratr   = RATR_EMOJI[p.ratr] ?? `${p.ratr}`;
+    return `${p.game}${sym}${result}${ratr}`;
+  });
+
+  return [header, ...lines].join(' \n');
+}
+
 // ── Payment handler registry (approve/reject via bot callbacks) ───────────
 let _paymentHandlers = null;
 function registerPaymentHandlers(handlers) {
@@ -2211,6 +2236,7 @@ module.exports = {
   sendRawMessage, sendBilanToStrategyChannels,
   SUIT_EMOJI, SUIT_NAME,
   buildBanqueInitialText, buildBanqueLotText, buildBanqueSummaryText, buildBanquePredText, buildBanqueFinalBilanText,
+  buildBanqueCompactSummary,
   sendBanqueTgMessage, editBanqueTgMessage,
   registerRelayHandler, unregisterRelayHandler, getMainToken,
   registerPaymentHandlers, getPaymentHandlers,
