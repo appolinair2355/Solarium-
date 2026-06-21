@@ -3859,6 +3859,8 @@ function AdminPanel() {
     // Filtre d'attente (universel — tous les modes)
     attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur',
     attente1_mapping: null, attente2_mapping: null, attente3_mapping: null,
+    // Relance sur perte
+    relance_sur_perte: false, relance_sur_perte_max: 3,
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -5081,7 +5083,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3 });
     setStratOpen(true);
   };
 
@@ -5098,7 +5100,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -9620,7 +9622,7 @@ function AdminPanel() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
-                        B1 — Absences de 2 cartes → prédit <b>3 cartes</b>
+                        Seuil 2k — Absences de 2 cartes → prédit <b>3 cartes</b>
                       </label>
                       <input type="number" min={1} max={50} value={stratForm.threshold || 3}
                         onChange={e => setStratForm(p => ({ ...p, threshold: Math.max(1, parseInt(e.target.value) || 1) }))}
@@ -9629,7 +9631,7 @@ function AdminPanel() {
                     </div>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
-                        B2 — Absences de 3 cartes → prédit <b>2 cartes</b>
+                        Seuil 3k — Absences de 3 cartes → prédit <b>2 cartes</b>
                       </label>
                       <input type="number" min={1} max={50} value={stratForm.threshold_b2 ?? stratForm.threshold ?? 3}
                         onChange={e => setStratForm(p => ({ ...p, threshold_b2: Math.max(1, parseInt(e.target.value) || 1) }))}
@@ -9638,7 +9640,7 @@ function AdminPanel() {
                     </div>
                   </div>
                   <div style={{ marginTop: 8, fontSize: 11, color: '#67e8f9', opacity: 0.75 }}>
-                    Les deux compteurs sont indépendants. Quand B1 jeux consécutifs ont eu 3 cartes → prédit 3 cartes. Quand B2 jeux consécutifs ont eu 2 cartes → prédit 2 cartes.
+                    Les deux seuils sont indépendants. Quand <strong>Seuil 2k</strong> jeux consécutifs ont eu 3 cartes → prédit 3 cartes. Quand <strong>Seuil 3k</strong> jeux consécutifs ont eu 2 cartes → prédit 2 cartes.
                   </div>
                 </div>
                 )}
@@ -10730,6 +10732,86 @@ function AdminPanel() {
                 })}
               </div>
               </>}
+
+
+                {/* ── Relance sur perte ── */}
+                {stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'gestion_banque' && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{
+                    padding: '14px 16px', borderRadius: 12,
+                    background: stratForm.relance_sur_perte ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${stratForm.relance_sur_perte ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                    transition: 'all 0.2s',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: stratForm.relance_sur_perte ? 12 : 0 }}>
+                      <div
+                        onClick={() => setStratForm(p => ({ ...p, relance_sur_perte: !p.relance_sur_perte }))}
+                        style={{
+                          width: 44, height: 24, borderRadius: 12, cursor: 'pointer', position: 'relative', flexShrink: 0,
+                          background: stratForm.relance_sur_perte ? '#ef4444' : 'rgba(255,255,255,0.12)',
+                          transition: 'background 0.2s',
+                        }}>
+                        <div style={{
+                          position: 'absolute', top: 3, left: stratForm.relance_sur_perte ? 23 : 3,
+                          width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                          transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                        }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: stratForm.relance_sur_perte ? '#f87171' : '#94a3b8' }}>
+                          🔁 Relancer le même costume après une perte
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          Si la prédiction échoue, l'engine relance automatiquement le même costume/type au jeu suivant
+                        </div>
+                      </div>
+                    </div>
+                    {stratForm.relance_sur_perte && (
+                      <div style={{ marginTop: 4 }}>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
+                          Nombre max de relances consécutives (1–10) — remet à zéro après une victoire
+                        </label>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {[1,2,3,4,5,7,10].map(n => {
+                            const active = (stratForm.relance_sur_perte_max ?? 3) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, relance_sur_perte_max: n }))}
+                                style={{
+                                  width: 40, height: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                  border: active ? '2px solid #ef4444' : '1px solid rgba(239,68,68,0.3)',
+                                  background: active ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)',
+                                  color: active ? '#fca5a5' : '#6b7280',
+                                  transition: 'all 0.15s',
+                                }}>
+                                {n}
+                              </button>
+                            );
+                          })}
+                          <input
+                            type="number" min="1" max="10" step="1"
+                            value={stratForm.relance_sur_perte_max ?? 3}
+                            onChange={e => { const v = Math.max(1, Math.min(10, parseInt(e.target.value) || 1)); setStratForm(p => ({ ...p, relance_sur_perte_max: v })); }}
+                            style={{
+                              width: 52, height: 36, borderRadius: 8,
+                              border: '1px solid rgba(239,68,68,0.4)',
+                              background: 'rgba(255,255,255,0.06)', color: '#fca5a5',
+                              textAlign: 'center', fontWeight: 800, fontSize: 15,
+                            }}
+                          />
+                        </div>
+                        <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)', fontSize: 11, color: '#f87171', lineHeight: 1.6 }}>
+                          {(() => {
+                            const max = stratForm.relance_sur_perte_max ?? 3;
+                            const r = stratForm.max_rattrapage ?? 20;
+                            return `Exemple : prédit jeu #10 (${r} rattrapage${r !== 1 ? 's' : ''}) → perte → relance auto #${10 + r + 1} → perte → relance #${10 + (r+1)*2 + 1}… jusqu'à ${max} relance${max > 1 ? 's' : ''} consécutive${max > 1 ? 's' : ''}, puis arrêt jusqu'à la prochaine victoire.`;
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
 
               {/* ── Filtre d'attente — universel (tous modes) ── */}
               <div style={{ gridColumn: '1 / -1', marginTop: 20, padding: '16px 18px', borderRadius: 12, background: 'rgba(245,158,11,0.05)', border: `1px solid ${stratForm.attente_enabled ? 'rgba(245,158,11,0.5)' : 'rgba(245,158,11,0.2)'}`, transition: 'border-color 0.2s' }}>
