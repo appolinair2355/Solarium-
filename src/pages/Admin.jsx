@@ -3861,6 +3861,8 @@ function AdminPanel() {
     attente1_mapping: null, attente2_mapping: null, attente3_mapping: null,
     // Relance sur perte
     relance_sur_perte: false, relance_sur_perte_max: 3,
+    // Fin de numéro
+    fn_rules: [],
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -3889,6 +3891,7 @@ function AdminPanel() {
   const [proStratTgOpen, setProStratTgOpen] = useState(null);   // id de stratégie Pro ouverte pour édition
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
   const [stratEditing, setStratEditing] = useState(null); // id being edited, null = creating
+  const [fnActiveDigit, setFnActiveDigit] = useState(null); // chiffre actif pour config fin_numero (0-9)
   const [stratMsg, setStratMsg] = useState('');
   const [successModal, setSuccessModal] = useState(null);
   const [proSavedModal, setProSavedModal] = useState(null); // { type:'create'|'update', id, filename, strategy_name, hand, decalage, max_rattrapage, engine_type, warnings, engine_error }
@@ -4271,6 +4274,7 @@ function AdminPanel() {
     { value: 'carte_valeur', label: '🃏 Carte Valeur' },
     { value: 'intersection', label: '🎯 Intersection' },
     { value: 'surveillance_perte', label: '🔍 Surveillance Pertes' },
+    { value: 'fin_numero', label: '🎯 Fin de Numéro' },
   ];
 
   useEffect(() => {
@@ -5083,7 +5087,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [] });
     setStratOpen(true);
   };
 
@@ -5100,7 +5104,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3 });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5143,7 +5147,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k','fin_numero'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -9274,6 +9278,7 @@ function AdminPanel() {
                     <option value="carte_2v3">2️⃣3️⃣ 2 vs 3 Cartes 🐍 (serpent sur perte)</option>
                     <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
+                    <option value="fin_numero">🎯 Fin de Numéro (règles par dernier chiffre du tour cible)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -9359,6 +9364,158 @@ function AdminPanel() {
                       <div style={{ marginTop: 6, color: '#34d399', fontWeight: 600 }}>Priorité : Bloqueur (JJ) &gt; Tendance (Seuil3) &gt; Inverse</div>
                     </div>
                   )}
+                  {stratForm.mode === 'fin_numero' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Fin de Numéro</div>
+                      <div>Prédit en se basant sur le <strong>dernier chiffre (0-9)</strong> du numéro de tour à venir. Ex : fin=5 → cible les jeux 5, 15, 25, 35, 55, 65...</div>
+                      <div style={{ marginTop: 6 }}><strong>Proche</strong> : émet la prédiction <em>X jeux avant</em> le tour cible (ex : proche=1, live=14 → prédit pour le jeu 15).</div>
+                      <div style={{ marginTop: 6 }}><strong>Résultats</strong> : costumes (♠♥♦♣), deux/trois cartes, pair/impair, joueur/banquier — tirage aléatoire ou en séquence.</div>
+                      <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Aucun seuil B ni mapping requis dans ce mode.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'fin_numero' && (() => {
+                    const getDigitCfg = (d) => {
+                      const r = (stratForm.fn_rules || []).find(x => Array.isArray(x.fins) && x.fins.includes(d));
+                      return r || { fins: [d], proche: 1, resultats: [], ordre: 'aleatoire' };
+                    };
+                    const setDigitCfg = (d, patch) => {
+                      setStratForm(p => {
+                        const rules = (p.fn_rules || []).filter(x => !(Array.isArray(x.fins) && x.fins.includes(d)));
+                        const existing = (p.fn_rules || []).find(x => Array.isArray(x.fins) && x.fins.includes(d)) || { fins: [d], proche: 1, resultats: [], ordre: 'aleatoire' };
+                        const updated = { ...existing, ...patch };
+                        if (updated.resultats && updated.resultats.length > 0) {
+                          return { ...p, fn_rules: [...rules, updated] };
+                        }
+                        return { ...p, fn_rules: rules };
+                      });
+                    };
+                    const activeCfg = fnActiveDigit !== null ? getDigitCfg(fnActiveDigit) : null;
+                    const RESULTS_OPTIONS = [
+                      ['♠','♠ Pique'],['♥','♥ Cœur'],['♦','♦ Carreau'],['♣','♣ Trèfle'],
+                      ['deux','2 Cartes'],['trois','3 Cartes'],
+                      ['pair','Pair'],['impair','Impair'],
+                      ['joueur','Joueur'],['banquier','Banquier'],
+                    ];
+                    return (
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 14 }}>🎯 Configuration par fin de numéro</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 12 }}>Cliquez sur un chiffre (0-9) pour configurer les prédictions pour ce fin de numéro. Ex : chiffre <strong style={{color:'#a5b4fc'}}>5</strong> → jeux 5, 15, 25, 35, 45, 55, 65…</div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                          {[0,1,2,3,4,5,6,7,8,9].map(d => {
+                            const cfg = getDigitCfg(d);
+                            const isConfigured = cfg.resultats && cfg.resultats.length > 0;
+                            const isActive = fnActiveDigit === d;
+                            return (
+                              <button key={d} type="button"
+                                onClick={() => setFnActiveDigit(isActive ? null : d)}
+                                style={{ position: 'relative', width: 52, height: 60, borderRadius: 10, border: `2px solid ${isActive ? '#818cf8' : isConfigured ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.1)'}`, background: isActive ? 'rgba(99,102,241,0.25)' : isConfigured ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)', color: isActive ? '#e0e7ff' : isConfigured ? '#a5b4fc' : '#475569', fontWeight: 800, fontSize: 20, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, transition: 'all .15s' }}>
+                                {d}
+                                {isConfigured && (
+                                  <div style={{ fontSize: 8, color: isActive ? '#c7d2fe' : '#818cf8', fontWeight: 600, letterSpacing: 0.5 }}>
+                                    {cfg.resultats.length} rés.
+                                  </div>
+                                )}
+                                {!isConfigured && (
+                                  <div style={{ fontSize: 8, color: '#334155' }}>vide</div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {fnActiveDigit !== null && activeCfg && (
+                          <div style={{ padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.35)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: '#e0e7ff' }}>
+                                ✏️ Configuration — fin de numéro <span style={{ color: '#818cf8', fontSize: 18, fontWeight: 900 }}>{fnActiveDigit}</span>
+                                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400, marginLeft: 8 }}>→ jeux {fnActiveDigit}, 1{fnActiveDigit}, 2{fnActiveDigit}, 3{fnActiveDigit}, 4{fnActiveDigit}…</span>
+                              </div>
+                              {activeCfg.resultats.length > 0 && (
+                                <button type="button" onClick={() => { setDigitCfg(fnActiveDigit, { resultats: [], fins: [fnActiveDigit] }); }}
+                                  style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
+                                  🗑 Effacer
+                                </button>
+                              )}
+                            </div>
+
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Résultats à prédire — sélectionnez un ou plusieurs</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {RESULTS_OPTIONS.map(([val, lbl]) => {
+                                  const isOn = (activeCfg.resultats || []).includes(val);
+                                  return (
+                                    <button key={val} type="button"
+                                      onClick={() => {
+                                        const cur = activeCfg.resultats || [];
+                                        setDigitCfg(fnActiveDigit, { resultats: isOn ? cur.filter(r => r !== val) : [...cur, val], fins: [fnActiveDigit], proche: activeCfg.proche ?? 1, ordre: activeCfg.ordre || 'aleatoire' });
+                                      }}
+                                      style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${isOn ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isOn ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: isOn ? '#c7d2fe' : '#64748b', fontSize: 13, fontWeight: isOn ? 700 : 500, cursor: 'pointer', transition: 'all .12s' }}>
+                                      {lbl}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                              <div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Déclencher X jeux avant le tour cible</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <input type="number" min={1} max={20} value={activeCfg.proche ?? 1}
+                                    onChange={e => setDigitCfg(fnActiveDigit, { proche: Math.max(1, parseInt(e.target.value) || 1), fins: [fnActiveDigit], resultats: activeCfg.resultats || [], ordre: activeCfg.ordre || 'aleatoire' })}
+                                    style={{ width: 70, padding: '8px 10px', borderRadius: 8, border: '2px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#a5b4fc', fontSize: 15, fontWeight: 700, textAlign: 'center' }} />
+                                  <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                    Ex : proche=<strong style={{color:'#a5b4fc'}}>{activeCfg.proche ?? 1}</strong> → live au jeu <strong style={{color:'#e2e8f0'}}>{fnActiveDigit === 0 ? 19 : (10 + fnActiveDigit) - (activeCfg.proche ?? 1)}</strong> → prédit pour jeu <strong style={{color:'#818cf8'}}>{fnActiveDigit === 0 ? 20 : 10 + fnActiveDigit}</strong>
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Ordre de prédiction</div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  {[['aleatoire','🎲 Aléatoire'],['sequence','🔁 Séquence']].map(([val, lbl]) => (
+                                    <button key={val} type="button"
+                                      onClick={() => setDigitCfg(fnActiveDigit, { ordre: val, fins: [fnActiveDigit], resultats: activeCfg.resultats || [], proche: activeCfg.proche ?? 1 })}
+                                      style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${(activeCfg.ordre || 'aleatoire') === val ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: (activeCfg.ordre || 'aleatoire') === val ? 'rgba(99,102,241,0.2)' : 'transparent', color: (activeCfg.ordre || 'aleatoire') === val ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                      {lbl}
+                                    </button>
+                                  ))}
+                                </div>
+                                {(activeCfg.ordre || 'aleatoire') === 'sequence' && (activeCfg.resultats || []).length > 1 && (
+                                  <div style={{ marginTop: 6, fontSize: 10, color: '#818cf8' }}>Ordre : {(activeCfg.resultats || []).join(' → ')}</div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(activeCfg.resultats || []).length > 0 && (
+                              <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 11, color: '#86efac' }}>
+                                ✅ <strong>Fin {fnActiveDigit} configuré</strong> — quand le live sera à {fnActiveDigit === 0 ? 'N' : 'N'}+{(activeCfg.proche ?? 1)} jeux du prochain tour se terminant par <strong>{fnActiveDigit}</strong>, la prédiction sera émise : <strong>{(activeCfg.resultats || []).join(', ')}</strong> ({activeCfg.ordre === 'sequence' ? 'en séquence' : 'aléatoire'}).
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(stratForm.fn_rules || []).length > 0 && (
+                          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6 }}>RÉCAPITULATIF</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {[0,1,2,3,4,5,6,7,8,9].map(d => {
+                                const cfg = getDigitCfg(d);
+                                if (!cfg.resultats || cfg.resultats.length === 0) return null;
+                                return (
+                                  <div key={d} style={{ padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 11 }}>
+                                    <span style={{ color: '#818cf8', fontWeight: 700 }}>…{d}</span>
+                                    <span style={{ color: '#94a3b8', margin: '0 4px' }}>→</span>
+                                    <span style={{ color: '#e2e8f0' }}>{cfg.resultats.join('/')}</span>
+                                    <span style={{ color: '#475569', marginLeft: 4 }}>(p={cfg.proche ?? 1})</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
