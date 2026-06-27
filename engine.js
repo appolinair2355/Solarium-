@@ -2519,6 +2519,23 @@ class Engine {
       const hCntAbs = countValidCards(cfg.hand === 'banquier' ? bCards : pCards);
       resolveHandSuits = hCntAbs === 2 ? ['deux'] : hCntAbs === 3 ? ['trois'] : [];
     }
+    // fin_numero : résolution dynamique multi-catégories
+    // Le type est détecté depuis la valeur prédite elle-même (costume / cartes / parité / vainqueur)
+    if (cfg.mode === 'fin_numero') {
+      const fnHand = cfg.hand || 'joueur';
+      const fnCards = fnHand === 'banquier' ? bCards : pCards;
+      const fnSuits = fnHand === 'banquier' ? bSuits : pSuits;
+      const hCntFn = countValidCards(fnCards);
+      const rScoreFn = baccaratHandScore(fnCards);
+      // Base : costumes de la main configurée
+      resolveHandSuits = [...(fnSuits || [])];
+      // Ajout : comptage de cartes
+      if (hCntFn === 2) resolveHandSuits.push('deux');
+      if (hCntFn === 3) resolveHandSuits.push('trois');
+      // Ajout : parité du score
+      if (rScoreFn !== null) resolveHandSuits.push(rScoreFn % 2 === 0 ? 'pair' : 'impair');
+      // joueur / banquier → résolus via WIN_P / WIN_B (gérés séparément dans _resolvePending)
+    }
     // gestion_banque : résolution avec la main configurée (cfg.hand), comme les autres modes.
     // NE PAS utiliser les deux mains — cela provoquerait une résolution prématurée (rattrapage=0)
     // si le costume prédit apparaît dans la mauvaise main, alors que la main configurée ne l'a pas.
@@ -4177,6 +4194,73 @@ class Engine {
         }
       }
 
+    } else if (mode === 'fin_numero') {
+      // ── MODE FIN DE NUMÉRO ──────────────────────────────────────────────────────
+      // Prédit en se basant sur le chiffre final (0-9) du numéro de tour à venir.
+      //
+      // fn_rules : [{ fins:[5], proche:2, resultats:['♥','deux','pair','joueur'], ordre:'aleatoire'|'sequence' }, ...]
+      //   fins      : chiffres finaux du tour cible (ex: [5] → jeux 5, 15, 25, 45, 55, 65...)
+      //   proche    : déclenche quand live == targetGn - proche
+      //   resultats : liste de résultats (costumes ♠♥♦♣, deux/trois, pair/impair, joueur/banquier)
+      //               → mélange libre de toutes les catégories
+      //   ordre     : 'aleatoire' (défaut) → tirage aléatoire | 'sequence' → cycle dans l'ordre
+      //
+      // Résolution dynamique : détectée depuis la valeur prédite elle-même
+      //   ♠♥♦♣     → costume de la main configurée
+      //   deux/trois → comptage de cartes de la main configurée
+      //   pair/impair → parité du score de la main configurée
+      //   joueur/banquier → vainqueur de la manche (→ mappé en WIN_P / WIN_B)
+      // ────────────────────────────────────────────────────────────────────────────
+      const fnRules = Array.isArray(cfg.fn_rules) ? cfg.fn_rules : [];
+      if (!state.fnTriggered) state.fnTriggered = new Set();
+      if (!state.fnSeqIdx)    state.fnSeqIdx    = {};
+
+      for (let rIdx = 0; rIdx < fnRules.length; rIdx++) {
+        const rule = fnRules[rIdx];
+        if (!Array.isArray(rule.fins) || rule.fins.length === 0) continue;
+        if (!Array.isArray(rule.resultats) || rule.resultats.length === 0) continue;
+        const proche = Math.max(1, parseInt(rule.proche) || 1);
+        const fins   = rule.fins.map(f => parseInt(f));
+
+        const targetGn  = gn + proche;
+        const targetFin = targetGn % 10;
+
+        if (!fins.includes(targetFin)) continue;
+
+        // Clé unique pour éviter les doublons sur le même tour cible
+        const triggerKey = `${targetGn}_i${rIdx}_f${fins.join('')}`;
+        if (state.fnTriggered.has(triggerKey)) continue;
+        if (state.pending[String(targetGn)]) continue;
+
+        // Sélection du résultat : aléatoire ou en séquence
+        let chosenResult;
+        if (rule.ordre === 'sequence') {
+          const seqKey = `r${rIdx}_f${fins.join('')}p${proche}`;
+          const idx = (state.fnSeqIdx[seqKey] || 0) % rule.resultats.length;
+          chosenResult = rule.resultats[idx];
+          state.fnSeqIdx[seqKey] = idx + 1;
+        } else {
+          chosenResult = rule.resultats[Math.floor(Math.random() * rule.resultats.length)];
+        }
+
+        // Mapping joueur/banquier → WIN_P / WIN_B (résolution vainqueur)
+        const emitValue = chosenResult === 'joueur' ? 'WIN_P'
+                        : chosenResult === 'banquier' ? 'WIN_B'
+                        : chosenResult;
+
+        state.fnTriggered.add(triggerKey);
+
+        // Nettoyer le Set si trop grand
+        if (state.fnTriggered.size > 300) {
+          const arr = [...state.fnTriggered];
+          state.fnTriggered = new Set(arr.slice(arr.length - 150));
+        }
+
+        const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
+        console.log(`[${channelId}] [FinNuméro] Live #${gn} | fin=${targetFin} | proche=${proche} | ${ordreLabel} → prédit "${emitValue}" pour #${targetGn}`);
+        await emitPrediction(targetGn, emitValue, emitValue, { force: true });
+      }
+
     } else if (mode === 'gestion_banque') {
       // Miroir d'une stratégie source avec gestion bankroll + messages Telegram édités
       // Le dropdown admin envoie l'ID numérique (ex: "35"), les prédictions DB sont stockées "S35"
@@ -5341,9 +5425,13 @@ class Engine {
             ? this.liveGameCards.playerSuits   // adverse du banquier = joueur
             : this.liveGameCards.bankerSuits;  // adverse du joueur = banquier
         } else {
+          // Utiliser les suits RAW + done check : dès que la main configurée
+          // a fini de tirer, le compteur se met à jour (même avant fin officielle du jeu)
+          const pDone = this.liveGameCards.playerDone;
+          const bDone = this.liveGameCards.bankerDone;
           projected = hand === 'banquier'
-            ? this.liveGameCards.bankerSuits
-            : this.liveGameCards.playerSuits;
+            ? (bDone ? this.liveGameCards.bankerSuitsRaw : [])
+            : (pDone ? this.liveGameCards.playerSuitsRaw : []);
         }
         if (projected.length > 0) liveSuits = projected;
       }
@@ -5810,6 +5898,67 @@ class Engine {
           singleCounter: true,
           description: `${cur}/${dynB} jeux (seuil B dynamique)`,
         }];
+      }
+
+      // ── Mode Fin de Numéro → compteur de countdown par règle ──────────────
+      if (mode === 'fin_numero') {
+        const fnRules  = Array.isArray(entry.config?.fn_rules) ? entry.config.fn_rules : [];
+        const fnType   = entry.config?.fn_type || 'A';
+        const TYPE_LBL = { A: 'Costume ♠♥♦♣', B: '2/3 Cartes', C: 'Pair/Impair', D: 'Joueur/Banquier' }[fnType] || 'Fin Numéro';
+        const LMAP     = { '♠':'♠','♥':'♥','♦':'♦','♣':'♣','deux':'2C','trois':'3C','pair':'Pair','impair':'Impair','joueur':'Joueur','banquier':'Banquier' };
+        const currentGn = this.liveGameCards?.gameNumber || this.maxProcessedGame || 0;
+
+        const fnItems = fnRules.filter(r => r.fins?.length && r.resultats?.length).map((rule, rIdx) => {
+          const fins   = (rule.fins || []).map(f => parseInt(f)).sort((a, b) => a - b);
+          const proche = Math.max(1, parseInt(rule.proche) || 1);
+          const ordre  = rule.ordre || 'aleatoire';
+          const LMAP2  = { '♠':'♠','♥':'♥','♦':'♦','♣':'♣','deux':'2 cartes','trois':'3 cartes','pair':'Pair','impair':'Impair','joueur':'Joueur','banquier':'Banquier' };
+          const resultatsLabel = (rule.resultats || []).map(v => LMAP[v] || v).join(ordre === 'sequence' ? '→' : '/');
+
+          // Chercher dans combien de jeux le moteur va déclencher pour cette règle
+          // Le déclenchement se fait au jeu (currentGn + K) quand ((currentGn + K) + proche) % 10 ∈ fins
+          let triggerIn = null;
+          let targetGn  = null;
+          for (let K = 0; K <= 10; K++) {
+            const tGn = (currentGn + K) + proche;
+            if (fins.includes(tGn % 10)) {
+              triggerIn = K;
+              targetGn  = tGn;
+              break;
+            }
+          }
+
+          let description;
+          if (currentGn === 0) {
+            description = `Fin ${fins.join('/')} · proche=${proche} · ${ordre === 'sequence' ? '🔁' : '🎲'} ${resultatsLabel}`;
+          } else if (triggerIn === 0) {
+            description = `🔥 Déclenchement — → Jeu #${targetGn} | ${ordre === 'sequence' ? '🔁' : '🎲'} ${resultatsLabel}`;
+          } else if (triggerIn !== null) {
+            description = `Fin ${fins.join('/')} · dans ${triggerIn} jeu${triggerIn > 1 ? 'x' : ''} → Jeu #${targetGn} | ${ordre === 'sequence' ? '🔁' : '🎲'} ${resultatsLabel}`;
+          } else {
+            description = `Fin ${fins.join('/')} · en attente | ${resultatsLabel}`;
+          }
+
+          return {
+            suit:       `fn_${rIdx}`,
+            display:    fins.map(f => `…${f}`).join(' '),
+            count:      triggerIn !== null ? Math.max(0, 10 - triggerIn) : 5,
+            threshold:  10,
+            mode, label: TYPE_LBL,
+            isFnNumero: true,
+            singleCounter: false,
+            fins, resultats: rule.resultats || [], ordre, proche,
+            triggerIn, targetGn, currentGn,
+            description,
+          };
+        });
+
+        if (fnItems.length === 0) {
+          return [{ suit: 'fn_empty', display: '🎯', count: 0, threshold: 1, mode,
+            label: TYPE_LBL, isFnNumero: true, singleCounter: true,
+            description: 'Aucune règle configurée' }];
+        }
+        return fnItems;
       }
 
       const _aqDefault = (entry.attenteQueue || []).map(x => ({ ...x }));
