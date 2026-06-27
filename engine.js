@@ -2524,7 +2524,7 @@ class Engine {
     if (cfg.mode === 'fin_numero') {
       const fnHand = cfg.hand || 'joueur';
       const fnCards = fnHand === 'banquier' ? bCards : pCards;
-      const fnSuits = fnHand === 'banquier' ? bSuits : pSuits;
+      const fnSuits = fnHand === 'banquier' ? bSuits : suits;
       const hCntFn = countValidCards(fnCards);
       const rScoreFn = baccaratHandScore(fnCards);
       // Base : costumes de la main configurée

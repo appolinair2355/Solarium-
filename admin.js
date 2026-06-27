@@ -518,7 +518,7 @@ function validateStrategyBody(body) {
   }
 
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -527,10 +527,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -662,7 +662,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isPairImpair        = mode === 'pair_impair';
     const isCarte2v3          = mode === 'carte_2v3';
     const is2k3k              = mode === '2k-3k';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k) ? null : normalizeMappings(mappings);
+    const isFinNumero         = mode === 'fin_numero';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -730,17 +731,25 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
             prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
             max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
+        : isFinNumero
+        ? { threshold: 0, mode: 'fin_numero', mappings: null,
+            fn_rules: (Array.isArray(req.body.fn_rules) ? req.body.fn_rules : []).map(r => ({
+              fins: (Array.isArray(r.fins) ? r.fins : []).map(f => parseInt(f)).filter(f => f >= 0 && f <= 9),
+              proche: Math.max(1, parseInt(r.proche) || 1),
+              resultats: (Array.isArray(r.resultats) ? r.resultats : []).filter(v => ['♠','♥','♦','♣','deux','trois','pair','impair','joueur','banquier'].includes(v)),
+              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+            })).filter(r => r.fins.length > 0 && r.resultats.length > 0) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
-            bg_lot_size:     Math.max(1,   parseInt(req.body.bg_lot_size)      || 5),
-            bg_cote:         Math.max(0.1, parseFloat(req.body.bg_cote)        || 1.9),
-            bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
-            bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.bg_site_url || '') }
+            bg_source_strategy_id: String(req.body.gb_source_id || req.body.bg_source_strategy_id || ''),
+            bg_lot_size:     Math.max(1,   parseInt(req.body.gb_taille      ?? req.body.bg_lot_size)      || 5),
+            bg_cote:         Math.max(0.1, parseFloat(req.body.gb_cote      ?? req.body.bg_cote)          || 1.9),
+            bg_bank:         Math.max(0,   parseFloat(req.body.gb_banque    ?? req.body.bg_bank)           || 5000),
+            bg_mise_initiale: Math.max(1,  parseFloat(req.body.gb_mise      ?? req.body.bg_mise_initiale)  || 1000),
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.gb_devise || req.body.bg_currency) ? (req.body.gb_devise || req.body.bg_currency) : 'f',
+            bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
+            bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
+            bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
@@ -965,7 +974,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isPairImpair        = mode === 'pair_impair';
     const isCarte2v3          = mode === 'carte_2v3';
     const is2k3k              = mode === '2k-3k';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k) ? null : normalizeMappings(mappings);
+    const isFinNumero         = mode === 'fin_numero';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1033,17 +1043,25 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
             prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
             max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
+        : isFinNumero
+        ? { threshold: 0, mode: 'fin_numero', mappings: null,
+            fn_rules: (Array.isArray(req.body.fn_rules) ? req.body.fn_rules : []).map(r => ({
+              fins: (Array.isArray(r.fins) ? r.fins : []).map(f => parseInt(f)).filter(f => f >= 0 && f <= 9),
+              proche: Math.max(1, parseInt(r.proche) || 1),
+              resultats: (Array.isArray(r.resultats) ? r.resultats : []).filter(v => ['♠','♥','♦','♣','deux','trois','pair','impair','joueur','banquier'].includes(v)),
+              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+            })).filter(r => r.fins.length > 0 && r.resultats.length > 0) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
-            bg_lot_size:      Math.max(1,   parseInt(req.body.bg_lot_size)       || 5),
-            bg_cote:          Math.max(0.1, parseFloat(req.body.bg_cote)         || 1.9),
-            bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
-            bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.bg_site_url || '') }
+            bg_source_strategy_id: String(req.body.gb_source_id || req.body.bg_source_strategy_id || ''),
+            bg_lot_size:      Math.max(1,   parseInt(req.body.gb_taille      ?? req.body.bg_lot_size)       || 5),
+            bg_cote:          Math.max(0.1, parseFloat(req.body.gb_cote      ?? req.body.bg_cote)            || 1.9),
+            bg_bank:          Math.max(0,   parseFloat(req.body.gb_banque    ?? req.body.bg_bank)             || 5000),
+            bg_mise_initiale: Math.max(1,   parseFloat(req.body.gb_mise      ?? req.body.bg_mise_initiale)    || 1000),
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.gb_devise || req.body.bg_currency) ? (req.body.gb_devise || req.body.bg_currency) : 'f',
+            bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
+            bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
+            bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
