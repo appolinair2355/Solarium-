@@ -96,8 +96,10 @@ function _makeId() {
 // ─── État global ────────────────────────────────────────────────────────────────
 let _countersList   = [];   // array of counter config objects
 let _countersState  = {};   // { [id]: { suitCounters, groupeJoueur, ..., gameCount, lastGameNumber, lastScheduleSent, lastSentTimes } }
-let _schedulerInterval = null;
-let _configLoaded   = false;
+let _schedulerInterval  = null;
+let _configLoaded       = false;
+let _lastConfigReloadMs = 0;  // timestamp du dernier rechargement depuis la DB
+let _schedulerRunning   = false;  // verrou anti-reentrancy
 
 // ─── Fabrique d'état vierge pour un compteur ──────────────────────────────────
 function _makeState() {
@@ -642,20 +644,20 @@ async function sendCounterById(id) {
 }
 
 // ─── Planificateur ────────────────────────────────────────────────────────────
-// L'intervalle est aligné sur l'horloge :
-//   interval=30 → envoi à H:00 et H:30
-//   interval=60 → envoi à H:00 uniquement
+// L'intervalle est basé sur le temps écoulé depuis le dernier envoi.
+//   interval=30 → envoi si >= 30 min depuis le dernier envoi
+//   interval=60 → envoi si >= 60 min depuis le dernier envoi
 function _shouldSendByInterval(counter, now) {
   if (!counter.enabled) return false;
   if (!counter.bot_token || !counter.channel_id) return false;
   const s = _countersState[counter.id];
   if (!s) return false;
   const interval = parseInt(counter.interval) || 30;
-  const mins     = now.getMinutes();
   const hhmm     = _getHHMM(now);
 
-  // Vérifier que la minute courante est un multiple de l'intervalle
-  if (mins % interval !== 0) return false;
+  // Vérifier que l'intervalle (en minutes) s'est écoulé depuis le dernier envoi planifié
+  const msSinceLastSend = now.getTime() - (s.lastScheduleSentMs || 0);
+  if (msSinceLastSend < interval * 60 * 1000) return false;
 
   // Anti-doublon : ne pas envoyer deux fois dans la même minute
   return s.lastScheduleSent !== hhmm;
@@ -676,10 +678,19 @@ function startScheduler() {
   if (_schedulerInterval) clearInterval(_schedulerInterval);
   loadConfig().catch(() => {});
   _schedulerInterval = setInterval(async () => {
+    // Verrou anti-reentrancy : si le cycle précédent est encore en cours, on saute
+    if (_schedulerRunning) return;
+    _schedulerRunning = true;
     try {
-      if (!_configLoaded) await loadConfig();
       const now  = new Date();
       const hhmm = _getHHMM(now);
+
+      // Rechargement de la config depuis la DB toutes les 5 min
+      // pour prendre en compte les modifications faites via le panneau admin
+      if (!_configLoaded || now.getTime() - _lastConfigReloadMs > 5 * 60 * 1000) {
+        await loadConfig();
+        _lastConfigReloadMs = now.getTime();
+      }
 
       for (const counter of _countersList) {
         if (!counter.enabled) continue;
@@ -688,6 +699,8 @@ function startScheduler() {
 
         let sent = false;
 
+        // L'envoi par intervalle est prioritaire ; si déclenché, on skip l'heure fixe
+        // pour éviter un double-envoi dans le même cycle.
         if (_shouldSendByInterval(counter, now)) {
           s.lastScheduleSent   = hhmm;
           s.lastScheduleSentMs = now.getTime();
@@ -698,9 +711,7 @@ function startScheduler() {
           } catch (e) {
             console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi intervalle: ${e.message}`);
           }
-        }
-
-        if (_shouldSendByFixedTime(counter, now)) {
+        } else if (_shouldSendByFixedTime(counter, now)) {
           try {
             await _sendCounter(counter);
             console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi heure fixe — ${hhmm}`);
@@ -732,6 +743,8 @@ function startScheduler() {
       }
     } catch (e) {
       console.warn('[SuitCounter] Erreur scheduler:', e.message);
+    } finally {
+      _schedulerRunning = false;
     }
   }, 60 * 1000);
   console.log('[SuitCounter] ⏱ Scheduler v2 démarré (vérif. toutes les 60s)');

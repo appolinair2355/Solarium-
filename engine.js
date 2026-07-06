@@ -3257,40 +3257,43 @@ class Engine {
 
     } else if (mode === 'absence_victoire') {
       // ── MODE ABSENCE → VICTOIRE ───────────────────────────────────────────
-      // Logique identique à absence_apparition mais sur les résultats (Joueur/Banquier).
       // Deux compteurs indépendants :
-      //   abs_joueur  = jeux consécutifs sans victoire Joueur
-      //   abs_banquier = jeux consécutifs sans victoire Banquier
+      //   abs_joueur   = jeux consécutifs sans victoire Joueur  (incrémenté quand Banker gagne)
+      //   abs_banquier = jeux consécutifs sans victoire Banquier (incrémenté quand Player gagne)
       //
-      // Règles :
-      //  - Victoire Joueur  → si abs_joueur  >= B → prédit WIN_P puis reset des 2 compteurs
-      //  - Victoire Banquier → si abs_banquier >= B → prédit WIN_B puis reset des 2 compteurs
-      //  - Égalité (Tie)    → reset des 2 compteurs, puis reprise
+      // Règles (prédiction déclenchée DÈS que le seuil B est atteint,
+      //         SANS attendre la réapparition de la main absente) :
+      //  - Banker gagne  → abs_joueur++ → si abs_joueur  == B → prédit WIN_P (jeu #gn+offset) → reset abs_joueur
+      //  - Player gagne  → abs_banquier++ → si abs_banquier == B → prédit WIN_B (jeu #gn+offset) → reset abs_banquier
+      //  - Égalité (Tie) → reset des 2 compteurs
       // ─────────────────────────────────────────────────────────────────────
       const absP = state.counts['abs_joueur']   || 0;
       const absB = state.counts['abs_banquier']  || 0;
 
       if (winner === 'Player') {
-        if (absP >= B) {
-          console.log(`[${channelId}] [Abs Victoire] 👤 Joueur réapparaît après ${absP} absences (seuil≥${B}) → WIN_P jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P');
-          state.counts['abs_joueur'] = 0;
+        // Player gagne → Banquier n'a pas gagné → abs_banquier progresse
+        state.counts['abs_joueur'] = 0;
+        const newAbsB = absB + 1;
+        if (newAbsB >= B) {
+          console.log(`[${channelId}] [Abs Victoire] 🏦 Banquier absent ${newAbsB} jeux (seuil=${B}) → WIN_B prédit jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B');
           state.counts['abs_banquier'] = 0;
         } else {
-          state.counts['abs_joueur'] = 0;
-          state.counts['abs_banquier'] = absB + 1;
+          state.counts['abs_banquier'] = newAbsB;
         }
       } else if (winner === 'Banker') {
-        if (absB >= B) {
-          console.log(`[${channelId}] [Abs Victoire] 🏦 Banquier réapparaît après ${absB} absences (seuil≥${B}) → WIN_B jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B');
+        // Banker gagne → Joueur n'a pas gagné → abs_joueur progresse
+        state.counts['abs_banquier'] = 0;
+        const newAbsP = absP + 1;
+        if (newAbsP >= B) {
+          console.log(`[${channelId}] [Abs Victoire] 👤 Joueur absent ${newAbsP} jeux (seuil=${B}) → WIN_P prédit jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P');
           state.counts['abs_joueur'] = 0;
-          state.counts['abs_banquier'] = 0;
         } else {
-          state.counts['abs_banquier'] = 0;
-          state.counts['abs_joueur'] = absP + 1;
+          state.counts['abs_joueur'] = newAbsP;
         }
       } else {
+        // Égalité → reset des 2 compteurs
         state.counts['abs_joueur'] = 0;
         state.counts['abs_banquier'] = 0;
         console.log(`[${channelId}] [Abs Victoire] Égalité — reset des 2 compteurs`);
@@ -5510,7 +5513,7 @@ class Engine {
             isLive: false,
             singleCounter: false,
             description: absP >= threshold
-              ? `✅ Seuil atteint ! (${absP} abs.) — attend victoire Joueur`
+              ? `🎯 Seuil atteint ! (${absP} abs.) — WIN_P prédit`
               : `${absP}/${threshold} jeux sans victoire Joueur`,
           },
           {
@@ -5521,7 +5524,7 @@ class Engine {
             isLive: false,
             singleCounter: false,
             description: absB >= threshold
-              ? `✅ Seuil atteint ! (${absB} abs.) — attend victoire Banquier`
+              ? `🎯 Seuil atteint ! (${absB} abs.) — WIN_B prédit`
               : `${absB}/${threshold} jeux sans victoire Banquier`,
           },
         ];

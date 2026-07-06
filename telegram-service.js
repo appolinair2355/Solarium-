@@ -1412,6 +1412,24 @@ function buildTgMessage(formatId, {
       };
     }
 
+    // ── Format 77 : Absence Victoire (V1 Joueur / V2 Banquier) ─────────────
+    case 77: {
+      // V1 = Victoire Joueur (WIN_P), V2 = Victoire Banquier (WIN_B)
+      const v77 = suit === 'WIN_P' ? 'V1' : suit === 'WIN_B' ? 'V2' : suit === 'TIE' ? 'Ég.' : name;
+      let sl77;
+      if (status === null) {
+        sl77 = `⌛⏳\n💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque )`;
+      } else if (status === 'gagne') {
+        sl77 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage}\n💧 Poursuite ${maxR}!! (🔰+ ${rattrapage}Risque )`;
+      } else {
+        sl77 = `❌\n💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque )`;
+      }
+      return {
+        text: `🌈 Jeux № ${gameNumber}\n🔹 Prediction: ${v77}\n🌹Statut :${sl77}`,
+        parse_mode: null,
+      };
+    }
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {
