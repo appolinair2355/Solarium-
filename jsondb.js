@@ -238,6 +238,7 @@ function setHiddenChannels(userId, channelIds) {
 function getSetting(key)        { return d().settings[key] ?? null; }
 function setSetting(key, value) { d().settings[key] = value; _persist(); }
 function deleteSetting(key)     { delete d().settings[key]; _persist(); }
+function getAllSettings()        { return Object.assign({}, d().settings); }
 
 // ── ADMIN STATS ────────────────────────────────────────────────────
 
@@ -259,6 +260,6 @@ module.exports = {
   getMaxResolvedGame, expireStaleByGame,
   getTelegramConfigs, upsertTelegramConfig, deleteTelegramConfig,
   getHiddenChannels, setHiddenChannels,
-  getSetting, setSetting, deleteSetting,
+  getSetting, setSetting, deleteSetting, getAllSettings,
   getUserStats,
 };

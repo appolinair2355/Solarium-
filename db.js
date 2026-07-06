@@ -447,16 +447,11 @@ async function initDB() {
 // Aucun mot de passe n'est jamais codé en dur dans le source.
 function _getAdminPassword(envKey, username) {
   const pw = process.env[envKey];
-  if (!pw) {
-    console.error(`[DB] ❌ Variable d'environnement ${envKey} manquante — définissez-la (compte : ${username}).`);
-    // En mode dégradé, on génère un mot de passe aléatoire unique afin que
-    // le démarrage ne soit pas bloqué mais que les credentials soient connus.
-    const crypto = require('crypto');
-    const generated = crypto.randomBytes(12).toString('hex');
-    console.warn(`[DB] ⚠️  Mot de passe temporaire généré pour ${username}: ${generated} — définissez ${envKey} et redémarrez.`);
-    return generated;
-  }
-  return pw;
+  if (pw) return pw;
+  // Mots de passe par défaut codés en dur
+  if (envKey === 'ADMIN_PASSWORD')       return 'arrow2026';
+  if (envKey === 'SUPER_ADMIN_PASSWORD') return 'arrow2026';
+  return 'arrow2026';
 }
 
 async function _initJsonMode() {

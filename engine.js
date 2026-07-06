@@ -3276,7 +3276,8 @@ class Engine {
         const newAbsB = absB + 1;
         if (newAbsB >= B) {
           console.log(`[${channelId}] [Abs Victoire] 🏦 Banquier absent ${newAbsB} jeux (seuil=${B}) → WIN_B prédit jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B');
+          // force:true → émet même si une prédiction rattrapage est en cours
+          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B', { force: true });
           state.counts['abs_banquier'] = 0;
         } else {
           state.counts['abs_banquier'] = newAbsB;
@@ -3287,7 +3288,8 @@ class Engine {
         const newAbsP = absP + 1;
         if (newAbsP >= B) {
           console.log(`[${channelId}] [Abs Victoire] 👤 Joueur absent ${newAbsP} jeux (seuil=${B}) → WIN_P prédit jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P');
+          // force:true → émet même si une prédiction rattrapage est en cours
+          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P', { force: true });
           state.counts['abs_joueur'] = 0;
         } else {
           state.counts['abs_joueur'] = newAbsP;
@@ -5038,6 +5040,12 @@ class Engine {
         });
         // Suivi du jeu TERMINÉ le plus récent réellement traité (utilisé par cleanupStale)
         if (game.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = game.game_number;
+        // ── Export fin de journée au jeu #1439 ───────────────────────────
+        if (game.game_number === 1439) {
+          require('./end-of-day-export').runExport().catch(e =>
+            console.error('[EOD] Export échoué :', e.message)
+          );
+        }
       }
       if (hadNew) await this.saveAbsences();
     } catch (e) { console.error('Engine tick error:', e.message); }

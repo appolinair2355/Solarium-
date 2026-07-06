@@ -3599,6 +3599,108 @@ router.post('/stop-render', requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── EOD BACKUP / EXPORT FIN DE JOURNÉE ────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Lire la config (token masqué)
+router.get('/eod/config', requireAdmin, (req, res) => {
+  try {
+    const jdb       = require('./jsondb');
+    const botToken  = jdb.getSetting('eod_bot_token');
+    const channelId = jdb.getSetting('eod_channel_id');
+    res.json({
+      has_token:     !!botToken,
+      token_preview: botToken ? '●●●●●●●' + botToken.slice(-4) : '',
+      eod_channel_id: channelId || '',
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Sauvegarder la config
+router.post('/eod/config', requireAdmin, (req, res) => {
+  try {
+    const jdb = require('./jsondb');
+    const { eod_bot_token, eod_channel_id } = req.body;
+    if (eod_bot_token && eod_bot_token.trim() && !eod_bot_token.includes('●'))
+      jdb.setSetting('eod_bot_token', eod_bot_token.trim());
+    if (eod_channel_id !== undefined)
+      jdb.setSetting('eod_channel_id', String(eod_channel_id).trim());
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Test — envoie immédiatement (bypass garde journalière)
+router.post('/eod/test', requireAdmin, async (req, res) => {
+  try {
+    const { runExportForce } = require('./end-of-day-export');
+    const msg = await runExportForce();
+    res.json({ ok: true, message: msg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Import — restaure paramètres + canaux Telegram depuis un fichier backup JSON
+router.post('/eod/import', requireAdmin, (req, res) => {
+  try {
+    const jdb = require('./jsondb');
+    const { data } = req.body;
+    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Données JSON invalides' });
+
+    const imported = { settings: 0, telegram: 0, users: 0 };
+
+    // ── Stratégie d'import : utiliser _raw_db si présent (restauration complète)
+    // Sinon importer champ par champ depuis les sections du backup.
+
+    if (data._raw_db && typeof data._raw_db === 'object') {
+      // Restauration complète via le dump db.json brut
+      const fs     = require('fs');
+      const path   = require('path');
+      const dbPath = path.join(__dirname, 'data', 'db.json');
+      // Fusionner plutôt qu'écraser : préserver meta.next_*_id en prenant le max
+      let current = {};
+      try { current = JSON.parse(fs.readFileSync(dbPath, 'utf8')); } catch {}
+      const merged = Object.assign({}, current, data._raw_db);
+      merged.meta = {
+        next_user_id: Math.max(current.meta?.next_user_id || 1, data._raw_db.meta?.next_user_id || 1),
+        next_pred_id: Math.max(current.meta?.next_pred_id || 1, data._raw_db.meta?.next_pred_id || 1),
+        next_tg_id:   Math.max(current.meta?.next_tg_id   || 1, data._raw_db.meta?.next_tg_id   || 1),
+      };
+      fs.writeFileSync(dbPath, JSON.stringify(merged, null, 2), 'utf8');
+      // Recharger jsondb en mémoire
+      const jdbMod = require.resolve('./jsondb');
+      delete require.cache[jdbMod];
+      const jdb2 = require('./jsondb');
+      imported.settings = Object.keys(merged.settings || {}).length;
+      imported.telegram = (merged.telegram_config || []).length;
+      imported.users    = (merged.users || []).filter(u => !u.is_admin).length;
+    } else {
+      // Import champ par champ (backup sans _raw_db)
+      if (data.settings && typeof data.settings === 'object') {
+        for (const [k, v] of Object.entries(data.settings)) {
+          if (v !== null && v !== undefined && String(v).trim() !== '') {
+            jdb.setSetting(k, String(v));
+            imported.settings++;
+          }
+        }
+      }
+      if (Array.isArray(data.telegram_config)) {
+        for (const cfg of data.telegram_config) {
+          if (cfg.channel_id) {
+            jdb.upsertTelegramConfig({ channel_id: cfg.channel_id, channel_name: cfg.channel_name || cfg.channel_id });
+            imported.telegram++;
+          }
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      imported,
+      message: `✅ Import terminé — ${imported.settings} paramètre(s), ${imported.telegram} canal(aux) Telegram, ${imported.users} utilisateur(s) restauré(s).`,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── HÉBERGEMENT BOTS TELEGRAM ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 const botHost = require('./bot-host');
