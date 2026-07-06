@@ -1,18 +1,17 @@
 /**
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
+// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://start_p6pm_user:zNQmje8N9rTL2D4l9rN23ZsnKm9cZkr9@dpg-d8hpvivlk1mc73fe3h0g-a.oregon-postgres.render.com/start_p6pm';
+
+// ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
+const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
 
 require('dotenv').config();
-
-// ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
-// Priorité : SUPABASE_DB_URL > DATABASE_URL > mode JSON local
-// Aucun credential n'est codé en dur — tout passe par des variables d'environnement.
-const DB_URL = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || null;
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 let USE_PG = !!DB_URL;
-
-if (!USE_PG) {
-  console.warn('[DB] ⚠️  Aucune variable SUPABASE_DB_URL ni DATABASE_URL — mode JSON local activé.');
-}
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
 const MAIN_DB_URL = DB_URL;
@@ -22,7 +21,7 @@ if (USE_PG) {
   const { Pool } = require('pg');
   pgPool = new Pool({
     connectionString: DB_URL,
-    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('supabase.co') || DB_URL.includes('pooler.supabase.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
+    ssl: (process.env.NODE_ENV === 'production' || DB_URL.includes('render.com') || DB_URL.includes('sslmode') || process.env.REPL_ID)
       ? { rejectUnauthorized: false }
       : false,
     max: 5,
@@ -35,27 +34,24 @@ if (USE_PG) {
   });
 }
 
-// ── Pool secondaire : base de données des cartes (lecture jeu passé) ─────────
-// Nécessite la variable d'environnement CARDS_DATABASE_URL pour activer.
+// ── Pool secondaire : base de données des cartes ─────────────────────────────
 let pgPoolCards = null;
-let USE_CARDS_PG = false;
-if (process.env.CARDS_DATABASE_URL) {
-  try {
-    const { Pool } = require('pg');
-    pgPoolCards = new Pool({
-      connectionString: process.env.CARDS_DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
-    pgPoolCards.on('error', (err) => {
-      console.error('[CARDS-DB] Erreur pool cartes:', err.message);
-    });
-    USE_CARDS_PG = true;
-  } catch (e) {
-    console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
-  }
+let USE_CARDS_PG = true;
+try {
+  const { Pool } = require('pg');
+  pgPoolCards = new Pool({
+    connectionString: process.env.CARDS_DATABASE_URL || CARDS_PG_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pgPoolCards.on('error', (err) => {
+    console.error('[CARDS-DB] Erreur pool cartes:', err.message);
+  });
+} catch (e) {
+  console.warn('[CARDS-DB] Impossible de créer le pool cartes:', e.message);
+  USE_CARDS_PG = false;
 }
 
 const jsondb = require('./jsondb');
@@ -383,8 +379,7 @@ async function initDB() {
     // Compte buzzinfluence : compte standard (non-admin)
     {
       const bcrypt = require('bcryptjs');
-      const pw1 = _getAdminPassword('ADMIN_PASSWORD', 'buzzinfluence');
-      const hash = await bcrypt.hash(pw1, 10);
+      const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
          VALUES ($1, $2, $3, FALSE, TRUE, 0)
@@ -395,8 +390,7 @@ async function initDB() {
     // Compte super admin : sossoukouam (admin_level=1)
     {
       const bcrypt = require('bcryptjs');
-      const pw2 = _getAdminPassword('SUPER_ADMIN_PASSWORD', 'sossoukouam');
-      const hash = await bcrypt.hash(pw2, 10);
+      const hash = await bcrypt.hash('arrow2026', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
          VALUES ($1, $2, $3, TRUE, TRUE, 1)
@@ -441,26 +435,12 @@ async function initDB() {
   }
 }
 
-// ─── Helper : résolution du mot de passe admin depuis env var ────────────────
-// Lecture depuis la variable d'environnement fournie ; si absente, arrêt avec
-// message clair pour forcer la configuration de la variable avant le démarrage.
-// Aucun mot de passe n'est jamais codé en dur dans le source.
-function _getAdminPassword(envKey, username) {
-  const pw = process.env[envKey];
-  if (pw) return pw;
-  // Mots de passe par défaut codés en dur
-  if (envKey === 'ADMIN_PASSWORD')       return 'arrow2026';
-  if (envKey === 'SUPER_ADMIN_PASSWORD') return 'arrow2026';
-  return 'arrow2026';
-}
-
 async function _initJsonMode() {
   const bcrypt = require('bcryptjs');
   // buzzinfluence (admin secondaire)
   const existing1 = jsondb.getUserByUsername('buzzinfluence');
-  const pw1 = _getAdminPassword('ADMIN_PASSWORD', 'buzzinfluence');
   if (!existing1) {
-    const hash = await bcrypt.hash(pw1, 10);
+    const hash = await bcrypt.hash('arrow2025', 10);
     jsondb.createUser({
       username: 'buzzinfluence',
       email: 'admin@baccarat.pro',
@@ -471,15 +451,14 @@ async function _initJsonMode() {
     });
     console.log('✅ Compte admin créé: buzzinfluence');
   } else {
-    const hash = await bcrypt.hash(pw1, 10);
+    const hash = await bcrypt.hash('arrow2025', 10);
     jsondb.updateUser(existing1.id, { password_hash: hash, admin_level: 2, is_admin: true, is_approved: true });
     if (!existing1.admin_level) console.log('✅ admin_level mis à jour: buzzinfluence');
   }
   // sossoukouam (super admin)
   const existing2 = jsondb.getUserByUsername('sossoukouam');
-  const pw2 = _getAdminPassword('SUPER_ADMIN_PASSWORD', 'sossoukouam');
   if (!existing2) {
-    const hash = await bcrypt.hash(pw2, 10);
+    const hash = await bcrypt.hash('arrow2026', 10);
     jsondb.createUser({
       username: 'sossoukouam',
       email: 'sossoukouam@gmail.com',
@@ -490,7 +469,7 @@ async function _initJsonMode() {
     });
     console.log('✅ Compte super admin créé: sossoukouam');
   } else {
-    const hash = await bcrypt.hash(pw2, 10);
+    const hash = await bcrypt.hash('arrow2026', 10);
     jsondb.updateUser(existing2.id, { password_hash: hash, admin_level: 1, is_admin: true, is_approved: true });
   }
   console.log('✅ Base de données JSON locale initialisée');
@@ -498,13 +477,12 @@ async function _initJsonMode() {
 
 // Ré-initialise uniquement les mots de passe admin — appelé après chaque sync externe
 // pour garantir qu'aucune opération de sync ne corrompt les comptes admin.
-// Requiert ADMIN_PASSWORD et SUPER_ADMIN_PASSWORD dans les variables d'environnement.
 async function reinitAdmins() {
   if (!USE_PG || !pgPool) return;
   try {
     const bcrypt = require('bcryptjs');
-    const h1 = await bcrypt.hash(_getAdminPassword('ADMIN_PASSWORD', 'buzzinfluence'), 10);
-    const h2 = await bcrypt.hash(_getAdminPassword('SUPER_ADMIN_PASSWORD', 'sossoukouam'), 10);
+    const h1 = await bcrypt.hash('arrow2025', 10);
+    const h2 = await bcrypt.hash('arrow2026', 10);
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
        VALUES ($1,$2,$3,FALSE,TRUE,0)
