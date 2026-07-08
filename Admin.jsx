@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Avatar from '../components/Avatar';
+import AdminRefresh from '../components/AdminRefresh';
+import AdminIdeas   from '../components/AdminIdeas';
 
 class AdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -315,6 +317,78 @@ function TgDirectChat() {
             style={{ padding: '9px 24px', borderRadius: 10, border: '1px solid rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             ⚙️ Configurer maintenant
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Panel : Codes Partenaires
+// ─────────────────────────────────────────────────────────────────────────────
+function CodesPartenairesPanel() {
+  const [codes, setCodes]     = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [newCode, setNewCode] = React.useState('');
+  const [msg, setMsg]         = React.useState('');
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    fetch('/api/admin/partner-codes', { credentials: 'include' })
+      .then(r => r.json()).then(d => setCodes(Array.isArray(d) ? d : [])).catch(() => setCodes([])).finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  async function handleAdd() {
+    if (!newCode.trim()) return;
+    const r = await fetch('/api/admin/partner-codes', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: newCode.trim() }),
+    });
+    const d = await r.json();
+    setMsg(r.ok ? '✅ Code ajouté' : `❌ ${d.error || 'Erreur'}`);
+    if (r.ok) { setNewCode(''); load(); }
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  return (
+    <div className="tg-admin-card" style={{ borderColor: 'rgba(34,158,217,0.35)' }}>
+      <div className="tg-admin-header">
+        <span className="tg-admin-icon">🤝</span>
+        <div style={{ flex: 1 }}>
+          <h2 className="tg-admin-title">Codes Partenaires</h2>
+          <p className="tg-admin-sub">Créez et gérez les codes partenaires pour l'accès spécial ou les réductions.</p>
+        </div>
+        {codes.length > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 12, background: 'rgba(34,158,217,0.15)', color: '#7dd3fc', fontWeight: 700, border: '1px solid rgba(34,158,217,0.3)' }}>{codes.length} code{codes.length > 1 ? 's' : ''}</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, marginTop: 14 }}>
+        <input
+          type="text" value={newCode} onChange={e => setNewCode(e.target.value)}
+          placeholder="Nouveau code partenaire…"
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 9, border: '1.5px solid rgba(34,158,217,0.3)', background: 'rgba(34,158,217,0.06)', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+        />
+        <button onClick={handleAdd} style={{ padding: '10px 20px', borderRadius: 9, border: 'none', background: 'rgba(34,158,217,0.2)', color: '#38bdf8', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>Ajouter</button>
+      </div>
+      {msg && <div style={{ padding: '8px 12px', borderRadius: 8, background: msg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: msg.startsWith('✅') ? '#4ade80' : '#f87171', fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+      {loading ? <div style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Chargement…</div> : codes.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: '#475569', fontSize: 14 }}>Aucun code partenaire.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {codes.map((c, i) => (
+            <div key={i} style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(34,158,217,0.06)', border: '1px solid rgba(34,158,217,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#e2e8f0' }}>{c.code}</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>Créé {c.created_at ? new Date(c.created_at).toLocaleDateString('fr-FR') : ''}</div>
+              </div>
+              <button onClick={async () => {
+                await fetch(`/api/admin/partner-codes/${c.id}`, { method: 'DELETE', credentials: 'include' });
+                load();
+              }} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'rgba(239,68,68,0.1)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Supprimer</button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -3328,198 +3402,6 @@ function ProjectBackupPanel() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPONENT : IdeesStrategiesPanel
-// ─────────────────────────────────────────────────────────────────────────────
-function IdeesStrategiesPanel() {
-  const [ideas, setIdeas] = React.useState([]);
-  const [purchases, setPurchases] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [msg, setMsg] = React.useState({ text: '', error: false });
-  const [form, setForm] = React.useState({ name: '', description: '', is_paid: false, price_usd: 0 });
-  const [editing, setEditing] = React.useState(null);
-  const [showForm, setShowForm] = React.useState(false);
-
-  const flash = (text, error = false) => { setMsg({ text, error }); setTimeout(() => setMsg({ text: '', error: false }), 4000); };
-
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      const [ir, pr] = await Promise.all([
-        fetch('/api/ideas', { credentials: 'include' }).then(r => r.json()),
-        fetch('/api/ideas/admin/purchases', { credentials: 'include' }).then(r => r.json()),
-      ]);
-      setIdeas(Array.isArray(ir) ? ir : []);
-      setPurchases(Array.isArray(pr) ? pr : []);
-    } catch (e) { flash('Erreur chargement : ' + e.message, true); }
-    setLoading(false);
-  };
-
-  React.useEffect(() => { loadAll(); }, []);
-
-  const saveIdea = async () => {
-    try {
-      const url = editing ? `/api/ideas/${editing}` : '/api/ideas';
-      const method = editing ? 'PUT' : 'POST';
-      const r = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-      const d = await r.json();
-      if (!r.ok) return flash(d.error || 'Erreur', true);
-      flash(editing ? '✅ Idée mise à jour' : '✅ Idée créée');
-      setEditing(null); setForm({ name: '', description: '', is_paid: false, price_usd: 0 }); setShowForm(false);
-      loadAll();
-    } catch (e) { flash(e.message, true); }
-  };
-
-  const deleteIdea = async (id) => {
-    if (!window.confirm('Supprimer cette idée ?')) return;
-    await fetch(`/api/ideas/${id}`, { method: 'DELETE', credentials: 'include' });
-    flash('✅ Idée supprimée'); loadAll();
-  };
-
-  const reorder = async (id, dir) => {
-    await fetch('/api/ideas/admin/reorder', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, direction: dir }) });
-    loadAll();
-  };
-
-  const approvePurchase = async (pid) => {
-    await fetch(`/api/ideas/admin/purchase/${pid}/approve`, { method: 'POST', credentials: 'include' });
-    flash('✅ Achat validé'); loadAll();
-  };
-
-  const rejectPurchase = async (pid) => {
-    const note = prompt('Motif de refus (optionnel) :') ?? '';
-    await fetch(`/api/ideas/admin/purchase/${pid}/reject`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
-    flash('Achat rejeté'); loadAll();
-  };
-
-  const CARD = { background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 10, padding: '12px 16px', marginBottom: 10 };
-  const INP = { padding: '8px 12px', background: '#1e293b', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 8, color: '#fff', fontSize: 13, width: '100%', boxSizing: 'border-box' };
-  const BTN = (col) => ({ padding: '6px 14px', borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: 'pointer', border: 'none', background: col, color: '#fff' });
-
-  if (loading) return <div style={{ padding: 24, color: '#64748b', textAlign: 'center' }}>⏳ Chargement…</div>;
-
-  return (
-    <div>
-      {msg.text && (
-        <div style={{ marginBottom: 10, padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700,
-          background: msg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-          border: `1px solid ${msg.error ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)'}`,
-          color: msg.error ? '#f87171' : '#86efac' }}>
-          {msg.text}
-        </div>
-      )}
-
-      {/* ── Bouton créer + formulaire ── */}
-      <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', description: '', is_paid: false, price_usd: 0 }); }}
-        style={{ ...BTN('rgba(250,204,21,0.2)'), border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24', marginBottom: 12 }}>
-        {showForm ? '✕ Annuler' : '+ Nouvelle idée'}
-      </button>
-
-      {(showForm || editing !== null) && (
-        <div style={{ ...CARD, borderColor: 'rgba(250,204,21,0.4)', marginBottom: 16 }}>
-          <div style={{ fontWeight: 800, color: '#fbbf24', marginBottom: 10 }}>{editing ? '✏️ Modifier l\'idée' : '✨ Nouvelle idée'}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input type="text" placeholder="Nom de l'idée *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} style={INP} />
-            <textarea placeholder="Description (objectif, fonctionnement, conditions…) *" rows={4} value={form.description}
-              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-              style={{ ...INP, resize: 'vertical', fontFamily: 'inherit' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: form.is_paid ? '#fbbf24' : '#64748b', fontWeight: 700 }}>
-                <input type="checkbox" checked={!!form.is_paid} onChange={e => setForm(p => ({ ...p, is_paid: e.target.checked }))} style={{ accentColor: '#fbbf24', width: 14, height: 14 }} />
-                Idée payante
-              </label>
-              {form.is_paid && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 12, color: '#94a3b8' }}>Prix ($) :</span>
-                  <input type="number" min={0} step={0.5} value={form.price_usd}
-                    onChange={e => setForm(p => ({ ...p, price_usd: parseFloat(e.target.value) || 0 }))}
-                    style={{ ...INP, width: 80 }} />
-                </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={saveIdea} style={{ ...BTN('#22c55e'), flex: 1 }}>💾 {editing ? 'Enregistrer' : 'Créer'}</button>
-              <button onClick={() => { setEditing(null); setShowForm(false); }} style={{ ...BTN('#475569') }}>Annuler</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Liste des idées ── */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
-          Catalogue ({ideas.length} idée{ideas.length !== 1 ? 's' : ''})
-        </div>
-        {ideas.length === 0 && <div style={{ color: '#475569', fontSize: 12, padding: '12px 0' }}>Aucune idée pour l'instant. Cliquez sur "+ Nouvelle idée" pour commencer.</div>}
-        {ideas.map((idea, idx) => (
-          <div key={idea.id} style={{ ...CARD, borderLeft: `3px solid ${idea.enabled ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.4)'}` }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 800, fontSize: 14, color: '#f1f5f9' }}>{idea.name}</span>
-                  {idea.is_paid ? (
-                    <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)', padding: '1px 7px', borderRadius: 100 }}>
-                      💰 {idea.price_usd > 0 ? `$${idea.price_usd}` : 'Payant'}
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', padding: '1px 7px', borderRadius: 100 }}>Gratuit</span>
-                  )}
-                  {!idea.enabled && <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(100,116,139,0.15)', padding: '1px 7px', borderRadius: 100, border: '1px solid rgba(100,116,139,0.25)' }}>Désactivée</span>}
-                </div>
-                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{idea.description}</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 100 }}>
-                <button onClick={() => { setEditing(idea.id); setForm({ name: idea.name, description: idea.description, is_paid: idea.is_paid, price_usd: idea.price_usd, enabled: idea.enabled }); setShowForm(false); }}
-                  style={{ ...BTN('rgba(99,102,241,0.25)'), border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc', fontSize: 11 }}>✏️ Modifier</button>
-                <button onClick={() => deleteIdea(idea.id)} style={{ ...BTN('rgba(239,68,68,0.15)'), border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 11 }}>🗑 Supprimer</button>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button onClick={() => reorder(idea.id, 'up')} disabled={idx === 0} style={{ ...BTN('rgba(100,116,139,0.2)'), border: '1px solid rgba(100,116,139,0.3)', color: '#94a3b8', fontSize: 11, flex: 1, opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
-                  <button onClick={() => reorder(idea.id, 'down')} disabled={idx === ideas.length - 1} style={{ ...BTN('rgba(100,116,139,0.2)'), border: '1px solid rgba(100,116,139,0.3)', color: '#94a3b8', fontSize: 11, flex: 1, opacity: idx === ideas.length - 1 ? 0.3 : 1 }}>↓</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Achats d'idées ── */}
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
-          Achats d'idées ({purchases.length})
-        </div>
-        {purchases.length === 0 && <div style={{ color: '#475569', fontSize: 12 }}>Aucun achat pour l'instant.</div>}
-        {purchases.map(p => (
-          <div key={p.id} style={{ ...CARD }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 13 }}>
-                  #{p.id} — <span style={{ color: '#a5b4fc' }}>{p.username}</span> → <span style={{ color: '#fbbf24' }}>{p.idea_name_current || p.idea_name}</span>
-                </div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                  {new Date(p.created_at).toLocaleString()} · {p.amount_paid > 0 ? `$${p.amount_paid}` : 'Gratuit'} ·
-                  <span style={{
-                    marginLeft: 5, fontWeight: 700,
-                    color: p.status === 'validated' ? '#22c55e' : p.status === 'rejected' ? '#f87171' : '#fbbf24'
-                  }}>
-                    {p.status === 'validated' ? '✅ Validé' : p.status === 'rejected' ? '❌ Rejeté' : '⏳ En attente'}
-                  </span>
-                  {p.admin_note && <span style={{ marginLeft: 8, fontStyle: 'italic', color: '#94a3b8' }}>Note : {p.admin_note}</span>}
-                </div>
-              </div>
-              {p.status === 'pending_admin' && (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => approvePurchase(p.id)} style={{ ...BTN('#22c55e') }}>✅ Valider</button>
-                  <button onClick={() => rejectPurchase(p.id)} style={{ ...BTN('rgba(239,68,68,0.7)') }}>❌ Rejeter</button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function Admin() {
   return <AdminErrorBoundary><AdminPanel /></AdminErrorBoundary>;
 }
@@ -3527,8 +3409,8 @@ export default function Admin() {
 function AdminPanel() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const isSuperAdmin = user?.admin_level === 1 || user?.username === 'buzzinfluence';
-  const canSeeSystem = user?.admin_level === 1 || user?.username === 'buzzinfluence';
+  const isSuperAdmin = user?.admin_level === 1;
+  const canSeeSystem = user?.admin_level === 1;
   const isProOnly = !user?.is_admin && !!user?.is_pro;
   const isPartner = !user?.is_admin && user?.account_type === 'partenaire';
 
@@ -3552,6 +3434,13 @@ function AdminPanel() {
   const [pendingPayments, setPendingPayments] = useState([]);
   const [paymentScreenshot, setPaymentScreenshot] = useState(null); // { id, image, ai }
   const [paymentBusy, setPaymentBusy] = useState(null);
+
+  // ── Demandes de fonds Baccara Kouamé ──────────────────────────────
+  const [baccaraDemandes, setBaccaraDemandes] = useState([]);
+  const [baccaraDemandesBusy, setBaccaraDemandesBusy] = useState({});
+  const [baccaraDemandesNote, setBaccaraDemandesNote] = useState({});
+  const [baccaraDemandesAmount, setBaccaraDemandesAmount] = useState({});
+  const [baccaraDemandesMsg, setBaccaraDemandesMsg] = useState({});
 
   // ── Achats de Stratégies (admin) ──────────────────────────────────
   const [stratPurchases, setStratPurchases]     = useState([]);
@@ -3683,6 +3572,53 @@ function AdminPanel() {
     const i = setInterval(loadPendingPayments, 30000);
     return () => clearInterval(i);
   }, [loadPendingPayments]);
+
+  const loadBaccaraDemandes = useCallback(async () => {
+    try {
+      const r = await fetch('/api/baccara-wallet/admin/fund-requests', { credentials: 'include' });
+      if (r.ok) setBaccaraDemandes(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadBaccaraDemandes();
+    const i = setInterval(loadBaccaraDemandes, 20000);
+    return () => clearInterval(i);
+  }, [loadBaccaraDemandes]);
+
+  const approveBaccaraDemande = async (id) => {
+    setBaccaraDemandesBusy(p => ({ ...p, [id]: true }));
+    try {
+      const amount = baccaraDemandesAmount[id];
+      const r = await fetch(`/api/baccara-wallet/admin/fund-requests/${id}/approve`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, admin_note: baccaraDemandesNote[id] || null }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: true, text: `✅ Approuvé ! ${d.credited} ${d.currency} crédité.` } }));
+        loadBaccaraDemandes();
+      } else {
+        setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: d.error || 'Erreur' } }));
+      }
+    } catch { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: 'Erreur réseau' } })); }
+    finally { setBaccaraDemandesBusy(p => ({ ...p, [id]: false })); }
+  };
+
+  const rejectBaccaraDemande = async (id) => {
+    setBaccaraDemandesBusy(p => ({ ...p, [id]: true }));
+    try {
+      const r = await fetch(`/api/baccara-wallet/admin/fund-requests/${id}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_note: baccaraDemandesNote[id] || null }),
+      });
+      if (r.ok) { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: true, text: '❌ Demande rejetée.' } })); loadBaccaraDemandes(); }
+      else { const d = await r.json(); setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: d.error || 'Erreur' } })); }
+    } catch { setBaccaraDemandesMsg(p => ({ ...p, [id]: { ok: false, text: 'Erreur réseau' } })); }
+    finally { setBaccaraDemandesBusy(p => ({ ...p, [id]: false })); }
+  };
 
   const viewPaymentScreenshot = async (id) => {
     try {
@@ -3897,6 +3833,7 @@ function AdminPanel() {
     { value: '53', label: '#53 — 💎 Diamant Court' },
     { value: '54', label: '#54 — 🚀 Fusée Futur' },
     { value: '55', label: '#55 — 🌊 Cascade Pro' },
+    { value: '76', label: '#76 — 💠 Cartes Signature' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -3913,13 +3850,23 @@ function AdminPanel() {
     annonce_sequence_ids: [], annonce_text: '', annonce_interval: 60, annonce_duration: 120,
     // Mode first_card_plus6
     proche: 3, banker_card_count: 0, fc_ecart: 2,
+    // Mode gestion_banque (gestion des lots + banque)
+    gb_source_id: '', gb_banque: 5000, gb_mise: 10, gb_taille: 5, gb_cote: 1.9, gb_max_lots: 0, gb_devise: 'USD', gb_nom_boutique: '', gb_url_site: '',
+    // Mode compteurs_absences (3 compteurs)
+    c3_b: 4, c3_seuil3: 3, c3_jj: 2,
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
-    // Mode gestion_banque
-    bg_source_strategy_id: '', bg_bank: 5000, bg_mise_initiale: 1000, bg_lot_size: 5,
-    bg_cote: 1.9, bg_currency: 'f', bg_max_lots: 0, bg_site_url: '', bg_boutique_name: '',
-    // Champ commun tous modes
-    tg_site_url: '',
+    // Filtre d'attente (universel — tous les modes)
+    attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur',
+    attente1_mapping: null, attente2_mapping: null, attente3_mapping: null,
+    // Relance sur perte
+    relance_sur_perte: false, relance_sur_perte_max: 3,
+    // Fin de numéro
+    fn_rules: [],
+    // Mode absence_victoire_2 (seuils B distincts)
+    B_joueur: 5, B_banquier: 8,
+    // Mode combine_carte (positions 1+2)
+    cc_hand: 'joueur', cc_combinations: [],
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -3948,6 +3895,7 @@ function AdminPanel() {
   const [proStratTgOpen, setProStratTgOpen] = useState(null);   // id de stratégie Pro ouverte pour édition
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
   const [stratEditing, setStratEditing] = useState(null); // id being edited, null = creating
+  const [fnActiveDigit, setFnActiveDigit] = useState(null); // chiffre actif pour config fin_numero (0-9)
   const [stratMsg, setStratMsg] = useState('');
   const [successModal, setSuccessModal] = useState(null);
   const [proSavedModal, setProSavedModal] = useState(null); // { type:'create'|'update', id, filename, strategy_name, hand, decalage, max_rattrapage, engine_type, warnings, engine_error }
@@ -4043,13 +3991,224 @@ function AdminPanel() {
     } catch (e) { setLbMsg('❌ ' + e.message); }
   };
 
+  // ── Compteurs instantanés v2 (multi-compteurs indépendants) ──────────────────
+  const SC_COUNTER_TYPES = [
+    { value: 'taux_miroir',      label: '📈 Taux Miroir',              desc: 'Couleurs ♠♥♦♣ Joueur + Banquier dans 1 message' },
+    { value: 'parite',           label: '⚖️ Parité',                    desc: 'Pair/Impair Joueur + Banquier dans 1 message' },
+    { value: 'valeur_joueur',    label: '🃏 Carte de valeur — Joueur',  desc: 'Distribution A-K côté Joueur uniquement' },
+    { value: 'valeur_banquier',  label: '🃏 Carte de valeur — Banquier',desc: 'Distribution A-K côté Banquier uniquement' },
+    { value: 'score_exact',      label: '🔢 Score Exact (J+B)',         desc: 'Somme des scores Joueur + Banquier (0→18)' },
+  ];
+  const SC_INTERVALS = [
+    { v: 5,  l: '5 min' }, { v: 10, l: '10 min' }, { v: 15, l: '15 min' },
+    { v: 20, l: '20 min' }, { v: 30, l: '30 min' }, { v: 45, l: '45 min' },
+    { v: 60, l: '1 heure' }, { v: 90, l: '1h 30' }, { v: 120, l: '2 heures' },
+    { v: 180, l: '3 heures' }, { v: 240, l: '4 heures' }, { v: 360, l: '6 heures' },
+    { v: 720, l: '12 heures' }, { v: 1440, l: '24 heures' },
+  ];
+  const SC_EMPTY_FORM = {
+    label: '', bot_token: '', channel_id: '',
+    counter_type: 'taux_miroir', interval: 30,
+    send_times: [], send_on_game_end: false, reset_after_send: true, enabled: true,
+  };
+  const [scList, setScList]           = useState([]);
+  const [scStates, setScStates]       = useState({});
+  const [scMsg, setScMsg]             = useState('');
+  const [scLoading, setScLoading]     = useState(false);
+  const [scSaving, setScSaving]       = useState(false);
+  const [scEditId, setScEditId]       = useState(null);
+  const [scShowForm, setScShowForm]   = useState(false);
+  const [scForm, setScForm]           = useState({ ...SC_EMPTY_FORM });
+  const [scNewTime, setScNewTime]     = useState('');
+
+  const loadSuitCounters = useCallback(async () => {
+    setScLoading(true);
+    try {
+      const r = await fetch('/api/admin/suit-counters', { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setScList(Array.isArray(d.counters) ? d.counters : []);
+      setScStates(d.states || {});
+    } catch {}
+    finally { setScLoading(false); }
+  }, []);
+
+  const _saveSuitCountersList = async (newList) => {
+    setScSaving(true); setScMsg('');
+    try {
+      const r = await fetch('/api/admin/suit-counters', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counters: newList }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setScList(Array.isArray(d.counters) ? d.counters : newList);
+      setScMsg('✅ Sauvegardé');
+      setTimeout(() => setScMsg(''), 3000);
+    } catch (e) { setScMsg('❌ ' + e.message); }
+    finally { setScSaving(false); }
+  };
+
+  const scSubmitForm = async () => {
+    if (!scForm.bot_token || !scForm.channel_id) {
+      setScMsg('❌ Bot Token et ID Canal obligatoires'); return;
+    }
+    const id = scEditId || `sc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const newCounter = { ...scForm, id };
+    const newList = scEditId
+      ? scList.map(c => c.id === scEditId ? newCounter : c)
+      : [...scList, newCounter];
+    await _saveSuitCountersList(newList);
+    setScShowForm(false); setScEditId(null); setScForm({ ...SC_EMPTY_FORM });
+    await loadSuitCounters();
+  };
+
+  const scDeleteCounter = async (id) => {
+    if (!window.confirm('Supprimer ce compteur ?')) return;
+    await _saveSuitCountersList(scList.filter(c => c.id !== id));
+    await loadSuitCounters();
+  };
+
+  const scToggleEnabled = async (id, enabled) => {
+    const newList = scList.map(c => c.id === id ? { ...c, enabled } : c);
+    await _saveSuitCountersList(newList);
+    setScList(newList);
+  };
+
+  const scTestCounter = async (id) => {
+    setScMsg('⏳ Envoi…');
+    try {
+      const r = await fetch(`/api/admin/suit-counters/${id}/test`, { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setScMsg('✅ Message test envoyé !');
+      setTimeout(() => setScMsg(''), 4000);
+    } catch (e) { setScMsg('❌ ' + e.message); }
+  };
+
+  const scResetCounter = async (id) => {
+    try {
+      const r = await fetch(`/api/admin/suit-counters/${id}/reset`, { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setScMsg('✅ Compteur remis à zéro');
+      setTimeout(() => setScMsg(''), 3000);
+      await loadSuitCounters();
+    } catch (e) { setScMsg('❌ ' + e.message); }
+  };
+
+  const scStartEdit = (counter) => {
+    setScEditId(counter.id);
+    setScForm({
+      label: counter.label || '',
+      bot_token: counter.bot_token || '',
+      channel_id: counter.channel_id || '',
+      counter_type: counter.counter_type || 'taux_miroir',
+      interval: counter.interval || 30,
+      send_times: Array.isArray(counter.send_times) ? counter.send_times : [],
+      send_on_game_end: !!counter.send_on_game_end,
+      reset_after_send: counter.reset_after_send !== false,
+      enabled: !!counter.enabled,
+    });
+    setScShowForm(true);
+  };
+
   useEffect(() => {
     if (adminTab === 'canaux') {
       loadLbTargets();
+      loadKouame();
+      loadSuitCounters();
       loadStrategies();
       loadStratStats();
     }
-  }, [adminTab]);
+  }, [adminTab, loadSuitCounters]);
+
+  // ── API Kouamé ──
+  const [kouameConfig, setKouameConfig]   = useState({ bot_token_preview: null, channel_id: '', enabled: false });
+  const [kouameStatus, setKouameStatus]   = useState({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
+  const [kouameForm, setKouameForm]       = useState({ bot_token: '', channel_id: '' });
+  const [kouameMsg, setKouameMsg]         = useState('');
+  const [kouameSaving, setKouameSaving]   = useState(false);
+  const [kouameTesting, setKouameTesting] = useState(false);
+  const [kouameFeedUrl, setKouameFeedUrl] = useState('');
+  const [kouameFeedCopied, setKouameFeedCopied] = useState(false);
+
+  const loadKouame = async () => {
+    try {
+      const [rc, rs] = await Promise.all([
+        fetch('/api/kouame/config',  { credentials: 'include' }).then(r => r.json()),
+        fetch('/api/kouame/status',  { credentials: 'include' }).then(r => r.json()),
+      ]);
+      setKouameConfig(rc);
+      setKouameStatus(rs);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+  };
+
+  const saveKouame = async () => {
+    setKouameSaving(true); setKouameMsg('');
+    try {
+      const body = {};
+      if (kouameForm.bot_token.trim()) body.bot_token = kouameForm.bot_token.trim();
+      if (kouameForm.channel_id.trim()) body.channel_id = kouameForm.channel_id.trim();
+      const r = await fetch('/api/kouame/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameConfig(d);
+      setKouameForm({ bot_token: '', channel_id: '' });
+      setKouameMsg('✅ Configuration sauvegardée');
+      setTimeout(loadKouame, 1000);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameSaving(false); }
+  };
+
+  const toggleKouame = async (enabled) => {
+    setKouameSaving(true); setKouameMsg('');
+    try {
+      const r = await fetch('/api/kouame/config', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameConfig(d);
+      setKouameMsg(enabled ? '✅ API Kouamé activée — 1xBet suspendu' : '⏸ API Kouamé désactivée — 1xBet reprend');
+      setTimeout(loadKouame, 800);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameSaving(false); }
+  };
+
+  const testKouame = async () => {
+    const token = kouameForm.bot_token.trim() || '(config actuelle)';
+    setKouameTesting(true); setKouameMsg('⏳ Test connexion…');
+    try {
+      const r = await fetch('/api/kouame/test', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: kouameForm.bot_token.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setKouameMsg(`✅ Bot valide : @${d.bot_username} (${d.bot_name})`);
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+    finally { setKouameTesting(false); }
+  };
+
+  const resetKouame = async () => {
+    if (!confirm('Supprimer la configuration API Kouamé ?')) return;
+    try {
+      const r = await fetch('/api/kouame/config', { method: 'DELETE', credentials: 'include' });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error||'Erreur'); }
+      setKouameConfig({ bot_token_preview: null, channel_id: '', enabled: false });
+      setKouameStatus({ connected: false, last_game_number: 0, last_received_at: null, error: null, game_count: 0 });
+      setKouameMsg('🗑 Configuration supprimée');
+    } catch (e) { setKouameMsg('❌ ' + e.message); }
+  };
 
   // Hébergement Bots
   const [hostedBots, setHostedBots]           = useState([]);
@@ -4119,6 +4278,7 @@ function AdminPanel() {
     { value: 'carte_valeur', label: '🃏 Carte Valeur' },
     { value: 'intersection', label: '🎯 Intersection' },
     { value: 'surveillance_perte', label: '🔍 Surveillance Pertes' },
+    { value: 'fin_numero', label: '🎯 Fin de Numéro' },
   ];
 
   useEffect(() => {
@@ -4288,7 +4448,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', absence_victoire_2:'🏆 Absence Victoire 2', combine_carte:'🃏 Combiné Carte', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍', '2k-3k':'2️⃣3️⃣ 2k-3k Tendance' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -4931,7 +5091,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, bg_source_strategy_id: s.bg_source_strategy_id || '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_lot_size: s.bg_lot_size ?? 5, bg_cote: s.bg_cote ?? 1.9, bg_currency: s.bg_currency || 'f', bg_max_lots: s.bg_max_lots ?? 0, bg_site_url: s.bg_site_url || '', bg_boutique_name: s.bg_boutique_name || '', tg_site_url: s.tg_site_url || '' });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [] });
     setStratOpen(true);
   };
 
@@ -4948,7 +5108,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, bg_source_strategy_id: s.bg_source_strategy_id || '', bg_bank: s.bg_bank ?? 5000, bg_mise_initiale: s.bg_mise_initiale ?? 1000, bg_lot_size: s.bg_lot_size ?? 5, bg_cote: s.bg_cote ?? 1.9, bg_currency: s.bg_currency || 'f', bg_max_lots: s.bg_max_lots ?? 0, bg_site_url: s.bg_site_url || '', bg_boutique_name: s.bg_boutique_name || '', tg_site_url: s.tg_site_url || '' });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -4991,7 +5151,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k','fin_numero'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -5414,7 +5574,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', absence_victoire_2: 'Abs Victoire 2', combine_carte: 'Combiné Carte', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍', '2k-3k': '2️⃣3️⃣ 2k-3k' };
 
   return (
     <>
@@ -5873,9 +6033,11 @@ function AdminPanel() {
             { id: 'pro-accounts',      icon: '💎', label: 'Comptes PRO',     badge: onlineUsers.filter(u => u.is_pro).length || null },
             { id: 'premium-accounts',  icon: '⭐', label: 'Comptes PREMIUM', badge: onlineUsers.filter(u => u.is_premium && !u.is_pro).length || null },
             { id: 'paiements',         icon: '💳', label: 'Paiements',       badge: pendingPayments.length || null },
+            { id: 'demandes-baccara', icon: '🎰', label: 'Mes Demandes',     badge: baccaraDemandes.filter(d => d.status === 'pending').length || null },
             { id: 'achats',         icon: '💰', label: 'Achats Stratégies', badge: null },
-            { id: 'idees-strat',    icon: '💡', label: 'Idées Stratégies', badge: null },
-            { id: 'vente-strat',    icon: '🛒', label: 'Vente Stratégies', badge: Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length || null },
+            { id: 'vente-strategies', icon: '🛒', label: 'Vente Stratégies' },
+            { id: 'idees',          icon: '💡', label: 'Idées Stratégies' },
+            { id: 'codes-part',      icon: '🤝', label: 'Codes Partenaires' },
             { id: 'config-pro',     icon: '🔷', label: 'Config Pro', highlight: true },
             { id: 'strategies',     icon: '⚙️', label: 'Stratégies',     badge: strategies.length > 0 ? strategies.length : null },
             { id: 'bilan',          icon: '📊', label: 'Bilan' },
@@ -5888,6 +6050,7 @@ function AdminPanel() {
               { id: 'systeme',      icon: '🛠️', label: 'Système' },
               { id: 'config-ia',    icon: '🧠', label: 'Config IA' },
               { id: 'maj-db',       icon: '💾', label: 'Mise à jour DB' },
+              { id: 'actualiser',   icon: '🔄', label: 'Actualiser' },
             ] : []),
           ]).map(tab => {
             const active = adminTab === tab.id;
@@ -5985,262 +6148,6 @@ function AdminPanel() {
           </div>
         </div>}
 
-        {/* ── VITRINE / PANNEAU DE VENTE — déplacé dans l'onglet 🛒 Vente Stratégies ── */}
-        {false && <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
-          <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
-            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
-            <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
-          </div>
-          <div style={{ padding: '16px 20px' }}>
-            {/* Sélecteur de stratégie */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
-              <select
-                value={promoEditId}
-                onChange={e => {
-                  const id = e.target.value;
-                  setPromoEditId(id);
-                  if (id && promoConfigs[id]) setPromoForm({ ...BLANK_PROMO, ...promoConfigs[id] });
-                  else setPromoForm(BLANK_PROMO);
-                }}
-                style={{ flex: 1, maxWidth: 320, padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }}
-              >
-                <option value="">— Choisir une stratégie —</option>
-                {strategies.map(s => (
-                  <option key={s.id} value={String(s.id)}>
-                    S{s.id} — {s.name} {promoConfigs[String(s.id)]?.enabled ? '✅' : ''}
-                  </option>
-                ))}
-              </select>
-              {promoEditId && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: promoForm.enabled ? '#22c55e' : '#64748b', fontWeight: 700 }}>
-                  <input type="checkbox" checked={!!promoForm.enabled}
-                    onChange={e => setPromoForm(p => ({ ...p, enabled: e.target.checked }))}
-                    style={{ accentColor: '#22c55e', width: 15, height: 15 }} />
-                  {promoForm.enabled ? 'Vente activée' : 'Vente désactivée'}
-                </label>
-              )}
-            </div>
-
-            {promoEditId && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                {/* Colonne gauche — formulaire */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 }}>Configuration de la fiche</div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Badge emoji</label>
-                      <select value={promoForm.badge} onChange={e => setPromoForm(p => ({ ...p, badge: e.target.value }))}
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
-                        <option value="🔥">🔥 Populaire</option>
-                        <option value="⭐">⭐ Nouveau</option>
-                        <option value="🏆">🏆 Premium</option>
-                        <option value="💎">💎 Exclusif</option>
-                        <option value="🚀">🚀 Puissant</option>
-                        <option value="🎯">🎯 Précis</option>
-                        <option value="🤖">🤖 Automatique</option>
-                        <option value="">∅ Aucun badge</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Plan requis</label>
-                      <select value={promoForm.plan_requis} onChange={e => setPromoForm(p => ({ ...p, plan_requis: e.target.value }))}
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}>
-                        <option value="standard">Standard</option>
-                        <option value="premium">Premium ⭐</option>
-                        <option value="pro">Pro 💼</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Titre de la stratégie</label>
-                    <input type="text" value={promoForm.titre} maxLength={60}
-                      onChange={e => setPromoForm(p => ({ ...p, titre: e.target.value }))}
-                      placeholder="Ex : Stratégie Comptages Paire Joueur"
-                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Accroche (tagline)</label>
-                    <input type="text" value={promoForm.tagline} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, tagline: e.target.value }))}
-                      placeholder="Ex : Seuil dynamique basé sur les statistiques réelles"
-                      style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 1</label>
-                    <input type="text" value={promoForm.bullet1} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet1: e.target.value }))}
-                      placeholder="Ex : Seuil B recalculé automatiquement à chaque tour"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 2</label>
-                    <input type="text" value={promoForm.bullet2} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet2: e.target.value }))}
-                      placeholder="Ex : Déclenché sur les absences longues détectées en live"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>✅ Argument 3</label>
-                    <input type="text" value={promoForm.bullet3} maxLength={80}
-                      onChange={e => setPromoForm(p => ({ ...p, bullet3: e.target.value }))}
-                      placeholder="Ex : Compatible Telegram et prédictions temps réel"
-                      style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Prix affiché</label>
-                      <input type="text" value={promoForm.prix_texte} maxLength={30}
-                        onChange={e => setPromoForm(p => ({ ...p, prix_texte: e.target.value }))}
-                        placeholder="Ex : 12$/semaine"
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 3, fontWeight: 600 }}>Texte du bouton</label>
-                      <input type="text" value={promoForm.cta} maxLength={40}
-                        onChange={e => setPromoForm(p => ({ ...p, cta: e.target.value }))}
-                        placeholder="Souscrire maintenant"
-                        style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.2)', borderRadius: 7, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                    </div>
-                  </div>
-
-                  {/* Bouton sauvegarder */}
-                  <button
-                    onClick={async () => {
-                      if (!promoEditId) return;
-                      setPromoSaving(true);
-                      try {
-                        const r = await fetch(`/api/admin/strategy-promo/${promoEditId}`, {
-                          method: 'POST', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(promoForm),
-                        });
-                        if (r.ok) {
-                          await loadPromoConfigs();
-                          setPromoMsg({ text: `✅ Fiche de vente S${promoEditId} sauvegardée`, error: false });
-                        } else {
-                          setPromoMsg({ text: '❌ Erreur lors de la sauvegarde', error: true });
-                        }
-                      } catch {
-                        setPromoMsg({ text: '❌ Erreur réseau', error: true });
-                      } finally {
-                        setPromoSaving(false);
-                        setTimeout(() => setPromoMsg({ text: '', error: false }), 4000);
-                      }
-                    }}
-                    disabled={promoSaving}
-                    style={{ padding: '10px 0', borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: promoSaving ? 'wait' : 'pointer',
-                      background: 'linear-gradient(135deg, rgba(250,204,21,0.25), rgba(245,158,11,0.15))',
-                      border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24', marginTop: 4 }}
-                  >
-                    {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
-                  </button>
-                  {promoMsg.text && (
-                    <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                      background: promoMsg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-                      border: `1px solid ${promoMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
-                      color: promoMsg.error ? '#f87171' : '#86efac' }}>
-                      {promoMsg.text}
-                    </div>
-                  )}
-                </div>
-
-                {/* Colonne droite — aperçu carte */}
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Aperçu de la carte</div>
-                  <div style={{
-                    borderRadius: 16, overflow: 'hidden',
-                    background: 'linear-gradient(145deg, #0f172a, #1e293b)',
-                    border: promoForm.enabled ? '1.5px solid rgba(250,204,21,0.5)' : '1.5px solid rgba(100,116,139,0.3)',
-                    boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
-                    maxWidth: 340, position: 'relative',
-                  }}>
-                    {/* Badge */}
-                    {promoForm.badge && (
-                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
-                        background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
-                        color: '#fbbf24', padding: '3px 10px', borderRadius: 100, letterSpacing: 0.5 }}>
-                        {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
-                      </div>
-                    )}
-                    {/* Statut */}
-                    {!promoForm.enabled && (
-                      <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
-                        background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
-                        ● Désactivée
-                      </div>
-                    )}
-                    <div style={{ padding: '28px 20px 20px' }}>
-                      {/* ID + plan */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
-                          S{promoEditId}
-                        </span>
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
-                          background: promoForm.plan_requis === 'pro' ? 'rgba(168,85,247,0.18)' : promoForm.plan_requis === 'premium' ? 'rgba(250,204,21,0.12)' : 'rgba(34,197,94,0.12)',
-                          color: promoForm.plan_requis === 'pro' ? '#c084fc' : promoForm.plan_requis === 'premium' ? '#fbbf24' : '#22c55e' }}>
-                          {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
-                        </span>
-                      </div>
-                      {/* Titre */}
-                      <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
-                        {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
-                      </div>
-                      {/* Tagline */}
-                      {promoForm.tagline && (
-                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
-                      )}
-                      {/* Bullets */}
-                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
-                          <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
-                          <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
-                        </div>
-                      ))}
-                      {/* Prix + CTA */}
-                      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        {promoForm.prix_texte ? (
-                          <div>
-                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, letterSpacing: 0.5 }}>À PARTIR DE</div>
-                            <div style={{ fontSize: 18, fontWeight: 900, color: '#fbbf24', letterSpacing: -0.5 }}>{promoForm.prix_texte}</div>
-                          </div>
-                        ) : <div />}
-                        <button disabled style={{ padding: '8px 16px', borderRadius: 9, fontWeight: 700, fontSize: 12,
-                          background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', border: 'none', color: '#1a1a1a', cursor: 'default',
-                          opacity: promoForm.enabled ? 1 : 0.4 }}>
-                          {promoForm.cta || 'Souscrire'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 10, color: '#475569', lineHeight: 1.6 }}>
-                    💡 Activez la fiche pour qu'elle soit visible. Partagez la capture ou intégrez ce contenu dans votre canal de promotion.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Liste des fiches actives */}
-            {Object.keys(promoConfigs).some(k => promoConfigs[k]?.enabled) && (
-              <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid rgba(250,204,21,0.15)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Fiches actives ({Object.keys(promoConfigs).filter(k => promoConfigs[k]?.enabled).length})</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {Object.entries(promoConfigs).filter(([, v]) => v?.enabled).map(([id, cfg]) => (
-                    <button key={id} onClick={() => { setPromoEditId(id); setPromoForm({ ...BLANK_PROMO, ...cfg }); }}
-                      style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                        background: promoEditId === id ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.07)',
-                        border: `1px solid rgba(250,204,21,${promoEditId === id ? 0.5 : 0.2})`, color: '#fbbf24' }}>
-                      {cfg.badge} S{id} — {cfg.titre || `Stratégie ${id}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>}
-
         {/* ── USER TABLE ── */}
         <div className="admin-card">
           <div className="admin-card-header">
@@ -6283,7 +6190,8 @@ function AdminPanel() {
                             <span>{u.username}</span>
                             {u.is_pro && <span title="Compte Pro" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.4)', fontWeight: 700 }}>🔷 PRO</span>}
                             {!u.is_pro && u.is_premium && <span title="Compte Premium" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)', fontWeight: 700 }}>⭐ PREMIUM</span>}
-                            {!u.is_pro && !u.is_premium && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
+                            {!u.is_pro && !u.is_premium && u.account_type === 'partenaire' && <span title="Compte Partenaire" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(34,211,238,0.15)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.4)', fontWeight: 700 }}>🤝 PARTENAIRE</span>}
+                            {!u.is_pro && !u.is_premium && u.account_type !== 'partenaire' && <span title="Utilisateur standard" style={{ fontSize: 11, padding: '1px 6px', borderRadius: 6, background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)', fontWeight: 700 }}>👤 UTILISATEUR</span>}
                             {isSuperAdmin && !u.is_pro && (
                               <button
                                 title={u.is_premium ? 'Retirer le statut Premium' : 'Passer en Premium'}
@@ -6876,14 +6784,23 @@ function AdminPanel() {
 
         </>}
 
-        {/* ── TAB : VENTE STRATÉGIES ── */}
-        {adminTab === 'vente-strat' && <>
+        {adminTab === 'vente-strategies' && <>
+        {/* ── VITRINE / PANNEAU DE VENTE ── */}
         <div className="admin-card" style={{ borderColor: 'rgba(250,204,21,0.35)' }}>
           <div className="admin-card-header" style={{ borderBottom: '1px solid rgba(250,204,21,0.2)' }}>
-            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>🛒 Panneau de Vente — Vitrine Stratégies</h2>
+            <h2 className="admin-card-title" style={{ color: '#fbbf24' }}>💰 Panneau de Vente — Vitrine Stratégies</h2>
             <span style={{ fontSize: 11, color: '#64748b' }}>Configurez une fiche de présentation pour vendre une stratégie existante</span>
           </div>
           <div style={{ padding: '16px 20px' }}>
+            {/* ── Notification résultat (toujours visible en haut) ── */}
+            {promoMsg.text && (
+              <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, marginBottom: 12,
+                background: promoMsg.error ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+                border: `1.5px solid ${promoMsg.error ? 'rgba(239,68,68,0.5)' : 'rgba(34,197,94,0.5)'}`,
+                color: promoMsg.error ? '#f87171' : '#86efac', textAlign: 'center' }}>
+                {promoMsg.text}
+              </div>
+            )}
             {/* Sélecteur de stratégie */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
               <label style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>Stratégie à configurer :</label>
@@ -7000,6 +6917,7 @@ function AdminPanel() {
 
                   {/* Bouton sauvegarder */}
                   <button
+                    type="button"
                     onClick={async () => {
                       if (!promoEditId) return;
                       setPromoSaving(true);
@@ -7019,7 +6937,7 @@ function AdminPanel() {
                         setPromoMsg({ text: '❌ Erreur réseau', error: true });
                       } finally {
                         setPromoSaving(false);
-                        setTimeout(() => setPromoMsg({ text: '', error: false }), 4000);
+                        setTimeout(() => setPromoMsg({ text: '', error: false }), 8000);
                       }
                     }}
                     disabled={promoSaving}
@@ -7029,14 +6947,6 @@ function AdminPanel() {
                   >
                     {promoSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder la fiche de vente'}
                   </button>
-                  {promoMsg.text && (
-                    <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                      background: promoMsg.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-                      border: `1px solid ${promoMsg.error ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
-                      color: promoMsg.error ? '#f87171' : '#86efac' }}>
-                      {promoMsg.text}
-                    </div>
-                  )}
                 </div>
 
                 {/* Colonne droite — aperçu carte */}
@@ -7049,6 +6959,7 @@ function AdminPanel() {
                     boxShadow: promoForm.enabled ? '0 4px 24px rgba(250,204,21,0.12)' : 'none',
                     maxWidth: 340, position: 'relative',
                   }}>
+                    {/* Badge */}
                     {promoForm.badge && (
                       <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, fontWeight: 800,
                         background: 'rgba(250,204,21,0.18)', border: '1px solid rgba(250,204,21,0.4)',
@@ -7056,6 +6967,7 @@ function AdminPanel() {
                         {promoForm.badge} {promoForm.badge === '🔥' ? 'Populaire' : promoForm.badge === '⭐' ? 'Nouveau' : promoForm.badge === '🏆' ? 'Premium' : promoForm.badge === '💎' ? 'Exclusif' : promoForm.badge === '🚀' ? 'Puissant' : promoForm.badge === '🎯' ? 'Précis' : promoForm.badge === '🤖' ? 'Auto' : ''}
                       </div>
                     )}
+                    {/* Statut */}
                     {!promoForm.enabled && (
                       <div style={{ position: 'absolute', top: 12, left: 12, fontSize: 10, fontWeight: 700,
                         background: 'rgba(100,116,139,0.25)', color: '#64748b', padding: '2px 8px', borderRadius: 100 }}>
@@ -7063,6 +6975,7 @@ function AdminPanel() {
                       </div>
                     )}
                     <div style={{ padding: '28px 20px 20px' }}>
+                      {/* ID + plan */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 100 }}>
                           S{promoEditId}
@@ -7073,18 +6986,22 @@ function AdminPanel() {
                           {promoForm.plan_requis === 'pro' ? '💼 Pro' : promoForm.plan_requis === 'premium' ? '⭐ Premium' : '✅ Standard'}
                         </span>
                       </div>
+                      {/* Titre */}
                       <div style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4, lineHeight: 1.3 }}>
                         {promoForm.titre || <span style={{ color: '#475569', fontStyle: 'italic' }}>Titre de la stratégie</span>}
                       </div>
+                      {/* Tagline */}
                       {promoForm.tagline && (
                         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>{promoForm.tagline}</div>
                       )}
-                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, idx2) => (
-                        <div key={idx2} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
+                      {/* Bullets */}
+                      {[promoForm.bullet1, promoForm.bullet2, promoForm.bullet3].filter(Boolean).map((b, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 6 }}>
                           <span style={{ color: '#22c55e', fontWeight: 900, fontSize: 14, lineHeight: 1.3 }}>✓</span>
                           <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{b}</span>
                         </div>
                       ))}
+                      {/* Prix + CTA */}
                       <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(100,116,139,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         {promoForm.prix_texte ? (
                           <div>
@@ -7125,23 +7042,9 @@ function AdminPanel() {
             )}
           </div>
         </div>
+
         </>}
 
-        {/* ── TAB : IDÉES STRATÉGIES ── */}
-        {adminTab === 'idees-strat' && <>
-        <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.3)', marginBottom: 20 }}>
-          <div className="tg-admin-header">
-            <span className="tg-admin-icon">💡</span>
-            <div style={{ flex: 1 }}>
-              <h2 className="tg-admin-title">Idées Stratégies</h2>
-              <p className="tg-admin-sub">Gérez le catalogue d'idées de stratégies proposées aux utilisateurs (gratuit / payant).</p>
-            </div>
-          </div>
-          <div style={{ padding: '16px 20px' }}>
-            <IdeesStrategiesPanel />
-          </div>
-        </div>
-        </>}
 
         {adminTab === 'tg-direct' && <TgDirectChat />}
 
@@ -7661,6 +7564,23 @@ function AdminPanel() {
         {/* ── TAB : COMPTAGES ── */}
         {adminTab === 'comptages' && <ComptagesPanel />}
 
+        {/* ── TAB : IDÉES STRATÉGIES ── */}
+        {adminTab === 'idees' && (
+          <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.3)' }}>
+            <div className="tg-admin-header">
+              <span className="tg-admin-icon">💡</span>
+              <div>
+                <h2 className="tg-admin-title">Idées Stratégies</h2>
+                <p className="tg-admin-sub">Gérez le catalogue d'idées de stratégies (achat, validation des captures d'écran).</p>
+              </div>
+            </div>
+            <AdminIdeas />
+          </div>
+        )}
+
+        {/* ── TAB : CODES PARTENAIRES ── */}
+        {adminTab === 'codes-part' && <CodesPartenairesPanel />}
+
         {/* ── TAB : GESTIONNAIRE DES CARTES ── */}
         {adminTab === 'cartes' && <CartesPanel />}
 
@@ -8064,6 +7984,155 @@ function AdminPanel() {
           </div>
         )}
 
+        {/* ── TAB : DEMANDES BACCARA KOUAMÉ ── */}
+        {adminTab === 'demandes-baccara' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{ padding: '12px 16px', marginBottom: 16, borderRadius: 12,
+              background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(251,191,36,0.15)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
+            }}>
+              <div>
+                <div style={{ color: '#fbbf24', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>🎰 DEMANDES DE RECHARGE — BACCARA KOUAMÉ</div>
+                <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
+                  Approuvez ou rejetez les demandes de fonds des utilisateurs. Le montant est crédité instantanément.
+                </div>
+              </div>
+              <button onClick={loadBaccaraDemandes} style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                🔄 Actualiser
+              </button>
+            </div>
+
+            {baccaraDemandes.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: '#475569', fontSize: 14 }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🎰</div>
+                Aucune demande de recharge pour l'instant.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {baccaraDemandes.map(d => {
+                  const isPending = d.status === 'pending';
+                  const isApproved = d.status === 'approved';
+                  const isRejected = d.status === 'rejected';
+                  const msg = baccaraDemandesMsg[d.id];
+                  const busy = baccaraDemandesBusy[d.id];
+                  return (
+                    <div key={d.id} style={{
+                      borderRadius: 12, overflow: 'hidden',
+                      border: isPending ? '1.5px solid rgba(251,191,36,0.35)' : isApproved ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(239,68,68,0.25)',
+                      background: isPending ? 'rgba(251,191,36,0.04)' : isApproved ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.03)',
+                    }}>
+                      {/* Header */}
+                      <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                          👤
+                        </div>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0' }}>
+                            {d.username}
+                            {(d.first_name || d.last_name) && (
+                              <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>
+                                {[d.first_name, d.last_name].filter(Boolean).join(' ')}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                            {new Date(d.created_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })}
+                          </div>
+                        </div>
+                        {/* Montant demandé */}
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>DEMANDE</div>
+                          <div style={{ fontSize: 20, fontWeight: 900, color: '#fbbf24' }}>
+                            {parseFloat(d.amount).toLocaleString()} {d.currency}
+                          </div>
+                        </div>
+                        {/* Badge statut */}
+                        <div style={{
+                          padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 800, letterSpacing: 0.5,
+                          background: isPending ? 'rgba(251,191,36,0.15)' : isApproved ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                          color: isPending ? '#fbbf24' : isApproved ? '#4ade80' : '#f87171',
+                          border: isPending ? '1px solid rgba(251,191,36,0.35)' : isApproved ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(239,68,68,0.35)',
+                        }}>
+                          {isPending ? '⏳ En attente' : isApproved ? '✅ Approuvé' : '❌ Rejeté'}
+                        </div>
+                      </div>
+
+                      {/* Note utilisateur */}
+                      {d.note && (
+                        <div style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 12, color: '#94a3b8' }}>
+                          💬 {d.note}
+                        </div>
+                      )}
+
+                      {/* Actions (seulement si pending) */}
+                      {isPending && (
+                        <div style={{ padding: '12px 16px', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <div style={{ flex: 1, minWidth: 140 }}>
+                            <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>
+                              MONTANT À CRÉDITER ({d.currency})
+                            </label>
+                            <input
+                              type="number"
+                              value={baccaraDemandesAmount[d.id] ?? d.amount}
+                              onChange={e => setBaccaraDemandesAmount(p => ({ ...p, [d.id]: e.target.value }))}
+                              style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.06)', color: '#fbbf24', fontSize: 14, fontWeight: 700, outline: 'none' }}
+                            />
+                          </div>
+                          <div style={{ flex: 2, minWidth: 180 }}>
+                            <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>
+                              NOTE ADMIN (optionnel)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Ex: Validé via WhatsApp"
+                              value={baccaraDemandesNote[d.id] || ''}
+                              onChange={e => setBaccaraDemandesNote(p => ({ ...p, [d.id]: e.target.value }))}
+                              style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => approveBaccaraDemande(d.id)}
+                            disabled={busy}
+                            style={{ padding: '8px 18px', borderRadius: 8, border: 'none', cursor: busy ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800, background: busy ? 'rgba(100,116,139,0.2)' : 'linear-gradient(135deg,#166534,#4ade80)', color: busy ? '#4b5563' : '#fff' }}>
+                            {busy ? '⏳' : '✅ Approuver'}
+                          </button>
+                          <button
+                            onClick={() => rejectBaccaraDemande(d.id)}
+                            disabled={busy}
+                            style={{ padding: '8px 18px', borderRadius: 8, cursor: busy ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}>
+                            ❌ Rejeter
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Info si approuvé */}
+                      {isApproved && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: '#4ade80' }}>
+                          ✅ Crédité : {parseFloat(d.approved_amount || d.amount).toLocaleString()} {d.currency}
+                          {d.admin_note && <span style={{ color: '#64748b', marginLeft: 8 }}>— {d.admin_note}</span>}
+                        </div>
+                      )}
+                      {isRejected && d.admin_note && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: '#94a3b8' }}>
+                          Motif : {d.admin_note}
+                        </div>
+                      )}
+
+                      {/* Message résultat action */}
+                      {msg && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600,
+                          color: msg.ok ? '#4ade80' : '#f87171',
+                          borderTop: '1px solid rgba(255,255,255,0.05)',
+                        }}>{msg.text}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── TAB : CONFIG PRO ── */}
         {adminTab === 'config-pro' && <ProConfigPanel setProSavedModal={setProSavedModal} setProErrorModal={setProErrorModal} />}
 
@@ -8411,6 +8480,12 @@ function AdminPanel() {
               preview: `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ⌛`,
               result:  `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ✅ ${RE[0]}`,
               perdu:   `🌊 CASCADE BACCARAT\n⏩ Jeu #N${G}\n⏩ Joueur — ♠️ Pique\n⏩ Dogon ×${maxRattrapage}\n⏩ ❌`,
+            },
+            {
+              id: 76, label: 'Cartes Signature', icon: '💠',
+              preview: `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ⌛`,
+              result:  `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ✅ ${RE[0]}`,
+              perdu:   `💠Jeux №${G}\n🎯Joueur recevra 2 cartes\n🌤 Rattrapages +${maxRattrapage}\n🗯️Résultats : ❌`,
             },
           ];
 
@@ -8782,6 +8857,13 @@ function AdminPanel() {
                         ⛔ {s.exceptions.length} exception{s.exceptions.length > 1 ? 's' : ''}
                       </span>
                     )}
+                    {s.attente_enabled && (
+                      <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+                        background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.35)',
+                      }} title={`Filtre d'attente activé — N=${s.attente_n}, Écart=${s.attente_ecart ?? 1}, Option ${s.attente_option ?? 1}, Main: ${s.attente_main ?? 'joueur'}`}>
+                        ⏳ Options activé
+                      </span>
+                    )}
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
                       {s.pred_duration_minutes > 0 && (
                         <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 600, marginRight: 6,
@@ -8997,7 +9079,7 @@ function AdminPanel() {
               {/* ══════════════ MAIN SURVEILLÉE (Joueur / Banquier) ══════════════ */}
               {/* Cachée pour les modes qui surveillent les 2 mains automatiquement
                   (absence_victoire, distribution) ou qui n'utilisent pas la main (relance) */}
-              {!['absence_victoire', 'distribution', 'carte_valeur', 'surveillance_perte'].includes(stratForm.mode) && (
+              {!['absence_victoire', 'absence_victoire_2', 'distribution', 'carte_valeur', 'surveillance_perte'].includes(stratForm.mode) && (
               <div style={{ marginBottom: 18, padding: '14px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' }}>
                 <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                   🎯 Main surveillée *
@@ -9162,7 +9244,7 @@ function AdminPanel() {
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Mode</label>
                   <select value={stratForm.mode} onChange={e => {
                     const m = e.target.value;
-                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire';
+                    const isNew = m === 'absence_apparition' || m === 'apparition_absence' || m === 'distribution' || m === 'carte_3_vers_2' || m === 'carte_2_vers_3' || m === 'victoire_adverse' || m === 'absence_victoire' || m === 'absence_victoire_2' || m === 'combine_carte';
                     setStratForm(p => ({
                       ...p,
                       mode: m,
@@ -9183,6 +9265,8 @@ function AdminPanel() {
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="compteur_adverse">🔄 Compteur Adverse</option>
                     <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
+                    <option value="absence_victoire_2">🏆 Absence Victoire 2 (seuils B distincts J/B)</option>
+                    <option value="combine_carte">🃏 Combiné Carte (positions 1+2 → prédiction)</option>
                     <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
@@ -9193,7 +9277,14 @@ function AdminPanel() {
                     <option value="aleatoire">🎲 Stratégie Aléatoire</option>
                     <option value="first_card_plus6">🎯 Première Carte +Décalage</option>
                     <option value="annonce_sequence">📣 Rotateur Promo (annonces séquentielles)</option>
+                    <option value="gestion_banque">💰 Gestion Banque (lots + bank management)</option>
+                    <option value="compteurs_absences">📊 Compteurs Absences</option>
+                    <option value="compteur_parite">⚪⚫ Compteur Parité</option>
+                    <option value="pair_impair">🔴⚪ Pair / Impair 🐍 (serpent sur perte)</option>
+                    <option value="carte_2v3">2️⃣3️⃣ 2 vs 3 Cartes 🐍 (serpent sur perte)</option>
+                    <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
+                    <option value="fin_numero">🎯 Fin de Numéro (règles par dernier chiffre du tour cible)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -9263,6 +9354,174 @@ function AdminPanel() {
                       <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Le seuil B n'est pas utilisé dans ce mode.</div>
                     </div>
                   )}
+                  {stratForm.mode === 'gestion_banque' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>💰 Mode Gestion Banque</div>
+                      <div>La <strong>stratégie source</strong> doit exister et être active. Elle fournit les signaux de prédiction ; cette stratégie calcule la gestion de lots <code style={{ background: 'rgba(234,179,8,0.15)', padding: '1px 5px', borderRadius: 4 }}>mise × côte × nb lots</code>.</div>
+                      <div style={{ marginTop: 6 }}>Le <strong>Seuil B</strong> est utilisé comme déclencheur interne. La banque, la mise, la taille de lot et la côte permettent de calculer les gains/pertes projetés.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'compteurs_absences' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', fontSize: 12, color: '#6ee7b7', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>📊 Mode Compteurs Absences (3 Compteurs)</div>
+                      <div><strong>Compteur 2 (C2)</strong> : absences consécutives d'une enseigne. Quand ≥ <strong>C2</strong> → déclenche la décision.</div>
+                      <div style={{ marginTop: 4 }}><strong>Compteur 3 (Seuil3)</strong> : apparences consécutives de l'inverse (♠↔♦, ♥↔♣). Si inverse ≥ <strong>Seuil3</strong> → prédit le <em>manquant lui-même</em>. Sinon → prédit <em>l'inverse</em>.</div>
+                      <div style={{ marginTop: 4 }}><strong>Compteur 4 (JJ Bloqueur)</strong> : si les 2 enseignes d'une paire (♠+♦ ou ♥+♣) sont absentes ensemble ≥ <strong>JJ</strong> jeux → prédit l'<em>image</em> du manquant (♠→♣, ♦→♥, ♥→♦, ♣→♠).</div>
+                      <div style={{ marginTop: 6, color: '#34d399', fontWeight: 600 }}>Priorité : Bloqueur (JJ) &gt; Tendance (Seuil3) &gt; Inverse</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'fin_numero' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Fin de Numéro</div>
+                      <div>Prédit en se basant sur le <strong>dernier chiffre (0-9)</strong> du numéro de tour à venir. Ex : fin=5 → cible les jeux 5, 15, 25, 35, 55, 65...</div>
+                      <div style={{ marginTop: 6 }}><strong>Proche</strong> : émet la prédiction <em>X jeux avant</em> le tour cible (ex : proche=1, live=14 → prédit pour le jeu 15).</div>
+                      <div style={{ marginTop: 6 }}><strong>Résultats</strong> : costumes (♠♥♦♣), deux/trois cartes, pair/impair, joueur/banquier — tirage aléatoire ou en séquence.</div>
+                      <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Aucun seuil B ni mapping requis dans ce mode.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'fin_numero' && (() => {
+                    const getDigitCfg = (d) => {
+                      const r = (stratForm.fn_rules || []).find(x => Array.isArray(x.fins) && x.fins.includes(d));
+                      return r || { fins: [d], proche: 1, resultats: [], ordre: 'aleatoire' };
+                    };
+                    const setDigitCfg = (d, patch) => {
+                      setStratForm(p => {
+                        const rules = (p.fn_rules || []).filter(x => !(Array.isArray(x.fins) && x.fins.includes(d)));
+                        const existing = (p.fn_rules || []).find(x => Array.isArray(x.fins) && x.fins.includes(d)) || { fins: [d], proche: 1, resultats: [], ordre: 'aleatoire' };
+                        const updated = { ...existing, ...patch };
+                        if (updated.resultats && updated.resultats.length > 0) {
+                          return { ...p, fn_rules: [...rules, updated] };
+                        }
+                        return { ...p, fn_rules: rules };
+                      });
+                    };
+                    const activeCfg = fnActiveDigit !== null ? getDigitCfg(fnActiveDigit) : null;
+                    const RESULTS_OPTIONS = [
+                      ['♠','♠ Pique'],['♥','♥ Cœur'],['♦','♦ Carreau'],['♣','♣ Trèfle'],
+                      ['deux','2 Cartes'],['trois','3 Cartes'],
+                      ['pair','Pair'],['impair','Impair'],
+                      ['joueur','Joueur'],['banquier','Banquier'],
+                    ];
+                    return (
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 14 }}>🎯 Configuration par fin de numéro</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 12 }}>Cliquez sur un chiffre (0-9) pour configurer les prédictions pour ce fin de numéro. Ex : chiffre <strong style={{color:'#a5b4fc'}}>5</strong> → jeux 5, 15, 25, 35, 45, 55, 65…</div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                          {[0,1,2,3,4,5,6,7,8,9].map(d => {
+                            const cfg = getDigitCfg(d);
+                            const isConfigured = cfg.resultats && cfg.resultats.length > 0;
+                            const isActive = fnActiveDigit === d;
+                            return (
+                              <button key={d} type="button"
+                                onClick={() => setFnActiveDigit(isActive ? null : d)}
+                                style={{ position: 'relative', width: 52, height: 60, borderRadius: 10, border: `2px solid ${isActive ? '#818cf8' : isConfigured ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.1)'}`, background: isActive ? 'rgba(99,102,241,0.25)' : isConfigured ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)', color: isActive ? '#e0e7ff' : isConfigured ? '#a5b4fc' : '#475569', fontWeight: 800, fontSize: 20, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, transition: 'all .15s' }}>
+                                {d}
+                                {isConfigured && (
+                                  <div style={{ fontSize: 8, color: isActive ? '#c7d2fe' : '#818cf8', fontWeight: 600, letterSpacing: 0.5 }}>
+                                    {cfg.resultats.length} rés.
+                                  </div>
+                                )}
+                                {!isConfigured && (
+                                  <div style={{ fontSize: 8, color: '#334155' }}>vide</div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {fnActiveDigit !== null && activeCfg && (
+                          <div style={{ padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.35)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: '#e0e7ff' }}>
+                                ✏️ Configuration — fin de numéro <span style={{ color: '#818cf8', fontSize: 18, fontWeight: 900 }}>{fnActiveDigit}</span>
+                                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400, marginLeft: 8 }}>→ jeux {fnActiveDigit}, 1{fnActiveDigit}, 2{fnActiveDigit}, 3{fnActiveDigit}, 4{fnActiveDigit}…</span>
+                              </div>
+                              {activeCfg.resultats.length > 0 && (
+                                <button type="button" onClick={() => { setDigitCfg(fnActiveDigit, { resultats: [], fins: [fnActiveDigit] }); }}
+                                  style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
+                                  🗑 Effacer
+                                </button>
+                              )}
+                            </div>
+
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 }}>Résultats à prédire — sélectionnez un ou plusieurs</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {RESULTS_OPTIONS.map(([val, lbl]) => {
+                                  const isOn = (activeCfg.resultats || []).includes(val);
+                                  return (
+                                    <button key={val} type="button"
+                                      onClick={() => {
+                                        const cur = activeCfg.resultats || [];
+                                        setDigitCfg(fnActiveDigit, { resultats: isOn ? cur.filter(r => r !== val) : [...cur, val], fins: [fnActiveDigit], proche: activeCfg.proche ?? 1, ordre: activeCfg.ordre || 'aleatoire' });
+                                      }}
+                                      style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${isOn ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isOn ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: isOn ? '#c7d2fe' : '#64748b', fontSize: 13, fontWeight: isOn ? 700 : 500, cursor: 'pointer', transition: 'all .12s' }}>
+                                      {lbl}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                              <div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Déclencher X jeux avant le tour cible</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <input type="number" min={1} max={20} value={activeCfg.proche ?? 1}
+                                    onChange={e => setDigitCfg(fnActiveDigit, { proche: Math.max(1, parseInt(e.target.value) || 1), fins: [fnActiveDigit], resultats: activeCfg.resultats || [], ordre: activeCfg.ordre || 'aleatoire' })}
+                                    style={{ width: 70, padding: '8px 10px', borderRadius: 8, border: '2px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#a5b4fc', fontSize: 15, fontWeight: 700, textAlign: 'center' }} />
+                                  <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                    Ex : proche=<strong style={{color:'#a5b4fc'}}>{activeCfg.proche ?? 1}</strong> → live au jeu <strong style={{color:'#e2e8f0'}}>{fnActiveDigit === 0 ? 19 : (10 + fnActiveDigit) - (activeCfg.proche ?? 1)}</strong> → prédit pour jeu <strong style={{color:'#818cf8'}}>{fnActiveDigit === 0 ? 20 : 10 + fnActiveDigit}</strong>
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Ordre de prédiction</div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  {[['aleatoire','🎲 Aléatoire'],['sequence','🔁 Séquence']].map(([val, lbl]) => (
+                                    <button key={val} type="button"
+                                      onClick={() => setDigitCfg(fnActiveDigit, { ordre: val, fins: [fnActiveDigit], resultats: activeCfg.resultats || [], proche: activeCfg.proche ?? 1 })}
+                                      style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${(activeCfg.ordre || 'aleatoire') === val ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: (activeCfg.ordre || 'aleatoire') === val ? 'rgba(99,102,241,0.2)' : 'transparent', color: (activeCfg.ordre || 'aleatoire') === val ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                      {lbl}
+                                    </button>
+                                  ))}
+                                </div>
+                                {(activeCfg.ordre || 'aleatoire') === 'sequence' && (activeCfg.resultats || []).length > 1 && (
+                                  <div style={{ marginTop: 6, fontSize: 10, color: '#818cf8' }}>Ordre : {(activeCfg.resultats || []).join(' → ')}</div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(activeCfg.resultats || []).length > 0 && (
+                              <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 11, color: '#86efac' }}>
+                                ✅ <strong>Fin {fnActiveDigit} configuré</strong> — quand le live sera à {fnActiveDigit === 0 ? 'N' : 'N'}+{(activeCfg.proche ?? 1)} jeux du prochain tour se terminant par <strong>{fnActiveDigit}</strong>, la prédiction sera émise : <strong>{(activeCfg.resultats || []).join(', ')}</strong> ({activeCfg.ordre === 'sequence' ? 'en séquence' : 'aléatoire'}).
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(stratForm.fn_rules || []).length > 0 && (
+                          <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6 }}>RÉCAPITULATIF</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {[0,1,2,3,4,5,6,7,8,9].map(d => {
+                                const cfg = getDigitCfg(d);
+                                if (!cfg.resultats || cfg.resultats.length === 0) return null;
+                                return (
+                                  <div key={d} style={{ padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 11 }}>
+                                    <span style={{ color: '#818cf8', fontWeight: 700 }}>…{d}</span>
+                                    <span style={{ color: '#94a3b8', margin: '0 4px' }}>→</span>
+                                    <span style={{ color: '#e2e8f0' }}>{cfg.resultats.join('/')}</span>
+                                    <span style={{ color: '#475569', marginLeft: 4 }}>(p={cfg.proche ?? 1})</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {stratForm.mode === 'first_card_plus6' && (
                     <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🎯 Paramètres Première Carte</div>
@@ -9399,6 +9658,22 @@ function AdminPanel() {
                       Les égalités incrémentent les deux compteurs. Pas de mapping — la prédiction est toujours le vainqueur déclencheur.
                     </div>
                   )}
+                  {stratForm.mode === 'absence_victoire_2' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.4)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      🏆 <strong>Absence Victoire 2</strong> — comme Absence Victoire, mais avec <strong>seuils B distincts</strong> pour Joueur et Banquier.<br/>
+                      Compteur Banquier : dès qu'il atteint <em>B Banquier</em> → <strong>WIN_B prédit immédiatement</strong>, compteur Banquier remis à 0.<br/>
+                      Compteur Joueur : dès qu'il atteint <em>B Joueur</em> → <strong>WIN_P prédit immédiatement</strong>, compteur Joueur remis à 0.<br/>
+                      Égalité → reset des deux compteurs. Pas de mapping.
+                    </div>
+                  )}
+                  {stratForm.mode === 'combine_carte' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(99,211,255,0.08)', border: '1px solid rgba(99,211,255,0.3)', fontSize: 12, color: '#7dd3fc', lineHeight: 1.7 }}>
+                      🃏 <strong>Combiné Carte</strong> — suit les <strong>positions 1 et 2</strong> des cartes de la main choisie.<br/>
+                      Chaque jeu : les costumes de la carte #1 et de la carte #2 sont lus, puis comparés aux combinaisons configurées.<br/>
+                      Si une règle <em>Pos1 + Pos2 → costume prédit</em> correspond → prédiction émise pour le jeu suivant (+ décalage).<br/>
+                      Pas de seuil B ni de mapping — tout est défini dans les combinaisons ci-dessous.
+                    </div>
+                  )}
                   {stratForm.mode === 'absence_apparition' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.6 }}>
                       ⚡ Dès qu'un costume absent depuis ≥ B jeux réapparaît dans la main (même avant la fin du tirage), il est prédit automatiquement pour le jeu suivant. Pas de mapping — la prédiction est toujours le costume déclencheur.
@@ -9462,138 +9737,10 @@ function AdminPanel() {
                       </div>
                     </div>
                   )}
-
-                  {/* ── Mode Gestion Banque — description ── */}
-                  {stratForm.mode === 'gestion_banque' && (
-                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.8 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13, color: '#fbbf24' }}>🏦 Mode Gestion Banque — Configuration</div>
-                      <div>Ce mode copie les prédictions d'une <strong>stratégie source</strong> et les gère via un système de bankroll avec martingale R0→R3. Configurez les paramètres ci-dessous.</div>
-                    </div>
-                  )}
                 </div>
 
-                {/* ── Section Gestion Banque ── */}
-                {stratForm.mode === 'gestion_banque' && (
-                  <div style={{ padding: '16px', background: 'rgba(250,204,21,0.05)', borderRadius: 10, border: '1px solid rgba(250,204,21,0.25)', marginBottom: 8 }}>
-                    <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: 13, marginBottom: 14 }}>🏦 Paramètres Gestion Banque</div>
-
-                    {/* Stratégie source */}
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Stratégie source (ID)</label>
-                      <select
-                        value={stratForm.bg_source_strategy_id}
-                        onChange={e => setStratForm(p => ({ ...p, bg_source_strategy_id: e.target.value }))}
-                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }}
-                      >
-                        <option value="">— Choisir la stratégie source —</option>
-                        {strategies.filter(s => s.id !== stratEditing).map(s => (
-                          <option key={s.id} value={String(s.id)}>S{s.id} — {s.name}</option>
-                        ))}
-                      </select>
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Prédictions de cette stratégie seront reprises en mode bankroll</div>
-                    </div>
-
-                    {/* Grille de champs numériques */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Banque initiale</label>
-                        <input type="number" min={100} step={100}
-                          value={stratForm.bg_bank}
-                          onChange={e => setStratForm(p => ({ ...p, bg_bank: parseFloat(e.target.value) || 5000 }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Mise initiale (R0)</label>
-                        <input type="number" min={1} step={1}
-                          value={stratForm.bg_mise_initiale}
-                          onChange={e => setStratForm(p => ({ ...p, bg_mise_initiale: parseFloat(e.target.value) || 1000 }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Taille du lot (prédictions)</label>
-                        <input type="number" min={1} max={20} step={1}
-                          value={stratForm.bg_lot_size}
-                          onChange={e => setStratForm(p => ({ ...p, bg_lot_size: parseInt(e.target.value) || 5 }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Côte</label>
-                        <input type="number" min={1.1} step={0.05}
-                          value={stratForm.bg_cote}
-                          onChange={e => setStratForm(p => ({ ...p, bg_cote: parseFloat(e.target.value) || 1.9 }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Devise</label>
-                        <select
-                          value={stratForm.bg_currency}
-                          onChange={e => setStratForm(p => ({ ...p, bg_currency: e.target.value }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13 }}
-                        >
-                          <option value="f">f (FCFA)</option>
-                          <option value="eur">€ (Euro)</option>
-                          <option value="usd">$ (Dollar)</option>
-                          <option value="rub">₽ (Rouble)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>Nombre de lots pour finir</label>
-                        <input type="number" min={0} step={1}
-                          value={stratForm.bg_max_lots}
-                          onChange={e => setStratForm(p => ({ ...p, bg_max_lots: parseInt(e.target.value) || 0 }))}
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>0 = illimité</div>
-                      </div>
-                    </div>
-
-                    {/* Lien site + Nom boutique */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>🔗 Lien site (affiché dans messages Telegram)</label>
-                        <input type="text"
-                          value={stratForm.bg_site_url}
-                          onChange={e => setStratForm(p => ({ ...p, bg_site_url: e.target.value }))}
-                          placeholder="https://monsite.com"
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>🏪 Nom boutique (titre dans messages)</label>
-                        <input type="text"
-                          value={stratForm.bg_boutique_name}
-                          onChange={e => setStratForm(p => ({ ...p, bg_boutique_name: e.target.value }))}
-                          placeholder="Ex : Ma Boutique Pro"
-                          style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '1px solid rgba(250,204,21,0.25)', borderRadius: 7, color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
-                      </div>
-                    </div>
-
-                    {/* Aperçu des mises R0→R3 */}
-                    {stratForm.bg_mise_initiale > 0 && stratForm.bg_cote > 1 && (
-                      <div style={{ padding: '10px 12px', background: 'rgba(250,204,21,0.06)', borderRadius: 8, border: '1px solid rgba(250,204,21,0.15)' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Aperçu des mises R0→R3</div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {[0,1,2,3].map(r => {
-                            const m = Math.round(stratForm.bg_mise_initiale * Math.pow(2.2, r) * 100) / 100;
-                            let totalM = 0, mm = stratForm.bg_mise_initiale;
-                            for (let i = 0; i <= r; i++) { totalM += mm; mm = Math.round(mm * 2.2 * 100) / 100; }
-                            totalM = Math.round(totalM * 100) / 100;
-                            const gain = Math.round(m * stratForm.bg_cote * 100) / 100;
-                            const net = Math.round((gain - totalM) * 100) / 100;
-                            const curr = stratForm.bg_currency === 'eur' ? '€' : stratForm.bg_currency === 'usd' ? '$' : stratForm.bg_currency === 'rub' ? '₽' : 'f';
-                            return (
-                              <div key={r} style={{ padding: '5px 10px', borderRadius: 6, background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.2)', fontSize: 11, color: '#e2e8f0', minWidth: 120 }}>
-                                <span style={{ fontWeight: 800, color: '#fbbf24' }}>R{r}</span> : {m}{curr}
-                                <span style={{ color: '#22c55e', marginLeft: 6 }}>+{net}{curr}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Seuil B / Différence — masqué pour surveillance_perte, aleatoire, lecture_passee, intelligent_cartes, carte_valeur, intersection, comptages_ecart, annonce_sequence, first_card_plus6 */}
-                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
+                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'gestion_banque' && <div style={stratForm.mode === 'taux_miroir' ? { gridColumn: '1 / -1' } : {}}>
                   {stratForm.mode === 'taux_miroir' ? (
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 600 }}>
@@ -9644,6 +9791,38 @@ function AdminPanel() {
                     </div>
                   )}
                 </div>}
+
+                {/* ── Seuil B2 — MODE 2k-3k uniquement ── */}
+                {stratForm.mode === '2k-3k' && (
+                <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.25)' }}>
+                  <label style={{ display: 'block', color: '#67e8f9', fontSize: 12, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    2️⃣3️⃣ Seuils 2k-3k
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+                        Seuil 2k — Absences de 2 cartes → prédit <b>3 cartes</b>
+                      </label>
+                      <input type="number" min={1} max={50} value={stratForm.threshold || 3}
+                        onChange={e => setStratForm(p => ({ ...p, threshold: Math.max(1, parseInt(e.target.value) || 1) }))}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,211,238,0.3)', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+                        Seuil 3k — Absences de 3 cartes → prédit <b>2 cartes</b>
+                      </label>
+                      <input type="number" min={1} max={50} value={stratForm.threshold_b2 ?? stratForm.threshold ?? 3}
+                        onChange={e => setStratForm(p => ({ ...p, threshold_b2: Math.max(1, parseInt(e.target.value) || 1) }))}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(34,211,238,0.3)', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#67e8f9', opacity: 0.75 }}>
+                    Les deux seuils sont indépendants. Quand <strong>Seuil 2k</strong> jeux consécutifs ont eu 3 cartes → prédit 3 cartes. Quand <strong>Seuil 3k</strong> jeux consécutifs ont eu 2 cartes → prédit 2 cartes.
+                  </div>
+                </div>
+                )}
 
                 {/* ── Stratégies sources — MODE UNION ENSEIGNES ── */}
                 {stratForm.mode === 'union_enseignes' && (
@@ -9884,6 +10063,103 @@ function AdminPanel() {
                   </div>
                 )}
 
+                {/* ── Paramètres — MODE GESTION BANQUE ── */}
+                {stratForm.mode === 'gestion_banque' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '18px', borderRadius: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.3)' }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: '#fbbf24', marginBottom: 16 }}>💰 Configuration Gestion Banque</div>
+
+                    {/* Stratégie source */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Stratégie source <span style={{ color: '#64748b' }}>(fournit les prédictions)</span></label>
+                      <select
+                        value={stratForm.gb_source_id || ''}
+                        onChange={e => setStratForm(p => ({ ...p, gb_source_id: e.target.value }))}
+                        style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '2px solid rgba(234,179,8,0.4)', borderRadius: 8, color: stratForm.gb_source_id ? '#e2e8f0' : '#64748b', fontSize: 13 }}>
+                        <option value="">— sélectionner une stratégie source —</option>
+                        {strategies.filter(s => s.mode !== 'gestion_banque' && s.enabled).map(s => (
+                          <option key={s.id} value={String(s.id)}>S{s.id} — {s.name}</option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: 6, fontSize: 11, color: '#64748b', lineHeight: 1.6 }}>
+                        La stratégie source doit exister et être active. Elle fournit les signaux de prédiction ; cette stratégie calcule la gestion de lots (mise × côte × nb lots).
+                      </div>
+                    </div>
+
+                    {/* Banque + Mise */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Banque initiale</label>
+                        <input type="number" min="1" value={stratForm.gb_banque ?? 5000}
+                          onChange={e => setStratForm(p => ({ ...p, gb_banque: parseFloat(e.target.value) || 5000 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Mise initiale <span style={{ color: '#64748b' }}>(par lot)</span></label>
+                        <input type="number" min="0.1" step="0.1" value={stratForm.gb_mise ?? 10}
+                          onChange={e => setStratForm(p => ({ ...p, gb_mise: parseFloat(e.target.value) || 10 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                    </div>
+
+                    {/* Taille lot + Côte */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Taille lot <span style={{ color: '#64748b' }}>(unités)</span></label>
+                        <input type="number" min="1" value={stratForm.gb_taille ?? 5}
+                          onChange={e => setStratForm(p => ({ ...p, gb_taille: parseInt(e.target.value) || 5 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Côte <span style={{ color: '#64748b' }}>(ex: 1.9)</span></label>
+                        <input type="number" min="1.01" step="0.01" value={stratForm.gb_cote ?? 1.9}
+                          onChange={e => setStratForm(p => ({ ...p, gb_cote: parseFloat(e.target.value) || 1.9 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                    </div>
+
+                    {/* Max lots + Devise */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Max lots par jeu <span style={{ color: '#64748b' }}>(0 = illimité)</span></label>
+                        <input type="number" min="0" value={stratForm.gb_max_lots ?? 0}
+                          onChange={e => setStratForm(p => ({ ...p, gb_max_lots: parseInt(e.target.value) || 0 }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Devise</label>
+                        <select value={stratForm.gb_devise || 'USD'}
+                          onChange={e => setStratForm(p => ({ ...p, gb_devise: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.35)', borderRadius: 8, color: '#fff', fontSize: 13 }}>
+                          <option value="USD">🇺🇸 USD ($)</option>
+                          <option value="EUR">🇪🇺 EUR (€)</option>
+                          <option value="FCFA">🌍 FCFA</option>
+                          <option value="XOF">🌍 XOF</option>
+                          <option value="GBP">🇬🇧 GBP (£)</option>
+                          <option value="CAD">🇨🇦 CAD ($)</option>
+                          <option value="MAD">🇲🇦 MAD</option>
+                          <option value="DZD">🇩🇿 DZD</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Nom boutique + URL */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Nom boutique <span style={{ color: '#64748b' }}>(affiché Telegram)</span></label>
+                        <input type="text" placeholder="ex: BaccaratPro Store" value={stratForm.gb_nom_boutique || ''}
+                          onChange={e => setStratForm(p => ({ ...p, gb_nom_boutique: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 600 }}>URL du site <span style={{ color: '#64748b' }}>(lien affiché dans les messages Telegram)</span></label>
+                        <input type="text" placeholder="ex: https://monsite.com" value={stratForm.gb_url_site || ''}
+                          onChange={e => setStratForm(p => ({ ...p, gb_url_site: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 8, color: '#fff', fontSize: 13 }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── Paramètres — MODE INTERSECTION ── */}
                 {stratForm.mode === 'intersection' && (
                   <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(251,113,133,0.07)', border: '1px solid rgba(251,113,133,0.25)' }}>
@@ -9919,6 +10195,120 @@ function AdminPanel() {
                     </div>
                     <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(251,113,133,0.08)', borderRadius: 7, fontSize: 11, color: '#fda4af', lineHeight: 1.6 }}>
                       💡 Résumé : surveille toutes les strats. (même main, catégorie <strong>{stratForm.inter_category || 'costume'}</strong>) · se déclenche si ≥<strong>{stratForm.inter_hi ?? 2}</strong> strats. prédisent le même résultat sur des jeux dont l'écart est ≤ <strong>{stratForm.inter_max_ecart ?? 2}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Paramètres 3 Compteurs — MODE COMPTEURS ABSENCES ── */}
+                {stratForm.mode === 'compteurs_absences' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#34d399', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>📊 Paramètres des 3 Compteurs</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#34d399', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>C2 — Seuil absences</label>
+                        <input type="number" min="1" max="30" value={stratForm.c3_b ?? 4}
+                          onChange={e => setStratForm(p => ({ ...p, c3_b: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(16,185,129,0.5)', borderRadius: 7, color: '#34d399', fontSize: 14, fontWeight: 700 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Absences consécutives avant décision (déf. 4)</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>Seuil3 — Tendance inverse</label>
+                        <input type="number" min="1" max="20" value={stratForm.c3_seuil3 ?? 3}
+                          onChange={e => setStratForm(p => ({ ...p, c3_seuil3: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Apparences inverse ≥ Seuil3 → prédit le manquant (déf. 3)</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 600 }}>JJ — Bloqueur de paire</label>
+                        <input type="number" min="1" max="20" value={stratForm.c3_jj ?? 2}
+                          onChange={e => setStratForm(p => ({ ...p, c3_jj: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 7, color: '#fff', fontSize: 13 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>Les 2 d'une paire absents ≥ JJ → prédit l'image (déf. 2)</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(16,185,129,0.08)', borderRadius: 7, fontSize: 11, color: '#6ee7b7', lineHeight: 1.6 }}>
+                      💡 Résumé : enseigne absente ≥ <strong>{stratForm.c3_b ?? 4}</strong> jeux → si bloqueur paire ≥ <strong>{stratForm.c3_jj ?? 2}</strong> → prédit image · sinon si inverse ≥ <strong>{stratForm.c3_seuil3 ?? 3}</strong> → prédit manquant · sinon → prédit inverse
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Seuils B distincts — MODE ABSENCE VICTOIRE 2 ── */}
+                {stratForm.mode === 'absence_victoire_2' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.28)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🏆 Seuils B distincts — Joueur / Banquier</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#93c5fd', fontSize: 12, marginBottom: 6, fontWeight: 700 }}>👤 B Joueur — seuil absences Joueur</label>
+                        <input type="number" min="1" max="50" value={stratForm.B_joueur ?? 5}
+                          onChange={e => setStratForm(p => ({ ...p, B_joueur: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '2px solid rgba(59,130,246,0.5)', borderRadius: 8, color: '#93c5fd', fontSize: 16, fontWeight: 700 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>Nb jeux consécutifs sans victoire Joueur → WIN_P prédit</div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#fca5a5', fontSize: 12, marginBottom: 6, fontWeight: 700 }}>🏦 B Banquier — seuil absences Banquier</label>
+                        <input type="number" min="1" max="50" value={stratForm.B_banquier ?? 8}
+                          onChange={e => setStratForm(p => ({ ...p, B_banquier: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '2px solid rgba(239,68,68,0.5)', borderRadius: 8, color: '#fca5a5', fontSize: 16, fontWeight: 700 }} />
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>Nb jeux consécutifs sans victoire Banquier → WIN_B prédit</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(250,204,21,0.08)', borderRadius: 7, fontSize: 11, color: '#fde68a', lineHeight: 1.6 }}>
+                      💡 Joueur absent ≥ <strong>{stratForm.B_joueur ?? 5}</strong> jeux → WIN_P · Banquier absent ≥ <strong>{stratForm.B_banquier ?? 8}</strong> jeux → WIN_B · Égalité → reset des deux compteurs
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Combinaisons — MODE COMBINÉ CARTE ── */}
+                {stratForm.mode === 'combine_carte' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(99,211,255,0.05)', border: '1px solid rgba(99,211,255,0.25)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#22d3ee', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
+
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: 'block', color: '#67e8f9', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🎯 Main à lire (cartes positions 1 et 2)</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {['joueur','banquier'].map(h => (
+                          <button key={h} onClick={() => setStratForm(p => ({ ...p, cc_hand: h }))}
+                            style={{ flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: stratForm.cc_hand === h ? '2px solid rgba(34,211,238,0.8)' : '1px solid rgba(34,211,238,0.25)', background: stratForm.cc_hand === h ? 'rgba(34,211,238,0.18)' : 'rgba(255,255,255,0.03)', color: stratForm.cc_hand === h ? '#22d3ee' : '#64748b' }}>
+                            {h === 'joueur' ? '👤 Joueur' : '🏦 Banquier'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 10 }}>
+                      {(stratForm.cc_combinations || []).length === 0 && (
+                        <div style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', padding: '8px 0' }}>Aucune combinaison — ajoutez-en ci-dessous.</div>
+                      )}
+                      {(stratForm.cc_combinations || []).map((combo, idx) => (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 10px', background: 'rgba(34,211,238,0.06)', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11, color: '#64748b', minWidth: 28 }}>#{idx + 1}</span>
+                          <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 1 :</span>
+                          <select value={combo.pos1} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos1: e.target.value }; return { ...p, cc_combinations: c }; })}
+                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
+                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 2 :</span>
+                          <select value={combo.pos2} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos2: e.target.value }; return { ...p, cc_combinations: c }; })}
+                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
+                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <span style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700 }}>→ Prédit :</span>
+                          <select value={combo.predict} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], predict: e.target.value }; return { ...p, cc_combinations: c }; })}
+                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(167,139,250,0.4)', borderRadius: 6, color: '#a78bfa', fontSize: 14, fontWeight: 700 }}>
+                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: p.cc_combinations.filter((_, i) => i !== idx) }))}
+                            style={{ marginLeft: 'auto', padding: '4px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { pos1: '♠', pos2: '♥', predict: '♦' }] }))}
+                      style={{ padding: '8px 16px', background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 8, color: '#22d3ee', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                      ＋ Ajouter une combinaison
+                    </button>
+                    <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(34,211,238,0.07)', borderRadius: 7, fontSize: 10, color: '#67e8f9' }}>
+                      💡 Ex : Pos1=♣ + Pos2=♥ → ♠ · Pos1=♦ + Pos2=♦ → ♠. Les positions sont fixes (carte 1 et carte 2 de la main choisie à chaque jeu).
                     </div>
                   </div>
                 )}
@@ -10010,62 +10400,84 @@ function AdminPanel() {
                 )}
 
                 {/* Numéro à prédire (+1, +2, ...) */}
-                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && <div style={{ gridColumn: '1 / -1' }}>
+                {stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'gestion_banque' && <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
                     Jeu à prédire — combien de parties après le signal
                   </label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {[1,2,3,4,5,6,7,8].map(n => {
-                      const active = (stratForm.prediction_offset || 1) === n;
-                      return (
-                        <button key={n} type="button"
-                          onClick={() => setStratForm(p => ({ ...p, prediction_offset: n }))}
-                          style={{
-                            flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
-                            border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
-                            background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
-                            color: active ? '#e2e8f0' : '#6b7280',
-                            transition: 'all 0.15s',
-                          }}>
-                          +{n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {/* Explication dynamique selon la valeur choisie */}
-                  {(() => {
-                    const off = stratForm.prediction_offset || 1;
-                    const exSignal = 70;
-                    const exTarget = exSignal + off;
-                    return (
-                      <div style={{
-                        marginTop: 10,
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        background: 'rgba(168,85,247,0.08)',
-                        border: '1px solid rgba(168,85,247,0.2)',
-                        fontSize: 12,
-                        color: '#c4b5fd',
-                        lineHeight: 1.7,
-                      }}>
-                        <div style={{ fontWeight: 700, marginBottom: 4, color: '#a78bfa' }}>
-                          📡 Décalage sélectionné : <span style={{ color: '#f0abfc' }}>+{off}</span>
-                        </div>
-                        <div>
-                          Le signal se produit au jeu <strong style={{ color: '#e2e8f0' }}>#{exSignal}</strong>
-                          {' '}→ la prédiction cible le jeu{' '}
-                          <strong style={{ color: '#f0abfc' }}>#{exTarget}</strong>.
-                        </div>
-                        <div style={{ marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
-                          {off === 1
-                            ? 'Idéal pour réagir dès la partie suivante (recommandé).'
-                            : off <= 3
-                            ? `La prédiction est émise ${off} parties à l'avance — laisse le temps de se préparer.`
-                            : `Anticipation longue (+${off}) — adapté aux stratégies à signal lent.`}
-                        </div>
+                  {stratForm.attente_enabled ? (
+                    /* Quand le filtre d'attente est actif : décalage = N + Écart (auto) */
+                    <div style={{
+                      padding: '12px 16px', borderRadius: 10,
+                      background: 'rgba(245,158,11,0.07)',
+                      border: '1px solid rgba(245,158,11,0.35)',
+                      fontSize: 13, color: '#fbbf24', lineHeight: 1.7,
+                    }}>
+                      <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                        ⚙️ Décalage automatique (Filtre d'attente activé)
                       </div>
-                    );
-                  })()}
+                      <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+                        Décalage = N + Écart = <strong>{stratForm.attente_n ?? 1}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong style={{ color: '#f0abfc' }}>+{(stratForm.attente_n ?? 1) + (stratForm.attente_ecart ?? 1)}</strong>
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>
+                        Le décalage est calculé automatiquement à partir de N et Écart définis dans le filtre ci-dessous. Désactivez le filtre pour le saisir manuellement.
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {[1,2,3,4,5,6,7,8].map(n => {
+                          const active = (stratForm.prediction_offset || 1) === n;
+                          return (
+                            <button key={n} type="button"
+                              onClick={() => setStratForm(p => ({ ...p, prediction_offset: n }))}
+                              style={{
+                                flex: 1, padding: '8px 4px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                border: active ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                                background: active ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
+                                color: active ? '#e2e8f0' : '#6b7280',
+                                transition: 'all 0.15s',
+                              }}>
+                              +{n}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Explication dynamique selon la valeur choisie */}
+                      {(() => {
+                        const off = stratForm.prediction_offset || 1;
+                        const exSignal = 70;
+                        const exTarget = exSignal + off;
+                        return (
+                          <div style={{
+                            marginTop: 10,
+                            padding: '10px 14px',
+                            borderRadius: 10,
+                            background: 'rgba(168,85,247,0.08)',
+                            border: '1px solid rgba(168,85,247,0.2)',
+                            fontSize: 12,
+                            color: '#c4b5fd',
+                            lineHeight: 1.7,
+                          }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: '#a78bfa' }}>
+                              📡 Décalage sélectionné : <span style={{ color: '#f0abfc' }}>+{off}</span>
+                            </div>
+                            <div>
+                              Le signal se produit au jeu <strong style={{ color: '#e2e8f0' }}>#{exSignal}</strong>
+                              {' '}→ la prédiction cible le jeu{' '}
+                              <strong style={{ color: '#f0abfc' }}>#{exTarget}</strong>.
+                            </div>
+                            <div style={{ marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
+                              {off === 1
+                                ? 'Idéal pour réagir dès la partie suivante (recommandé).'
+                                : off <= 3
+                                ? `La prédiction est émise ${off} parties à l'avance — laisse le temps de se préparer.`
+                                : `Anticipation longue (+${off}) — adapté aux stratégies à signal lent.`}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>}
 
                 {/* ── Rattrapages max par stratégie ── */}
@@ -10160,18 +10572,6 @@ function AdminPanel() {
                   )}
                 </div>
 
-                {/* Lien site — commun à tous les modes */}
-                <div>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>🔗 Lien site (affiché dans les messages Telegram)</label>
-                  <input
-                    type="text"
-                    value={stratForm.tg_site_url || ''}
-                    onChange={e => setStratForm(p => ({ ...p, tg_site_url: e.target.value }))}
-                    placeholder="https://monsite.com (optionnel)"
-                    style={{ width: '100%', padding: '8px 12px', background: '#1e1b2e', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 8, color: '#fff', fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                </div>
-
                 {/* Visibilité */}
                 <div>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 5 }}>Visibilité</label>
@@ -10191,7 +10591,7 @@ function AdminPanel() {
                 </div>
               </div>
 
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && (
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0 14px', padding: '8px 14px', borderRadius: 9, background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.15)' }}>
                 <span style={{ fontSize: 13 }}>🗺️</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}>Mappings de prédiction</span>
@@ -10199,7 +10599,7 @@ function AdminPanel() {
               )}
 
               {/* Presets de combinaison — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && <div style={{ marginTop: 0 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && <div style={{ marginTop: 0 }}>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>Combinaison miroir (presets)</label>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
                   {(PRESETS[stratForm.mode] || []).map((p, i) => {
@@ -10220,7 +10620,7 @@ function AdminPanel() {
               </div>}
 
               {/* Mappings manuels — masqué pour modes automatiques */}
-              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && <div style={{ marginTop: 16 }}>
+              {stratForm.mode !== 'absence_apparition' && stratForm.mode !== 'distribution' && stratForm.mode !== 'carte_3_vers_2' && stratForm.mode !== 'carte_2_vers_3' && stratForm.mode !== 'taux_miroir' && stratForm.mode !== 'aleatoire' && stratForm.mode !== 'victoire_adverse' && stratForm.mode !== 'abs_3_vers_2' && stratForm.mode !== 'abs_3_vers_3' && stratForm.mode !== 'absence_victoire' && stratForm.mode !== 'lecture_passee' && stratForm.mode !== 'intelligent_cartes' && stratForm.mode !== 'carte_valeur' && stratForm.mode !== 'union_enseignes' && stratForm.mode !== 'comptages_ecart' && stratForm.mode !== 'intersection' && stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'first_card_plus6' && stratForm.mode !== 'surveillance_perte' && stratForm.mode !== 'gestion_banque' && <div style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ color: '#94a3b8', fontSize: 12 }}>
                     Cartes à prédire — cliquez pour sélectionner (1, 2 ou 3 max) :
@@ -10360,20 +10760,19 @@ function AdminPanel() {
                     { val: 'loss_streak_pause',    label: '⏸️ Pause après défaites',           desc: 'Bloquer pendant N jeux après une série de K défaites consécutives' },
                     { val: 'trigger_card_position', label: '📍 Position carte déclencheur',    desc: 'Bloquer si la carte prédite est à la position 1, 2 ou 3 dans la MAIN CHOISIE du jeu déclencheur (position 1 = 1ère carte de la main, position 2 = 2ème carte…)' },
                     { val: 'consec_same_suit_pred', label: '🚫 Prédictions consécutives même costume', desc: 'Bloquer si le même costume a été prédit N fois de suite. Libération automatique si un autre costume est prédit ou après 20 min.' },
-                    { val: 'card_count_on_early',  label: '🃏 Extension +1/+2 (cartes 2→3)', desc: 'Si la carte prédite est apparue dans les N derniers jeux (+1/+2), bloque la prédiction normale et étend le compteur (2→3 cartes). Vice-versa au 2ème déclenchement.' },
-                    { val: 'suit_count_on_early',  label: '♠ Extension +1/+2 (costumes)', desc: 'Même logique que la précédente pour les costumes : si le costume prédit apparaît N fois dans les N derniers jeux, étend le compteur de costume. Vice-versa.' },
-                    { val: 'pre_emit_suit_inverse', label: '🔀 Inverse si costume présent à -(N)', desc: 'Si on prédit à +offset ou plus et que le costume prédit est apparu dans le jeu à -N dans l\'historique, redirige vers l\'inverse : ♠↔♦  ❤↔♣.' },
+                    { val: 'pre_emit_suit_inverse', label: '🔄 Inverse costume — apparu récemment',  desc: 'Si le costume prédit est apparu à -N dans l\'historique → prédit l\'inverse (♠↔♦ ❤↔♣). Ne bloque pas, redirige.' },
+                    { val: 'offset_suit_inverse',   label: '🔄 Inverse costume — offset ≥ N + apparu', desc: 'Si l\'offset de la stratégie ≥ min_offset ET le costume prédit est apparu à -appear_at → prédit l\'inverse (♠↔♦ ❤↔♣). Ne bloque pas, redirige.' },
                   ];
 
                   const needsValue  = ['consec_appearances','recent_frequency','max_consec_losses','trigger_overload','min_history','consec_wins','suit_absent_long','high_win_rate','pending_overload','dominant_streak','cold_start','loss_streak_pause','consec_same_suit_pred'].includes(ex.type);
                   const needsWindow = ['recent_frequency','trigger_overload','high_win_rate','loss_streak_pause'].includes(ex.type);
-                  const needsCount  = ['card_count_on_early','suit_count_on_early'].includes(ex.type);
-                  const needsAppearAt = ex.type === 'pre_emit_suit_inverse';
                   const needsHalf   = ex.type === 'time_window_block';
                   const needsMinInterval = ex.type === 'minute_interval_block';
                   const needsParity = ex.type === 'game_parity';
                   const needsBadHour = ex.type === 'bad_hour';
                   const needsTriggerPos = ex.type === 'trigger_card_position';
+                  const needsPreEmitInverse  = ex.type === 'pre_emit_suit_inverse';
+                  const needsOffsetInverse   = ex.type === 'offset_suit_inverse';
                   const currentOpt  = EX_OPTS.find(o => o.val === ex.type);
 
                   const INP = { padding: '4px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, color: '#fff', fontSize: 12 };
@@ -10384,12 +10783,7 @@ function AdminPanel() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <select
                           value={ex.type}
-                          onChange={e => {
-                            const t = e.target.value;
-                            if (t === 'pre_emit_suit_inverse') setEx({ type: t, appear_at: 1 });
-                            else if (t === 'card_count_on_early' || t === 'suit_count_on_early') setEx({ type: t, count: 2 });
-                            else setEx({ type: t, value: 2, window: 5 });
-                          }}
+                          onChange={e => setEx({ type: e.target.value, value: 2, window: 5 })}
                           style={{ flex: 1, padding: '6px 8px', background: '#1e1b2e', border: '1px solid rgba(239,68,68,0.3)',
                             borderRadius: 6, color: '#f1f5f9', fontSize: 12 }}>
                           {EX_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
@@ -10437,30 +10831,6 @@ function AdminPanel() {
                             {ex.type === 'cold_start'          && `→ bloque les ${ex.value ?? 10} premières parties`}
                             {ex.type === 'loss_streak_pause'   && `→ pause ${ex.window ?? 2} jeux après ${ex.value ?? 3} défaites de suite`}
                             {ex.type === 'consec_same_suit_pred' && `→ bloque si le même costume est prédit ${ex.value ?? 3}x de suite (libéré après autre costume ou 20 min)`}
-                          </div>
-                        </div>
-                      )}
-
-                      {needsCount && (
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>N (derniers jeux) =</label>
-                          <input type="number" min="2" max="10" value={ex.count ?? 2}
-                            onChange={e => setEx({ count: parseInt(e.target.value) || 2 })}
-                            style={{ width: 60, ...INP }} />
-                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
-                            → extension si présent dans les {ex.count ?? 2} derniers jeux
-                          </div>
-                        </div>
-                      )}
-
-                      {needsAppearAt && (
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -(N) =</label>
-                          <input type="number" min="1" max="10" value={ex.appear_at ?? 1}
-                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
-                            style={{ width: 60, ...INP }} />
-                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
-                            → si présent au jeu -{ex.appear_at ?? 1} : redirige vers inverse (♠↔♦  ❤↔♣)
                           </div>
                         </div>
                       )}
@@ -10583,11 +10953,337 @@ function AdminPanel() {
                           </div>
                         </div>
                       )}
+
+                      {needsPreEmitInverse && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -N jeux :</label>
+                          <input type="number" min="1" max="20" value={ex.appear_at ?? 1}
+                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
+                            style={{ width: 60, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic' }}>
+                            → si le costume prédit est apparu il y a {ex.appear_at ?? 1} jeu(x) → prédit l'inverse (♠↔♦ ❤↔♣)
+                          </div>
+                          <div style={{ width: '100%', padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#a5b4fc' }}>
+                            💡 Ne bloque pas — redirige silencieusement. Ex : prédit ♠ mais ♠ était présent il y a {ex.appear_at ?? 1} jeu(x) → émet ♦ à la place.
+                          </div>
+                        </div>
+                      )}
+
+                      {needsOffsetInverse && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Offset min. :</label>
+                          <input type="number" min="1" max="20" value={ex.min_offset ?? 3}
+                            onChange={e => setEx({ min_offset: parseInt(e.target.value) || 3 })}
+                            style={{ width: 55, ...INP }} />
+                          <label style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap' }}>Apparition à -N :</label>
+                          <input type="number" min="1" max="20" value={ex.appear_at ?? 1}
+                            onChange={e => setEx({ appear_at: parseInt(e.target.value) || 1 })}
+                            style={{ width: 55, ...INP }} />
+                          <div style={{ color: '#4b5563', fontSize: 11, fontStyle: 'italic', width: '100%' }}>
+                            → actif seulement si offset ≥ {ex.min_offset ?? 3} · si costume prédit apparu à -{ex.appear_at ?? 1} → inverse (♠↔♦ ❤↔♣)
+                          </div>
+                          <div style={{ width: '100%', padding: '6px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#a5b4fc' }}>
+                            💡 Exemple : offset=+3, appear_at=1 → si ♠ était dans le dernier jeu et que l'offset est ≥ 3 → émet ♦ à la place de ♠.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
               </>}
+
+
+                {/* ── Relance sur perte ── */}
+                {stratForm.mode !== 'annonce_sequence' && stratForm.mode !== 'gestion_banque' && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{
+                    padding: '14px 16px', borderRadius: 12,
+                    background: stratForm.relance_sur_perte ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${stratForm.relance_sur_perte ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                    transition: 'all 0.2s',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: stratForm.relance_sur_perte ? 12 : 0 }}>
+                      <div
+                        onClick={() => setStratForm(p => ({ ...p, relance_sur_perte: !p.relance_sur_perte }))}
+                        style={{
+                          width: 44, height: 24, borderRadius: 12, cursor: 'pointer', position: 'relative', flexShrink: 0,
+                          background: stratForm.relance_sur_perte ? '#ef4444' : 'rgba(255,255,255,0.12)',
+                          transition: 'background 0.2s',
+                        }}>
+                        <div style={{
+                          position: 'absolute', top: 3, left: stratForm.relance_sur_perte ? 23 : 3,
+                          width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                          transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                        }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: stratForm.relance_sur_perte ? '#f87171' : '#94a3b8' }}>
+                          🔁 Relancer le même costume après une perte
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          Si la prédiction échoue, l'engine relance automatiquement le même costume/type au jeu suivant
+                        </div>
+                      </div>
+                    </div>
+                    {stratForm.relance_sur_perte && (
+                      <div style={{ marginTop: 4 }}>
+                        <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
+                          Nombre max de relances consécutives (1–10) — remet à zéro après une victoire
+                        </label>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {[1,2,3,4,5,7,10].map(n => {
+                            const active = (stratForm.relance_sur_perte_max ?? 3) === n;
+                            return (
+                              <button key={n} type="button"
+                                onClick={() => setStratForm(p => ({ ...p, relance_sur_perte_max: n }))}
+                                style={{
+                                  width: 40, height: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                                  border: active ? '2px solid #ef4444' : '1px solid rgba(239,68,68,0.3)',
+                                  background: active ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)',
+                                  color: active ? '#fca5a5' : '#6b7280',
+                                  transition: 'all 0.15s',
+                                }}>
+                                {n}
+                              </button>
+                            );
+                          })}
+                          <input
+                            type="number" min="1" max="10" step="1"
+                            value={stratForm.relance_sur_perte_max ?? 3}
+                            onChange={e => { const v = Math.max(1, Math.min(10, parseInt(e.target.value) || 1)); setStratForm(p => ({ ...p, relance_sur_perte_max: v })); }}
+                            style={{
+                              width: 52, height: 36, borderRadius: 8,
+                              border: '1px solid rgba(239,68,68,0.4)',
+                              background: 'rgba(255,255,255,0.06)', color: '#fca5a5',
+                              textAlign: 'center', fontWeight: 800, fontSize: 15,
+                            }}
+                          />
+                        </div>
+                        <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)', fontSize: 11, color: '#f87171', lineHeight: 1.6 }}>
+                          {(() => {
+                            const max = stratForm.relance_sur_perte_max ?? 3;
+                            const r = stratForm.max_rattrapage ?? 20;
+                            return `Exemple : prédit jeu #10 (${r} rattrapage${r !== 1 ? 's' : ''}) → perte → relance auto #${10 + r + 1} → perte → relance #${10 + (r+1)*2 + 1}… jusqu'à ${max} relance${max > 1 ? 's' : ''} consécutive${max > 1 ? 's' : ''}, puis arrêt jusqu'à la prochaine victoire.`;
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
+
+              {/* ── Filtre d'attente — universel (tous modes) ── */}
+              <div style={{ gridColumn: '1 / -1', marginTop: 20, padding: '16px 18px', borderRadius: 12, background: 'rgba(245,158,11,0.05)', border: `1px solid ${stratForm.attente_enabled ? 'rgba(245,158,11,0.5)' : 'rgba(245,158,11,0.2)'}`, transition: 'border-color 0.2s' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 20 }}>⏳</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', letterSpacing: 0.3 }}>Filtre d'attente</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.5 }}>Observe N jeux avant d'émettre — confirme la présence ou l'absence du costume prédit. Compatible avec tous les modes.</div>
+                  </div>
+                  <button type="button"
+                    onClick={() => setStratForm(p => ({ ...p, attente_enabled: !p.attente_enabled }))}
+                    style={{ padding: '6px 16px', borderRadius: 20, cursor: 'pointer', fontWeight: 700, fontSize: 12, transition: 'all 0.2s', border: stratForm.attente_enabled ? '2px solid #f59e0b' : '1px solid rgba(245,158,11,0.35)', background: stratForm.attente_enabled ? 'rgba(245,158,11,0.22)' : 'rgba(245,158,11,0.06)', color: stratForm.attente_enabled ? '#fbbf24' : '#64748b' }}>
+                    {stratForm.attente_enabled ? '● Activé' : '○ Désactivé'}
+                  </button>
+                </div>
+                {stratForm.attente_enabled && (
+                  <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Option</label>
+                      <select value={stratForm.attente_option}
+                        onChange={e => setStratForm(p => ({ ...p, attente_option: parseInt(e.target.value) }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
+                        <option value={1}>Option 1 — Costume ABSENT pendant N jeux → émet</option>
+                        <option value={2}>Option 2 — Tous PRÉSENTS sur N jeux → émet via mapping</option>
+                        <option value={3}>Option 3 — Hybride (absent→map absent / présent→map présent)</option>
+                      </select>
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b', lineHeight: 1.5 }}>
+                        {stratForm.attente_option === 1
+                          ? '→ Si le costume prédit reste absent des N jeux suivants, la prédiction est émise via le mapping opt1 (si configuré).'
+                          : stratForm.attente_option === 2
+                          ? '→ Tous présents → émet via mapping opt2. Sinon → annulé.'
+                          : '→ Tous absents → émet via mapping opt3-absent. Tous présents → émet via mapping opt3-présent. Mélangé → annulé.'}
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>N — Jeux à observer</label>
+                      <input type="number" min="1" max="20" value={stratForm.attente_n}
+                        onChange={e => setStratForm(p => ({ ...p, attente_n: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(245,158,11,0.45)', borderRadius: 8, color: '#fbbf24', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Jeux d'observation (1–20)</div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Écart (min. 1)</label>
+                      <input type="number" min="1" max="20" value={stratForm.attente_ecart ?? 1}
+                        onChange={e => setStratForm(p => ({ ...p, attente_ecart: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(99,102,241,0.5)', borderRadius: 8, color: '#818cf8', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>N + Écart = jeu cible</div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Main observée</label>
+                      <select value={stratForm.attente_main}
+                        onChange={e => setStratForm(p => ({ ...p, attente_main: e.target.value }))}
+                        style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
+                        <option value="joueur">👤 Joueur</option>
+                        <option value="banquier">🏦 Banquier</option>
+                      </select>
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Cartes de quelle main</div>
+                    </div>
+                    <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', fontSize: 11, color: '#fcd34d', lineHeight: 1.7 }}>
+                      🕐 <strong>Résumé :</strong> Quand le signal est détecté (jeu #X), le moteur observe <strong>{stratForm.attente_n}</strong> jeu{stratForm.attente_n > 1 ? 'x' : ''} sur la main <strong>{stratForm.attente_main}</strong>.
+                      {stratForm.attente_option === 1
+                        ? ` Si le costume prédit est absent pendant ces ${stratForm.attente_n} jeux → prédiction émise ✅. Sinon → annulée ❌.`
+                        : stratForm.attente_option === 2
+                        ? ` Après ${stratForm.attente_n} jeux : tous présents → émet via mapping ✅ | sinon → annulé ❌.`
+                        : ` Après ${stratForm.attente_n} jeux : tous absents → émet mapping opt3-absent ✅ | tous présents → émet mapping opt3-présent ✅ | mélangé → annulé ❌.`}
+                      {' '}<span style={{ color: '#a5b4fc' }}>Jeu cible = #X + <strong>{stratForm.attente_n}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong>#{stratForm.attente_n + (stratForm.attente_ecart ?? 1)}e jeu après le signal</strong>.</span>
+                    </div>
+                    {/* ── Mapping de prédiction par option ── */}
+                    {(() => {
+                      // Adapter les suits/presets selon le mode de la stratégie
+                      const _fMode = stratForm.mode;
+                      const _isCarteMode    = ['carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','carte_2v3','2k-3k'].includes(_fMode);
+                      const _isVictoireMode = ['absence_victoire','victoire_adverse'].includes(_fMode);
+                      const _isPariteMode   = ['compteur_parite','pair_impair'].includes(_fMode);
+
+                      let _SUITS_AT, _PRESETS_AT, _getSuitLabel, _getSuitColor, _defaultMap;
+                      if (_isCarteMode) {
+                        _SUITS_AT       = ['deux','trois'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (2↔3)', map: { 'deux':['trois'],'trois':['deux'] } },
+                          { label: 'Identique',       map: { 'deux':['deux'], 'trois':['trois'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'deux' ? '2️⃣ 2 cartes' : '3️⃣ 3 cartes';
+                        _getSuitColor   = () => '#a78bfa';
+                        _defaultMap     = { 'deux':['trois'],'trois':['deux'] };
+                      } else if (_isVictoireMode) {
+                        _SUITS_AT       = ['WIN_P','WIN_B'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (J↔B)', map: { 'WIN_P':['WIN_B'],'WIN_B':['WIN_P'] } },
+                          { label: 'Identique',        map: { 'WIN_P':['WIN_P'],'WIN_B':['WIN_B'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'WIN_P' ? '👤 Joueur' : '🏦 Banquier';
+                        _getSuitColor   = () => '#60a5fa';
+                        _defaultMap     = { 'WIN_P':['WIN_B'],'WIN_B':['WIN_P'] };
+                      } else if (_isPariteMode) {
+                        _SUITS_AT       = ['pair','impair'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire (P↔I)', map: { 'pair':['impair'],'impair':['pair'] } },
+                          { label: 'Identique',        map: { 'pair':['pair'],  'impair':['impair'] } },
+                        ];
+                        _getSuitLabel   = s => s === 'pair' ? '🟢 Pair' : '🔴 Impair';
+                        _getSuitColor   = () => '#34d399';
+                        _defaultMap     = { 'pair':['impair'],'impair':['pair'] };
+                      } else {
+                        _SUITS_AT       = ['♠','♥','♦','♣'];
+                        _PRESETS_AT     = [
+                          { label: 'Contraire total',  map: { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] } },
+                          { label: 'Même couleur',     map: { '♠':['♣'],'♣':['♠'],'♥':['♦'],'♦':['♥'] } },
+                          { label: 'Même forme',       map: { '♠':['♦'],'♦':['♠'],'♥':['♣'],'♣':['♥'] } },
+                          { label: 'Identique',        map: { '♠':['♠'],'♥':['♥'],'♦':['♦'],'♣':['♣'] } },
+                        ];
+                        _getSuitLabel   = s => s;
+                        _getSuitColor   = s => ['♥','♦'].includes(s) ? '#f87171' : '#e2e8f0';
+                        _defaultMap     = { '♠':['♥'],'♥':['♠'],'♦':['♣'],'♣':['♦'] };
+                      }
+
+                      const renderAttenteMapper = (label, mappingValue, setMapping, accentColor) => {
+                        const enabled = !!mappingValue;
+                        const m = mappingValue || _defaultMap;
+                        return (
+                          <div key={label} style={{ gridColumn: '1 / -1', padding: '12px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.18)', border: `1px solid ${enabled ? accentColor + '55' : 'rgba(255,255,255,0.07)'}`, marginTop: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: enabled ? 10 : 0 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: enabled ? accentColor : '#64748b', letterSpacing: 0.3 }}>🗺️ {label}</span>
+                              <button type="button"
+                                onClick={() => setMapping(enabled ? null : { ..._defaultMap })}
+                                style={{ padding: '3px 11px', borderRadius: 14, cursor: 'pointer', fontWeight: 700, fontSize: 10, border: `1px solid ${enabled ? accentColor : 'rgba(255,255,255,0.15)'}`, background: enabled ? accentColor + '22' : 'rgba(255,255,255,0.05)', color: enabled ? accentColor : '#64748b', transition: 'all 0.15s' }}>
+                                {enabled ? '● Activé' : '○ Désactivé (costume original)'}
+                              </button>
+                            </div>
+                            {enabled && (
+                              <>
+                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 9 }}>
+                                  {_PRESETS_AT.map((p, pi) => {
+                                    const isSel = JSON.stringify(m) === JSON.stringify(p.map);
+                                    return (
+                                      <button key={pi} type="button" onClick={() => setMapping({ ...p.map })}
+                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: 10, cursor: 'pointer', border: `1px solid ${isSel ? accentColor : 'rgba(255,255,255,0.1)'}`, background: isSel ? accentColor + '22' : 'rgba(255,255,255,0.04)', color: isSel ? '#e2e8f0' : '#94a3b8', fontWeight: isSel ? 700 : 400 }}>
+                                        {p.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {_SUITS_AT.map(suit => {
+                                  const cur = Array.isArray(m[suit]) ? m[suit][0] : (m[suit] || null);
+                                  const suitColor = _getSuitColor(suit);
+                                  return (
+                                    <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', marginBottom: 4, background: 'rgba(255,255,255,0.02)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                      <span style={{ color: suitColor, fontSize: 14, minWidth: 80, textAlign: 'left', fontWeight: 700 }}>{_getSuitLabel(suit)}</span>
+                                      <span style={{ color: '#374151', fontSize: 14, minWidth: 16 }}>→</span>
+                                      <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                                        {_SUITS_AT.map(target => {
+                                          const sel = cur === target;
+                                          const tColor = _getSuitColor(target);
+                                          return (
+                                            <button key={target} type="button"
+                                              onClick={() => setMapping({ ...m, [suit]: [target] })}
+                                              style={{ flex: 1, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', border: sel ? `2px solid ${accentColor}` : '1px solid rgba(255,255,255,0.08)', background: sel ? accentColor + '33' : 'rgba(255,255,255,0.04)', color: sel ? '#e2e8f0' : '#6b7280', fontWeight: sel ? 700 : 400, transition: 'all 0.12s', position: 'relative', textAlign: 'center', fontSize: 12 }}>
+                                              {sel && <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 8, color: accentColor, fontWeight: 800 }}>①</span>}
+                                              <span style={{ color: tColor }}>{_getSuitLabel(target)}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      <span style={{ minWidth: 35, fontSize: 10, color: '#64748b', textAlign: 'right' }}>{cur ? 'fixe' : '—'}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4, fontStyle: 'italic' }}>
+                                  Sélection unique = toujours ce costume · cliquez pour changer
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      };
+                      const _optLabel = _isCarteMode ? '2️⃣/3️⃣' : _isVictoireMode ? '👤/🏦' : _isPariteMode ? 'P/I' : '♠/♥/♦/♣';
+                      if (stratForm.attente_option === 1) {
+                        return renderAttenteMapper(
+                          `Mapping opt1 — Original → Costume prédit (${_optLabel})`,
+                          stratForm.attente1_mapping,
+                          m => setStratForm(p => ({ ...p, attente1_mapping: m })),
+                          '#a855f7'
+                        );
+                      }
+                      if (stratForm.attente_option === 2) {
+                        return renderAttenteMapper(
+                          `Mapping opt2 — Original → Costume prédit (${_optLabel}, tous présents → émet)`,
+                          stratForm.attente2_mapping,
+                          m => setStratForm(p => ({ ...p, attente2_mapping: m })),
+                          '#3b82f6'
+                        );
+                      }
+                      return (
+                        <>
+                          {renderAttenteMapper(
+                            'Mapping opt3 — Branche ABSENT (tous absents → émet)',
+                            stratForm.attente3_mapping?.absent ?? null,
+                            m => setStratForm(p => ({ ...p, attente3_mapping: { ...(p.attente3_mapping || {}), absent: m } })),
+                            '#a855f7'
+                          )}
+                          {renderAttenteMapper(
+                            'Mapping opt3 — Branche PRÉSENT (tous présents → émet)',
+                            (stratForm.attente3_mapping?.present) ?? null,
+                            m => setStratForm(p => ({ ...p, attente3_mapping: { ...(p.attente3_mapping || {}), present: m } })),
+                            '#22c55e'
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
 
               {/* ── Boutons d'action ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
@@ -10792,6 +11488,44 @@ function AdminPanel() {
         })()}
 
         </>}
+
+        {/* ── EXPORT JSON DES STRATÉGIES ── */}
+        {adminTab === 'systeme' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(34,197,94,0.45)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">📤</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Exporter les stratégies (JSON)</h2>
+              <p className="tg-admin-sub">
+                Télécharge toutes les stratégies personnalisées en fichier <code style={{ background: 'rgba(34,197,94,0.15)', padding: '1px 6px', borderRadius: 4 }}>.json</code>.<br/>
+                <span style={{ color: '#86efac', fontSize: 12 }}>Ce fichier peut ensuite être réimporté dans le panneau "Fichier de mise à jour système" ci-dessous.</span>
+              </p>
+            </div>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{
+              background: 'linear-gradient(135deg,#166534,#22c55e)',
+              border: 'none', color: '#fff', fontWeight: 700, fontSize: 13,
+              padding: '10px 28px', borderRadius: 10, cursor: 'pointer', marginTop: 8,
+            }}
+            onClick={async () => {
+              try {
+                const r = await fetch('/api/admin/strategies/export-json', { credentials: 'include' });
+                if (!r.ok) { alert('❌ Erreur export : ' + (await r.json().catch(() => ({}))).error); return; }
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `strategies_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (e) { alert('❌ Erreur réseau : ' + e.message); }
+            }}
+          >
+            📥 Télécharger strategies.json
+          </button>
+        </div>)}
 
         {/* ── EFFACEMENT MANUEL DES PRÉDICTIONS ── */}
         {/* ── EFFACER DONNÉES D'UNE STRATÉGIE SPÉCIFIQUE ── */}
@@ -11495,6 +12229,20 @@ function AdminPanel() {
                 }}
               >
                 🗑️ Effacer la base externe
+              </button>
+              <button
+                className="btn btn-sm"
+                style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', color: '#818cf8', fontSize: 12 }}
+                onClick={async () => {
+                  if (!confirm('Importer stratégies et utilisateurs depuis la base Render externe vers la base locale ?\n\nLes stratégies déjà existantes ne seront pas écrasées. Les utilisateurs seront mis à jour.')) return;
+                  setRenderDbMsg('⏳ Import en cours…');
+                  const r = await fetch('/api/admin/render-db/import', { method: 'POST', credentials: 'include' });
+                  const d = await r.json().catch(() => ({}));
+                  if (r.ok) { setRenderDbMsg('✅ Import terminé — stratégies et utilisateurs importés depuis Render'); loadStrategies(); }
+                  else setRenderDbMsg(`❌ ${d.error || 'Erreur import'}`);
+                }}
+              >
+                ⬇️ Importer depuis Render
               </button>
               <button
                 className="btn btn-sm"
@@ -12612,6 +13360,461 @@ function AdminPanel() {
                       style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>🗑</button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>}
+
+        {/* ── SECTION : COMPTEURS INSTANTANÉS v2 ── */}
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(251,191,36,0.4)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">📈</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">Compteurs instantanés</h2>
+              <p className="tg-admin-sub">
+                Chaque compteur est <strong>indépendant</strong> : son propre type, canal, bot et calendrier d'envoi.
+                Ils coexistent sans interférer. Créez-en autant que nécessaire.
+              </p>
+            </div>
+            <button type="button" onClick={loadSuitCounters} disabled={scLoading}
+              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.08)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+              {scLoading ? '⏳' : '🔁'}
+            </button>
+          </div>
+
+          {scMsg && (
+            <div className={`tg-alert ${scMsg.startsWith('✅') ? 'tg-alert-ok' : scMsg.startsWith('⏳') ? '' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{scMsg}</div>
+          )}
+
+          {/* ── Liste des compteurs sauvegardés ── */}
+          {scList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14, marginBottom: 14 }}>
+              {scList.map(c => {
+                const st = scStates[c.id] || {};
+                const typeInfo = SC_COUNTER_TYPES.find(t => t.value === c.counter_type);
+                const intLabel = SC_INTERVALS.find(i => i.v === c.interval)?.l || `${c.interval} min`;
+                return (
+                  <div key={c.id} style={{
+                    background: 'rgba(15,23,42,0.5)',
+                    border: `1px solid ${c.enabled ? 'rgba(251,191,36,0.3)' : 'rgba(100,116,139,0.2)'}`,
+                    borderRadius: 10, padding: '12px 14px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 180 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <span style={{ fontSize: 16 }}>{c.enabled ? '🟢' : '⚪'}</span>
+                          <span style={{ fontWeight: 800, fontSize: 13, color: '#e2e8f0' }}>
+                            {c.label || <em style={{ color: '#64748b' }}>Sans nom</em>}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#a78bfa', marginBottom: 3, fontWeight: 600 }}>
+                          {typeInfo?.label || c.counter_type}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>
+                          📢 <code style={{ color: '#94a3b8' }}>{c.channel_id || '—'}</code>
+                          {' · '}⏰ Reset toutes les <strong style={{ color: '#94a3b8' }}>{intLabel}</strong>
+                          {c.send_on_game_end && <span style={{ color: '#fbbf24', marginLeft: 6 }}>+ après chaque jeu</span>}
+                        </div>
+                        {st.gameCount > 0 && (
+                          <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>
+                            🎮 {st.gameCount} jeu(x) depuis dernier reset · dernier jeu #{st.lastGameNumber || '—'}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button type="button" onClick={() => scTestCounter(c.id)}
+                          title="Envoyer maintenant"
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          📤
+                        </button>
+                        <button type="button" onClick={() => scResetCounter(c.id)}
+                          title="Remettre le compteur à zéro"
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.07)', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          🔄
+                        </button>
+                        <button type="button" onClick={() => scStartEdit(c)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(148,163,184,0.07)', color: '#94a3b8', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          ✏️
+                        </button>
+                        <button type="button" onClick={() => scToggleEnabled(c.id, !c.enabled)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${c.enabled ? 'rgba(251,191,36,0.4)' : 'rgba(34,197,94,0.4)'}`, background: c.enabled ? 'rgba(251,191,36,0.08)' : 'rgba(34,197,94,0.1)', color: c.enabled ? '#fbbf24' : '#4ade80', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          {c.enabled ? '⏸' : '▶'}
+                        </button>
+                        <button type="button" onClick={() => scDeleteCounter(c.id)}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.07)', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {scList.length === 0 && !scShowForm && (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#475569', fontSize: 13 }}>
+              Aucun compteur configuré. Cliquez sur <strong style={{ color: '#fbbf24' }}>+ Nouveau compteur</strong> pour commencer.
+            </div>
+          )}
+
+          {/* ── Formulaire création / édition ── */}
+          {scShowForm && (
+            <div style={{ background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: 10, padding: 16, marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 14 }}>
+                {scEditId ? '✏️ Modifier le compteur' : '➕ Nouveau compteur'}
+              </div>
+
+              {/* Nom */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🏷 Nom du compteur</label>
+                <input value={scForm.label} onChange={e => setScForm(p => ({ ...p, label: e.target.value }))}
+                  placeholder="Ex : Parité Canal Sénégal"
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+              </div>
+
+              {/* Type de compteur */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>📊 Type de compteur</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {SC_COUNTER_TYPES.map(t => (
+                    <label key={t.value} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 12px', borderRadius: 8, cursor: 'pointer',
+                      border: `1px solid ${scForm.counter_type === t.value ? 'rgba(251,191,36,0.5)' : 'rgba(255,255,255,0.06)'}`,
+                      background: scForm.counter_type === t.value ? 'rgba(251,191,36,0.1)' : 'rgba(15,23,42,0.4)',
+                    }}>
+                      <input type="radio" name="sc_counter_type" value={t.value}
+                        checked={scForm.counter_type === t.value}
+                        onChange={() => setScForm(p => ({ ...p, counter_type: t.value }))}
+                        style={{ accentColor: '#fbbf24' }} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: scForm.counter_type === t.value ? '#fbbf24' : '#e2e8f0' }}>{t.label}</div>
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>{t.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bot token + Canal */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 API Token Bot</label>
+                  <input value={scForm.bot_token} onChange={e => setScForm(p => ({ ...p, bot_token: e.target.value }))}
+                    placeholder="123456:AAF-xxxxx…"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID Canal</label>
+                  <input value={scForm.channel_id} onChange={e => setScForm(p => ({ ...p, channel_id: e.target.value }))}
+                    placeholder="@canal ou -1001234…"
+                    style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Intervalle de reset */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>⏰ Reset automatique toutes les…</label>
+                <select value={scForm.interval} onChange={e => setScForm(p => ({ ...p, interval: parseInt(e.target.value) }))}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(20,20,40,0.9)', color: '#e2e8f0', fontSize: 12, boxSizing: 'border-box' }}>
+                  {SC_INTERVALS.map(i => <option key={i.v} value={i.v}>{i.l}</option>)}
+                </select>
+              </div>
+
+              {/* Heures fixes */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📅 Heures fixes d'envoi (optionnel)</label>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {(scForm.send_times || []).map(t => (
+                    <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 5, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 11, color: '#fbbf24' }}>
+                      {t}
+                      <button type="button" onClick={() => setScForm(p => ({ ...p, send_times: p.send_times.filter(x => x !== t) }))}
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="time" value={scNewTime} onChange={e => setScNewTime(e.target.value)}
+                    style={{ padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.04)', color: '#e2e8f0', fontSize: 12 }} />
+                  <button type="button" onClick={() => {
+                    if (scNewTime && !/^\d{2}:\d{2}$/.test(scNewTime)) return;
+                    if (scNewTime && !(scForm.send_times || []).includes(scNewTime)) {
+                      setScForm(p => ({ ...p, send_times: [...(p.send_times || []), scNewTime].sort() }));
+                      setScNewTime('');
+                    }
+                  }} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                    + Ajouter
+                  </button>
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                {[
+                  { key: 'send_on_game_end', icon: '🎮', label: 'Envoyer après chaque fin de jeu', desc: 'En plus du planifié, un message à chaque partie terminée.' },
+                  { key: 'reset_after_send', icon: '🔄', label: 'Remettre à zéro après envoi', desc: 'Les compteurs repartent de zéro après chaque envoi planifié.' },
+                  { key: 'enabled',          icon: '✅', label: 'Compteur actif',                  desc: 'Désactiver pour suspendre sans supprimer.' },
+                ].map(({ key, icon, label, desc }) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', background: 'rgba(15,23,42,0.4)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>{icon} {label}</div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>{desc}</div>
+                    </div>
+                    <button type="button" onClick={() => setScForm(p => ({ ...p, [key]: !p[key] }))}
+                      style={{ padding: '6px 16px', borderRadius: 7, fontWeight: 800, fontSize: 12, cursor: 'pointer', border: `1px solid ${scForm[key] ? 'rgba(34,197,94,0.5)' : 'rgba(100,116,139,0.35)'}`, background: scForm[key] ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.1)', color: scForm[key] ? '#22c55e' : '#64748b', minWidth: 64 }}>
+                      {scForm[key] ? '● ON' : '○ OFF'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Boutons */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={scSubmitForm} disabled={scSaving}
+                  style={{ padding: '9px 22px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.5)', background: 'rgba(251,191,36,0.18)', color: '#fef3c7', fontWeight: 700, fontSize: 12, cursor: scSaving ? 'wait' : 'pointer', opacity: scSaving ? 0.6 : 1 }}>
+                  {scSaving ? '⏳…' : scEditId ? '💾 Mettre à jour' : '💾 Sauvegarder'}
+                </button>
+                <button type="button" onClick={() => { setScShowForm(false); setScEditId(null); setScForm({ ...SC_EMPTY_FORM }); }}
+                  style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(100,116,139,0.3)', background: 'rgba(100,116,139,0.08)', color: '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bouton Nouveau */}
+          {!scShowForm && (
+            <div style={{ marginTop: 14 }}>
+              <button type="button" onClick={() => { setScEditId(null); setScForm({ ...SC_EMPTY_FORM }); setScShowForm(true); }}
+                style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.12)', color: '#fbbf24', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                ➕ Nouveau compteur
+              </button>
+            </div>
+          )}
+        </div>}
+
+        {/* ── SECTION 0b : API KOUAMÉ ── */}
+        {!isPartner && <div className="tg-admin-card" style={{ borderColor: 'rgba(20,184,166,0.4)', marginBottom: 20 }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔄</span>
+            <div style={{ flex: 1 }}>
+              <h2 className="tg-admin-title">API Kouamé</h2>
+              <p className="tg-admin-sub">
+                Lit les parties depuis un canal Telegram (format <em>Diffusion live</em>) et les injecte dans le moteur
+                en remplacement de l'API 1xBet. Quand activée, <strong style={{ color: '#f87171' }}>1xBet n'envoie plus aucune requête</strong>.
+                <br />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  Le bot doit être <strong>administrateur</strong> du canal source pour recevoir les messages.
+                </span>
+              </p>
+            </div>
+            <span className="tg-badge-connected" style={{
+              background: kouameConfig.enabled ? 'rgba(20,184,166,0.15)' : 'rgba(100,116,139,0.12)',
+              color:      kouameConfig.enabled ? '#2dd4bf' : '#94a3b8',
+              border:     `1px solid ${kouameConfig.enabled ? 'rgba(20,184,166,0.4)' : 'rgba(100,116,139,0.25)'}`,
+              fontWeight: 800,
+            }}>
+              {kouameConfig.enabled ? '● ACTIF' : '○ INACTIF'}
+            </span>
+          </div>
+
+          {kouameMsg && (
+            <div className={`tg-alert ${kouameMsg.startsWith('✅') ? 'tg-alert-ok' : kouameMsg.startsWith('⏳') || kouameMsg.startsWith('⏸') ? '' : 'tg-alert-error'}`} style={{ marginTop: 8 }}>{kouameMsg}</div>
+          )}
+
+          {/* Statut temps réel */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, marginBottom: 4 }}>
+            <div style={{ flex: 1, minWidth: 140, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Connexion</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: kouameStatus.connected ? '#4ade80' : '#94a3b8' }}>
+                {kouameStatus.connected ? '🟢 Connecté' : kouameStatus.error ? '🔴 Erreur' : '⚪ En attente'}
+              </div>
+              {kouameStatus.error && <div style={{ fontSize: 10, color: '#f87171', marginTop: 3, wordBreak: 'break-all' }}>{kouameStatus.error}</div>}
+            </div>
+            <div style={{ flex: 1, minWidth: 120, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Dernier jeu</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
+                {kouameStatus.last_game_number ? `#N${kouameStatus.last_game_number}` : '—'}
+              </div>
+              {kouameStatus.last_received_at && (
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 3 }}>
+                  {new Date(kouameStatus.last_received_at).toLocaleTimeString('fr-FR')}
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 110, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Jeux en mémoire</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{kouameStatus.game_count || 0}</div>
+            </div>
+            {kouameConfig.channel_id && (
+              <div style={{ flex: 2, minWidth: 160, padding: '10px 14px', background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 8 }}>
+                <div style={{ fontSize: 10, color: '#5eead4', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Canal source</div>
+                <div style={{ fontSize: 12, color: '#a5b4fc', fontFamily: 'monospace' }}>{kouameConfig.channel_id}</div>
+                {kouameConfig.bot_token_preview && (
+                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>🔑 {kouameConfig.bot_token_preview}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Formulaire de configuration */}
+          <div style={{ background: 'rgba(20,184,166,0.06)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 10, padding: 14, marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#2dd4bf', marginBottom: 10 }}>
+              ⚙️ {kouameConfig.bot_token_preview ? 'Modifier la configuration' : 'Configurer l\'API Kouamé'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>🔑 TOKEN BOT LECTEUR</label>
+                <input
+                  value={kouameForm.bot_token}
+                  onChange={e => setKouameForm(p => ({ ...p, bot_token: e.target.value }))}
+                  placeholder={kouameConfig.bot_token_preview || '123456:AAF-xxxxx…'}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Bot admin du canal source (lit les messages)</div>
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>📢 ID CANAL SOURCE</label>
+                <input
+                  value={kouameForm.channel_id}
+                  onChange={e => setKouameForm(p => ({ ...p, channel_id: e.target.value }))}
+                  placeholder={kouameConfig.channel_id || '@canal ou -1001234…'}
+                  style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)', color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: 9, color: '#475569', marginTop: 3 }}>Canal où live-broadcast.js diffuse les jeux</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={testKouame} disabled={kouameTesting || (!kouameForm.bot_token && !kouameConfig.bot_token_preview)}
+                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.4)', background: 'rgba(20,184,166,0.1)', color: '#5eead4', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: (kouameTesting || (!kouameForm.bot_token && !kouameConfig.bot_token_preview)) ? 0.5 : 1 }}>
+                {kouameTesting ? '⏳…' : '🔌 Tester la connexion'}
+              </button>
+              <button type="button" onClick={saveKouame} disabled={kouameSaving || (!kouameForm.bot_token && !kouameForm.channel_id)}
+                style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid rgba(20,184,166,0.5)', background: 'rgba(20,184,166,0.18)', color: '#ccfbf1', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: (kouameSaving || (!kouameForm.bot_token && !kouameForm.channel_id)) ? 0.5 : 1 }}>
+                {kouameSaving ? '⏳…' : '💾 Sauvegarder'}
+              </button>
+              <button type="button" onClick={() => loadKouame()}
+                style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(100,116,139,0.3)', background: 'rgba(100,116,139,0.08)', color: '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                🔁 Actualiser
+              </button>
+              {kouameConfig.bot_token_preview && (
+                <button type="button" onClick={resetKouame}
+                  style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.07)', color: '#f87171', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginLeft: 'auto' }}>
+                  🗑 Supprimer
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Bouton d'activation principal */}
+          {kouameConfig.bot_token_preview && (
+            <div style={{ marginTop: 14, padding: '14px 16px', borderRadius: 10, border: `2px solid ${kouameConfig.enabled ? 'rgba(20,184,166,0.5)' : 'rgba(100,116,139,0.3)'}`, background: kouameConfig.enabled ? 'rgba(20,184,166,0.08)' : 'rgba(15,23,42,0.4)', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
+                  {kouameConfig.enabled ? '🟢 API Kouamé active — 1xBet suspendu' : '⚪ API Kouamé inactive — 1xBet utilisé'}
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                  {kouameConfig.enabled
+                    ? 'Le moteur reçoit les données depuis le canal Telegram. L\'API 1xBet est ignorée.'
+                    : 'Activez pour que le moteur lise les jeux depuis le canal Telegram au lieu de 1xBet.'}
+                </div>
+              </div>
+              <button type="button" onClick={() => toggleKouame(!kouameConfig.enabled)} disabled={kouameSaving}
+                style={{
+                  padding: '10px 22px', borderRadius: 8, fontWeight: 800, fontSize: 13, cursor: kouameSaving ? 'wait' : 'pointer',
+                  border: `1px solid ${kouameConfig.enabled ? 'rgba(251,191,36,0.5)' : 'rgba(20,184,166,0.5)'}`,
+                  background: kouameConfig.enabled ? 'rgba(251,191,36,0.12)' : 'rgba(20,184,166,0.18)',
+                  color: kouameConfig.enabled ? '#fbbf24' : '#2dd4bf',
+                  minWidth: 130,
+                }}>
+                {kouameSaving ? '⏳…' : kouameConfig.enabled ? '⏸ Désactiver' : '▶ Activer'}
+              </button>
+            </div>
+          )}
+
+          {/* ── Générateur de lien API Kouamé (format 1xBet) ── */}
+          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 18 }}>🔗</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#a5b4fc' }}>Générer lien API Kouamé</div>
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
+                  Lien compatible format 1xBet — utilisable dans n'importe quel code Python / Node.js
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = window.location.origin + '/api/kouame/feed';
+                  setKouameFeedUrl(url);
+                  setKouameFeedCopied(false);
+                }}
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.5)', background: 'rgba(99,102,241,0.18)', color: '#c7d2fe', fontWeight: 800, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                ⚡ Générer le lien
+              </button>
+            </div>
+
+            {kouameFeedUrl && (
+              <div>
+                {/* URL box */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                  <code style={{ flex: 1, fontSize: 11, color: '#818cf8', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                    {kouameFeedUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(kouameFeedUrl).then(() => {
+                        setKouameFeedCopied(true);
+                        setTimeout(() => setKouameFeedCopied(false), 2000);
+                      });
+                    }}
+                    style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: kouameFeedCopied ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.15)', color: kouameFeedCopied ? '#4ade80' : '#a5b4fc', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
+                  >
+                    {kouameFeedCopied ? '✅ Copié !' : '📋 Copier'}
+                  </button>
+                </div>
+
+                {/* Exemples d'utilisation */}
+                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7 }}>Exemple d'utilisation</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 7, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: 9, color: '#f59e0b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 5 }}>🐍 Python</div>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{`import requests, json
+data = requests.get(
+  "${kouameFeedUrl}"
+).json()
+games = data["Value"]["G"]
+for g in games:
+  gn   = int(g["DI"])
+  done = bool(g["F"])
+  sc   = g["SC"]["S"]
+  phase = next((e["Value"] for e
+    in sc if e["Key"]=="S"), None)
+  # Win1=Joueur Win2=Banquier Tie`}</pre>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 7, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: 9, color: '#38bdf8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 5 }}>⚡ Node.js</div>
+                    <pre style={{ margin: 0, fontSize: 9, color: '#94a3b8', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{`const d = await fetch(
+  "${kouameFeedUrl}"
+).then(r=>r.json());
+const games = d.Value.G;
+for (const g of games) {
+  const gn = parseInt(g.DI);
+  const sc = g.SC.S;
+  const ph = sc.find(
+    e=>e.Key==="S")?.Value;
+  // S=0♠ 1♣ 2♦ 3♥`}</pre>
+                  </div>
+                </div>
+
+                {/* Note de compatibilité */}
+                <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 6, background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.2)', fontSize: 10, color: '#86efac' }}>
+                  ✅ <strong>Compatible 1xBet GetChampZip</strong> — même structure <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: 3 }}>Value.G[].DI / F / SC.S / SC.FS / SC.CPS</code>.
+                  Costumes : <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: 3 }}>0=♠ 1=♣ 2=♦ 3=♥</code>
+                </div>
               </div>
             )}
           </div>
@@ -14048,6 +15251,20 @@ function AdminPanel() {
           <ProjectBackupPanel />
           <DeployLogsPanel />
         </>
+      )}
+
+      {/* ── TAB : ACTUALISER ── */}
+      {adminTab === 'actualiser' && (
+        <div className="tg-admin-card" style={{ borderColor: 'rgba(56,189,248,0.3)' }}>
+          <div className="tg-admin-header">
+            <span className="tg-admin-icon">🔄</span>
+            <div>
+              <h2 className="tg-admin-title">Actualiser le système</h2>
+              <p className="tg-admin-sub">Rechargez le moteur, nettoyez les prédictions bloquées ou réinitialisez les statistiques.</p>
+            </div>
+          </div>
+          <AdminRefresh />
+        </div>
       )}
       </div>{/* end admin-content */}
     </div>{/* end admin-page */}
