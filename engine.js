@@ -2566,8 +2566,20 @@ class Engine {
           }
           // 🔁 Relance sur perte : réinitialiser le compteur sur victoire
           if (cfg.relance_sur_perte) state.relanceSurPerteCount = 0;
+          // 🃏 Combiné Carte : suivi des victoires consécutives pour cc_limit
+          if (_cfgMode === 'combine_carte') {
+            state._ccConsecWins = (state._ccConsecWins || 0) + 1;
+            const _ccLimitVal = parseInt(cfg.cc_limit) || 0;
+            if (_ccLimitVal > 0 && state._ccConsecWins >= _ccLimitVal) {
+              state._ccSkipNext = true;
+              state._ccConsecWins = 0;
+              console.log(`[${channelId}] [Combiné Carte] 🔢 Limite ${_ccLimitVal} atteinte → pause 1 jeu`);
+            }
+          }
         } else {
           this._onStratLoss(channelId, gn, ps);
+          // 🃏 Combiné Carte : reset victoires consécutives sur perte
+          if (_cfgMode === 'combine_carte') state._ccConsecWins = 0;
           // 🐍 Serpent : activer sur perte ; continuer jusqu'à victoire
           if (_cfgMode === 'pair_impair' || _cfgMode === 'carte_2v3') {
             if (state.snakeActive) {
@@ -3344,21 +3356,29 @@ class Engine {
       // Lit le costume pos 1 (index 0) et pos 2 (index 1) de cc_hand.
       // Cherche dans cc_combinations la règle { pos1, pos2, predict }.
       // Si trouvée → prédit le costume configuré. Pas de seuil B ni mapping.
+      // cc_limit : tracking intégré dans le callback _resolvePending commun.
       // ─────────────────────────────────────────────────────────────────────
-      const ccCards  = (cfg.cc_hand === 'banquier' ? bCards : pCards) || [];
-      const ccCard1  = ccCards[0];
-      const ccCard2  = ccCards[1];
-      if (ccCard1 && ccCard2) {
-        const ccS1 = normalizeSuit(ccCard1.S || '');
-        const ccS2 = normalizeSuit(ccCard2.S || '');
-        if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
-          const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
-          const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
-          if (ccMatch && ALL_SUITS.includes(ccMatch.predict)) {
-            const ccPs = resolvePredictedSuit(ccMatch.predict) || ccMatch.predict;
-            if (ccPs) {
-              console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} → prédit ${ccMatch.predict} jeu #${gn + offset}`);
-              await emitPrediction(gn + offset, ccPs, ccMatch.predict);
+
+      // ── Vérifier si on est en mode pause (skip 1 jeu) ──────────────────
+      if (state._ccSkipNext) {
+        state._ccSkipNext = false;
+        console.log(`[${channelId}] [Combiné Carte] ⏭ Jeu sauté (pause après limite) — prochaine prédiction reprise`);
+      } else {
+        const ccCards  = (cfg.cc_hand === 'banquier' ? bCards : pCards) || [];
+        const ccCard1  = ccCards[0];
+        const ccCard2  = ccCards[1];
+        if (ccCard1 && ccCard2) {
+          const ccS1 = normalizeSuit(ccCard1.S || '');
+          const ccS2 = normalizeSuit(ccCard2.S || '');
+          if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
+            const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
+            const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
+            if (ccMatch && ALL_SUITS.includes(ccMatch.predict)) {
+              const ccPs = resolvePredictedSuit(ccMatch.predict) || ccMatch.predict;
+              if (ccPs) {
+                console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} → prédit ${ccMatch.predict} jeu #${gn + offset}`);
+                await emitPrediction(gn + offset, ccPs, ccMatch.predict);
+              }
             }
           }
         }
