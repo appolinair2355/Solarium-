@@ -517,8 +517,18 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'absence_victoire_2') {
+    return null;
+  }
+
+  if (mode === 'combine_carte') {
+    const combos = Array.isArray(body.cc_combinations) ? body.cc_combinations : [];
+    if (combos.length === 0) return 'Mode Combiné Carte : ajoutez au moins une combinaison (Pos1+Pos2→Prédit)';
+    return null;
+  }
+
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero', 'absence_victoire_2', 'combine_carte'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -527,10 +537,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'absence_victoire_2', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'combine_carte', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'absence_victoire_2', 'combine_carte'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -663,7 +673,9 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isCarte2v3          = mode === 'carte_2v3';
     const is2k3k              = mode === '2k-3k';
     const isFinNumero         = mode === 'fin_numero';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero) ? null : normalizeMappings(mappings);
+    const isAbsenceVictoire2  = mode === 'absence_victoire_2';
+    const isCombineCarte      = mode === 'combine_carte';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -750,6 +762,16 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
             bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
             bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
+        : isAbsenceVictoire2
+        ? { threshold: 0, mode: 'absence_victoire_2', mappings: null,
+            B_joueur:  Math.max(1, parseInt(req.body.B_joueur)  || 5),
+            B_banquier: Math.max(1, parseInt(req.body.B_banquier) || 8) }
+        : isCombineCarte
+        ? { threshold: 0, mode: 'combine_carte', mappings: null,
+            cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
+            cc_combinations: Array.isArray(req.body.cc_combinations)
+              ? req.body.cc_combinations.filter(c => c && ['♠','♥','♦','♣'].includes(c.pos1) && ['♠','♥','♦','♣'].includes(c.pos2) && ['♠','♥','♦','♣'].includes(c.predict))
+              : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
@@ -975,7 +997,9 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isCarte2v3          = mode === 'carte_2v3';
     const is2k3k              = mode === '2k-3k';
     const isFinNumero         = mode === 'fin_numero';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero) ? null : normalizeMappings(mappings);
+    const isAbsenceVictoire2  = mode === 'absence_victoire_2';
+    const isCombineCarte      = mode === 'combine_carte';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1062,6 +1086,16 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
             bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
             bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
+        : isAbsenceVictoire2
+        ? { threshold: 0, mode: 'absence_victoire_2', mappings: null,
+            B_joueur:  Math.max(1, parseInt(req.body.B_joueur)  || 5),
+            B_banquier: Math.max(1, parseInt(req.body.B_banquier) || 8) }
+        : isCombineCarte
+        ? { threshold: 0, mode: 'combine_carte', mappings: null,
+            cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
+            cc_combinations: Array.isArray(req.body.cc_combinations)
+              ? req.body.cc_combinations.filter(c => c && ['♠','♥','♦','♣'].includes(c.pos1) && ['♠','♥','♦','♣'].includes(c.pos2) && ['♠','♥','♦','♣'].includes(c.predict))
+              : [] }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
