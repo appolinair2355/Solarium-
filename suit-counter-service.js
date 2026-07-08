@@ -746,16 +746,6 @@ function startScheduler() {
           newState.lastSentTimes      = prevSentTimes;
           _countersState[counter.id] = newState;
           console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
-
-          // Envoi immédiat du nouveau compteur (état vierge) après le reset
-          if (hasTelegram) {
-            try {
-              await _sendCounter(counter);
-              console.log(`[SuitCounter] 📤 [${counter.label||counter.id}] Nouveau compteur envoyé après reset — ${hhmm}`);
-            } catch (e) {
-              console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi nouveau compteur: ${e.message}`);
-            }
-          }
         }
 
         // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
