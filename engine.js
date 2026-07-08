@@ -1758,9 +1758,9 @@ class Engine {
     switch (category) {
       case 'costume':
         // Modes basés sur les costumes (♠♥♦♣) — la plupart des modes standards
-        return !['victoire_adverse', 'absence_victoire', 'carte_valeur', 'intersection', 'multi_strategy', 'union_enseignes', 'aleatoire', 'distribution'].includes(mode);
+        return !['victoire_adverse', 'absence_victoire', 'absence_victoire_2', 'carte_valeur', 'intersection', 'multi_strategy', 'union_enseignes', 'aleatoire', 'distribution'].includes(mode);
       case 'victoire':
-        return mode === 'victoire_adverse' || mode === 'absence_victoire';
+        return mode === 'victoire_adverse' || mode === 'absence_victoire' || mode === 'absence_victoire_2';
       case '2_2':
         // 2 cartes joueur + 2 cartes banquier
         return mode === 'carte_2_vers_3' || mode === 'abs_3_vers_2';
@@ -3299,6 +3299,69 @@ class Engine {
         state.counts['abs_joueur'] = 0;
         state.counts['abs_banquier'] = 0;
         console.log(`[${channelId}] [Abs Victoire] Égalité — reset des 2 compteurs`);
+      }
+
+    } else if (mode === 'absence_victoire_2') {
+      // ── MODE ABSENCE VICTOIRE 2 ── Seuils B distincts par camp ───────────
+      // Identique à absence_victoire, mais B_joueur et B_banquier séparés.
+      //  - Player gagne  → abs_banquier++ → si >= B_banquier → WIN_B → reset
+      //  - Banker gagne  → abs_joueur++   → si >= B_joueur   → WIN_P → reset
+      //  - Égalité (Tie) → reset des 2 compteurs
+      // ─────────────────────────────────────────────────────────────────────
+      const BP2 = parseInt(cfg.B_joueur)   || B;
+      const BB2 = parseInt(cfg.B_banquier) || B;
+      const absP2 = state.counts['abs_joueur']  || 0;
+      const absB2 = state.counts['abs_banquier'] || 0;
+
+      if (winner === 'Player') {
+        state.counts['abs_joueur'] = 0;
+        const newAbsB2 = absB2 + 1;
+        if (newAbsB2 >= BB2) {
+          console.log(`[${channelId}] [Abs Victoire 2] 🏦 Banquier absent ${newAbsB2}j (seuil B_banquier=${BB2}) → WIN_B jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_B', 'WIN_B', { force: true });
+          state.counts['abs_banquier'] = 0;
+        } else {
+          state.counts['abs_banquier'] = newAbsB2;
+        }
+      } else if (winner === 'Banker') {
+        state.counts['abs_banquier'] = 0;
+        const newAbsP2 = absP2 + 1;
+        if (newAbsP2 >= BP2) {
+          console.log(`[${channelId}] [Abs Victoire 2] 👤 Joueur absent ${newAbsP2}j (seuil B_joueur=${BP2}) → WIN_P jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'WIN_P', 'WIN_P', { force: true });
+          state.counts['abs_joueur'] = 0;
+        } else {
+          state.counts['abs_joueur'] = newAbsP2;
+        }
+      } else {
+        state.counts['abs_joueur'] = 0;
+        state.counts['abs_banquier'] = 0;
+        console.log(`[${channelId}] [Abs Victoire 2] Égalité — reset des 2 compteurs`);
+      }
+
+    } else if (mode === 'combine_carte') {
+      // ── MODE COMBINÉ CARTE ── Positions 1+2 de la main choisie ───────────
+      // Lit le costume pos 1 (index 0) et pos 2 (index 1) de cc_hand.
+      // Cherche dans cc_combinations la règle { pos1, pos2, predict }.
+      // Si trouvée → prédit le costume configuré. Pas de seuil B ni mapping.
+      // ─────────────────────────────────────────────────────────────────────
+      const ccCards  = (cfg.cc_hand === 'banquier' ? bCards : pCards) || [];
+      const ccCard1  = ccCards[0];
+      const ccCard2  = ccCards[1];
+      if (ccCard1 && ccCard2) {
+        const ccS1 = normalizeSuit(ccCard1.S || '');
+        const ccS2 = normalizeSuit(ccCard2.S || '');
+        if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
+          const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
+          const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
+          if (ccMatch && ALL_SUITS.includes(ccMatch.predict)) {
+            const ccPs = resolvePredictedSuit(ccMatch.predict) || ccMatch.predict;
+            if (ccPs) {
+              console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} → prédit ${ccMatch.predict} jeu #${gn + offset}`);
+              await emitPrediction(gn + offset, ccPs, ccMatch.predict);
+            }
+          }
+        }
       }
 
     } else if (mode === 'lecture_passee') {
@@ -5536,6 +5599,41 @@ class Engine {
               : `${absB}/${threshold} jeux sans victoire Banquier`,
           },
         ];
+      }
+
+      // Mode Absence Victoire 2 → deux compteurs avec seuils B distincts
+      if (mode === 'absence_victoire_2') {
+        const absP2 = entry.counts?.['abs_joueur']   || 0;
+        const absB2 = entry.counts?.['abs_banquier']  || 0;
+        const thP2  = parseInt(entry.cfg?.B_joueur)   || threshold;
+        const thB2  = parseInt(entry.cfg?.B_banquier) || threshold;
+        return [
+          {
+            suit: 'WIN_P', display: '👤', count: absP2, threshold: thP2,
+            mode, label: 'Abs Victoire 2 — Joueur', isLive: false, singleCounter: false,
+            description: absP2 >= thP2
+              ? `🎯 Seuil atteint ! (${absP2} abs.) — WIN_P prédit`
+              : `${absP2}/${thP2} jeux sans victoire Joueur`,
+          },
+          {
+            suit: 'WIN_B', display: '🏦', count: absB2, threshold: thB2,
+            mode, label: 'Abs Victoire 2 — Banquier', isLive: false, singleCounter: false,
+            description: absB2 >= thB2
+              ? `🎯 Seuil atteint ! (${absB2} abs.) — WIN_B prédit`
+              : `${absB2}/${thB2} jeux sans victoire Banquier`,
+          },
+        ];
+      }
+
+      // Mode Combiné Carte → aucun compteur continu, afficher les combos configurés
+      if (mode === 'combine_carte') {
+        const hand    = entry.cfg?.cc_hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+        const nCombos = (entry.cfg?.cc_combinations || []).length;
+        return [{
+          suit: '🃏', display: '🃏', count: nCombos, threshold: 0,
+          mode, label: `Combiné Carte (${hand})`, isLive: false, singleCounter: true,
+          description: `${nCombos} combinaison(s) configurée(s) · positions 1+2 de la main`,
+        }];
       }
 
       // Mode Carte Valeur → afficher les compteurs de valeurs (A, K, Q, J, 10, 9, 8, 7, 6)

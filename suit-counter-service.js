@@ -644,34 +644,46 @@ async function sendCounterById(id) {
 }
 
 // ─── Planificateur ────────────────────────────────────────────────────────────
-// L'intervalle est basé sur le temps écoulé depuis le dernier envoi.
-//   interval=30 → envoi si >= 30 min depuis le dernier envoi
-//   interval=60 → envoi si >= 60 min depuis le dernier envoi
-function _shouldSendByInterval(counter, now) {
+// L'intervalle est basé sur le temps écoulé depuis le dernier reset.
+//   interval=30 → reset (et envoi si Telegram configuré) si >= 30 min écoulées
+//   interval=60 → reset (et envoi si Telegram configuré) si >= 60 min écoulées
+
+// Vérifie si l'heure de reset par intervalle est atteinte (sans condition Telegram)
+function _shouldTriggerByInterval(counter, now) {
   if (!counter.enabled) return false;
-  if (!counter.bot_token || !counter.channel_id) return false;
   const s = _countersState[counter.id];
   if (!s) return false;
   const interval = parseInt(counter.interval) || 30;
   const hhmm     = _getHHMM(now);
 
-  // Vérifier que l'intervalle (en minutes) s'est écoulé depuis le dernier envoi planifié
-  const msSinceLastSend = now.getTime() - (s.lastScheduleSentMs || 0);
-  if (msSinceLastSend < interval * 60 * 1000) return false;
+  // Vérifier que l'intervalle (en minutes) s'est écoulé depuis le dernier reset
+  const msSinceLastReset = now.getTime() - (s.lastScheduleSentMs || 0);
+  if (msSinceLastReset < interval * 60 * 1000) return false;
 
-  // Anti-doublon : ne pas envoyer deux fois dans la même minute
+  // Anti-doublon : ne pas déclencher deux fois dans la même minute
   return s.lastScheduleSent !== hhmm;
 }
 
-function _shouldSendByFixedTime(counter, now) {
+// Vérifie si une heure fixe de reset est atteinte (sans condition Telegram)
+function _shouldTriggerByFixedTime(counter, now) {
   if (!counter.enabled) return false;
-  if (!counter.bot_token || !counter.channel_id) return false;
   const s     = _countersState[counter.id];
   if (!s)     return false;
   const times = Array.isArray(counter.send_times) ? counter.send_times : [];
   if (times.length === 0) return false;
   const hhmm  = _getHHMM(now);
   return times.includes(hhmm) && !s.lastSentTimes[hhmm];
+}
+
+// Garde-fous rétrocompat (utilisés uniquement pour l'envoi Telegram)
+function _shouldSendByInterval(counter, now) {
+  if (!counter.bot_token || !counter.channel_id) return false;
+  return _shouldTriggerByInterval(counter, now);
+}
+
+function _shouldSendByFixedTime(counter, now) {
+  if (!counter.bot_token || !counter.channel_id) return false;
+  return _shouldTriggerByFixedTime(counter, now);
 }
 
 function startScheduler() {
@@ -697,43 +709,43 @@ function startScheduler() {
         const s = _countersState[counter.id];
         if (!s) continue;
 
-        let sent = false;
+        const hasTelegram = !!(counter.bot_token && counter.channel_id);
 
-        // L'envoi par intervalle est prioritaire ; si déclenché, on skip l'heure fixe
-        // pour éviter un double-envoi dans le même cycle.
-        if (_shouldSendByInterval(counter, now)) {
+        // Détecter si c'est l'heure de déclencher (indépendamment de Telegram)
+        // L'intervalle est prioritaire sur l'heure fixe pour éviter un double reset.
+        const triggerByInterval  = _shouldTriggerByInterval(counter, now);
+        const triggerByFixedTime = !triggerByInterval && _shouldTriggerByFixedTime(counter, now);
+        const triggered = triggerByInterval || triggerByFixedTime;
+
+        if (triggered) {
+          // Mémoriser le déclenchement pour l'anti-doublon et le prochain calcul d'intervalle
           s.lastScheduleSent   = hhmm;
           s.lastScheduleSentMs = now.getTime();
-          try {
-            await _sendCounter(counter);
-            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi intervalle ${counter.interval}min — ${hhmm}`);
-            sent = true;
-          } catch (e) {
-            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi intervalle: ${e.message}`);
-          }
-        } else if (_shouldSendByFixedTime(counter, now)) {
-          try {
-            await _sendCounter(counter);
-            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi heure fixe — ${hhmm}`);
-            s.lastSentTimes[hhmm] = true;  // marqué seulement après succès
-            sent = true;
-          } catch (e) {
-            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi heure fixe: ${e.message}`);
-          }
-        }
+          if (triggerByFixedTime) s.lastSentTimes[hhmm] = true;
 
-        if (sent) {
+          // Envoi Telegram uniquement si configuré
+          if (hasTelegram) {
+            try {
+              await _sendCounter(counter);
+              const mode = triggerByInterval ? `intervalle ${counter.interval}min` : 'heure fixe';
+              console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi ${mode} — ${hhmm}`);
+            } catch (e) {
+              console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi Telegram: ${e.message}`);
+            }
+          }
+
           // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
+          // (qu'un envoi Telegram ait eu lieu ou non)
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
-          const prevSentMs    = s.lastScheduleSentMs || now.getTime();
-          const prevSentHhmm  = s.lastScheduleSent   || hhmm;
+          const prevSentMs    = s.lastScheduleSentMs;
+          const prevSentHhmm  = s.lastScheduleSent;
           const prevSentTimes = { ...s.lastSentTimes };
           const newState = _makeState();
           newState.lastScheduleSentMs = prevSentMs;
           newState.lastScheduleSent   = prevSentHhmm;
           newState.lastSentTimes      = prevSentTimes;
           _countersState[counter.id] = newState;
-          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}`);
+          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
         }
 
         // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
