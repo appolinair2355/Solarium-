@@ -3373,11 +3373,44 @@ class Engine {
           if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
             const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
             const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
-            if (ccMatch && ALL_SUITS.includes(ccMatch.predict)) {
-              const ccPs = resolvePredictedSuit(ccMatch.predict) || ccMatch.predict;
-              if (ccPs) {
-                console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} → prédit ${ccMatch.predict} jeu #${gn + offset}`);
-                await emitPrediction(gn + offset, ccPs, ccMatch.predict);
+            if (ccMatch) {
+              // Support multi-suit mode (predict_suits) + legacy single predict field
+              const ccSuits = Array.isArray(ccMatch.predict_suits) && ccMatch.predict_suits.length > 0
+                ? ccMatch.predict_suits.filter(s => ALL_SUITS.includes(s))
+                : (ALL_SUITS.includes(ccMatch.predict) ? [ccMatch.predict] : []);
+              if (ccSuits.length > 0) {
+                const ccMode     = ccMatch.predict_mode || 'ordre';
+                const comboKey   = `${ccMatch.pos1}_${ccMatch.pos2}`;
+                if (!state._ccOrderState) state._ccOrderState = {};
+                if (!state._ccOrderState[comboKey]) state._ccOrderState[comboKey] = { idx: 0, counts: null };
+                const cState = state._ccOrderState[comboKey];
+                let chosenRaw;
+                if (ccMode === 'aleatoire') {
+                  // Tirage aléatoire parmi les costumes définis
+                  chosenRaw = ccSuits[Math.floor(Math.random() * ccSuits.length)];
+                } else if (ccMode === 'nombre_fois') {
+                  // Chaque costume prédit N fois avant passage au suivant
+                  const defCounts = Array.isArray(ccMatch.predict_counts) && ccMatch.predict_counts.length === ccSuits.length
+                    ? ccMatch.predict_counts.map(c => Math.max(1, parseInt(c) || 1))
+                    : ccSuits.map(() => 1);
+                  if (!Array.isArray(cState.counts) || cState.counts.length !== ccSuits.length) {
+                    cState.counts = [...defCounts];
+                  }
+                  let foundIdx = cState.counts.findIndex(c => c > 0);
+                  if (foundIdx === -1) { cState.counts = [...defCounts]; foundIdx = 0; }
+                  chosenRaw = ccSuits[foundIdx];
+                  cState.counts[foundIdx]--;
+                } else {
+                  // Par ordre (défaut) : rotation séquentielle
+                  const idx = (cState.idx || 0) % ccSuits.length;
+                  chosenRaw = ccSuits[idx];
+                  cState.idx = (idx + 1) % ccSuits.length;
+                }
+                const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
+                if (ccPs) {
+                  console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
+                  await emitPrediction(gn + offset, ccPs, chosenRaw);
+                }
               }
             }
           }
