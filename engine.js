@@ -296,7 +296,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 }, attenteQueue: [] };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 }, attenteHistory: [], attenteQueue: [] };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -2633,11 +2633,22 @@ class Engine {
     state.history.push([...handSuits]);
     if (state.history.length > 15) state.history.shift();
 
+    // ── Historique filtre d'attente (5 derniers jeux terminés, FIFO) ──────────
+    if (!state.attenteHistory) state.attenteHistory = [];
+    state.attenteHistory.push({
+      gn,
+      pSuits: [...suits],
+      bSuits: [...bSuits],
+      pCount: countValidCards(pCards),
+      bCount: countValidCards(bCards),
+      winner,
+      pScore: baccaratHandScore(pCards),
+      bScore: baccaratHandScore(bCards),
+    });
+    if (state.attenteHistory.length > Math.max(5, parseInt(cfg.attente_n) || 5)) state.attenteHistory.shift();
+
     const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
-    // Si le filtre d'attente est activé, décalage = N + Écart (calculé automatiquement)
-    const offset = (cfg.attente_enabled && cfg.attente_n > 0)
-      ? Math.max(1, (parseInt(cfg.attente_n) || 1) + (parseInt(cfg.attente_ecart) || 1))
-      : Math.max(1, parseInt(prediction_offset) || 1);
+    const offset = Math.max(1, parseInt(prediction_offset) || 1);
     const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
 
     // ── Durée de prédiction expirée ────────────────────────────────────────
@@ -2712,32 +2723,76 @@ class Engine {
       // Exception C (pre_emit_suit_inverse) : rediriger vers l'inverse si nécessaire
       if (state._exRedirectSuit) { ps = state._exRedirectSuit; state._exRedirectSuit = null; }
 
-      // ── Filtre d'attente : mise en file avant émission ───────────────────
+      // ── Filtre d'attente : vérification sur l'historique des N derniers jeux ─
+      // Lit les N derniers jeux stockés dans attenteHistory, vérifie si ps était
+      // absent (opt1) ou présent (opt2) dans TOUS ces jeux, et émet à gn+écart.
       if (!force && cfg.attente_enabled && cfg.attente_n > 0) {
-        if (!state.attenteQueue) state.attenteQueue = [];
+        state.lastAttentePs = ps; // stocker le costume vérifié pour le dashboard
         const _aN = Math.max(1, cfg.attente_n || 3);
         const _aE = Math.max(1, cfg.attente_ecart || 1);
-        state.attenteQueue.push({
-          ps, triggerSuit: suit,
-          triggerGame: gn,  // jeu déclencheur original → cible = triggerGame + n + écart
-          option: cfg.attente_option || 1,
-          main: cfg.attente_main || cfg.hand || 'joueur',
-          n: _aN,
-          ecart: _aE,
-          seen: 0, suitFound: false,
-          presentCount: 0,  // Option 2 : nb de jeux où le costume est apparu
-          // Mappings par option — chacun peut avoir son propre mapping de prédiction
-          attente1Mapping: cfg.attente1_mapping || null,
-          attente2Mapping: cfg.attente2_mapping || cfg.mappings || null,
-          attente3Mapping: cfg.attente3_mapping || null,
-        });
-        const opt = cfg.attente_option || 1;
-        const optDesc = opt === 1
-          ? `opt1: absent ${_aN} jeux → émet${cfg.attente1_mapping ? ' via mapping opt1' : ' original'}`
-          : opt === 2 ? `opt2: tous présents→mapping opt2 / sinon annulé`
-          : `opt3: tous absents→mapping opt3(absent) / tous présents→mapping opt3(présent) / mélangé→annulé`;
-        console.log(`[${channelId}] [Attente] 🕐 ${SUIT_DISPLAY[ps] || ps} → file opt${opt} (${optDesc}), ${_aN} jeux sur ${cfg.attente_main || 'joueur'}, cible=#${gn + _aN + _aE} (triggerGame=${gn}+n=${_aN}+écart=${_aE})`);
-        return;
+        const _aMain = cfg.attente_main || cfg.hand || 'joueur';
+        const _aOpt  = cfg.attente_option || 1;
+        const hist   = (state.attenteHistory || []).slice(-_aN);
+
+        const _isAbsent = (e, _ps, _m) => {
+          if (_ps === 'pair' || _ps === 'impair') {
+            const sc = _m === 'banquier' ? e.bScore : e.pScore;
+            const r  = (sc !== null && sc !== undefined) ? (sc % 2 === 0 ? 'pair' : 'impair') : null;
+            return r !== _ps;
+          }
+          if (_ps === 'WIN_P') return e.winner !== 'Player';
+          if (_ps === 'WIN_B') return e.winner !== 'Banker';
+          if (_ps === 'deux')  { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 2; }
+          if (_ps === 'trois') { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 3; }
+          if (_ps === 'distrib') return !(e.pCount === 2 && e.bCount === 2);
+          const s = _m === 'banquier' ? (e.bSuits || []) : (e.pSuits || []);
+          return !s.includes(_ps);
+        };
+
+        if (hist.length < _aN) {
+          console.log(`[${channelId}] [Attente] ⚠️ Historique insuffisant (${hist.length}/${_aN} jeux) → annulé`);
+          return;
+        }
+
+        const absentCount  = hist.filter(e => _isAbsent(e, ps, _aMain)).length;
+        const presentCount = _aN - absentCount;
+
+        if (_aOpt === 1) {
+          if (absentCount === _aN) {
+            console.log(`[${channelId}] [Attente] ✅ opt1 — ${SUIT_DISPLAY[ps]||ps} absent ${_aN}/${_aN} jeux → émet #${gn+_aE}`);
+            next = gn + _aE;
+          } else {
+            console.log(`[${channelId}] [Attente] ❌ opt1 — ${SUIT_DISPLAY[ps]||ps} présent ${presentCount}/${_aN} jeux → annulé`);
+            return;
+          }
+        } else if (_aOpt === 2) {
+          if (presentCount === _aN) {
+            console.log(`[${channelId}] [Attente] ✅ opt2 — ${SUIT_DISPLAY[ps]||ps} présent ${_aN}/${_aN} jeux → émet #${gn+_aE}`);
+            next = gn + _aE;
+          } else {
+            console.log(`[${channelId}] [Attente] ❌ opt2 — présent ${presentCount}/${_aN} jeux → annulé`);
+            return;
+          }
+        } else {
+          // Option 3 : absent(tous) → émet | présent(tous) → émet inverse | mélangé → annule
+          if (absentCount === _aN) {
+            console.log(`[${channelId}] [Attente] ✅ opt3(abs) — ${SUIT_DISPLAY[ps]||ps} absent ${_aN}/${_aN} → émet #${gn+_aE}`);
+            next = gn + _aE;
+          } else if (presentCount === _aN) {
+            const mapped = SPECIAL_ATTENTE_MAPPING[ps] || ps;
+            ps = mapped;
+            console.log(`[${channelId}] [Attente] ✅ opt3(prés) — ${SUIT_DISPLAY[mapped]||mapped} présent ${_aN}/${_aN} → émet #${gn+_aE}`);
+            next = gn + _aE;
+          } else {
+            console.log(`[${channelId}] [Attente] ❌ opt3 — mélangé (${absentCount}A/${presentCount}P sur ${_aN}) → annulé`);
+            return;
+          }
+        }
+        // Revérifier la limite max après la cible modifiée par l'attente
+        if (next > MAX_GAME_NUMBER) {
+          console.warn(`[${channelId}] ⛔ Cible attente #${next} dépasse MAX (${MAX_GAME_NUMBER}) → annulé`);
+          return;
+        }
       }
 
       let inserted = false;
@@ -2793,144 +2848,6 @@ class Engine {
       console.log(`[${channelId}] Aléatoire ${suit}: pool=[${pool.join(',')}] choix → ${pool[idx]}`);
       return pool[idx];
     };
-
-    // ── Traitement de la file d'attente (filtre d'attente) ───────────────────
-    // Exécuté EN PREMIER à chaque tick, avant la logique du mode, pour toujours
-    // avoir les données du jeu courant (gn, suits, bSuits) fraîches.
-    if (!state.attenteQueue) state.attenteQueue = [];
-    if (state.attenteQueue.length > 0) {
-      const toRemoveAq = [];
-      for (let i = 0; i < state.attenteQueue.length; i++) {
-        const item = state.attenteQueue[i];
-        // Surveiller le costume DÉCLENCHEUR (triggerSuit) dans la main désignée.
-        // Option 1 : si absent pendant n jeux → émettre la prédiction originale (ps)
-        //            si présent avant n jeux → annuler
-        // Option 2 : dès qu'il apparaît → émettre avec le MAPPING PROPRE (attente2Mapping)
-        //            si absent après n jeux → annuler
-        // IMPORTANT: on trace triggerSuit (le costume qui a déclenché le mode), pas ps (le costume prédit)
-        let appearedThisTick;
-        const _aqPs = item.triggerSuit || item.ps;
-        if (_aqPs === 'pair' || _aqPs === 'impair') {
-          // Parité : calculer le score de la main configurée
-          const _aqCards = item.main === 'banquier' ? bCards : pCards;
-          const _aqScore = baccaratHandScore(_aqCards);
-          const _aqResult = _aqScore !== null ? (_aqScore % 2 === 0 ? 'pair' : 'impair') : null;
-          appearedThisTick = _aqResult === _aqPs;
-        } else if (_aqPs === 'WIN_P' || _aqPs === 'WIN_B') {
-          // Victoire : vérifier le gagnant
-          appearedThisTick = (_aqPs === 'WIN_P' && winner === 'Player') || (_aqPs === 'WIN_B' && winner === 'Banker');
-        } else if (_aqPs === 'deux' || _aqPs === 'trois') {
-          // Nombre de cartes : vérifier le compte de la main configurée
-          const _aqCards2 = item.main === 'banquier' ? bCards : pCards;
-          const _aqCnt = countValidCards(_aqCards2);
-          appearedThisTick = (_aqPs === 'deux' && _aqCnt === 2) || (_aqPs === 'trois' && _aqCnt === 3);
-        } else if (_aqPs === 'distrib') {
-          // Distribution : vérifier si les deux mains ont EXACTEMENT 2 cartes chacune (main naturelle)
-          // 3-3 n'est PAS une distribution même si les deux compteurs sont égaux
-          const _aqVp = countValidCards(pCards), _aqVb = countValidCards(bCards);
-          appearedThisTick = _aqVp === 2 && _aqVb === 2;
-        } else {
-          // Costume standard ♠♥♦♣
-          const checkSuitsAq = item.main === 'banquier' ? bSuits : suits;
-          appearedThisTick = checkSuitsAq.includes(_aqPs);
-        }
-        if (appearedThisTick) { item.suitFound = true; item.presentCount = (item.presentCount || 0) + 1; }
-        item.seen++;
-        let shouldEmitAq = false, shouldCancelAq = false;
-        let emitWithMapping = false; // Option 2 : émission via mapping (tous présents)
-        if (item.option === 1) {
-          if (item.suitFound) {
-            // Opt1 : costume apparu → annuler
-            shouldCancelAq = true;
-          } else if (item.seen >= item.n) {
-            // Opt1 : absent tout du long → émettre le costume original
-            shouldEmitAq = true;
-          }
-        } else if (item.option === 2) {
-          // Option 2 : attend N jeux complets
-          // Tous présents → émet le mapping | Tous absents ou mélangé → annule
-          if (item.seen >= item.n) {
-            const pc = item.presentCount || 0;
-            if (pc === item.n) {
-              // Tous présents → émission via mapping
-              shouldEmitAq = true;
-              emitWithMapping = true;
-            } else {
-              // Tous absents ou mélangé → annuler
-              shouldCancelAq = true;
-            }
-          }
-        } else {
-          // Option 3 : combine opt1 + opt2
-          // Tous absents → émet ps (opt1) | Tous présents → émet mapping (opt2) | Mélangé → annule
-          if (item.seen >= item.n) {
-            const pc = item.presentCount || 0;
-            if (pc === 0) {
-              // Tous absents → émet costume original (opt1)
-              shouldEmitAq = true;
-              emitWithMapping = false;
-            } else if (pc === item.n) {
-              // Tous présents → émet via mapping (opt2)
-              shouldEmitAq = true;
-              emitWithMapping = true;
-            } else {
-              // Mélangé → annuler
-              shouldCancelAq = true;
-            }
-          }
-        }
-        if (shouldEmitAq || shouldCancelAq) toRemoveAq.push(i);
-        if (shouldEmitAq) {
-          // Cible = jeu déclencheur original + n + écart (formule : triggerGame + n + écart)
-          const aqTarget = (item.triggerGame || gn) + (item.n || 1) + (item.ecart || 1);
-          // ── Résolution du mapping par option ───────────────────────────────
-          let emitPs = item.ps;
-          const _resolveMappingForOpt = (mappingObj) => {
-            if (!mappingObj) return null;
-            // Priorité : chercher par triggerSuit (costume détecté), puis par ps (costume prédit)
-            const tKey = item.triggerSuit || item.ps;
-            const m = mappingObj[tKey] !== undefined ? mappingObj[tKey] : mappingObj[item.ps];
-            if (!m) return null;
-            return Array.isArray(m) ? m[0] : m;
-          };
-          let mapped = null;
-          if (item.option === 1) {
-            // Option 1 : tous absents → utilise attente1Mapping si défini
-            mapped = _resolveMappingForOpt(item.attente1Mapping);
-          } else if (item.option === 2) {
-            // Option 2 : tous présents → attente2Mapping
-            mapped = _resolveMappingForOpt(item.attente2Mapping);
-          } else {
-            // Option 3 : absent → attente3Mapping branche "absent" / présent → branche "présent"
-            if (emitWithMapping) {
-              // Tous présents → mapping opt3 (clé suffixée _present si disponible, sinon attente3Mapping)
-              mapped = _resolveMappingForOpt(item.attente3Mapping?.present ? item.attente3Mapping.present : item.attente3Mapping);
-            } else {
-              // Tous absents → mapping opt3 branche absent
-              mapped = _resolveMappingForOpt(item.attente3Mapping?.absent ? item.attente3Mapping.absent : item.attente3Mapping);
-            }
-          }
-          // Fallback : mapping naturel pour ps spéciaux (pair↔impair, WIN_P↔WIN_B, deux↔trois)
-          if (!mapped && (emitWithMapping || item.option !== 1)) {
-            if (SPECIAL_ATTENTE_MAPPING[item.ps]) mapped = SPECIAL_ATTENTE_MAPPING[item.ps];
-          }
-          if (mapped) emitPs = mapped;
-
-          const logSuffix = item.option === 1
-            ? (item.attente1Mapping ? ` (opt1: absent→mapping opt1 ${item.ps}→${emitPs})` : ` (opt1: absent→original)`)
-            : item.option === 2 ? ` (opt2: tous présents→mapping opt2 ${item.ps}→${emitPs})`
-            : emitWithMapping ? ` (opt3: tous présents→mapping opt3 ${item.ps}→${emitPs})` : ` (opt3: tous absents→mapping opt3 ${item.ps}→${emitPs})`;
-          console.log(`[${channelId}] [Attente] ✅ opt${item.option} — émission #${aqTarget} ${SUIT_DISPLAY[emitPs] || emitPs}${logSuffix} (${item.seen}/${item.n} jeux, présents=${item.presentCount || 0}, triggerGame=#${item.triggerGame || gn})`);
-          await emitPrediction(aqTarget, emitPs, item.triggerSuit, { force: true });
-        } else if (shouldCancelAq) {
-          const reason = item.option === 1
-            ? ` (${item.seen}/${item.n} jeux, found=${item.suitFound})`
-            : ` (${item.presentCount || 0}P/${item.seen - (item.presentCount || 0)}A sur ${item.n} — ${item.presentCount === 0 ? 'tous absents' : 'mélangé'} → annulé)`;
-          console.log(`[${channelId}] [Attente] ❌ opt${item.option} — annulée ${SUIT_DISPLAY[item.ps] || item.ps}${reason}`);
-        }
-      }
-      for (let i = toRemoveAq.length - 1; i >= 0; i--) state.attenteQueue.splice(toRemoveAq[i], 1);
-    }
 
     if (mode === 'manquants') {
       for (const suit of ALL_SUITS) {
@@ -3035,79 +2952,57 @@ class Engine {
       }
 
     } else if (mode === 'carte_3_vers_2') {
-      // ── Mode : 3 cartes → prédit 2 cartes ────────────────────────────────
-      // Phase 1 (comptage) : on compte les jeux à 3 cartes consécutifs pour la main choisie.
+      // ── Mode : absence de 2 cartes → prédit 2 cartes ─────────────────────
+      // Compte les jeux où la main choisie a 3 cartes (= absence de 2 cartes).
       //   - Si 2 cartes apparaissent avant le seuil → reset compteur.
-      //   - Quand compteur >= B → on entre en phase attente.
-      // Phase 2 (attente) : on attend que 2 cartes apparaissent pour la main choisie.
-      //   - Dès que 2 cartes arrivent → prédiction envoyée + reset.
+      //   - Dès que compteur >= B → prédiction immédiate "deux" + reset.
+      //     (le jeu suivant gn+offset est la cible de vérification)
       const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
       const _hcCnt3v2     = countValidCards(handCardsNow);
       const hasTwoCards   = _hcCnt3v2 === 2;
       const hasThreeCards = _hcCnt3v2 === 3;
 
-      if (state.waiting_c3v2) {
-        // Phase attente : seuil déjà atteint, on attend les 2 cartes
-        if (hasTwoCards) {
-          console.log(`[${channelId}] [Carte3→2] ✅ 2 cartes apparues après seuil (${B}) → prédiction envoyée jeu #${gn + offset}`);
+      if (hasThreeCards) {
+        // 2 cartes absentes → on incrémente
+        state.counts['c3v2'] = (state.counts['c3v2'] || 0) + 1;
+        console.log(`[${channelId}] [Carte3→2] absence 2 cartes, compteur=${state.counts['c3v2']} / seuil=${B}`);
+        if (state.counts['c3v2'] >= B) {
+          console.log(`[${channelId}] [Carte3→2] ✅ Seuil ${B} atteint → prédiction immédiate jeu #${gn + offset}`);
           await emitPrediction(gn + offset, 'deux', 'trois');
           state.counts['c3v2'] = 0;
-          state.waiting_c3v2 = false;
         }
-        // 3 cartes en attente → on reste en attente, on ne compte plus
-      } else {
-        // Phase comptage
-        if (hasThreeCards) {
-          state.counts['c3v2'] = (state.counts['c3v2'] || 0) + 1;
-          console.log(`[${channelId}] [Carte3→2] compteur=${state.counts['c3v2']} / seuil=${B}`);
-          if (state.counts['c3v2'] >= B) {
-            console.log(`[${channelId}] [Carte3→2] Seuil ${B} atteint → attente des 2 cartes...`);
-            state.waiting_c3v2 = true;
-          }
-        } else if (hasTwoCards) {
-          // 2 cartes avant le seuil → reset
-          if ((state.counts['c3v2'] || 0) > 0)
-            console.log(`[${channelId}] [Carte3→2] 2 cartes avant seuil → reset (was ${state.counts['c3v2']})`);
-          state.counts['c3v2'] = 0;
-        }
+      } else if (hasTwoCards) {
+        // 2 cartes présentes avant le seuil → reset
+        if ((state.counts['c3v2'] || 0) > 0)
+          console.log(`[${channelId}] [Carte3→2] 2 cartes présentes avant seuil → reset (was ${state.counts['c3v2']})`);
+        state.counts['c3v2'] = 0;
       }
 
     } else if (mode === 'carte_2_vers_3') {
-      // ── Mode : 2 cartes → prédit 3 cartes ────────────────────────────────
-      // Phase 1 (comptage) : on compte les jeux à 2 cartes consécutifs pour la main choisie.
+      // ── Mode : absence de 3 cartes → prédit 3 cartes ─────────────────────
+      // Compte les jeux où la main choisie a 2 cartes (= absence de 3 cartes).
       //   - Si 3 cartes apparaissent avant le seuil → reset compteur.
-      //   - Quand compteur >= B → on entre en phase attente.
-      // Phase 2 (attente) : on attend que 3 cartes apparaissent pour la main choisie.
-      //   - Dès que 3 cartes arrivent → prédiction envoyée + reset.
+      //   - Dès que compteur >= B → prédiction immédiate "trois" + reset.
+      //     (le jeu suivant gn+offset est la cible de vérification)
       const handCardsNow  = cfg.hand === 'banquier' ? bCards : pCards;
       const _hcCnt2v3     = countValidCards(handCardsNow);
       const hasTwoCards   = _hcCnt2v3 === 2;
       const hasThreeCards = _hcCnt2v3 === 3;
 
-      if (state.waiting_c2v3) {
-        // Phase attente : seuil déjà atteint, on attend les 3 cartes
-        if (hasThreeCards) {
-          console.log(`[${channelId}] [Carte2→3] ✅ 3 cartes apparues après seuil (${B}) → prédiction envoyée jeu #${gn + offset}`);
+      if (hasTwoCards) {
+        // 3 cartes absentes → on incrémente
+        state.counts['c2v3'] = (state.counts['c2v3'] || 0) + 1;
+        console.log(`[${channelId}] [Carte2→3] absence 3 cartes, compteur=${state.counts['c2v3']} / seuil=${B}`);
+        if (state.counts['c2v3'] >= B) {
+          console.log(`[${channelId}] [Carte2→3] ✅ Seuil ${B} atteint → prédiction immédiate jeu #${gn + offset}`);
           await emitPrediction(gn + offset, 'trois', 'deux');
           state.counts['c2v3'] = 0;
-          state.waiting_c2v3 = false;
         }
-        // 2 cartes en attente → on reste en attente, on ne compte plus
-      } else {
-        // Phase comptage
-        if (hasTwoCards) {
-          state.counts['c2v3'] = (state.counts['c2v3'] || 0) + 1;
-          console.log(`[${channelId}] [Carte2→3] compteur=${state.counts['c2v3']} / seuil=${B}`);
-          if (state.counts['c2v3'] >= B) {
-            console.log(`[${channelId}] [Carte2→3] Seuil ${B} atteint → attente des 3 cartes...`);
-            state.waiting_c2v3 = true;
-          }
-        } else if (hasThreeCards) {
-          // 3 cartes avant le seuil → reset
-          if ((state.counts['c2v3'] || 0) > 0)
-            console.log(`[${channelId}] [Carte2→3] 3 cartes avant seuil → reset (was ${state.counts['c2v3']})`);
-          state.counts['c2v3'] = 0;
-        }
+      } else if (hasThreeCards) {
+        // 3 cartes présentes avant le seuil → reset
+        if ((state.counts['c2v3'] || 0) > 0)
+          console.log(`[${channelId}] [Carte2→3] 3 cartes présentes avant seuil → reset (was ${state.counts['c2v3']})`);
+        state.counts['c2v3'] = 0;
       }
 
     } else if (mode === 'apparition_absence') {
@@ -3745,9 +3640,9 @@ class Engine {
       // ── Mode 2k-3k : Tendance cartes (sans serpent) ───────────────────────
       // Deux compteurs indépendants sur la main configurée :
       //   abs_deux  → jeux consécutifs où la main a eu 3 cartes (2 cartes absentes)
-      //               Quand abs_deux ≥ B1 (threshold) → prédit "trois" (tendance confirmée)
+      //               Quand abs_deux ≥ B1 (threshold) → prédit "deux" (ce qui manque)
       //   abs_trois → jeux consécutifs où la main a eu 2 cartes (3 cartes absentes)
-      //               Quand abs_trois ≥ B2 (threshold_b2) → prédit "deux" (tendance confirmée)
+      //               Quand abs_trois ≥ B2 (threshold_b2) → prédit "trois" (ce qui manque)
       // Pas de serpent, pas de mapping — prédiction directe deux/trois.
       const B1 = parseInt(cfg.threshold) || 3;
       const B2 = parseInt(cfg.threshold_b2) || B1;
@@ -3759,8 +3654,8 @@ class Engine {
         state.abs2k3k.abs_deux  = 0;
         state.abs2k3k.abs_trois = (state.abs2k3k.abs_trois || 0) + 1;
         if (state.abs2k3k.abs_trois >= B2 && Object.keys(state.pending).length === 0) {
-          console.log(`[${channelId}] [2k-3k] 3 cartes absent ${state.abs2k3k.abs_trois}× (≥B2=${B2}) → prédit 2 cartes jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'deux', 'deux');
+          console.log(`[${channelId}] [2k-3k] 3 cartes absent ${state.abs2k3k.abs_trois}× (≥B2=${B2}) → prédit 3 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'trois', 'trois');
           state.abs2k3k.abs_deux  = 0;
           state.abs2k3k.abs_trois = 0;
         }
@@ -3769,8 +3664,8 @@ class Engine {
         state.abs2k3k.abs_trois = 0;
         state.abs2k3k.abs_deux  = (state.abs2k3k.abs_deux || 0) + 1;
         if (state.abs2k3k.abs_deux >= B1 && Object.keys(state.pending).length === 0) {
-          console.log(`[${channelId}] [2k-3k] 2 cartes absent ${state.abs2k3k.abs_deux}× (≥B1=${B1}) → prédit 3 cartes jeu #${gn + offset}`);
-          await emitPrediction(gn + offset, 'trois', 'trois');
+          console.log(`[${channelId}] [2k-3k] 2 cartes absent ${state.abs2k3k.abs_deux}× (≥B1=${B1}) → prédit 2 cartes jeu #${gn + offset}`);
+          await emitPrediction(gn + offset, 'deux', 'deux');
           state.abs2k3k.abs_deux  = 0;
           state.abs2k3k.abs_trois = 0;
         }
@@ -5577,6 +5472,8 @@ class Engine {
           description: waiting
             ? `⏳ Seuil atteint — attend un jeu à 2 cartes`
             : `${count}/${threshold} jeu${count > 1 ? 'x' : ''} à 3 cartes`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5594,6 +5491,8 @@ class Engine {
           description: waiting
             ? `⏳ Seuil atteint — attend un jeu à 3 cartes`
             : `${count}/${threshold} jeu${count > 1 ? 'x' : ''} à 2 cartes`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5607,6 +5506,8 @@ class Engine {
           isLive: false,
           singleCounter: true,
           description: `${count} jeu${count > 1 ? 'x' : ''} non-naturel${count > 1 ? 's' : ''} consécutif${count > 1 ? 's' : ''}`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5621,6 +5522,8 @@ class Engine {
           isLive: false,
           singleCounter: true,
           description: `${count}/${threshold} jeux à 2 cartes (absence de 3)`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5639,6 +5542,8 @@ class Engine {
             description: absP >= threshold
               ? `🎯 Seuil atteint ! (${absP} abs.) — WIN_P prédit`
               : `${absP}/${threshold} jeux sans victoire Joueur`,
+            attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+            lastAttentePs: entry.lastAttentePs || null,
           },
           {
             suit: 'WIN_B',
@@ -5667,6 +5572,8 @@ class Engine {
             description: absP2 >= thP2
               ? `🎯 Seuil atteint ! (${absP2} abs.) — WIN_P prédit`
               : `${absP2}/${thP2} jeux sans victoire Joueur`,
+            attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+            lastAttentePs: entry.lastAttentePs || null,
           },
           {
             suit: 'WIN_B', display: '🏦', count: absB2, threshold: thB2,
@@ -5686,6 +5593,8 @@ class Engine {
           suit: '🃏', display: '🃏', count: nCombos, threshold: 0,
           mode, label: `Combiné Carte (${hand})`, isLive: false, singleCounter: true,
           description: `${nCombos} combinaison(s) configurée(s) · positions 1+2 de la main`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5722,6 +5631,8 @@ class Engine {
           description: waiting
             ? `⏳ Seuil atteint — en attente d'une victoire ${adverseHand}`
             : `${count}/${threshold} victoires ${configHand} consécutives`,
+          attenteHistory: (entry.attenteHistory || []).map(x => ({ ...x })),
+          lastAttentePs: entry.lastAttentePs || null,
         }];
       }
 
@@ -5730,7 +5641,7 @@ class Engine {
       if (mode === 'compteur_adverse') {
         const adverseCounts = entry.adverseCounts || {};
         const adverseLabel  = hand === 'banquier' ? 'joueur' : 'banquier';
-        const _aqAdv = (entry.attenteQueue || []).map(x => ({ ...x }));
+        const _ahAdv = (entry.attenteHistory || []).map(x => ({ ...x }));
         return ALL_SUITS.map((suit, _aqIdx) => {
           const count = adverseCounts[suit] || 0;
           const item = {
@@ -5739,7 +5650,7 @@ class Engine {
             mode, label: `Adverse (${adverseLabel})`,
             isLive: false,
           };
-          if (_aqIdx === 0) item.attenteQueue = _aqAdv;
+          if (_aqIdx === 0) { item.attenteHistory = _ahAdv; item.lastAttentePs = entry.lastAttentePs || null; }
           return item;
         });
       }
@@ -5751,7 +5662,7 @@ class Engine {
         const pairs = Array.isArray(rawPairs) && rawPairs.length > 0
           ? rawPairs.map(p => Array.isArray(p) ? { a: p[0], b: p[1] } : p)
           : null;
-        const _aqMiroir = (entry.attenteQueue || []).map(x => ({ ...x }));
+        const _ahMiroir = (entry.attenteHistory || []).map(x => ({ ...x }));
         return ALL_SUITS.map((suit, _aqIdx) => {
           // Si des paires sont configurées, marquer si ce costume est dans une paire surveillée
           const inPair = !pairs || pairs.some(p => p.a === suit || p.b === suit);
@@ -5763,7 +5674,7 @@ class Engine {
             isLive: false,
             dimmed: !inPair,
           };
-          if (_aqIdx === 0) item.attenteQueue = _aqMiroir;
+          if (_aqIdx === 0) { item.attenteHistory = _ahMiroir; item.lastAttentePs = entry.lastAttentePs || null; }
           return item;
         });
       }
@@ -5798,7 +5709,7 @@ class Engine {
       // ── Mode Absence Confirmée : projection live correcte + état feu tricolore ──
       if (mode === 'absence_confirmee') {
         const confirmPending = entry.confirmPending || {};
-        const _aqAbsConf = (entry.attenteQueue || []).map(x => ({ ...x }));
+        const _ahAbsConf = (entry.attenteHistory || []).map(x => ({ ...x }));
         return ALL_SUITS.map((suit, _aqIdx) => {
           const base = entry.counts[suit] || 0;
           let count  = base;
@@ -5816,7 +5727,7 @@ class Engine {
             // true = feu jaune (seuil B atteint, attend confirmation au jeu suivant)
             confirmPending: !!confirmPending[suit],
           };
-          if (_aqIdx === 0) item.attenteQueue = _aqAbsConf;
+          if (_aqIdx === 0) { item.attenteHistory = _ahAbsConf; item.lastAttentePs = entry.lastAttentePs || null; }
           return item;
         });
       }
@@ -6123,7 +6034,7 @@ class Engine {
         return fnItems;
       }
 
-      const _aqDefault = (entry.attenteQueue || []).map(x => ({ ...x }));
+      const _ahDefault = (entry.attenteHistory || []).map(x => ({ ...x }));
       return ALL_SUITS.map((suit, _aqIdx) => {
         const base = entry.counts[suit] || 0;
         let count  = base;
@@ -6150,7 +6061,7 @@ class Engine {
           mode, label: modeLabel,
           isLive,
         };
-        if (_aqIdx === 0) item.attenteQueue = _aqDefault;
+        if (_aqIdx === 0) { item.attenteHistory = _ahDefault; item.lastAttentePs = entry.lastAttentePs || null; }
         return item;
       });
     }
