@@ -24,7 +24,7 @@ const renderSync = require('./render-sync');
 const cartesStore = require('./cartes-store');
 
 const ALL_SUITS   = ['♠', '♥', '♦', '♣'];
-const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣', 'pair': '🟢 Pair', 'impair': '🔴 Impair' };
+const SUIT_DISPLAY = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣': '♣️', 'WIN_B': '🏦', 'WIN_P': '👤', 'TIE': '🤝', 'TWO_THREE': '⚡', 'DEUX_TROIS': '2️⃣3️⃣', 'TROIS_DEUX': '3️⃣2️⃣', 'TROIS_TROIS': '3️⃣3️⃣', 'pair': '🟢 Pair', 'impair': '🔴 Impair', 'distrib': '⚖️ 2v2', 'P_DEUX': '👤2', 'B_DEUX': '🏦2', 'P_TROIS': '👤3', 'B_TROIS': '🏦3', 'PAIR_P': '🟢 Pair J', 'IMPAIR_P': '🔴 Impair J' };
 
 // ── Helpers score Baccarat (pour mode compteur_parite) ─────────────────────
 function baccaratCardValue(c) {
@@ -41,7 +41,7 @@ function baccaratHandScore(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return null;
   return cards.reduce((acc, c) => acc + baccaratCardValue(c), 0) % 10;
 }
-const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3' };
+const WIN_LABEL    = { 'WIN_B': 'Banquier', 'WIN_P': 'Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3', 'distrib': '2v2', 'P_DEUX': 'Joueur 2 cartes', 'B_DEUX': 'Banquier 2 cartes', 'P_TROIS': 'Joueur 3 cartes', 'B_TROIS': 'Banquier 3 cartes', 'PAIR_P': 'Pair Joueur', 'IMPAIR_P': 'Impair Joueur' };
 
 // Mapping naturel pour Option 2 du filtre d'attente sur les ps spéciaux (non-costumes)
 const SPECIAL_ATTENTE_MAPPING = {
@@ -4380,25 +4380,37 @@ class Engine {
           if (state.nulTriggered.has(triggerKey)) continue;
           if (state.pending[String(targetGn)]) continue;
 
+          // Calcul du choix SANS muter l'état — l'état n'est avancé qu'après confirmation
+          // de l'émission (évite de perdre un tour de séquence si emitPrediction est bloqué).
           let chosen;
+          let _seqKey, _nextSeqIdx;
           if (rule.ordre === 'sequence') {
-            const seqKey = `r${rIdx}_${rule.trigger}`;
-            const idx = (state.nulSeqIdx[seqKey] || 0) % rule.targets.length;
+            _seqKey = `r${rIdx}_${rule.trigger}`;
+            const idx = (state.nulSeqIdx[_seqKey] || 0) % rule.targets.length;
             chosen = rule.targets[idx];
-            state.nulSeqIdx[seqKey] = idx + 1;
+            _nextSeqIdx = idx + 1;
           } else {
             chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
           }
 
+          const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
+          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → tente "${chosen}" pour #${targetGn}`);
+          // Passe rule.trigger comme suit déclencheur réel (pas chosen) pour que les
+          // exceptions évaluent le bon costume/catégorie déclencheur.
+          await emitPrediction(targetGn, chosen, rule.trigger, { force: true });
+
+          // Ne muter l'état (séquence + nulTriggered) que si la prédiction a été
+          // effectivement enregistrée dans state.pending — sinon on ne consomme pas
+          // le tour de séquence et le déclencheur reste disponible pour une relance.
+          if (!state.pending[String(targetGn)]) continue;
           state.nulTriggered.add(triggerKey);
           if (state.nulTriggered.size > 300) {
             const arr = [...state.nulTriggered];
             state.nulTriggered = new Set(arr.slice(arr.length - 150));
           }
-
-          const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
-          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → prédit "${chosen}" pour #${targetGn}`);
-          await emitPrediction(targetGn, chosen, chosen, { force: true });
+          if (rule.ordre === 'sequence') {
+            state.nulSeqIdx[_seqKey] = _nextSeqIdx;
+          }
         }
       }
 

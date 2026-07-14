@@ -1343,6 +1343,29 @@ router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── État filtre d'attente (accessible à tous les utilisateurs authentifiés) ──────────────
+router.get('/strategies/:id/attente-state', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
+    const id = parseInt(req.params.id);
+    const entry = engine.custom?.[id];
+    if (!entry) return res.json({ history: [], lastPs: null, attente_enabled: false });
+    const state = entry.state || {};
+    const cfg   = entry.config || {};
+    const _aN   = Math.max(1, cfg.attente_n || 3);
+    res.json({
+      history:         (state.attenteHistory || []).slice(-_aN),
+      lastPs:          state.lastAttentePs || null,
+      n:               _aN,
+      ecart:           Math.max(1, cfg.attente_ecart || 1),
+      main:            cfg.attente_main || 'joueur',
+      option:          cfg.attente_option || 1,
+      mode:            cfg.mode || '',
+      attente_enabled: cfg.attente_enabled || false,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Compteurs live serpent (pair_impair / carte_2v3) ──────────────
 router.get('/strategies/:id/snake-counts', requireAdmin, (req, res) => {
   try {
