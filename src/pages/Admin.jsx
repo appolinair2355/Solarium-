@@ -9607,27 +9607,27 @@ function AdminPanel() {
                       counts[sIdx] = Math.max(1, parseInt(val) || 1);
                       updateCombo(idx, { predict_counts: counts });
                     };
-                    const modeBtn = (active) => ({ padding: '6px 12px', borderRadius: 7, border: active ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: active ? '#a855f7' : 'transparent', color: active ? '#fff' : '#94a3b8', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
+                    const modeBtn = (active) => ({ padding: '6px 12px', borderRadius: 7, border: active ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.18)', background: active ? '#a855f7' : 'rgba(255,255,255,0.04)', color: active ? '#fff' : '#94a3b8', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
                     return (
-                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)' }}>
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.35)' }}>
                         {/* ── En-tête section ── */}
-                        <div style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#38bdf8', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
                         {/* ── Main à lire (après l'en-tête, comme dans l'image) ── */}
                         <div style={{ marginBottom: 12 }}>
                           <div style={{ fontSize: 12, color: '#bae6fd', marginBottom: 8 }}>◎ Main à lire (cartes positions 1 et 2)</div>
                           <div style={{ display: 'flex', gap: 8 }}>
                             <button type="button" onClick={() => setStratForm(p => ({ ...p, cc_hand: 'joueur' }))}
-                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand !== 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand !== 'banquier' ? 'rgba(168,85,247,0.15)' : 'transparent', color: stratForm.cc_hand !== 'banquier' ? '#e9d5ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand !== 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand !== 'banquier' ? 'rgba(139,92,246,0.45)' : 'rgba(255,255,255,0.03)', color: stratForm.cc_hand !== 'banquier' ? '#f3e8ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                               👤 Joueur
                             </button>
                             <button type="button" onClick={() => setStratForm(p => ({ ...p, cc_hand: 'banquier' }))}
-                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand === 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand === 'banquier' ? 'rgba(168,85,247,0.15)' : 'transparent', color: stratForm.cc_hand === 'banquier' ? '#e9d5ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand === 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand === 'banquier' ? 'rgba(139,92,246,0.45)' : 'rgba(255,255,255,0.03)', color: stratForm.cc_hand === 'banquier' ? '#f3e8ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                               🏦 Banquier
                             </button>
                           </div>
                         </div>
                         {combos.length === 0 && (
-                          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171', marginBottom: 10 }}>
+                          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', fontSize: 12, color: '#fca5a5', marginBottom: 10 }}>
                             ⚠️ Ajoutez au moins une combinaison pour activer ce mode
                           </div>
                         )}
@@ -9635,9 +9635,9 @@ function AdminPanel() {
                           const suits = c.predict_suits || [];
                           const mode = c.predict_mode || 'ordre';
                           return (
-                            <div key={idx} style={{ marginBottom: 12, padding: '12px', borderRadius: 10, background: 'rgba(30,27,46,0.6)', border: '1px solid rgba(168,85,247,0.25)' }}>
+                            <div key={idx} style={{ marginBottom: 12, padding: '12px', borderRadius: 10, background: 'rgba(15,10,35,0.75)', border: '1px solid rgba(168,85,247,0.38)' }}>
                               {/* Ligne 1 : #N  Pos 1 : [dropdown]   Pos 2 : */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                 <span style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>#{idx + 1}</span>
                                 <span style={{ fontSize: 11, color: '#94a3b8' }}>Pos 1 :</span>
                                 <select value={c.pos1} onChange={e => updateCombo(idx, { pos1: e.target.value })}
@@ -9652,11 +9652,11 @@ function AdminPanel() {
                                   style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
                                   {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
-                                <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>✕</button>
+                                <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.55)', background: 'rgba(239,68,68,0.32)', color: '#fca5a5', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>✕</button>
                               </div>
                               {/* Lignes mode : "→ Mode :" + [Par ordre] sur même ligne, [Aléatoire] [Nombre de fois] dessous */}
                               <div style={{ marginBottom: 10 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                   <span style={{ fontSize: 11, color: '#94a3b8' }}>→ Mode :</span>
                                   <button type="button" style={modeBtn(mode === 'ordre')} onClick={() => updateCombo(idx, { predict_mode: 'ordre' })}>Par ordre</button>
                                 </div>
@@ -9680,21 +9680,21 @@ function AdminPanel() {
                                           onChange={e => updatePredictCount(idx, sIdx, e.target.value)}
                                           style={{ width: 60, padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 13 }} />
                                       )}
-                                      <button type="button" onClick={() => removePredictSuit(idx, sIdx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>✕</button>
+                                      <button type="button" onClick={() => removePredictSuit(idx, sIdx)} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.55)', background: 'rgba(239,68,68,0.32)', color: '#fca5a5', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>✕</button>
                                       {suits.length < 4 && sIdx === suits.length - 1 && (
-                                        <button type="button" onClick={() => addPredictSuit(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                                        <button type="button" onClick={() => addPredictSuit(idx)} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.55)', background: 'rgba(56,189,248,0.2)', color: '#bae6fd', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>+</button>
                                       )}
                                     </div>
                                   ))}
                                   {suits.length === 0 && (
-                                    <button type="button" onClick={() => addPredictSuit(idx)} style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+ Ajouter un costume</button>
+                                    <button type="button" onClick={() => addPredictSuit(idx)} style={{ alignSelf: 'flex-start', padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.55)', background: 'rgba(56,189,248,0.18)', color: '#bae6fd', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+ Ajouter un costume</button>
                                   )}
                                 </div>
                               </div>
                             </div>
                           );
                         })}
-                        <button type="button" onClick={addCombo} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px dashed rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.08)', color: '#bae6fd', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                        <button type="button" onClick={addCombo} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px dashed rgba(56,189,248,0.55)', background: 'rgba(56,189,248,0.09)', color: '#bae6fd', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                           + Ajouter une combinaison
                         </button>
                         <div style={{ marginTop: 14 }}>
@@ -12223,7 +12223,7 @@ function AdminPanel() {
               border: `1px solid ${buildStatus.status === 'done' ? 'rgba(34,197,94,0.3)' : buildStatus.status === 'error' ? 'rgba(248,113,113,0.3)' : 'rgba(168,85,247,0.3)'}`,
               borderRadius: 10, padding: '12px 16px', marginBottom: 14,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 {buildStatus.status === 'building' && <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#a855f7', animation: 'pulse 1s infinite' }} />}
                 <span style={{ fontWeight: 700, fontSize: 13, color: buildStatus.status === 'done' ? '#22c55e' : buildStatus.status === 'error' ? '#f87171' : '#c4b5fd' }}>
                   {buildStatus.status === 'building' ? '🔨 Build en cours…' : buildStatus.status === 'done' ? '✅ Build terminé — rechargement de la page…' : '❌ Erreur de build'}
