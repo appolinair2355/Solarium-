@@ -69,7 +69,18 @@ function suitToFrench(s) {
   if (str === 'WIN_B' || str === 'WIN_BANKER') return 'Banquier gagne';
   if (str === 'deux' || str === '2') return 'deux cartes';
   if (str === 'trois' || str === '3') return 'trois cartes';
-  if (str === 'distrib') return 'distribution';
+  if (str === 'distrib') return 'distribution deux-deux';
+  // Catégories Mode Match Nul (Motifs)
+  if (str === 'P_DEUX')   return 'joueur deux cartes';
+  if (str === 'B_DEUX')   return 'banquier deux cartes';
+  if (str === 'P_TROIS')  return 'joueur trois cartes';
+  if (str === 'B_TROIS')  return 'banquier trois cartes';
+  if (str === 'PAIR_P')   return 'pair joueur';
+  if (str === 'IMPAIR_P') return 'impair joueur';
+  if (str === 'TIE')      return 'match nul';
+  if (str === 'DEUX_TROIS')   return 'joueur deux banquier trois';
+  if (str === 'TROIS_DEUX')   return 'joueur trois banquier deux';
+  if (str === 'TROIS_TROIS')  return 'joueur trois banquier trois';
   const m = { 'P': 'Pique', 'H': 'Cœur', 'C': 'Cœur', 'D': 'Carreau', 'T': 'Trèfle' };
   return m[str.toUpperCase()[0]] || str;
 }
@@ -194,6 +205,12 @@ const SUIT_LABELS = {
   'distrib': 'Distribution',
   'c3v2': '3→2 cartes',     'c2v3': '2→3 cartes',
   'abs3': 'Abs 3 cartes',
+  // Catégories Mode Match Nul (Motifs)
+  'P_DEUX': 'Joueur 2 cartes', 'B_DEUX': 'Banquier 2 cartes',
+  'P_TROIS': 'Joueur 3 cartes', 'B_TROIS': 'Banquier 3 cartes',
+  'PAIR_P': 'Pair (Joueur)', 'IMPAIR_P': 'Impair (Joueur)',
+  'TIE': 'Match Nul', 'DEUX_TROIS': 'J:2 B:3',
+  'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3',
 };
 
 const SPECIAL_SUIT_ORBS = {
@@ -203,6 +220,12 @@ const SPECIAL_SUIT_ORBS = {
   'pair':  '🟢', 'impair': '🔴',
   'distrib': '📊',
   'c3v2': '3️⃣', 'c2v3': '2️⃣', 'abs3': '2️⃣',
+  // Catégories Mode Match Nul (Motifs)
+  'P_DEUX': '👤', 'B_DEUX': '🏦',
+  'P_TROIS': '👤', 'B_TROIS': '🏦',
+  'PAIR_P': '🟢', 'IMPAIR_P': '🔴',
+  'TIE': '🤝', 'DEUX_TROIS': '2️⃣',
+  'TROIS_DEUX': '3️⃣', 'TROIS_TROIS': '3️⃣',
 };
 
 function suitLabel(s) { return SUIT_LABELS[s] || s || '—'; }
@@ -316,6 +339,170 @@ function explainProLog(rawMsg, kind, proMeta) {
   }
 
   return null; // pas d'explication automatique
+}
+
+// ── Filtre d'attente — panneau de suivi des N derniers jeux terminés ──────────
+function AttenteFilterPanel({ stratId, strat }) {
+  const [state, setState] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!stratId || !strat?.attente_enabled) return;
+    let cancelled = false;
+    const fetch_ = () => {
+      fetch(`/api/admin/strategies/${stratId}/attente-state`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d && !cancelled) setState(d); })
+        .catch(() => {});
+    };
+    fetch_();
+    const iv = setInterval(fetch_, 5000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [stratId, strat?.attente_enabled]);
+
+  if (!strat?.attente_enabled || !state) return null;
+
+  const { history = [], lastPs, n, ecart, main, option, mode } = state;
+  const mainLabel  = main === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+  const optLabel   = { 1: 'absent → émet', 2: 'présent → émet', 3: 'hybride' }[option] || `opt${option}`;
+
+  // Fonctions d'analyse par mode
+  const isCarteMode    = ['carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','carte_2v3','2k-3k'].includes(mode);
+  const isVictoireMode = ['absence_victoire','victoire_adverse'].includes(mode);
+  const isPariteMode   = ['compteur_parite','pair_impair'].includes(mode);
+
+  const renderGameCell = (e, idx) => {
+    const gn = e.gn;
+    let content = null;
+    let absent  = false;
+
+    if (isCarteMode) {
+      const cnt = main === 'banquier' ? e.bCount : e.pCount;
+      const is2 = cnt === 2, is3 = cnt === 3;
+      content = <span style={{ fontWeight: 800, color: is2 ? '#60a5fa' : '#a855f7' }}>{cnt ? `${cnt}k` : '?'}</span>;
+      if (lastPs) absent = (lastPs === 'deux' ? !is2 : !is3);
+    } else if (isVictoireMode) {
+      const w = e.winner;
+      const label = w === 'Player' ? '👤' : w === 'Banker' ? '🏦' : '🤝';
+      content = <span style={{ fontWeight: 800, color: w === 'Player' ? '#a78bfa' : w === 'Banker' ? '#60a5fa' : '#94a3b8' }}>{label}</span>;
+      if (lastPs) absent = (lastPs === 'WIN_P' ? w !== 'Player' : w !== 'Banker');
+    } else if (isPariteMode) {
+      const sc = main === 'banquier' ? e.bScore : e.pScore;
+      const isPair = sc !== null && sc !== undefined ? sc % 2 === 0 : null;
+      content = isPair === null
+        ? <span style={{ color: '#475569' }}>?</span>
+        : <span style={{ fontWeight: 800, color: isPair ? '#22c55e' : '#ef4444' }}>{isPair ? 'P' : 'I'}</span>;
+      if (lastPs) absent = (lastPs === 'pair' ? !isPair : isPair !== false);
+    } else {
+      // Mode costume (default)
+      const suits = main === 'banquier' ? (e.bSuits || []) : (e.pSuits || []);
+      const SUIT_C = { '♠': '#94a3b8', '♥': '#ef4444', '♦': '#f97316', '♣': '#4ade80' };
+      content = (
+        <span style={{ fontSize: '0.8rem', display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {suits.length > 0
+            ? suits.map((s, si) => <span key={si} style={{ color: SUIT_C[s] || '#e2e8f0', fontWeight: lastPs && s === lastPs ? 900 : 500, textShadow: lastPs && s === lastPs ? '0 0 8px currentColor' : 'none' }}>{s}</span>)
+            : <span style={{ color: '#334155' }}>—</span>}
+        </span>
+      );
+      if (lastPs) absent = !suits.includes(lastPs);
+    }
+
+    return (
+      <div key={idx} style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+        padding: '5px 4px', borderRadius: 7, minWidth: 38,
+        background: absent ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${absent ? 'rgba(251,191,36,0.45)' : 'rgba(255,255,255,0.07)'}`,
+        flex: '1 0 0',
+      }}>
+        <span style={{ fontSize: '0.52rem', color: '#475569', fontWeight: 600 }}>#{gn}</span>
+        <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem' }}>{content}</div>
+        {absent && <span style={{ fontSize: '0.48rem', color: '#fbbf24', fontWeight: 800, marginTop: 1 }}>abs</span>}
+      </div>
+    );
+  };
+
+  // Calcul résumé : absent/présent dans history
+  let absentCount = 0, presentCount = 0;
+  if (lastPs && history.length > 0) {
+    history.forEach(e => {
+      let abs = false;
+      if (isCarteMode) { const cnt = main === 'banquier' ? e.bCount : e.pCount; abs = lastPs === 'deux' ? cnt !== 2 : cnt !== 3; }
+      else if (isVictoireMode) { abs = lastPs === 'WIN_P' ? e.winner !== 'Player' : e.winner !== 'Banker'; }
+      else if (isPariteMode) { const sc = main === 'banquier' ? e.bScore : e.pScore; const isPair = sc !== null && sc !== undefined ? sc % 2 === 0 : null; abs = lastPs === 'pair' ? !isPair : isPair !== false; }
+      else { const s = main === 'banquier' ? (e.bSuits || []) : (e.pSuits || []); abs = !s.includes(lastPs); }
+      if (abs) absentCount++; else presentCount++;
+    });
+  }
+  const readyOpt1 = option === 1 && absentCount === n && history.length >= n;
+  const readyOpt2 = option === 2 && presentCount === n && history.length >= n;
+  const isReady   = readyOpt1 || readyOpt2;
+
+  const SUIT_DISPLAY_LOCAL = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣', 'WIN_P': '👤 Joueur', 'WIN_B': '🏦 Banquier', 'deux': '2 cartes', 'trois': '3 cartes', 'pair': 'Pair', 'impair': 'Impair', 'distrib': '2v2', 'P_DEUX': 'J.2k', 'B_DEUX': 'B.2k', 'P_TROIS': 'J.3k', 'B_TROIS': 'B.3k', 'PAIR_P': 'Pair J', 'IMPAIR_P': 'Impair J' };
+
+  return (
+    <div style={{
+      marginTop: 12,
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: isReady ? 'rgba(251,191,36,0.08)' : 'rgba(245,158,11,0.04)',
+      border: `1px solid ${isReady ? 'rgba(251,191,36,0.55)' : 'rgba(245,158,11,0.22)'}`,
+      transition: 'all 0.3s ease',
+    }}>
+      {/* En-tête */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: '0.75rem' }}>⏳</span>
+          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#fbbf24', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            Filtre d'attente — {n} derniers jeux
+          </span>
+          <span style={{ fontSize: '0.55rem', color: '#64748b', background: 'rgba(255,255,255,0.05)', padding: '1px 6px', borderRadius: 6 }}>
+            {mainLabel} · {optLabel}
+          </span>
+        </div>
+        {lastPs && (
+          <span style={{
+            fontSize: '0.6rem', fontWeight: 800, padding: '2px 8px', borderRadius: 999,
+            background: isReady ? 'rgba(251,191,36,0.25)' : 'rgba(245,158,11,0.1)',
+            border: `1px solid ${isReady ? 'rgba(251,191,36,0.7)' : 'rgba(245,158,11,0.35)'}`,
+            color: isReady ? '#fbbf24' : '#94a3b8',
+            animation: isReady ? 'pulse 1.2s infinite' : 'none',
+          }}>
+            {isReady ? '✅ Condition OK' : `Suivi : ${SUIT_DISPLAY_LOCAL[lastPs] || lastPs}`}
+          </span>
+        )}
+      </div>
+
+      {/* Grille des N derniers jeux */}
+      {history.length === 0 ? (
+        <div style={{ fontSize: '0.68rem', color: '#475569', fontStyle: 'italic' }}>
+          En attente des {n} premiers jeux terminés…
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 4 }}>
+          {history.map((e, idx) => renderGameCell(e, idx))}
+          {/* Cellules vides si l'historique est insuffisant */}
+          {Array.from({ length: Math.max(0, n - history.length) }).map((_, i) => (
+            <div key={`empty-${i}`} style={{
+              flex: '1 0 0', minWidth: 38, padding: '5px 4px', borderRadius: 7,
+              background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.07)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <span style={{ fontSize: '0.55rem', color: '#334155' }}>—</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Résumé bas */}
+      {lastPs && history.length > 0 && (
+        <div style={{ marginTop: 7, fontSize: '0.6rem', color: '#94a3b8', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ color: absentCount > 0 ? '#fbbf24' : '#475569' }}>Absent : {absentCount}/{history.length}</span>
+          <span style={{ color: presentCount > 0 ? '#4ade80' : '#475569' }}>Présent : {presentCount}/{history.length}</span>
+          {history.length < n && <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>⚠ {n - history.length} jeux manquants</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -1896,6 +2083,12 @@ export default function Dashboard() {
                       </div>
                     );
                   })()}
+
+
+                  {/* ── Filtre d'attente — panel état N derniers jeux (visible aux abonnés) ── */}
+                  {currentStrat?.attente_enabled && currentStrat.id && (
+                    <AttenteFilterPanel stratId={currentStrat.id} strat={currentStrat} />
+                  )}
 
                   {/* ── Séquences de Relance — barres de progression pertes ── */}
                   {(user?.is_admin || user?.is_premium) && (() => {

@@ -9566,8 +9566,8 @@ function AdminPanel() {
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', fontSize: 12, color: '#bae6fd', lineHeight: 1.7 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Combiné Carte</div>
                       <div>Lit les costumes des <strong>2 premières cartes</strong> de la main choisie (Joueur ou Banquier).</div>
-                      <div style={{ marginTop: 6 }}>Pour chaque combinaison <strong>Pos1 + Pos2</strong> configurée, le costume à prédire est émis pour le prochain jeu.</div>
-                      <div style={{ marginTop: 6, color: '#38bdf8', fontStyle: 'italic' }}>ℹ️ Pas de seuil B ni de mappings dans ce mode — la logique repose uniquement sur les combinaisons ci-dessous.</div>
+                      <div style={{ marginTop: 6 }}>Pour chaque combinaison <strong>Pos1 + Pos2</strong> reconnue, un costume est prédit selon le mode d'émission (ordre séquentiel, aléatoire, nombre de fois).</div>
+                      <div style={{ marginTop: 6, color: '#38bdf8', fontStyle: 'italic' }}>Pas de seuil B ni de mapping — la prédiction est émise dès que la combinaison est détectée.</div>
                     </div>
                   )}
                   {stratForm.mode === 'combine_carte' && (() => {
@@ -9610,8 +9610,11 @@ function AdminPanel() {
                     const modeBtn = (active) => ({ padding: '6px 12px', borderRadius: 7, border: active ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: active ? '#a855f7' : 'transparent', color: active ? '#fff' : '#94a3b8', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
                     return (
                       <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)' }}>
+                        {/* ── En-tête section ── */}
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
+                        {/* ── Main à lire (après l'en-tête, comme dans l'image) ── */}
                         <div style={{ marginBottom: 12 }}>
-                          <label style={{ display: 'block', color: '#bae6fd', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>⏱ Main à lire (cartes positions 1 et 2)</label>
+                          <div style={{ fontSize: 12, color: '#bae6fd', marginBottom: 8 }}>◎ Main à lire (cartes positions 1 et 2)</div>
                           <div style={{ display: 'flex', gap: 8 }}>
                             <button type="button" onClick={() => setStratForm(p => ({ ...p, cc_hand: 'joueur' }))}
                               style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand !== 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand !== 'banquier' ? 'rgba(168,85,247,0.15)' : 'transparent', color: stratForm.cc_hand !== 'banquier' ? '#e9d5ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
@@ -9623,7 +9626,6 @@ function AdminPanel() {
                             </button>
                           </div>
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
                         {combos.length === 0 && (
                           <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171', marginBottom: 10 }}>
                             ⚠️ Ajoutez au moins une combinaison pour activer ce mode
@@ -9634,34 +9636,36 @@ function AdminPanel() {
                           const mode = c.predict_mode || 'ordre';
                           return (
                             <div key={idx} style={{ marginBottom: 12, padding: '12px', borderRadius: 10, background: 'rgba(30,27,46,0.6)', border: '1px solid rgba(168,85,247,0.25)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>#{idx + 1}</div>
-                                <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                              {/* Ligne 1 : #N  Pos 1 : [dropdown]   Pos 2 : */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>#{idx + 1}</span>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>Pos 1 :</span>
+                                <select value={c.pos1} onChange={e => updateCombo(idx, { pos1: e.target.value })}
+                                  style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
+                                  {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>Pos 2 :</span>
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                                <div>
-                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>Pos 1 :</div>
-                                  <select value={c.pos1} onChange={e => updateCombo(idx, { pos1: e.target.value })}
-                                    style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
-                                    {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
-                                  </select>
-                                </div>
-                                <div>
-                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>Pos 2 :</div>
-                                  <select value={c.pos2} onChange={e => updateCombo(idx, { pos2: e.target.value })}
-                                    style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
-                                    {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
-                                  </select>
-                                </div>
+                              {/* Ligne 2 : [Pos 2 dropdown]              [✕ supprimer] */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <select value={c.pos2} onChange={e => updateCombo(idx, { pos2: e.target.value })}
+                                  style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
+                                  {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>✕</button>
                               </div>
-                              <div style={{ marginBottom: 8 }}>
-                                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>→ Mode :</div>
-                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {/* Lignes mode : "→ Mode :" + [Par ordre] sur même ligne, [Aléatoire] [Nombre de fois] dessous */}
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 11, color: '#94a3b8' }}>→ Mode :</span>
                                   <button type="button" style={modeBtn(mode === 'ordre')} onClick={() => updateCombo(idx, { predict_mode: 'ordre' })}>Par ordre</button>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6 }}>
                                   <button type="button" style={modeBtn(mode === 'aleatoire')} onClick={() => updateCombo(idx, { predict_mode: 'aleatoire' })}>Aléatoire</button>
                                   <button type="button" style={modeBtn(mode === 'nombre_fois')} onClick={() => updateCombo(idx, { predict_mode: 'nombre_fois' })}>Nombre de fois</button>
                                 </div>
                               </div>
+                              {/* Costumes à prédire */}
                               <div>
                                 <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>→ Costumes à prédire ({suits.length}/4) :</div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -9676,9 +9680,9 @@ function AdminPanel() {
                                           onChange={e => updatePredictCount(idx, sIdx, e.target.value)}
                                           style={{ width: 60, padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 13 }} />
                                       )}
-                                      <button type="button" onClick={() => removePredictSuit(idx, sIdx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                                      <button type="button" onClick={() => removePredictSuit(idx, sIdx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>✕</button>
                                       {suits.length < 4 && sIdx === suits.length - 1 && (
-                                        <button type="button" onClick={() => addPredictSuit(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                                        <button type="button" onClick={() => addPredictSuit(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
                                       )}
                                     </div>
                                   ))}
@@ -11404,7 +11408,7 @@ function AdminPanel() {
                   <span style={{ fontSize: 20 }}>⏳</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', letterSpacing: 0.3 }}>Filtre d'attente</div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.5 }}>Observe N jeux avant d'émettre — confirme la présence ou l'absence du costume prédit. Compatible avec tous les modes.</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.5 }}>Analyse les N <strong>derniers jeux terminés</strong> — confirme la présence ou l'absence du costume prédit dans les parties passées. Compatible avec tous les modes.</div>
                   </div>
                   <button type="button"
                     onClick={() => setStratForm(p => ({ ...p, attente_enabled: !p.attente_enabled }))}
@@ -11419,15 +11423,15 @@ function AdminPanel() {
                       <select value={stratForm.attente_option}
                         onChange={e => setStratForm(p => ({ ...p, attente_option: parseInt(e.target.value) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 8, color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
-                        <option value={1}>Option 1 — Costume ABSENT pendant N jeux → émet</option>
-                        <option value={2}>Option 2 — Tous PRÉSENTS sur N jeux → émet via mapping</option>
+                        <option value={1}>Option 1 — Costume ABSENT dans les N derniers jeux terminés → émet</option>
+                        <option value={2}>Option 2 — Tous PRÉSENTS dans les N derniers jeux terminés → émet via mapping</option>
                         <option value={3}>Option 3 — Hybride (absent→map absent / présent→map présent)</option>
                       </select>
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b', lineHeight: 1.5 }}>
                         {stratForm.attente_option === 1
-                          ? '→ Si le costume prédit reste absent des N jeux suivants, la prédiction est émise via le mapping opt1 (si configuré).'
+                          ? '→ Si le costume prédit était absent dans les N derniers jeux terminés, la prédiction est émise (via mapping opt1 si configuré).'
                           : stratForm.attente_option === 2
-                          ? '→ Tous présents → émet via mapping opt2. Sinon → annulé.'
+                          ? '→ Si présent dans TOUS les N derniers jeux terminés → émet via mapping opt2. Sinon → annulé.'
                           : '→ Tous absents → émet via mapping opt3-absent. Tous présents → émet via mapping opt3-présent. Mélangé → annulé.'}
                       </div>
                     </div>
@@ -11436,14 +11440,14 @@ function AdminPanel() {
                       <input type="number" min="1" max="20" value={stratForm.attente_n}
                         onChange={e => setStratForm(p => ({ ...p, attente_n: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(245,158,11,0.45)', borderRadius: 8, color: '#fbbf24', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
-                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Jeux d'observation (1–20)</div>
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Derniers jeux terminés à analyser (1–20)</div>
                     </div>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Écart (min. 1)</label>
                       <input type="number" min="1" max="20" value={stratForm.attente_ecart ?? 1}
                         onChange={e => setStratForm(p => ({ ...p, attente_ecart: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
                         style={{ width: '100%', padding: '8px 10px', background: '#0f172a', border: '2px solid rgba(99,102,241,0.5)', borderRadius: 8, color: '#818cf8', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
-                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>N + Écart = jeu cible</div>
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Signal #X + Écart = jeu cible</div>
                     </div>
                     <div>
                       <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Main observée</label>
@@ -11456,13 +11460,13 @@ function AdminPanel() {
                       <div style={{ marginTop: 4, fontSize: 10, color: '#64748b' }}>Cartes de quelle main</div>
                     </div>
                     <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', fontSize: 11, color: '#fcd34d', lineHeight: 1.7 }}>
-                      🕐 <strong>Résumé :</strong> Quand le signal est détecté (jeu #X), le moteur observe <strong>{stratForm.attente_n}</strong> jeu{stratForm.attente_n > 1 ? 'x' : ''} sur la main <strong>{stratForm.attente_main}</strong>.
+                      🕐 <strong>Résumé :</strong> Quand le signal est détecté (jeu #X), le moteur analyse les <strong>{stratForm.attente_n}</strong> derniers jeux terminés sur la main <strong>{stratForm.attente_main}</strong>.
                       {stratForm.attente_option === 1
-                        ? ` Si le costume prédit est absent pendant ces ${stratForm.attente_n} jeux → prédiction émise ✅. Sinon → annulée ❌.`
+                        ? ` Si le costume prédit était absent dans ces ${stratForm.attente_n} jeux passés → prédiction émise ✅. Sinon → annulée ❌.`
                         : stratForm.attente_option === 2
-                        ? ` Après ${stratForm.attente_n} jeux : tous présents → émet via mapping ✅ | sinon → annulé ❌.`
-                        : ` Après ${stratForm.attente_n} jeux : tous absents → émet mapping opt3-absent ✅ | tous présents → émet mapping opt3-présent ✅ | mélangé → annulé ❌.`}
-                      {' '}<span style={{ color: '#a5b4fc' }}>Jeu cible = #X + <strong>{stratForm.attente_n}</strong> + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong>#{stratForm.attente_n + (stratForm.attente_ecart ?? 1)}e jeu après le signal</strong>.</span>
+                        ? ` Si présent dans les ${stratForm.attente_n} jeux passés : tous présents → émet via mapping ✅ | sinon → annulé ❌.`
+                        : ` Dans les ${stratForm.attente_n} jeux passés : tous absents → émet mapping opt3-absent ✅ | tous présents → émet mapping opt3-présent ✅ | mélangé → annulé ❌.`}
+                      {' '}<span style={{ color: '#a5b4fc' }}>Jeu cible = #X + <strong>{stratForm.attente_ecart ?? 1}</strong> = <strong>#{1 + (stratForm.attente_ecart ?? 1)}e jeu après le signal</strong>.</span>
                     </div>
                     {/* ── Mapping de prédiction par option ── */}
                     {(() => {
