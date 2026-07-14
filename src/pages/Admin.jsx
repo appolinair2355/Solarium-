@@ -3863,6 +3863,14 @@ function AdminPanel() {
     relance_sur_perte: false, relance_sur_perte_max: 3,
     // Fin de numéro
     fn_rules: [],
+    // Mode absence_victoire_2 (seuils B distincts Joueur / Banquier)
+    B_joueur: 5, B_banquier: 8,
+    // Mode combine_carte (Pos1+Pos2 → prédiction)
+    cc_hand: 'joueur', cc_combinations: [], cc_limit: 0,
+    // Match Nul (Motifs)
+    nul_rules: [],
+    // Numéro + Costume
+    numero_costume_list: [], numero_costume_ecart: 2, numero_costume_raw: '', numero_costume_hand: 'joueur',
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -3892,6 +3900,8 @@ function AdminPanel() {
   const [stratForm, setStratForm] = useState(BLANK_FORM); // current create/edit form
   const [stratEditing, setStratEditing] = useState(null); // id being edited, null = creating
   const [fnActiveDigit, setFnActiveDigit] = useState(null); // chiffre actif pour config fin_numero (0-9)
+  const [nulActiveRuleIdx, setNulActiveRuleIdx] = useState(null); // index de règle active pour nul_pattern
+  const [ncParseMsg, setNcParseMsg] = useState(null); // message après analyse de la liste numero_costume
   const [stratMsg, setStratMsg] = useState('');
   const [successModal, setSuccessModal] = useState(null);
   const [proSavedModal, setProSavedModal] = useState(null); // { type:'create'|'update', id, filename, strategy_name, hand, decalage, max_rattrapage, engine_type, warnings, engine_error }
@@ -4275,6 +4285,8 @@ function AdminPanel() {
     { value: 'intersection', label: '🎯 Intersection' },
     { value: 'surveillance_perte', label: '🔍 Surveillance Pertes' },
     { value: 'fin_numero', label: '🎯 Fin de Numéro' },
+    { value: 'nul_pattern', label: '🤝 Match Nul (Motifs)' },
+    { value: 'numero_costume', label: '🃏 Numéro + Costume' },
   ];
 
   useEffect(() => {
@@ -4444,7 +4456,7 @@ function AdminPanel() {
       // Afficher la modale de confirmation
       const fmtObj = TG_FORMATS.find(f => String(f.value) === String(stratChForm.tg_format ?? ''));
       const st = stratStats.find(x => x.strategy === `S${id}`) || {};
-      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍', '2k-3k':'2️⃣3️⃣ 2k-3k Tendance' };
+      const MODE_LABELS = { manquants:'Absences', apparents:'Apparitions', absence_apparition:'Absence → Apparition', apparition_absence:'Apparition → Absence', taux_miroir:'Taux miroir', multi_strategy:'Multi-stratégie', distribution:'Distribution', carte_3_vers_2:'3 cartes → 2 cartes', carte_2_vers_3:'2 cartes → 3 cartes', compteur_adverse:'Compteur Adverse', victoire_adverse:'Victoire Adverse', abs_3_vers_2:'3→2 Absence', abs_3_vers_3:'3→3 Absence', absence_victoire:'Absence Victoire', lecture_passee:'📖 Lecture jeux passés', intelligent_cartes:'🧠 Intelligent Cartes', union_enseignes:'🔗 Union Enseignes', carte_valeur:'🃏 Carte Valeur', comptages_ecart:'📊 Comptages Écart', intersection:'🎯 Intersection', annonce_sequence:'📣 Rotateur Promo', surveillance_perte:'🔍 Surveillance', gestion_banque:'💰 Gestion Banque', compteurs_absences:'📊 Compteurs Absences', pair_impair:'🔴⚪ Pair/Impair 🐍', carte_2v3:'2️⃣3️⃣ 2vs3 Cartes 🐍', '2k-3k':'2️⃣3️⃣ 2k-3k Tendance', fin_numero:'🎯 Fin de Numéro', nul_pattern:'🤝 Match Nul (Motifs)', numero_costume:'🃏 Numéro + Costume' };
       setTgSaveModal({
         type: 'strategie',
         id: `S${id}`,
@@ -5087,7 +5099,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], nul_rules: s.nul_rules || [], numero_costume_list: s.numero_costume_list || [], numero_costume_ecart: s.numero_costume_ecart ?? 2, numero_costume_raw: '', numero_costume_hand: s.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur', B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand === 'banquier' ? 'banquier' : 'joueur', cc_combinations: s.cc_combinations || [], cc_limit: s.cc_limit ?? 0 });
     setStratOpen(true);
   };
 
@@ -5104,7 +5116,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], nul_rules: s.nul_rules || [], numero_costume_list: s.numero_costume_list || [], numero_costume_ecart: s.numero_costume_ecart ?? 2, numero_costume_raw: '', numero_costume_hand: s.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur', B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand === 'banquier' ? 'banquier' : 'joueur', cc_combinations: s.cc_combinations || [], cc_limit: s.cc_limit ?? 0 });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5570,7 +5582,7 @@ function AdminPanel() {
   const handleLogout = async () => { await logout(); navigate('/'); };
   const nonAdmins = users.filter(u => !u.is_admin);
 
-  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍', '2k-3k': '2️⃣3️⃣ 2k-3k' };
+  const modeLabels = { manquants: 'Absences', apparents: 'Apparitions', absence_apparition: 'Abs→App', apparition_absence: 'App→Abs', miroir_taux: 'Miroir Taux', aleatoire: 'Aléatoire', multi_strategy: 'Combinaison', distribution: 'Distribution', carte_3_vers_2: '3C→2C', carte_2_vers_3: '2C→3C', taux_miroir: 'Miroir Taux', compteur_adverse: 'C. Adverse', victoire_adverse: 'Victoire Adverse', abs_3_vers_2: '3→2 Abs', abs_3_vers_3: '3→3 Abs', absence_victoire: 'Abs Victoire', union_enseignes: 'Union Ens.', carte_valeur: 'Carte Val.', intersection: 'Intersection', comptages_ecart: 'Cmpt. Écart', annonce_sequence: '📣 Rotateur', first_card_plus6: '1ère Carte +Décalage', surveillance_perte: '🔍 Surveillance', gestion_banque: '💰 Gestion Banque', compteurs_absences: '📊 C. Absences', compteur_parite: '⚪⚫ Parité', pair_impair: '🔴⚪ Pair/Impair 🐍', carte_2v3: '2️⃣3️⃣ 2vs3 🐍', '2k-3k': '2️⃣3️⃣ 2k-3k', fin_numero: '🎯 Fin Numéro', nul_pattern: '🤝 Match Nul (Motifs)', numero_costume: '🃏 Numéro+Costume' };
 
   return (
     <>
@@ -9261,6 +9273,11 @@ function AdminPanel() {
                     <option value="taux_miroir">⚖️ Miroir Taux</option>
                     <option value="compteur_adverse">🔄 Compteur Adverse</option>
                     <option value="absence_victoire">🏆 Absence Victoire (Joueur / Banquier)</option>
+                    <option value="absence_victoire_2">🏆 Absence Victoire 2</option>
+                    <option value="abs_3_vers_2">3️⃣→2️⃣ Absence (3 cartes → 2 cartes)</option>
+                    <option value="abs_3_vers_3">3️⃣→3️⃣ Absence (3 cartes → 3 cartes)</option>
+                    <option value="combine_carte">🃏 Combiné Carte (Pos1+Pos2 → Prédit)</option>
+                    <option value="costume_manquant">♠️ Costume Manquant</option>
                     <option value="lecture_passee">📖 Lecture des jeux passés (cartes_jeu)</option>
                     <option value="intelligent_cartes">🧠 Intelligent Cartes (analyse de patterns)</option>
                     <option value="union_enseignes">🔗 Union Enseignes (accord multi-sources)</option>
@@ -9279,6 +9296,8 @@ function AdminPanel() {
                     <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
                     <option value="fin_numero">🎯 Fin de Numéro (règles par dernier chiffre du tour cible)</option>
+                    <option value="nul_pattern">🤝 Match Nul (Motifs — déclencheur → cibles)</option>
+                    <option value="numero_costume">🃏 Numéro + Costume (liste collée)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -9511,6 +9530,415 @@ function AdminPanel() {
                                 );
                               })}
                             </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {stratForm.mode === 'absence_victoire_2' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🏆 Mode Absence Victoire 2</div>
+                      <div>Identique à "Absence Victoire", mais avec des <strong>seuils B distincts</strong> pour chaque camp.</div>
+                      <div style={{ marginTop: 6 }}>Le Banquier gagne <strong>B_banquier</strong> fois de suite sans que le Joueur ne gagne → prédit <strong>Victoire Joueur</strong>. Le Joueur gagne <strong>B_joueur</strong> fois de suite sans que le Banquier ne gagne → prédit <strong>Victoire Banquier</strong>.</div>
+                      <div style={{ marginTop: 6, color: '#fbbf24', fontWeight: 600 }}>ℹ️ Une égalité (Tie) réinitialise les deux compteurs.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'absence_victoire_2' && (
+                    <div style={{ marginTop: 12, padding: '14px', borderRadius: 10, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🏆 Seuils Absence Victoire 2</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>B Joueur (absences avant prédiction Victoire Banquier)</label>
+                          <input type="number" min="1" max="50" value={stratForm.B_joueur ?? 5}
+                            onChange={e => setStratForm(prev => ({ ...prev, B_joueur: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '2px solid rgba(251,191,36,0.5)', borderRadius: 7, color: '#fde68a', fontSize: 14, fontWeight: 700 }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', color: '#fde68a', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>B Banquier (absences avant prédiction Victoire Joueur)</label>
+                          <input type="number" min="1" max="50" value={stratForm.B_banquier ?? 8}
+                            onChange={e => setStratForm(prev => ({ ...prev, B_banquier: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '2px solid rgba(251,191,36,0.5)', borderRadius: 7, color: '#fde68a', fontSize: 14, fontWeight: 700 }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'combine_carte' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', fontSize: 12, color: '#bae6fd', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Combiné Carte</div>
+                      <div>Lit les costumes des <strong>2 premières cartes</strong> de la main choisie (Joueur ou Banquier).</div>
+                      <div style={{ marginTop: 6 }}>Pour chaque combinaison <strong>Pos1 + Pos2</strong> configurée, le costume à prédire est émis pour le prochain jeu.</div>
+                      <div style={{ marginTop: 6, color: '#38bdf8', fontStyle: 'italic' }}>ℹ️ Pas de seuil B ni de mappings dans ce mode — la logique repose uniquement sur les combinaisons ci-dessous.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'combine_carte' && (() => {
+                    const ALL_SUITS4 = ['♠','♥','♦','♣'];
+                    const combos = stratForm.cc_combinations || [];
+                    const updateCombo = (idx, patch) => {
+                      setStratForm(p => {
+                        const arr = [...(p.cc_combinations || [])];
+                        arr[idx] = { ...arr[idx], ...patch };
+                        return { ...p, cc_combinations: arr };
+                      });
+                    };
+                    const addCombo = () => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { pos1: '♠', pos2: '♥', predict_suits: ['♦'], predict_mode: 'ordre', predict_counts: [] }] }));
+                    const removeCombo = (idx) => setStratForm(p => ({ ...p, cc_combinations: (p.cc_combinations || []).filter((_, i) => i !== idx) }));
+                    const addPredictSuit = (idx) => {
+                      const c = combos[idx];
+                      const suits = c.predict_suits || [];
+                      if (suits.length >= 4) return;
+                      const next = ALL_SUITS4.find(s => !suits.includes(s)) || ALL_SUITS4[0];
+                      updateCombo(idx, { predict_suits: [...suits, next] });
+                    };
+                    const removePredictSuit = (idx, sIdx) => {
+                      const c = combos[idx];
+                      const suits = (c.predict_suits || []).filter((_, i) => i !== sIdx);
+                      const counts = (c.predict_counts || []).filter((_, i) => i !== sIdx);
+                      updateCombo(idx, { predict_suits: suits, predict_counts: counts });
+                    };
+                    const updatePredictSuit = (idx, sIdx, val) => {
+                      const c = combos[idx];
+                      const suits = [...(c.predict_suits || [])];
+                      suits[sIdx] = val;
+                      updateCombo(idx, { predict_suits: suits });
+                    };
+                    const updatePredictCount = (idx, sIdx, val) => {
+                      const c = combos[idx];
+                      const counts = [...(c.predict_counts || [])];
+                      counts[sIdx] = Math.max(1, parseInt(val) || 1);
+                      updateCombo(idx, { predict_counts: counts });
+                    };
+                    const modeBtn = (active) => ({ padding: '6px 12px', borderRadius: 7, border: active ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: active ? '#a855f7' : 'transparent', color: active ? '#fff' : '#94a3b8', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
+                    return (
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.2)' }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: 'block', color: '#bae6fd', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>⏱ Main à lire (cartes positions 1 et 2)</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button type="button" onClick={() => setStratForm(p => ({ ...p, cc_hand: 'joueur' }))}
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand !== 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand !== 'banquier' ? 'rgba(168,85,247,0.15)' : 'transparent', color: stratForm.cc_hand !== 'banquier' ? '#e9d5ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              👤 Joueur
+                            </button>
+                            <button type="button" onClick={() => setStratForm(p => ({ ...p, cc_hand: 'banquier' }))}
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.cc_hand === 'banquier' ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.15)', background: stratForm.cc_hand === 'banquier' ? 'rgba(168,85,247,0.15)' : 'transparent', color: stratForm.cc_hand === 'banquier' ? '#e9d5ff' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              🏦 Banquier
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
+                        {combos.length === 0 && (
+                          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171', marginBottom: 10 }}>
+                            ⚠️ Ajoutez au moins une combinaison pour activer ce mode
+                          </div>
+                        )}
+                        {combos.map((c, idx) => {
+                          const suits = c.predict_suits || [];
+                          const mode = c.predict_mode || 'ordre';
+                          return (
+                            <div key={idx} style={{ marginBottom: 12, padding: '12px', borderRadius: 10, background: 'rgba(30,27,46,0.6)', border: '1px solid rgba(168,85,247,0.25)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>#{idx + 1}</div>
+                                <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                                <div>
+                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>Pos 1 :</div>
+                                  <select value={c.pos1} onChange={e => updateCombo(idx, { pos1: e.target.value })}
+                                    style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
+                                    {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3 }}>Pos 2 :</div>
+                                  <select value={c.pos2} onChange={e => updateCombo(idx, { pos2: e.target.value })}
+                                    style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
+                                    {ALL_SUITS4.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>→ Mode :</div>
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                  <button type="button" style={modeBtn(mode === 'ordre')} onClick={() => updateCombo(idx, { predict_mode: 'ordre' })}>Par ordre</button>
+                                  <button type="button" style={modeBtn(mode === 'aleatoire')} onClick={() => updateCombo(idx, { predict_mode: 'aleatoire' })}>Aléatoire</button>
+                                  <button type="button" style={modeBtn(mode === 'nombre_fois')} onClick={() => updateCombo(idx, { predict_mode: 'nombre_fois' })}>Nombre de fois</button>
+                                </div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>→ Costumes à prédire ({suits.length}/4) :</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  {suits.map((s, sIdx) => (
+                                    <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <select value={s} onChange={e => updatePredictSuit(idx, sIdx, e.target.value)}
+                                        style={{ padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 14 }}>
+                                        {ALL_SUITS4.map(su => <option key={su} value={su}>{su}</option>)}
+                                      </select>
+                                      {mode === 'nombre_fois' && (
+                                        <input type="number" min="1" max="50" placeholder="Fois" value={(c.predict_counts || [])[sIdx] ?? 1}
+                                          onChange={e => updatePredictCount(idx, sIdx, e.target.value)}
+                                          style={{ width: 60, padding: '6px 8px', background: '#0f172a', border: '1px solid rgba(56,189,248,0.4)', borderRadius: 6, color: '#bae6fd', fontSize: 13 }} />
+                                      )}
+                                      <button type="button" onClick={() => removePredictSuit(idx, sIdx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                                      {suits.length < 4 && sIdx === suits.length - 1 && (
+                                        <button type="button" onClick={() => addPredictSuit(idx)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {suits.length === 0 && (
+                                    <button type="button" onClick={() => addPredictSuit(idx)} style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.15)', color: '#e9d5ff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+ Ajouter un costume</button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <button type="button" onClick={addCombo} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px dashed rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.08)', color: '#bae6fd', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                          + Ajouter une combinaison
+                        </button>
+                        <div style={{ marginTop: 14 }}>
+                          <label style={{ display: 'block', color: '#bae6fd', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Jeu à prédire — combien de parties après (limite de victoires consécutives avant pause de 1 jeu, 0 = désactivé)</label>
+                          <input type="number" min="0" max="50" value={stratForm.cc_limit ?? 0}
+                            onChange={e => setStratForm(p => ({ ...p, cc_limit: Math.max(0, parseInt(e.target.value) || 0) }))}
+                            style={{ width: '100%', padding: '7px 10px', background: '#0f172a', border: '2px solid rgba(56,189,248,0.5)', borderRadius: 7, color: '#bae6fd', fontSize: 14, fontWeight: 700 }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {stratForm.mode === 'nul_pattern' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🤝 Mode Match Nul (Motifs)</div>
+                      <div>Déclenche sur la <strong>forme</strong> de la main qui vient de se terminer (distribution, 2/3 cartes, victoire, pair/impair, costume, combinaisons, match nul).</div>
+                      <div style={{ marginTop: 6 }}>Pour chaque règle, choisissez le <strong>déclencheur</strong> puis 1 à 10 <strong>cibles</strong> (les mêmes catégories) — la cible peut être identique au déclencheur.</div>
+                      <div style={{ marginTop: 6 }}>La prédiction est émise pour le jeu <strong>N+Décalage</strong> (champ Décalage ci-dessous), en tirant la cible au hasard ou en séquence fixe.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'nul_pattern' && (() => {
+                    const NUL_CATS = [
+                      ['distrib', '⚖️ Distribution (2v2)'], ['P_DEUX', '👤 Joueur 2 cartes'], ['B_DEUX', '🏦 Banquier 2 cartes'],
+                      ['P_TROIS', '👤 Joueur 3 cartes'], ['B_TROIS', '🏦 Banquier 3 cartes'],
+                      ['WIN_P', '🏆 Victoire Joueur'], ['WIN_B', '🏆 Victoire Banquier'], ['TIE', '🤝 Match Nul'],
+                      ['PAIR_P', '🟢 Pair (Joueur)'], ['IMPAIR_P', '🔴 Impair (Joueur)'],
+                      ['♠', '♠ Pique'], ['♥', '♥ Cœur'], ['♦', '♦ Carreau'], ['♣', '♣ Trèfle'],
+                      ['DEUX_TROIS', '2️⃣3️⃣ J:2 B:3'], ['TROIS_DEUX', '3️⃣2️⃣ J:3 B:2'], ['TROIS_TROIS', '3️⃣3️⃣ J:3 B:3'],
+                    ];
+                    const catLabel = (v) => (NUL_CATS.find(c => c[0] === v) || [v, v])[1];
+                    const rules = stratForm.nul_rules || [];
+                    const updateRule = (idx, patch) => {
+                      setStratForm(p => {
+                        const arr = [...(p.nul_rules || [])];
+                        arr[idx] = { ...arr[idx], ...patch };
+                        return { ...p, nul_rules: arr };
+                      });
+                    };
+                    const addRule = () => {
+                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', targets: [], ordre: 'aleatoire' }] }));
+                      setNulActiveRuleIdx(rules.length);
+                    };
+                    const removeRule = (idx) => {
+                      setStratForm(p => ({ ...p, nul_rules: (p.nul_rules || []).filter((_, i) => i !== idx) }));
+                      if (nulActiveRuleIdx === idx) setNulActiveRuleIdx(null);
+                    };
+                    return (
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase' }}>🤝 Règles Déclencheur → Cibles</div>
+                          <button type="button" onClick={addRule} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.15)', color: '#c7d2fe', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                            + Ajouter une règle
+                          </button>
+                        </div>
+
+                        {rules.length === 0 && (
+                          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171' }}>
+                            ⚠️ Ajoutez au moins une règle pour activer ce mode
+                          </div>
+                        )}
+
+                        {rules.map((rule, idx) => {
+                          const isActive = nulActiveRuleIdx === idx;
+                          return (
+                            <div key={idx} style={{ marginBottom: 10, borderRadius: 10, border: `1px solid ${isActive ? 'rgba(129,140,248,0.5)' : 'rgba(255,255,255,0.08)'}`, background: isActive ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.02)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer' }}
+                                onClick={() => setNulActiveRuleIdx(isActive ? null : idx)}>
+                                <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+                                  <strong style={{ color: '#818cf8' }}>{catLabel(rule.trigger)}</strong>
+                                  <span style={{ color: '#475569', margin: '0 6px' }}>→</span>
+                                  {rule.targets.length > 0 ? rule.targets.map(catLabel).join(', ') : <span style={{ color: '#64748b' }}>(aucune cible)</span>}
+                                </div>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); removeRule(idx); }}
+                                  style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
+                                  🗑
+                                </button>
+                              </div>
+
+                              {isActive && (
+                                <div style={{ padding: '0 14px 14px' }}>
+                                  <div style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Déclencheur (forme de la main terminée)</div>
+                                    <select value={rule.trigger} onChange={e => updateRule(idx, { trigger: e.target.value })}
+                                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#c7d2fe', fontSize: 12 }}>
+                                      {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                    </select>
+                                  </div>
+                                  <div style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Cibles à prédire (1 à 10)</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                      {NUL_CATS.map(([v, l]) => {
+                                        const isOn = rule.targets.includes(v);
+                                        return (
+                                          <button key={v} type="button"
+                                            onClick={() => {
+                                              const cur = rule.targets || [];
+                                              const next = isOn ? cur.filter(x => x !== v) : (cur.length < 10 ? [...cur, v] : cur);
+                                              updateRule(idx, { targets: next });
+                                            }}
+                                            style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${isOn ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isOn ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: isOn ? '#c7d2fe' : '#64748b', fontSize: 11, fontWeight: isOn ? 700 : 500, cursor: 'pointer' }}>
+                                            {l}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Ordre de tirage des cibles</div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                      {[['aleatoire','🎲 Aléatoire'],['sequence','🔁 Séquence']].map(([val, lbl]) => (
+                                        <button key={val} type="button" onClick={() => updateRule(idx, { ordre: val })}
+                                          style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${(rule.ordre || 'aleatoire') === val ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: (rule.ordre || 'aleatoire') === val ? 'rgba(99,102,241,0.2)' : 'transparent', color: (rule.ordre || 'aleatoire') === val ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                          {lbl}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  {stratForm.mode === 'numero_costume' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🃏 Mode Numéro + Costume</div>
+                      <div>Collez une liste, une entrée par ligne : <code style={{ color: '#a5b4fc' }}>numéro code</code>, ex : <code style={{ color: '#a5b4fc' }}>13❤️</code> / <code style={{ color: '#a5b4fc' }}>23 2k</code> / <code style={{ color: '#a5b4fc' }}>27 3k</code> / <code style={{ color: '#a5b4fc' }}>29 2/2</code>.</div>
+                      <div style={{ marginTop: 8, fontWeight: 700 }}>Codes acceptés :</div>
+                      <div style={{ marginTop: 2 }}>• Costume : <code>♠️ ♥️ ♦️ ♣️</code> (apparu dans l'une des 2 mains)</div>
+                      <div>• <code>v1</code> = victoire Joueur · <code>v2</code> = victoire Banquier · <code>x</code> = match Nul</div>
+                      <div>• <code>2k</code> / <code>3k</code> = la main choisie ci-dessous (Joueur ou Banquier) gagne avec 2 / 3 cartes</div>
+                      <div>• <code>2/2</code> = 2 cartes Joueur + 2 cartes Banquier · <code>2/3</code> = 2 cartes J + 3 cartes B · <code>3/2</code> = 3 cartes J + 2 cartes B · <code>3/3</code> = 3 cartes J + 3 cartes B</div>
+                      <div>• <code>impair</code> = score Joueur impair</div>
+                      <div style={{ marginTop: 6 }}>Écart = numéro cible − numéro du jeu en cours. Dès que l'écart devient ≤ <strong>Écart configuré</strong>, la prédiction est émise pour le numéro cible.</div>
+                      <div style={{ marginTop: 6 }}>Le <strong>Rattrapage max</strong> (réglage plus bas dans le formulaire) s'applique aux entrées de cette liste comme le "+N" de votre en-tête.</div>
+                      <div style={{ marginTop: 6, color: '#818cf8', fontStyle: 'italic' }}>ℹ️ Si le direct dépasse le numéro cible sans avoir déclenché, la ligne est ignorée et on passe à la suivante.</div>
+                    </div>
+                  )}
+                  {stratForm.mode === 'numero_costume' && (() => {
+                    const NORM_SUIT = { '♠️':'♠','♠':'♠', '♥️':'♥','♥':'♥','❤️':'♥','❤':'♥', '♦️':'♦','♦':'♦', '♣️':'♣','♣':'♣' };
+                    const NC_CAT_LABEL = {
+                      'WIN_P': '🏆 Victoire Joueur (v1)', 'WIN_B': '🏆 Victoire Banquier (v2)', 'TIE': '🤝 Match Nul (x)',
+                      'P_DEUX': '👤 Joueur 2 cartes (2k)', 'B_DEUX': '🏦 Banquier 2 cartes (2k)',
+                      'P_TROIS': '👤 Joueur 3 cartes (3k)', 'B_TROIS': '🏦 Banquier 3 cartes (3k)',
+                      'distrib': '⚖️ 2/2', 'DEUX_TROIS': '2️⃣3️⃣ 2/3', 'TROIS_DEUX': '3️⃣2️⃣ 3/2', 'TROIS_TROIS': '3️⃣3️⃣ 3/3',
+                      'IMPAIR_P': '🔴 Impair',
+                      '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣',
+                    };
+                    const parseLine = (line, hand) => {
+                      const t = line.trim();
+                      if (!t) return null;
+                      // numéro suivi du reste de la ligne (séparé par espace, tiret ou ':')
+                      const m = t.match(/^(\d{1,4})\s*[:\-]?\s*(.+)$/);
+                      if (!m) return null;
+                      const gn = parseInt(m[1]);
+                      if (isNaN(gn) || gn < 1 || gn > 1440) return null;
+                      const codeRaw = m[2].trim().toLowerCase();
+                      let suit = null;
+                      // costume
+                      for (const [sym, norm] of Object.entries(NORM_SUIT)) {
+                        if (m[2].includes(sym)) { suit = norm; break; }
+                      }
+                      if (!suit) {
+                        if (codeRaw === 'v1') suit = 'WIN_P';
+                        else if (codeRaw === 'v2') suit = 'WIN_B';
+                        else if (codeRaw === 'x' || codeRaw === 'n') suit = 'TIE';
+                        else if (codeRaw === '2k') suit = hand === 'banquier' ? 'B_DEUX' : 'P_DEUX';
+                        else if (codeRaw === '3k') suit = hand === 'banquier' ? 'B_TROIS' : 'P_TROIS';
+                        else if (codeRaw === '2/2') suit = 'distrib';
+                        else if (codeRaw === '2/3') suit = 'DEUX_TROIS';
+                        else if (codeRaw === '3/2') suit = 'TROIS_DEUX';
+                        else if (codeRaw === '3/3') suit = 'TROIS_TROIS';
+                        else if (codeRaw === 'impair') suit = 'IMPAIR_P';
+                      }
+                      if (!suit) return null;
+                      return { gn, suit };
+                    };
+                    const parseList = () => {
+                      const hand = stratForm.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur';
+                      const lines = (stratForm.numero_costume_raw || '').split('\n');
+                      const parsed = [];
+                      let skipped = 0;
+                      for (const line of lines) {
+                        if (!line.trim()) continue;
+                        const item = parseLine(line, hand);
+                        if (!item) { skipped++; continue; }
+                        parsed.push(item);
+                      }
+                      setStratForm(p => ({ ...p, numero_costume_list: parsed }));
+                      setNcParseMsg(skipped > 0
+                        ? `✅ ${parsed.length} entrée(s) analysée(s) — ⚠️ ${skipped} ligne(s) ignorée(s) (format invalide)`
+                        : `✅ ${parsed.length} entrée(s) analysée(s)`);
+                    };
+                    const removeItem = (idx) => setStratForm(p => ({ ...p, numero_costume_list: (p.numero_costume_list || []).filter((_, i) => i !== idx) }));
+                    return (
+                      <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: 'block', color: '#a5b4fc', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>👤 Main visée par les codes 2k / 3k</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button type="button" onClick={() => setStratForm(p => ({ ...p, numero_costume_hand: 'joueur' }))}
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.numero_costume_hand !== 'banquier' ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.15)', background: stratForm.numero_costume_hand !== 'banquier' ? 'rgba(99,102,241,0.15)' : 'transparent', color: stratForm.numero_costume_hand !== 'banquier' ? '#c7d2fe' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              👤 Joueur
+                            </button>
+                            <button type="button" onClick={() => setStratForm(p => ({ ...p, numero_costume_hand: 'banquier' }))}
+                              style={{ flex: 1, padding: '10px', borderRadius: 8, border: stratForm.numero_costume_hand === 'banquier' ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.15)', background: stratForm.numero_costume_hand === 'banquier' ? 'rgba(99,102,241,0.15)' : 'transparent', color: stratForm.numero_costume_hand === 'banquier' ? '#c7d2fe' : '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                              🏦 Banquier
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>🃏 Liste numéro + code</div>
+                        <textarea value={stratForm.numero_costume_raw || ''}
+                          onChange={e => setStratForm(p => ({ ...p, numero_costume_raw: e.target.value }))}
+                          placeholder={'13❤️\n23 2k\n27 3k\n29 2/2\n31 v1'}
+                          rows={6}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#e2e8f0', fontSize: 13, fontFamily: 'monospace', resize: 'vertical' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+                          <button type="button" onClick={parseList}
+                            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.15)', color: '#c7d2fe', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                            🔍 Analyser la liste
+                          </button>
+                          <div>
+                            <span style={{ fontSize: 11, color: '#94a3b8', marginRight: 8 }}>Écart max</span>
+                            <input type="number" min={1} max={50} value={stratForm.numero_costume_ecart ?? 2}
+                              onChange={e => setStratForm(p => ({ ...p, numero_costume_ecart: Math.max(1, parseInt(e.target.value) || 2) }))}
+                              style={{ width: 60, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#a5b4fc', fontSize: 13, fontWeight: 700, textAlign: 'center' }} />
+                          </div>
+                        </div>
+                        {ncParseMsg && (
+                          <div style={{ marginTop: 8, fontSize: 11, color: '#86efac' }}>{ncParseMsg}</div>
+                        )}
+                        {(stratForm.numero_costume_list || []).length > 0 && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8 }}>ENTRÉES PARSÉES ({stratForm.numero_costume_list.length})</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                              {stratForm.numero_costume_list.map((it, idx) => (
+                                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12 }}>
+                                  <span style={{ color: '#a5b4fc', fontWeight: 700 }}>#{it.gn}</span>
+                                  <span style={{ color: '#e2e8f0' }}>{NC_CAT_LABEL[it.suit] || it.suit}</span>
+                                  <button type="button" onClick={() => removeItem(idx)} style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 12, padding: 0 }}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {(stratForm.numero_costume_list || []).length === 0 && (
+                          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 12, color: '#f87171' }}>
+                            ⚠️ Collez une liste puis cliquez sur "Analyser la liste" pour activer ce mode
                           </div>
                         )}
                       </div>
