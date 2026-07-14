@@ -100,6 +100,36 @@ function countValidCards(cards) {
   }).length;
 }
 
+// ── Mode "Match Nul (Motifs)" : classification d'une main terminée en catégories ──────
+// Utilisée à la fois comme déclencheur (quelle forme vient de se produire) et comme
+// cible de prédiction (quelle forme prédire pour une main future).
+// Catégories : distrib (2v2), P_DEUX/B_DEUX (2 cartes joueur/banquier seul),
+// P_TROIS/B_TROIS (3 cartes joueur/banquier), WIN_P/WIN_B (victoire), PAIR_P/IMPAIR_P
+// (parité joueur), ♠♥♦♣ (costume présent dans l'une des 2 mains), DEUX_TROIS/TROIS_DEUX/
+// TROIS_TROIS (combinaisons de comptage), TIE (match nul).
+function classifyNulCategories(pCards, bCards, winner) {
+  const cats = new Set();
+  const pCount = countValidCards(pCards);
+  const bCount = countValidCards(bCards);
+  if (pCount === 2 && bCount === 2) cats.add('distrib');
+  if (pCount === 2) cats.add('P_DEUX');
+  if (bCount === 2) cats.add('B_DEUX');
+  if (pCount === 3) cats.add('P_TROIS');
+  if (bCount === 3) cats.add('B_TROIS');
+  if (winner === 'Player') cats.add('WIN_P');
+  if (winner === 'Banker') cats.add('WIN_B');
+  if (winner === 'Tie')    cats.add('TIE');
+  const pScore = baccaratHandScore(pCards);
+  if (pScore !== null) cats.add(pScore % 2 === 0 ? 'PAIR_P' : 'IMPAIR_P');
+  for (const s of extractSuits(pCards)) cats.add(s);
+  for (const s of extractSuits(bCards)) cats.add(s);
+  if (pCount === 2 && bCount === 3) cats.add('DEUX_TROIS');
+  if (pCount === 3 && bCount === 2) cats.add('TROIS_DEUX');
+  if (pCount === 3 && bCount === 3) cats.add('TROIS_TROIS');
+  return cats;
+}
+const NUL_CATEGORY_KEYS = ['distrib','P_DEUX','B_DEUX','P_TROIS','B_TROIS','WIN_P','WIN_B','PAIR_P','IMPAIR_P','♠','♥','♦','♣','DEUX_TROIS','TROIS_DEUX','TROIS_TROIS','TIE'];
+
 // ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
 async function canEmitNewPrediction(stratId) {
   try {
@@ -1880,6 +1910,43 @@ class Engine {
         }
         continue;
 
+      // ── Résolution spéciale mode Match Nul (Motifs) : comptage par main fixe ──
+      // P_DEUX/B_DEUX/P_TROIS/B_TROIS ciblent explicitement une main (joueur ou
+      // banquier) quel que soit le nombre de cartes de l'autre main — utilisé par
+      // le mode 'nul_pattern' où plusieurs règles simultanées peuvent viser des
+      // mains différentes au sein d'une même stratégie.
+      } else if (ps === 'P_DEUX' || ps === 'B_DEUX' || ps === 'P_TROIS' || ps === 'B_TROIS') {
+        const isPlayer = ps === 'P_DEUX' || ps === 'P_TROIS';
+        const targetCount = (ps === 'P_DEUX' || ps === 'B_DEUX') ? 2 : 3;
+        const cnt = countValidCards(isPlayer ? pCards : bCards);
+        if (cnt === targetCount) {
+          const rattrapage = gn - pgNum;
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
+      // ── Résolution spéciale mode Match Nul (Motifs) : parité joueur fixe ────
+      } else if (ps === 'PAIR_P' || ps === 'IMPAIR_P') {
+        const pScoreR = baccaratHandScore(pCards);
+        const isMatch = pScoreR !== null && (ps === 'PAIR_P' ? pScoreR % 2 === 0 : pScoreR % 2 === 1);
+        if (isMatch) {
+          const rattrapage = gn - pgNum;
+          await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(true, ps, pgNum, rattrapage);
+        } else if (gn === pgNum + effectiveMaxR) {
+          await resolvePrediction(strategy, pgNum, ps, 'perdu', effectiveMaxR, pCards, bCards, tgOpts);
+          delete pending[pg];
+          if (onLoss) onLoss(false, ps, pgNum, effectiveMaxR);
+        }
+        continue;
+
       // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
       } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
         const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
@@ -2535,6 +2602,14 @@ class Engine {
       // Ajout : parité du score
       if (rScoreFn !== null) resolveHandSuits.push(rScoreFn % 2 === 0 ? 'pair' : 'impair');
       // joueur / banquier → résolus via WIN_P / WIN_B (gérés séparément dans _resolvePending)
+    }
+    // nul_pattern / numero_costume : résolution costume sur les 2 mains combinées
+    // (le costume cible peut apparaître côté joueur ou côté banquier).
+    // Les catégories non-costume (distrib, WIN_P/WIN_B, TIE, P_DEUX/B_DEUX/P_TROIS/
+    // B_TROIS, PAIR_P/IMPAIR_P, DEUX_TROIS/TROIS_DEUX/TROIS_TROIS) sont résolues par
+    // leurs branches dédiées dans _resolvePending, indépendamment de resolveHandSuits.
+    if (cfg.mode === 'nul_pattern' || cfg.mode === 'numero_costume') {
+      resolveHandSuits = [...(suits || []), ...(bSuits || [])];
     }
     // gestion_banque : résolution avec la main configurée (cfg.hand), comme les autres modes.
     // NE PAS utiliser les deux mains — cela provoquerait une résolution prématurée (rattrapage=0)
@@ -4275,6 +4350,110 @@ class Engine {
         const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
         console.log(`[${channelId}] [FinNuméro] Live #${gn} | fin=${targetFin} | proche=${proche} | ${ordreLabel} → prédit "${emitValue}" pour #${targetGn}`);
         await emitPrediction(targetGn, emitValue, emitValue, { force: true });
+      }
+
+    } else if (mode === 'nul_pattern') {
+      // ── MODE MATCH NUL (MOTIFS) ────────────────────────────────────────────────
+      // Déclenche sur la FORME de la main qui vient de se terminer (jeu #gn) :
+      // distribution 2v2, 2/3 cartes joueur ou banquier seul, victoire joueur/banquier,
+      // pair/impair joueur, costume ♠♥♦♣, combinaisons 2/3·3/2·3/3, ou match nul.
+      // Pour chaque règle dont le déclencheur correspond, prédit une des cibles
+      // assignées (1 à 10, prises dans la même liste) pour la main #gn+décalage,
+      // soit au hasard soit en tournant dans un ordre fixe.
+      //
+      // nul_rules : [{ trigger:'WIN_B', targets:['♥','DEUX_TROIS','PAIR_P'], ordre:'sequence' }, ...]
+      // ────────────────────────────────────────────────────────────────────────────
+      const nulRules = Array.isArray(cfg.nul_rules) ? cfg.nul_rules : [];
+      if (nulRules.length > 0) {
+        if (!state.nulTriggered) state.nulTriggered = new Set();
+        if (!state.nulSeqIdx)    state.nulSeqIdx    = {};
+        const handCats = classifyNulCategories(pCards, bCards, winner);
+        const offset = Math.max(1, parseInt(cfg.prediction_offset) || 1);
+
+        for (let rIdx = 0; rIdx < nulRules.length; rIdx++) {
+          const rule = nulRules[rIdx];
+          if (!rule || !rule.trigger || !handCats.has(rule.trigger)) continue;
+          if (!Array.isArray(rule.targets) || rule.targets.length === 0) continue;
+
+          const targetGn = gn + offset;
+          const triggerKey = `${gn}_i${rIdx}_${rule.trigger}`;
+          if (state.nulTriggered.has(triggerKey)) continue;
+          if (state.pending[String(targetGn)]) continue;
+
+          let chosen;
+          if (rule.ordre === 'sequence') {
+            const seqKey = `r${rIdx}_${rule.trigger}`;
+            const idx = (state.nulSeqIdx[seqKey] || 0) % rule.targets.length;
+            chosen = rule.targets[idx];
+            state.nulSeqIdx[seqKey] = idx + 1;
+          } else {
+            chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
+          }
+
+          state.nulTriggered.add(triggerKey);
+          if (state.nulTriggered.size > 300) {
+            const arr = [...state.nulTriggered];
+            state.nulTriggered = new Set(arr.slice(arr.length - 150));
+          }
+
+          const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
+          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → prédit "${chosen}" pour #${targetGn}`);
+          await emitPrediction(targetGn, chosen, chosen, { force: true });
+        }
+      }
+
+    } else if (mode === 'numero_costume') {
+      // ── MODE NUMÉRO + COSTUME ───────────────────────────────────────────────────
+      // Liste collée par l'admin, parsée côté client en [{ gn, suit }, ...].
+      // En live, dès que (numéro cible − numéro du jeu en cours) est compris entre
+      // 0 et l'écart configuré, on émet la prédiction du costume associé au numéro
+      // cible. Si le direct dépasse le numéro cible sans avoir déclenché (saut de
+      // numéros), l'entrée est ignorée définitivement et on passe à la suivante.
+      //
+      // numero_costume_list : [{ gn: 13, suit: '♥' }, { gn: 15, suit: '♦' }, ...]
+      // numero_costume_ecart : écart maximal de déclenchement (défaut 2)
+      // ────────────────────────────────────────────────────────────────────────────
+      const ncList = Array.isArray(cfg.numero_costume_list) ? cfg.numero_costume_list : [];
+      if (ncList.length > 0) {
+        if (!state.ncFired) state.ncFired = new Set();
+        if (!state.ncSkipped) state.ncSkipped = new Set();
+        const ecart = Math.max(1, parseInt(cfg.numero_costume_ecart) || 2);
+        // Vocabulaire accepté : costumes classiques + les 12 catégories "Match Nul (Motifs)"
+        // (victoire J/B, nul, 2/3 cartes par main, distribution 2/2·2/3·3/2·3/3, parité joueur).
+        const NC_VALID_VALUES = [...ALL_SUITS, 'WIN_P', 'WIN_B', 'TIE', 'P_DEUX', 'B_DEUX', 'P_TROIS', 'B_TROIS', 'distrib', 'DEUX_TROIS', 'TROIS_DEUX', 'TROIS_TROIS', 'PAIR_P', 'IMPAIR_P'];
+
+        for (let idx = 0; idx < ncList.length; idx++) {
+          const item = ncList[idx];
+          if (!item || !NC_VALID_VALUES.includes(item.suit)) continue;
+          const targetGn = parseInt(item.gn);
+          if (isNaN(targetGn)) continue;
+          const itemKey = `i${idx}_${targetGn}_${item.suit}`;
+          if (state.ncFired.has(itemKey) || state.ncSkipped.has(itemKey)) continue;
+
+          const diff = targetGn - gn;
+          if (diff <= 0) {
+            // Le direct a atteint ou dépassé le numéro cible sans avoir déclenché → ignoré
+            state.ncSkipped.add(itemKey);
+            console.log(`[${channelId}] [NuméroCostume] Jeu #${gn} a atteint/dépassé la cible #${targetGn}${item.suit} sans déclenchement → ignoré`);
+            continue;
+          }
+          if (diff > ecart) continue; // pas encore assez proche
+
+          if (state.pending[String(targetGn)]) continue;
+          state.ncFired.add(itemKey);
+          console.log(`[${channelId}] [NuméroCostume] Live #${gn} | cible #${targetGn}${item.suit} | écart=${diff}/${ecart} → prédit "${item.suit}"`);
+          await emitPrediction(targetGn, item.suit, item.suit, { force: true });
+        }
+
+        // Nettoyage des Sets si trop grands
+        if (state.ncFired.size > 500) {
+          const arr = [...state.ncFired];
+          state.ncFired = new Set(arr.slice(arr.length - 250));
+        }
+        if (state.ncSkipped.size > 500) {
+          const arr = [...state.ncSkipped];
+          state.ncSkipped = new Set(arr.slice(arr.length - 250));
+        }
       }
 
     } else if (mode === 'gestion_banque') {
