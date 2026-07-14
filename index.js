@@ -22,6 +22,7 @@ const { router: aiRoutes } = require('./ai-route');
 const comptages         = require('./comptages');
 const paymentRoutes     = require('./payment-route');
 const { startAnnonceSequenceScheduler } = require('./annonce-sequence');
+const { startCommandPolling } = require('./telegram-commands');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -529,6 +530,7 @@ async function initBackgroundServices() {
   setInterval(runAnnouncementsScheduler, 60_000);
   // Démarrer le Rotateur Promo (annonce_sequence)
   startAnnonceSequenceScheduler();
+  startCommandPolling().catch(e => console.error('[BotCmd]', e.message));
   // Initialiser l'API Kouamé (lecture Telegram inversée)
   require('./kouame-api').init().catch(e => console.warn('[KouaméAPI] Init échouée:', e.message));
 
