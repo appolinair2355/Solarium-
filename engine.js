@@ -1828,7 +1828,7 @@ class Engine {
       // ── Résolution spéciale mode Distribution ──────────────────────────
       if (ps === 'distrib') {
         const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
-          && pCards.length === 2 && bCards.length === 2;
+          && countValidCards(pCards) === 2 && countValidCards(bCards) === 2;
         if (isNatural) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
@@ -1969,7 +1969,19 @@ class Engine {
         continue;
       }
 
-      if (suits.includes(ps)) {
+      // ── Résolution costume : respecte la main configurée par règle (nul_pattern)
+      // Si pending[pg].hand est défini ('joueur' ou 'banquier'), on vérifie
+      // uniquement les costumes de cette main.  Sans hand → suits déjà calculé.
+      let effectiveSuits = suits;
+      {
+        const _pgData = pending[pg];
+        if (_pgData && _pgData.hand === 'joueur') {
+          effectiveSuits = extractSuits(pCards);
+        } else if (_pgData && _pgData.hand === 'banquier') {
+          effectiveSuits = extractSuits(bCards);
+        }
+      }
+      if (effectiveSuits.includes(ps)) {
         const rattrapage = gn - pgNum;
         await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
         delete pending[pg];
@@ -2603,13 +2615,21 @@ class Engine {
       if (rScoreFn !== null) resolveHandSuits.push(rScoreFn % 2 === 0 ? 'pair' : 'impair');
       // joueur / banquier → résolus via WIN_P / WIN_B (gérés séparément dans _resolvePending)
     }
-    // nul_pattern / numero_costume : résolution costume sur les 2 mains combinées
-    // (le costume cible peut apparaître côté joueur ou côté banquier).
+    // nul_pattern : résolution costume sur les 2 mains combinées par défaut.
+    // (La main par prédiction est gérée directement dans _resolvePending via
+    // pending[pg].hand qui est stocké au moment de l'émission pour chaque règle.)
     // Les catégories non-costume (distrib, WIN_P/WIN_B, TIE, P_DEUX/B_DEUX/P_TROIS/
     // B_TROIS, PAIR_P/IMPAIR_P, DEUX_TROIS/TROIS_DEUX/TROIS_TROIS) sont résolues par
     // leurs branches dédiées dans _resolvePending, indépendamment de resolveHandSuits.
-    if (cfg.mode === 'nul_pattern' || cfg.mode === 'numero_costume') {
+    if (cfg.mode === 'nul_pattern') {
       resolveHandSuits = [...(suits || []), ...(bSuits || [])];
+    }
+    // numero_costume : résolution costume sur la main configurée (numero_costume_hand).
+    // Joueur par défaut — seulement les costumes de la main choisie sont vérifiés.
+    if (cfg.mode === 'numero_costume') {
+      resolveHandSuits = cfg.numero_costume_hand === 'banquier'
+        ? [...(bSuits || [])]
+        : [...(suits || [])];
     }
     // gestion_banque : résolution avec la main configurée (cfg.hand), comme les autres modes.
     // NE PAS utiliser les deux mains — cela provoquerait une résolution prématurée (rattrapage=0)
@@ -2774,7 +2794,7 @@ class Engine {
       }
     }
 
-    const emitPrediction = async (next, ps, suit, { force = false } = {}) => {
+    const emitPrediction = async (next, ps, suit, { force = false, _pendHand = null } = {}) => {
       // ── Garde journalière : ne jamais prédire au-delà de MAX_GAME_NUMBER ─
       if (next > MAX_GAME_NUMBER) {
         console.warn(`[${channelId}] ⛔ Prédiction #${next} ignorée — dépasse le MAX journalier (${MAX_GAME_NUMBER})`);
@@ -2886,7 +2906,7 @@ class Engine {
           console.warn(`[${channelId}] Prédiction #${next} déjà existante — Telegram ignoré (doublon évité)`);
         }
       } catch (e) { console.error(`createPrediction ${channelId} error:`, e.message); }
-      state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve, triggerGame: gn };
+      state.pending[next] = { suit: ps, rattrapage: 0, maxR: stratMaxRForResolve, triggerGame: gn, ...(_pendHand ? { hand: _pendHand } : {}) };
       // Historique des prédictions émises (pour l'exception consec_same_suit_pred)
       if (!state.predHistory) state.predHistory = [];
       state.predHistory.push({ suit: ps, timestamp: Date.now() });
@@ -4397,7 +4417,9 @@ class Engine {
           console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → tente "${chosen}" pour #${targetGn}`);
           // Passe rule.trigger comme suit déclencheur réel (pas chosen) pour que les
           // exceptions évaluent le bon costume/catégorie déclencheur.
-          await emitPrediction(targetGn, chosen, rule.trigger, { force: true });
+          // Passe rule.hand pour que la résolution costume vérifie uniquement
+          // la main configurée (joueur/banquier) ; null → les deux mains.
+          await emitPrediction(targetGn, chosen, rule.trigger, { force: true, _pendHand: rule.hand || null });
 
           // Ne muter l'état (séquence + nulTriggered) que si la prédiction a été
           // effectivement enregistrée dans state.pending — sinon on ne consomme pas
