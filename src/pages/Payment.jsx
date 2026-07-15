@@ -28,6 +28,54 @@ export default function Payment() {
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const fileInputRef = useRef(null);
 
+  // ── "Déjà payé ?" — vérification directe dans la base de paiement externe ──
+  const [paidModalOpen, setPaidModalOpen] = useState(false);
+  const [paidIdentifiant, setPaidIdentifiant] = useState('');
+  const [paidPassword, setPaidPassword] = useState('');
+  const [paidChecking, setPaidChecking] = useState(false);
+  const [paidError, setPaidError] = useState('');
+  const [paidResults, setPaidResults] = useState(null);
+
+  const checkAlreadyPaid = async () => {
+    if (!paidIdentifiant || !paidPassword) return;
+    setPaidChecking(true);
+    setPaidError('');
+    setPaidResults(null);
+    try {
+      const res = await fetch('/api/payments/check-external', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ identifiant: paidIdentifiant, mot_de_passe: paidPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || autoT('Vérification impossible'));
+      setPaidResults(data.results || []);
+      if (data.user) setUser(data.user);
+    } catch (e) {
+      setPaidError(e.message);
+    } finally {
+      setPaidChecking(false);
+    }
+  };
+
+  const closePaidModal = () => {
+    setPaidModalOpen(false);
+    setPaidIdentifiant('');
+    setPaidPassword('');
+    setPaidError('');
+    setPaidResults(null);
+  };
+
+  const PAID_STATUS_LABEL = {
+    granted_now: { icon: '✅', text: autoT('Activé maintenant'), color: '#86efac' },
+    already_processed: { icon: '☑️', text: autoT('Déjà activé'), color: '#93c5fd' },
+    thanked: { icon: '🙏', text: autoT('Merci pour votre soutien'), color: '#fcd34d' },
+    pending_admin_review: { icon: '⏳', text: autoT("En attente de vérification par l'administrateur"), color: '#fbbf24' },
+    no_target_account: { icon: '⚠️', text: autoT('Compte introuvable'), color: '#fca5a5' },
+    error: { icon: '❌', text: autoT('Erreur'), color: '#fca5a5' },
+  };
+
   useEffect(() => {
     fetch('/api/payments/plans', { credentials: 'include' })
       .then(r => r.json())
@@ -250,6 +298,16 @@ export default function Payment() {
             {surchargePct > 0 && (
               <span style={{ opacity: 0.85 }}>· {autoT('Tarif')} +{surchargePct} %</span>
             )}
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <button
+              onClick={() => setPaidModalOpen(true)}
+              className="btn btn-ghost btn-sm"
+              style={{ color: '#93c5fd', border: '1px solid rgba(59,130,246,0.35)' }}
+            >
+              💳 {autoT('Déjà payé ?')}
+            </button>
           </div>
         </div>
 
@@ -654,6 +712,109 @@ export default function Payment() {
           </div>
         )}
       </div>
+
+      {/* MODAL "Déjà payé ?" */}
+      {paidModalOpen && (
+        <div
+          onClick={closePaidModal}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000, padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 460, width: '100%', background: '#0f172a',
+              border: '1px solid rgba(59,130,246,0.3)', borderRadius: 16,
+              padding: 24, maxHeight: '85vh', overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ color: '#fff', fontSize: 18, margin: 0 }}>💳 {autoT('Déjà payé ?')}</h3>
+              <button onClick={closePaidModal} className="btn btn-ghost btn-sm">✕</button>
+            </div>
+
+            {!paidResults && (
+              <>
+                <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 18 }}>
+                  {autoT("Entrez l'identifiant et le mot de passe utilisés lors de votre paiement pour retrouver et activer automatiquement votre accès.")}
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <input
+                    type="text"
+                    placeholder={autoT('Identifiant de paiement')}
+                    value={paidIdentifiant}
+                    onChange={(e) => setPaidIdentifiant(e.target.value)}
+                    className="input"
+                    style={{ width: '100%' }}
+                  />
+                  <input
+                    type="password"
+                    placeholder={autoT('Mot de passe de paiement')}
+                    value={paidPassword}
+                    onChange={(e) => setPaidPassword(e.target.value)}
+                    className="input"
+                    style={{ width: '100%' }}
+                  />
+                  {paidError && (
+                    <div style={{ color: '#fca5a5', fontSize: 13 }}>⚠️ {paidError}</div>
+                  )}
+                  <button
+                    onClick={checkAlreadyPaid}
+                    disabled={paidChecking || !paidIdentifiant || !paidPassword}
+                    className="btn btn-gold"
+                    style={{ width: '100%' }}
+                  >
+                    {paidChecking ? autoT('Vérification...') : autoT('Vérifier mon paiement')}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {paidResults && (
+              <div>
+                <h4 style={{ color: '#fbbf24', fontSize: 14, marginBottom: 12 }}>
+                  📊 {autoT('Bilan de votre compte')}
+                </h4>
+                {paidResults.length === 0 ? (
+                  <div style={{ color: '#94a3b8', fontSize: 13 }}>{autoT('Aucun paiement trouvé.')}</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {paidResults.map((r, i) => {
+                      const s = PAID_STATUS_LABEL[r.status] || { icon: 'ℹ️', text: r.status, color: '#94a3b8' };
+                      return (
+                        <div key={i} style={{
+                          padding: '10px 14px', borderRadius: 10,
+                          background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(255,255,255,0.06)',
+                        }}>
+                          <div style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                            {r.purpose || autoT('Paiement')} — {r.amount}
+                          </div>
+                          <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                            {r.paid_at ? new Date(r.paid_at).toLocaleString('fr-FR') : '—'} · réf: {r.reference}
+                          </div>
+                          <div style={{ color: s.color, fontSize: 12, marginTop: 6, fontWeight: 700 }}>
+                            {s.icon} {s.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <button
+                  onClick={() => { closePaidModal(); refreshMyRequests(); }}
+                  className="btn btn-gold"
+                  style={{ width: '100%', marginTop: 16 }}
+                >
+                  {autoT('OK')}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
