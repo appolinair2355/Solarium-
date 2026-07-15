@@ -9733,7 +9733,7 @@ function AdminPanel() {
                       });
                     };
                     const addRule = () => {
-                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', targets: [], ordre: 'aleatoire' }] }));
+                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', targets: [], ordre: 'aleatoire', hand: null }] }));
                       setNulActiveRuleIdx(rules.length);
                     };
                     const removeRule = (idx) => {
@@ -9765,6 +9765,11 @@ function AdminPanel() {
                                   <strong style={{ color: '#818cf8' }}>{catLabel(rule.trigger)}</strong>
                                   <span style={{ color: '#475569', margin: '0 6px' }}>→</span>
                                   {rule.targets.length > 0 ? rule.targets.map(catLabel).join(', ') : <span style={{ color: '#64748b' }}>(aucune cible)</span>}
+                                  {rule.targets.some(t => ['♠','♥','♦','♣'].includes(t)) && rule.hand && (
+                                    <span style={{ marginLeft: 8, fontSize: 10, color: '#6366f1', background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: 4 }}>
+                                      {rule.hand === 'joueur' ? '👤 Joueur' : '🏦 Banquier'}
+                                    </span>
+                                  )}
                                 </div>
                                 <button type="button" onClick={(e) => { e.stopPropagation(); removeRule(idx); }}
                                   style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
@@ -9811,6 +9816,23 @@ function AdminPanel() {
                                       ))}
                                     </div>
                                   </div>
+                                  {/* Main à vérifier — visible uniquement si la règle cible des costumes (♠♥♦♣) */}
+                                  {rule.targets.some(t => ['♠','♥','♦','♣'].includes(t)) && (
+                                    <div style={{ marginTop: 10 }}>
+                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Main à vérifier (costumes ♠♥♦♣)</div>
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        {[['joueur','👤 Joueur'],['banquier','🏦 Banquier'],[null,'♠+♥ Les deux']].map(([val, lbl]) => {
+                                          const isActive = (rule.hand ?? null) === val;
+                                          return (
+                                            <button key={String(val)} type="button" onClick={() => updateRule(idx, { hand: val })}
+                                              style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${isActive ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isActive ? 'rgba(99,102,241,0.2)' : 'transparent', color: isActive ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                              {lbl}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -9928,7 +9950,12 @@ function AdminPanel() {
                         )}
                         {(stratForm.numero_costume_list || []).length > 0 && (
                           <div style={{ marginTop: 14 }}>
-                            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8 }}>ENTRÉES PARSÉES ({stratForm.numero_costume_list.length})</div>
+                            <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8 }}>
+                              ENTRÉES PARSÉES ({stratForm.numero_costume_list.length})
+                              <span style={{ marginLeft: 10, fontSize: 10, color: '#6366f1', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+                                Main vérifiée : {stratForm.numero_costume_hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur'}
+                              </span>
+                            </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
                               {stratForm.numero_costume_list.map((it, idx) => (
                                 <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12 }}>
