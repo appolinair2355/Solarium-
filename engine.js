@@ -1897,7 +1897,16 @@ class Engine {
 
       // ── Résolution spéciale mode Match Nul ─────────────────────────────
       } else if (ps === 'TIE') {
-        if (winner === 'Tie') {
+        // Filet de sécurité : si winner est null (ex: chemin sans winner passé),
+        // on l'infère depuis les scores des cartes — en Baccarat P=B → Tie.
+        let effectiveWinnerTie = winner;
+        if (!effectiveWinnerTie && pCards && bCards) {
+          const _pSc = baccaratHandScore(pCards);
+          const _bSc = baccaratHandScore(bCards);
+          if (_pSc !== null && _bSc !== null)
+            effectiveWinnerTie = _pSc === _bSc ? 'Tie' : _pSc > _bSc ? 'Player' : 'Banker';
+        }
+        if (effectiveWinnerTie === 'Tie') {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Match Nul] ✅ Tie → gagne (R${rattrapage})`);
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -2515,6 +2524,78 @@ class Engine {
     return false;
   }
 
+  /**
+   * Lecture des jeux anciens (LJA) — vérifie si le costume à prédire (ps) était
+   * présent dans les N derniers jeux terminés avant gn, et le redirige si oui.
+   * @param {object} cfg   - Config de la stratégie
+   * @param {string} ps    - Costume initialement prédit
+   * @param {object} state - État de la stratégie
+   * @param {number} gn    - Numéro du jeu lanceur (déclencheur)
+   * @returns {string}     - Costume à émettre (peut différer de ps)
+   */
+  _applyLectureJeuxAnciens(cfg, ps, state, gn) {
+    if (!cfg.lja_enabled) return ps;
+    const rules = Array.isArray(cfg.lja_rules) ? cfg.lja_rules : [];
+    if (rules.length === 0) return ps;
+    const rule = rules.find(r => r.suit === ps);
+    if (!rule) return ps;
+    const nb = Math.max(1, parseInt(cfg.lja_nb_jeux) || 3);
+    // Récupère les nb derniers jeux TERMINÉS avant gn dans l'historique d'attente
+    const hist = (state.attenteHistory || []).filter(e => e.gn < gn).slice(-nb);
+    if (hist.length === 0) return ps;
+    // Vérifie si le costume/condition était présent dans AU MOINS UN des jeux
+    const checkType = rule.check_type || 'costume_joueur';
+    const wasPresent = hist.some(e => this._ljaCheckCondition(e, ps, checkType));
+    if (!wasPresent) return ps;
+    // Rediriger vers le costume configuré
+    const siPresent = rule.si_present;
+    if (!siPresent || (Array.isArray(siPresent) && siPresent.length === 0)) return ps;
+    const ALL_SUITS = ['♠','♥','♦','♣'];
+    const candidates = Array.isArray(siPresent)
+      ? siPresent.filter(s => ALL_SUITS.includes(s))
+      : (ALL_SUITS.includes(siPresent) ? [siPresent] : []);
+    if (candidates.length === 0) return ps;
+    const ordre = rule.ordre || 'fixe';
+    let chosen;
+    if (ordre === 'aleatoire') {
+      chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    } else if (ordre === 'sequence') {
+      if (!state.ljaSeqIndex) state.ljaSeqIndex = {};
+      const idx = (state.ljaSeqIndex[ps] || 0) % candidates.length;
+      chosen = candidates[idx];
+      state.ljaSeqIndex[ps] = idx + 1;
+    } else {
+      chosen = candidates[0];
+    }
+    console.log(`[LJA] ${ps} présent dans ${hist.length}/${nb} jeux anciens (check: ${checkType}) → redirigé vers ${chosen} (${ordre})`);
+    return chosen;
+  }
+
+  /**
+   * Vérifie si une condition LJA est remplie pour un jeu e.
+   * @param {object} e         - Entrée attenteHistory
+   * @param {string} suit      - Costume à rechercher (pour check types 'costume_*')
+   * @param {string} checkType - Type de condition
+   * @returns {boolean}
+   */
+  _ljaCheckCondition(e, suit, checkType) {
+    switch (checkType) {
+      case 'costume_joueur':       return (e.pSuits || []).includes(suit);
+      case 'costume_banquier':     return (e.bSuits || []).includes(suit);
+      case 'pair':                 return e.pScore != null && e.pScore % 2 === 0;
+      case 'impair':               return e.pScore != null && e.pScore % 2 !== 0;
+      case 'pair_banquier':        return e.bScore != null && e.bScore % 2 === 0;
+      case 'impair_banquier':      return e.bScore != null && e.bScore % 2 !== 0;
+      case 'victoire_joueur':      return e.winner === 'Player';
+      case 'victoire_banquier':    return e.winner === 'Banker';
+      case 'deux_cartes_joueur':   return e.pCount === 2;
+      case 'deux_cartes_banquier': return e.bCount === 2;
+      case 'trois_cartes_joueur':  return e.pCount === 3;
+      case 'trois_cartes_banquier':return e.bCount === 3;
+      default:                     return (e.pSuits || []).includes(suit);
+    }
+  }
+
   async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards, winner = null) {
     // Stratégie supprimée entre le début du tick et maintenant → on ignore
     if (!this.custom[id]) return;
@@ -2740,7 +2821,7 @@ class Engine {
       pScore: baccaratHandScore(pCards),
       bScore: baccaratHandScore(bCards),
     });
-    if (state.attenteHistory.length > Math.max(5, parseInt(cfg.attente_n) || 5)) state.attenteHistory.shift();
+    if (state.attenteHistory.length > Math.max(20, parseInt(cfg.attente_n) || 5, parseInt(cfg.lja_nb_jeux) || 5)) state.attenteHistory.shift();
 
     const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
     const offset = Math.max(1, parseInt(prediction_offset) || 1);
@@ -2817,6 +2898,9 @@ class Engine {
       if (this._checkExceptions(exceptions, ps, suit, state, { pCards, bCards, hand: cfg.hand || 'joueur' }, gn)) return;
       // Exception C (pre_emit_suit_inverse) : rediriger vers l'inverse si nécessaire
       if (state._exRedirectSuit) { ps = state._exRedirectSuit; state._exRedirectSuit = null; }
+
+      // ── Lecture des jeux anciens : redirection de costume si nécessaire ──────
+      ps = this._applyLectureJeuxAnciens(cfg, ps, state, gn);
 
       // ── Filtre d'attente : vérification sur l'historique des N derniers jeux ─
       // Lit les N derniers jeux stockés dans attenteHistory, vérifie si ps était
@@ -5200,6 +5284,20 @@ class Engine {
         if (game.player_cards.length < 2 || game.banker_cards.length < 2) continue;
         if (!suits.length && !bSuits.length) continue;
 
+        // ── Inférence du gagnant depuis les scores quand l'API ne le fournit pas ──
+        // L'API 1xBet peut terminer un jeu via game.F ou sc.CPS='Match finished' sans
+        // inclure la clé S='Tie'/'Win1'/'Win2' → game.winner serait null.
+        // En Baccarat le gagnant est toujours déductible des scores : P=B → Tie.
+        let gameWinner = game.winner || null;
+        if (!gameWinner) {
+          const _pScore = baccaratHandScore(game.player_cards  || []);
+          const _bScore = baccaratHandScore(game.banker_cards  || []);
+          if (_pScore !== null && _bScore !== null) {
+            if (_pScore === _bScore) gameWinner = 'Tie';
+            else gameWinner = _pScore > _bScore ? 'Player' : 'Banker';
+          }
+        }
+
         // ── Détection jeu #1 → reset complet (nouveau jour / minuit) ─────────
         // CRITIQUE : cette détection est VOLONTAIREMENT hors du bloc
         // `processed.has()` car le jeu #1 de la VEILLE est déjà dans c1.processed.
@@ -5231,8 +5329,15 @@ class Engine {
                 const rSuits  = extractSuits(rg.player_cards  || []);
                 const rbSuits = extractSuits(rg.banker_cards  || []);
                 if (!rSuits.length && !rbSuits.length) continue;
+                // Inférer le gagnant si absent
+                let rgWinner = rg.winner || null;
+                if (!rgWinner) {
+                  const _rp = baccaratHandScore(rg.player_cards || []);
+                  const _rb = baccaratHandScore(rg.banker_cards || []);
+                  if (_rp !== null && _rb !== null) rgWinner = _rp === _rb ? 'Tie' : _rp > _rb ? 'Player' : 'Banker';
+                }
                 console.log(`[Engine] ✅ [Récupéré] Traitement jeu #${rg.game_number} | P:${rSuits.join(',') || '—'} B:${rbSuits.join(',') || '—'}`);
-                await this.processGame(rg.game_number, rSuits, rbSuits, rg.player_cards, rg.banker_cards, rg.winner || null);
+                await this.processGame(rg.game_number, rSuits, rbSuits, rg.player_cards, rg.banker_cards, rgWinner);
                 if (rg.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = rg.game_number;
               }
               // Si le re-fetch a tout récupéré, pas besoin de reset
@@ -5245,15 +5350,15 @@ class Engine {
               this._resetCountersOnGap(fromGn, toGn);
             }
           }
-          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
+          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${gameWinner || '?'}`);
           hadNew = true;
         }
-        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
+        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, gameWinner);
         // Mise à jour compteurs globaux / écarts : UNE SEULE FOIS par jeu réellement nouveau
         if (isNewGame) {
           // Compteur instantané de costumes (suit-counter-service)
           // extractSuitsAll : sans déduplication → 3 trèfles = +3 (et non +1)
-          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards), game.player_cards || [], game.banker_cards || [], game.winner || null); } catch {}
+          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards), game.player_cards || [], game.banker_cards || [], gameWinner); } catch {}
           // Compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
           try { require('./comptages').onFinishedGame(game); }
           catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }

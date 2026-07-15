@@ -882,6 +882,21 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         return out;
       })(),
       attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
+      // Lecture des jeux anciens (LJA)
+      lja_enabled: req.body.lja_enabled === true || req.body.lja_enabled === 'true',
+      lja_nb_jeux: Math.max(1, Math.min(20, parseInt(req.body.lja_nb_jeux) || 3)),
+      lja_rules: (() => {
+        const rules = req.body.lja_rules;
+        if (!Array.isArray(rules)) return [];
+        const ALL_S = ['♠','♥','♦','♣'];
+        const ALL_CT = ['costume_joueur','costume_banquier','pair','impair','pair_banquier','impair_banquier','victoire_joueur','victoire_banquier','deux_cartes_joueur','deux_cartes_banquier','trois_cartes_joueur','trois_cartes_banquier'];
+        return rules.filter(r => r && ALL_S.includes(r.suit)).map(r => ({
+          suit:       r.suit,
+          check_type: ALL_CT.includes(r.check_type) ? r.check_type : 'costume_joueur',
+          si_present: Array.isArray(r.si_present) ? r.si_present.filter(s => ALL_S.includes(s)) : (ALL_S.includes(r.si_present) ? [r.si_present] : []),
+          ordre:      ['fixe','aleatoire','sequence'].includes(r.ordre) ? r.ordre : 'fixe',
+        }));
+      })(),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1238,6 +1253,21 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         return out;
       })(),
       attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
+      // Lecture des jeux anciens (LJA)
+      lja_enabled: req.body.lja_enabled === true || req.body.lja_enabled === 'true',
+      lja_nb_jeux: Math.max(1, Math.min(20, parseInt(req.body.lja_nb_jeux) || 3)),
+      lja_rules: (() => {
+        const rules = req.body.lja_rules;
+        if (!Array.isArray(rules)) return [];
+        const ALL_S = ['♠','♥','♦','♣'];
+        const ALL_CT = ['costume_joueur','costume_banquier','pair','impair','pair_banquier','impair_banquier','victoire_joueur','victoire_banquier','deux_cartes_joueur','deux_cartes_banquier','trois_cartes_joueur','trois_cartes_banquier'];
+        return rules.filter(r => r && ALL_S.includes(r.suit)).map(r => ({
+          suit:       r.suit,
+          check_type: ALL_CT.includes(r.check_type) ? r.check_type : 'costume_joueur',
+          si_present: Array.isArray(r.si_present) ? r.si_present.filter(s => ALL_S.includes(s)) : (ALL_S.includes(r.si_present) ? [r.si_present] : []),
+          ordre:      ['fixe','aleatoire','sequence'].includes(r.ordre) ? r.ordre : 'fixe',
+        }));
+      })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
