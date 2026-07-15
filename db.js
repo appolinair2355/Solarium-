@@ -129,7 +129,14 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_channels JSONB DEFAULT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS show_counter_channels JSONB DEFAULT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS users_promo_code_uniq ON users(promo_code) WHERE promo_code IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_id_uniq ON users(telegram_id) WHERE telegram_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS payment_ext_seen (
+        ref TEXT PRIMARY KEY,
+        granted_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS payment_requests (
         id SERIAL PRIMARY KEY,
@@ -517,6 +524,30 @@ async function getUserByLogin(login) {
 async function getUserByUsername(username) {
   if (USE_PG) { const r = await pgPool.query('SELECT * FROM users WHERE username = $1', [username]); return r.rows[0] || null; }
   return jsondb.getUserByUsername(username);
+}
+
+async function getUserByTelegramId(telegramId) {
+  const tgId = String(telegramId || '').trim();
+  if (!tgId) return null;
+  if (USE_PG) { const r = await pgPool.query('SELECT * FROM users WHERE telegram_id = $1', [tgId]); return r.rows[0] || null; }
+  const all = jsondb.getAllUsers();
+  return all.find(u => String(u.telegram_id || '') === tgId) || null;
+}
+
+async function linkTelegramId(userId, telegramId) {
+  const tgId = String(telegramId || '').trim();
+  if (USE_PG) { await pgPool.query('UPDATE users SET telegram_id = $1 WHERE id = $2', [tgId, userId]); return; }
+  jsondb.updateUser(userId, { telegram_id: tgId });
+}
+
+// ── Dédup des paiements externes déjà crédités (évite double-crédit) ────────
+async function isPaymentExtSeen(ref) {
+  if (USE_PG) { const r = await pgPool.query('SELECT 1 FROM payment_ext_seen WHERE ref = $1', [String(ref)]); return r.rows.length > 0; }
+  return (jsondb.getSetting(`payment_ext_seen_${ref}`)) ? true : false;
+}
+async function markPaymentExtSeen(ref) {
+  if (USE_PG) { await pgPool.query('INSERT INTO payment_ext_seen (ref) VALUES ($1) ON CONFLICT DO NOTHING', [String(ref)]); return; }
+  jsondb.setSetting(`payment_ext_seen_${ref}`, '1');
 }
 
 async function getAllUsers() {
@@ -1740,6 +1771,7 @@ async function deletePartnerCode(id) {
 module.exports = {
   pool, USE_PG, MAIN_DB_URL, pgPoolCards, USE_CARDS_PG, initDB, reinitAdmins,
   getUser, getUserByLogin, getUserByUsername, getAllUsers, getProUsers,
+  getUserByTelegramId, linkTelegramId, isPaymentExtSeen, markPaymentExtSeen,
   updateLastSeen, banInactiveUsers,
   getUserByPromoCode, isPromoCodeTaken,
   createPartnerCode, getPartnerCodes, getPartnerCodeByCode, markPartnerCodeUsed, deletePartnerCode,

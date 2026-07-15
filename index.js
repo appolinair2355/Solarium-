@@ -533,6 +533,8 @@ async function initBackgroundServices() {
   startCommandPolling().catch(e => console.error('[BotCmd]', e.message));
   // Initialiser l'API Kouamé (lecture Telegram inversée)
   require('./kouame-api').init().catch(e => console.warn('[KouaméAPI] Init échouée:', e.message));
+  // Démarrer la vérification périodique des paiements externes (base admin)
+  require('./payment-ext').startPolling(60_000);
 
   // ── Nettoyage automatique des logs en mémoire (toutes les 20 min) ──────────
   const CLEANUP_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes

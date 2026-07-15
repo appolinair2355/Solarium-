@@ -230,9 +230,56 @@ const FINISHED_PHASES = ['Win1', 'Win2', 'Tie', 'Match finished'];
 function parseWinner(scSList) {
   for (const e of (scSList || [])) {
     if (e.Key === 'S') {
-      if (e.Value === 'Win1') return 'Player';
-      if (e.Value === 'Win2') return 'Banker';
-      if (e.Value === 'Tie')  return 'Tie';
+      const v = String(e.Value || '').trim();
+      const vLc = v.toLowerCase();
+      if (v === 'Win1') return 'Player';
+      if (v === 'Win2') return 'Banker';
+      // ── Tie : le flux 1xBet n'envoie pas toujours littéralement "Tie" ────────
+      // Valeurs alternatives observées/possibles selon la source (proxy, miroir,
+      // version d'API) : "Tie", "Win0", "Draw", "X", "0", "Égalité". Sans ce
+      // fallback, le mode "Match Nul (Motifs)" ne déclenche JAMAIS car `winner`
+      // reste `null` pour les vraies égalités (le score-fallback ci-dessous
+      // rattrape aussi le cas où aucune valeur S ne matche du tout).
+      if (vLc === 'tie' || vLc === 'win0' || vLc === 'draw' || vLc === 'égalité' || vLc === 'egalite' || v === '0') return 'Tie';
+    }
+  }
+  return null;
+}
+
+// ── Valeur/score d'une main pour la dérivation du gagnant par les scores ─────
+// Utilisé en secours quand le flux live ne renvoie pas explicitement le
+// vainqueur (notamment les Match Nul, souvent mal signalés par le flux brut).
+function cardValue(card) {
+  const r = String(card?.R ?? '').trim();
+  if (!r || r === '?') return 0;
+  const u = r.toUpperCase();
+  if (u === 'A') return 1;
+  if (['J', 'Q', 'K', 'T', '10'].includes(u)) return 0;
+  const n = parseInt(u, 10);
+  if (Number.isNaN(n)) return 0;
+  return n >= 10 ? 0 : n;
+}
+function handScore(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return null;
+  return cards.reduce((acc, c) => acc + cardValue(c), 0) % 10;
+}
+
+// ── Dérive le gagnant avec repli sur les scores de main ──────────────────────
+// Priorité au flux (parseWinner) ; si celui-ci ne renvoie rien (valeur S
+// inconnue/absente) ET que les deux mains ont au moins 2 cartes, on calcule
+// les scores baccarat et on compare — reproduit exactement la logique déjà
+// utilisée par comptages.js pour les statistiques, mais appliquée ICI en
+// amont afin que `winner` soit fiable pour le moteur de prédiction en live
+// (mode "Match Nul (Motifs)", résolution TIE, etc.).
+function deriveWinner(scSList, player, banker) {
+  const fromFeed = parseWinner(scSList);
+  if (fromFeed) return fromFeed;
+  if (Array.isArray(player) && Array.isArray(banker) && player.length >= 2 && banker.length >= 2) {
+    const ps = handScore(player);
+    const bs = handScore(banker);
+    if (ps !== null && bs !== null) {
+      if (ps === bs) return 'Tie';
+      return ps > bs ? 'Player' : 'Banker';
     }
   }
   return null;
@@ -245,13 +292,16 @@ function parsePhase(scSList) {
   return null;
 }
 
-function isGameFinished(game, scSList) {
+function isGameFinished(game, scSList, player, banker) {
   if (game.F) return true;
   const sc = game.SC || {};
   if (sc.CPS === 'Match finished') return true;
   const phase = parsePhase(scSList);
   if (phase && FINISHED_PHASES.includes(phase)) return true;
-  const winner = parseWinner(scSList);
+  // Repli scores : couvre le cas où le flux ne signale pas explicitement Win1/
+  // Win2/Tie/phase-terminée mais où les 2 mains sont déjà complètes (≥2 cartes
+  // chacune) — évite qu'une vraie égalité reste indéfiniment "non terminée".
+  const winner = deriveWinner(scSList, player, banker);
   if (winner !== null) return true;
   return false;
 }
@@ -480,8 +530,8 @@ function parseChampData(data) {
     results.push({
       game_number:  gn,
       player_cards: player, banker_cards: banker,
-      winner:       parseWinner(scS),
-      is_finished:  isGameFinished(game, scS),
+      winner:       deriveWinner(scS, player, banker),
+      is_finished:  isGameFinished(game, scS, player, banker),
       phase:        parsePhase(scS),
       score:        sc.FS || {},
       championship: champName,
@@ -513,8 +563,8 @@ function parseRawData(data) {
       results.push({
         game_number:  gn,
         player_cards: player, banker_cards: banker,
-        winner:       parseWinner(scS),
-        is_finished:  isGameFinished(game, scS),
+        winner:       deriveWinner(scS, player, banker),
+        is_finished:  isGameFinished(game, scS, player, banker),
         phase:        parsePhase(scS),
         score:        sc.FS || {},
         championship: champ.L || champ.N || '',

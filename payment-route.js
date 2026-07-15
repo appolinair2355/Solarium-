@@ -247,6 +247,41 @@ router.get('/plans', async (req, res) => {
   });
 });
 
+// ── "Déjà payé ?" — vérifie l'identifiant/mot de passe utilisés lors du
+//    paiement DIRECTEMENT contre la base de paiement externe de l'admin,
+//    liste le bilan des paiements, et crédite automatiquement le compte
+//    Baccarat Pro actuellement connecté selon le motif du paiement. ──────
+router.post('/check-external', requireAuth, async (req, res) => {
+  const { identifiant, mot_de_passe } = req.body || {};
+  if (!identifiant || !mot_de_passe) return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
+  try {
+    const paymentExt = require('./payment-ext');
+    const user = await db.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ error: 'Session invalide' });
+
+    const check = await paymentExt.checkPaymentCredentials(identifiant, mot_de_passe);
+    if (!check.ok) {
+      const messages = {
+        not_configured: 'La vérification des paiements n\'est pas encore configurée par l\'administrateur.',
+        not_found: 'Aucun paiement trouvé pour cet identifiant.',
+        bad_password: 'Mot de passe incorrect.',
+        db_error: 'Vérification impossible pour le moment, réessayez plus tard.',
+      };
+      return res.status(404).json({ error: messages[check.reason] || 'Vérification impossible', reason: check.reason });
+    }
+
+    const results = await paymentExt.creditRowsForUser(check.rows, user);
+    const refreshedUser = await db.getUser(user.id);
+    res.json({ results, user: publicUserSafe(refreshedUser) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function publicUserSafe(u) {
+  try { return require('./auth').publicUser(u); } catch { return { id: u.id, username: u.username, subscription_expires_at: u.subscription_expires_at }; }
+}
+
 // ── Créer une demande de paiement (étape 1) ─────────────────────────
 router.post('/request', requireAuth, async (req, res) => {
   const { plan_id } = req.body;
@@ -560,3 +595,4 @@ module.exports = router;
 module.exports.BASE_PLANS = BASE_PLANS;
 module.exports.plansFor = plansFor;
 module.exports.priceForType = priceForType;
+module.exports.doApprovePayment = doApprovePayment;

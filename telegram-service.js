@@ -273,6 +273,353 @@ async function startBot() {
   bot.on('message', handleIncoming);
   bot.on('polling_error', err => { if (!err.message?.includes('ETELEGRAM')) return; console.error('Telegram polling error:', err.message); });
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  ADMIN & COMPTE — reconnaissance par ID Telegram, inscription/liaison,
+  //  et commandes admin complètes (approbation, durée, paiements, import/export)
+  // ══════════════════════════════════════════════════════════════════════════
+  const bcrypt   = require('bcryptjs');
+  const dbAcc    = require('./db');
+  const pendingLink = new Map(); // userId(tgId) -> { step, username }
+
+  async function isAdminSender(tgUserId) {
+    let adminId = '';
+    try { adminId = (await dbAcc.getSetting('bot_admin_tg_id') || '').trim(); } catch {}
+    return !!adminId && String(tgUserId) === adminId;
+  }
+
+  function fmtExpiry(u) {
+    if (!u.subscription_expires_at) return 'aucun abonnement';
+    const d = new Date(u.subscription_expires_at);
+    const active = d > new Date();
+    return `${active ? '✅ actif jusqu\'au' : '❌ expiré le'} ${d.toLocaleString('fr-FR')}`;
+  }
+
+  bot.on('message', async (msg) => {
+    const tgUserId = String(msg.from?.id || '');
+    const chatId   = String(msg.chat?.id || '');
+    const text     = (msg.text || '').trim();
+    if (!tgUserId || msg.chat?.type !== 'private') return;
+
+    // ── /start ────────────────────────────────────────────────────────────
+    if (text === '/start') {
+      if (await isAdminSender(tgUserId)) {
+        try {
+          await bot.sendMessage(chatId,
+            `👋 Bienvenue Sossou Kouamé !\n\nVous êtes reconnu comme <b>administrateur</b> de Baccarat Pro.\n\nTapez /adminhelp pour voir toutes les commandes disponibles.`,
+            { parse_mode: 'HTML' }
+          );
+        } catch {}
+        return;
+      }
+      const existing = await dbAcc.getUserByTelegramId(tgUserId);
+      if (existing) {
+        try {
+          await bot.sendMessage(chatId,
+            `👋 Bienvenue ${existing.username} !\n\n${fmtExpiry(existing)}`,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[
+              { text: '💳 Déjà payé ?', callback_data: 'acc:paid' },
+            ]] } }
+          );
+        } catch {}
+        return;
+      }
+      pendingLink.set(tgUserId, { step: 'choice' });
+      try {
+        await bot.sendMessage(chatId,
+          `👋 Bienvenue sur Baccarat Pro !\n\nVous n'avez pas encore de compte lié à ce Telegram.`,
+          { reply_markup: { inline_keyboard: [[
+            { text: '📝 S\'inscrire', callback_data: 'acc:register' },
+            { text: '🔑 J\'ai déjà un compte', callback_data: 'acc:login' },
+          ]] } }
+        );
+      } catch {}
+      return;
+    }
+
+    // ── Suite de la liaison de compte (saisie username / password) ────────
+    const pend = pendingLink.get(tgUserId);
+    if (pend && !text.startsWith('/')) {
+      if (pend.step === 'ask_username_login' || pend.step === 'ask_username_register') {
+        pend.username = text;
+        pend.step = pend.step === 'ask_username_login' ? 'ask_password_login' : 'ask_password_register';
+        pendingLink.set(tgUserId, pend);
+        try { await bot.sendMessage(chatId, pend.step === 'ask_password_login' ? '🔑 Mot de passe :' : '🔑 Choisissez un mot de passe :'); } catch {}
+        return;
+      }
+      if (pend.step === 'ask_password_login') {
+        pendingLink.delete(tgUserId);
+        try {
+          const user = await dbAcc.getUserByLogin(pend.username);
+          const ok = user && user.password_hash && await bcrypt.compare(text, user.password_hash);
+          if (!ok) { await bot.sendMessage(chatId, '❌ Identifiant ou mot de passe incorrect. Tapez /start pour réessayer.'); return; }
+          const already = await dbAcc.getUserByTelegramId(tgUserId);
+          if (already && already.id !== user.id) { await bot.sendMessage(chatId, '❌ Ce Telegram est déjà lié à un autre compte.'); return; }
+          await dbAcc.linkTelegramId(user.id, tgUserId);
+          await bot.sendMessage(chatId, `✅ Compte lié ! Bienvenue ${user.username}.\n\n${fmtExpiry(user)}`, { parse_mode: 'HTML' });
+        } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
+        return;
+      }
+      if (pend.step === 'ask_username_paid') {
+        pend.paidUsername = text;
+        pend.step = 'ask_password_paid';
+        pendingLink.set(tgUserId, pend);
+        try { await bot.sendMessage(chatId, '🔑 Mot de passe utilisé lors du paiement :'); } catch {}
+        return;
+      }
+      if (pend.step === 'ask_password_paid') {
+        pendingLink.delete(tgUserId);
+        try {
+          const paymentExt = require('./payment-ext');
+          const targetUser = await dbAcc.getUserByTelegramId(tgUserId);
+          if (!targetUser) { await bot.sendMessage(chatId, '❌ Aucun compte Baccarat Pro lié. Tapez /start pour vous inscrire ou vous connecter.'); return; }
+          const check = await paymentExt.checkPaymentCredentials(pend.paidUsername, text);
+          if (!check.ok) {
+            const msg = check.reason === 'not_configured' ? '⚠️ La vérification des paiements n\'est pas encore configurée. Contactez l\'administrateur.'
+              : check.reason === 'not_found' ? '❌ Aucun paiement trouvé pour cet identifiant.'
+              : check.reason === 'bad_password' ? '❌ Mot de passe incorrect.'
+              : '❌ Vérification impossible pour le moment, réessayez plus tard.';
+            await bot.sendMessage(chatId, msg);
+            return;
+          }
+          const results = await paymentExt.creditRowsForUser(check.rows, targetUser);
+          const lines = results.map(r => {
+            const date = r.paid_at ? new Date(r.paid_at).toLocaleString('fr-FR') : '—';
+            const badge = r.status === 'granted_now' ? '✅ activé maintenant' : r.status === 'already_processed' ? '☑️ déjà activé' : r.status === 'thanked' ? '🙏 merci pour votre soutien' : '⏳ en attente de vérification admin';
+            return `• ${r.purpose || 'Paiement'} — ${r.amount} — ${date} (réf: ${r.reference})\n  ${badge}`;
+          });
+          const refreshedUser = await dbAcc.getUser(targetUser.id);
+          await bot.sendMessage(chatId,
+            `📊 <b>Bilan de votre compte</b>\n\n${lines.join('\n\n')}\n\n${fmtExpiry(refreshedUser)}`,
+            { parse_mode: 'HTML' }
+          );
+        } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
+        return;
+      }
+      if (pend.step === 'ask_password_register') {
+        pendingLink.delete(tgUserId);
+        try {
+          const hash = await bcrypt.hash(text, 10);
+          const user = await dbAcc.createUser({ username: pend.username, password_hash: hash, plain_password: text, is_approved: false });
+          await dbAcc.linkTelegramId(user.id, tgUserId);
+          await bot.sendMessage(chatId,
+            `✅ Compte <b>${pend.username}</b> créé et lié à ce Telegram !\n\n⏳ En attente d'approbation par l'administrateur pour accéder aux prédictions.`,
+            { parse_mode: 'HTML' }
+          );
+          try {
+            let adminId = (await dbAcc.getSetting('bot_admin_tg_id') || '').trim();
+            if (adminId) await bot.sendMessage(adminId, `🆕 Nouvelle inscription : <b>${pend.username}</b> (via bot) — /approve ${user.id}`, { parse_mode: 'HTML' });
+          } catch {}
+        } catch (e) {
+          const dup = /taken|unique|duplicate/i.test(e.message || '');
+          try { await bot.sendMessage(chatId, dup ? '❌ Ce nom d\'utilisateur est déjà pris. Tapez /start pour réessayer.' : `❌ Erreur: ${e.message}`); } catch {}
+        }
+        return;
+      }
+    }
+
+    // ── Commandes admin ─────────────────────────────────────────────────────
+    if (text.startsWith('/')) {
+      const isAdmin = await isAdminSender(tgUserId);
+      const adminCmds = ['/adminhelp', '/pending', '/approve', '/extend', '/users', '/setpaymentdb', '/setpaymentcols', '/setpurpose', '/delpurpose', '/purposes', '/paymentcheck', '/export'];
+      const cmdWord = text.split(/\s+/)[0];
+      if (adminCmds.includes(cmdWord)) {
+        if (!isAdmin) {
+          try { await bot.sendMessage(chatId, '⛔ Accès refusé. Cette commande est réservée à l\'administrateur.'); } catch {}
+          return;
+        }
+        await handleAdminCommand(cmdWord, text, chatId);
+        return;
+      }
+      if (isAdmin && cmdWord === '/import') {
+        await handleImportCommand(text, chatId);
+        return;
+      }
+    }
+  });
+
+  // Callback boutons S'inscrire / J'ai déjà un compte
+  bot.on('callback_query', async (query) => {
+    const data = query.data || '';
+    if (!data.startsWith('acc:')) return;
+    const tgUserId = String(query.from.id);
+    const chatId   = String(query.message?.chat?.id || query.from.id);
+    try { await bot.answerCallbackQuery(query.id); } catch {}
+    if (data === 'acc:register') {
+      pendingLink.set(tgUserId, { step: 'ask_username_register' });
+      try { await bot.sendMessage(chatId, '📝 Choisissez un nom d\'utilisateur :'); } catch {}
+    } else if (data === 'acc:login') {
+      pendingLink.set(tgUserId, { step: 'ask_username_login' });
+      try { await bot.sendMessage(chatId, '🔑 Votre identifiant (nom d\'utilisateur ou e-mail) :'); } catch {}
+    } else if (data === 'acc:paid') {
+      pendingLink.set(tgUserId, { step: 'ask_username_paid' });
+      try { await bot.sendMessage(chatId, '💳 Identifiant utilisé lors du paiement :'); } catch {}
+    }
+  });
+
+  async function handleAdminCommand(cmdWord, text, chatId) {
+    const paymentExt = require('./payment-ext');
+    const parts = text.split(/\s+/).slice(1);
+    try {
+      if (cmdWord === '/adminhelp') {
+        await bot.sendMessage(chatId,
+`🛠 <b>Commandes admin</b>
+
+<b>Utilisateurs</b>
+/pending — comptes en attente d'approbation
+/approve &lt;id&gt; — approuver un compte
+/extend &lt;id&gt; &lt;minutes&gt; [libellé] — ajouter de la durée d'abonnement
+/users [page] — liste des utilisateurs
+
+<b>Paiements externes</b>
+/setpaymentdb &lt;url_postgres&gt; — connecter la base de paiement externe
+/setpaymentcols &lt;table&gt; &lt;col_user&gt; &lt;col_pass&gt; &lt;col_ref&gt; &lt;col_montant&gt; &lt;col_date&gt; &lt;col_motif&gt;
+/setpurpose &lt;mot-clé&gt; &lt;duration|strategy|support&gt; &lt;valeur&gt; [libellé] — associer un motif de paiement à un crédit
+/delpurpose &lt;mot-clé&gt; — supprimer une règle
+/purposes — voir les règles configurées
+/paymentcheck — forcer une vérification immédiate (auto, par nom d'utilisateur)
+
+<b>Config / Stratégies</b>
+/export — exporter stratégies + configuration (fichier JSON)
+/import (répondre à un fichier .json avec /import en légende) — importer
+
+<b>Format live</b>
+/setformat &lt;N&gt; — format global
+/setmaxr &lt;N&gt; — max rattrapage global`,
+          { parse_mode: 'HTML' }
+        );
+        return;
+      }
+
+      if (cmdWord === '/pending') {
+        const all = await dbAcc.getAllUsers();
+        const pending = all.filter(u => !u.is_approved);
+        if (pending.length === 0) { await bot.sendMessage(chatId, '✅ Aucun compte en attente.'); return; }
+        const lines = pending.slice(0, 30).map(u => `#${u.id} — ${u.username}${u.telegram_id ? ' (via bot)' : ''}`);
+        await bot.sendMessage(chatId, `⏳ <b>Comptes en attente</b> (${pending.length}) :\n\n${lines.join('\n')}\n\nApprouvez avec /approve <id>`, { parse_mode: 'HTML' });
+        return;
+      }
+
+      if (cmdWord === '/approve') {
+        const id = parseInt(parts[0]);
+        if (!id) { await bot.sendMessage(chatId, 'Usage: /approve <id>'); return; }
+        const user = await dbAcc.getUser(id);
+        if (!user) { await bot.sendMessage(chatId, `❌ Utilisateur #${id} introuvable.`); return; }
+        await dbAcc.updateUser(id, { is_approved: true });
+        await bot.sendMessage(chatId, `✅ ${user.username} approuvé.`);
+        if (user.telegram_id) { try { await bot.sendMessage(user.telegram_id, '✅ Votre compte a été approuvé par l\'administrateur !'); } catch {} }
+        return;
+      }
+
+      if (cmdWord === '/extend') {
+        const id = parseInt(parts[0]);
+        const minutes = parseInt(parts[1]);
+        const label = parts.slice(2).join(' ') || `${minutes} min`;
+        if (!id || !minutes) { await bot.sendMessage(chatId, 'Usage: /extend <id> <minutes> [libellé]'); return; }
+        const user = await dbAcc.getUser(id);
+        if (!user) { await bot.sendMessage(chatId, `❌ Utilisateur #${id} introuvable.`); return; }
+        const { doApprovePayment } = require('./payment-route');
+        await doApprovePayment({ id: null, plan_label: label, duration_minutes: minutes }, user, { approvedBy: 'admin_bot' });
+        await bot.sendMessage(chatId, `✅ +${minutes} min accordées à ${user.username}.`);
+        return;
+      }
+
+      if (cmdWord === '/users') {
+        const page = Math.max(1, parseInt(parts[0]) || 1);
+        const all = await dbAcc.getAllUsers();
+        const perPage = 15;
+        const slice = all.slice((page - 1) * perPage, page * perPage);
+        if (slice.length === 0) { await bot.sendMessage(chatId, 'Aucun utilisateur sur cette page.'); return; }
+        const lines = slice.map(u => `#${u.id} ${u.username} — ${u.is_approved ? '✅' : '⏳'} — ${fmtExpiry(u)}`);
+        await bot.sendMessage(chatId, `👥 <b>Utilisateurs</b> (page ${page}/${Math.ceil(all.length / perPage)}) :\n\n${lines.join('\n')}`, { parse_mode: 'HTML' });
+        return;
+      }
+
+      if (cmdWord === '/setpaymentdb') {
+        const url = parts.join(' ');
+        if (!url) { await bot.sendMessage(chatId, 'Usage: /setpaymentdb <url_postgres>'); return; }
+        await dbAcc.setSetting('payment_ext_db_url', url);
+        await bot.sendMessage(chatId, '✅ Base de paiement externe configurée.');
+        return;
+      }
+
+      if (cmdWord === '/setpaymentcols') {
+        const [table, username, password, ref, amount, paidAt, purpose] = parts;
+        if (!table || !username || !ref || !amount) { await bot.sendMessage(chatId, 'Usage: /setpaymentcols <table> <col_user> <col_pass> <col_ref> <col_montant> <col_date> <col_motif>'); return; }
+        const cols = await paymentExt.setColumns({ table, username, password: password || 'password', reference: ref, amount, paidAt: paidAt || 'paid_at', purpose: purpose || 'purpose' });
+        await bot.sendMessage(chatId, `✅ Colonnes configurées : ${JSON.stringify(cols)}`);
+        return;
+      }
+
+      if (cmdWord === '/setpurpose') {
+        const [keyword, type, value, ...labelParts] = parts;
+        if (!keyword || !type || value === undefined) { await bot.sendMessage(chatId, 'Usage: /setpurpose <mot-clé> <duration|strategy|support> <valeur> [libellé]\nEx: /setpurpose "abonnement mensuel" duration 43200 "Abonnement mensuel"'); return; }
+        if (!['duration', 'strategy', 'support'].includes(type)) { await bot.sendMessage(chatId, '❌ Type invalide. Utilisez duration, strategy ou support.'); return; }
+        await paymentExt.setPurpose(keyword, type, value, labelParts.join(' '));
+        await bot.sendMessage(chatId, `✅ Motif "${keyword}" → ${type} (${value}).`);
+        return;
+      }
+
+      if (cmdWord === '/delpurpose') {
+        const keyword = parts.join(' ');
+        if (!keyword) { await bot.sendMessage(chatId, 'Usage: /delpurpose <mot-clé>'); return; }
+        await paymentExt.removePurpose(keyword);
+        await bot.sendMessage(chatId, `✅ Motif "${keyword}" supprimé.`);
+        return;
+      }
+
+      if (cmdWord === '/purposes') {
+        const purposes = await paymentExt.getPurposes();
+        if (purposes.length === 0) { await bot.sendMessage(chatId, 'Aucun motif configuré. Utilisez /setpurpose.'); return; }
+        const lines = purposes.map(p => `"${p.match}" → ${p.type}${p.value !== null ? ` (${p.value})` : ''} — ${p.label}`);
+        await bot.sendMessage(chatId, `📋 <b>Motifs configurés</b> :\n\n${lines.join('\n')}`, { parse_mode: 'HTML' });
+        return;
+      }
+
+      if (cmdWord === '/paymentcheck') {
+        await bot.sendMessage(chatId, '🔄 Vérification en cours...');
+        const result = await paymentExt.pollAndCredit();
+        await bot.sendMessage(chatId, `✅ ${result.checked || 0} ligne(s) vérifiée(s), ${result.granted || 0} crédité(s).${result.error ? `\n⚠️ ${result.error}` : ''}${result.note ? `\nℹ️ ${result.note}` : ''}`);
+        return;
+      }
+
+      if (cmdWord === '/export') {
+        const strategies = await dbAcc.getSetting('custom_strategies');
+        const routing     = await dbAcc.getSetting('strategy_routes');
+        const payload = {
+          exported_at: new Date().toISOString(),
+          custom_strategies: strategies ? JSON.parse(strategies) : [],
+          strategy_routes: routing ? JSON.parse(routing) : null,
+          bot_admin_tg_id: await dbAcc.getSetting('bot_admin_tg_id'),
+          payment_ext_purposes: await paymentExt.getPurposes(),
+          payment_ext_columns: await paymentExt.getColumns(),
+        };
+        const buf = Buffer.from(JSON.stringify(payload, null, 2));
+        await bot.sendDocument(chatId, buf, {}, { filename: `baccarat-pro-export-${Date.now()}.json`, contentType: 'application/json' });
+        return;
+      }
+    } catch (e) {
+      try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {}
+    }
+  }
+
+  async function handleImportCommand(text, chatId) {
+    try {
+      const jsonStr = text.slice('/import'.length).trim();
+      if (!jsonStr) { await bot.sendMessage(chatId, 'ℹ️ Usage : envoyez /import suivi du JSON exporté (ou collez-le après la commande).'); return; }
+      const payload = JSON.parse(jsonStr);
+      if (Array.isArray(payload.custom_strategies)) {
+        await dbAcc.setSetting('custom_strategies', JSON.stringify(payload.custom_strategies));
+        try { require('./engine').reloadCustomStrategies(payload.custom_strategies); } catch {}
+      }
+      if (payload.strategy_routes) await dbAcc.setSetting('strategy_routes', JSON.stringify(payload.strategy_routes));
+      if (Array.isArray(payload.payment_ext_purposes)) await dbAcc.setSetting('payment_ext_purposes', JSON.stringify(payload.payment_ext_purposes));
+      if (payload.payment_ext_columns) await dbAcc.setSetting('payment_ext_columns', JSON.stringify(payload.payment_ext_columns));
+      await bot.sendMessage(chatId, '✅ Import terminé.');
+    } catch (e) {
+      await bot.sendMessage(chatId, `❌ JSON invalide: ${e.message}`);
+    }
+  }
+
   // ── Stratégie Aléatoire : machine d'état par utilisateur ──────────
   // pendingAleatoire[userId] = { stratId, stratName, hand, targets, step: 'hand'|'number' }
   const SUITS_JOUEUR   = ['♥', '♣', '♦', '♠']; // ❤️♣️♦️♠️
