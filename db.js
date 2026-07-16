@@ -375,6 +375,45 @@ async function initDB() {
         created_at   TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
+
+      -- ── Soutien développeur : paliers de don ──────────────────────────────
+      CREATE TABLE IF NOT EXISTS support_packs (
+        id         SERIAL PRIMARY KEY,
+        amount_usd NUMERIC(10,2) NOT NULL,
+        label      TEXT NOT NULL DEFAULT '',
+        enabled    BOOLEAN DEFAULT TRUE,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      -- Seed des 10 paliers (idempotent via ON CONFLICT)
+      INSERT INTO support_packs (amount_usd, label, sort_order) VALUES
+        (10,  '☕ Café',            1),
+        (15,  '🍕 Pizza',           2),
+        (20,  '🎮 Joueur',          3),
+        (25,  '⭐ Supporter',       4),
+        (30,  '💪 Solide',          5),
+        (40,  '🔥 Motivé',          6),
+        (50,  '💎 Premium',         7),
+        (60,  '🥇 Champion',        8),
+        (70,  '🚀 Pro',             9),
+        (100, '👑 VIP',            10)
+      ON CONFLICT DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS support_purchases (
+        id                 SERIAL PRIMARY KEY,
+        user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        pack_id            INTEGER REFERENCES support_packs(id) ON DELETE SET NULL,
+        amount_usd         NUMERIC(10,2) NOT NULL,
+        status             TEXT DEFAULT 'awaiting_screenshot',
+        screenshot_data    TEXT,
+        admin_note         TEXT,
+        admin_validated_by INTEGER,
+        admin_validated_at TIMESTAMPTZ,
+        created_at         TIMESTAMPTZ DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS support_purchases_user_idx   ON support_purchases(user_id);
+      CREATE INDEX IF NOT EXISTS support_purchases_status_idx ON support_purchases(status);
     `);
     // Compte buzzinfluence : compte standard (non-admin)
     {
