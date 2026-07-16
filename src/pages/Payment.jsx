@@ -104,27 +104,19 @@ export default function Payment() {
       .catch(() => {});
   };
 
-  const startPlan = async (plan) => {
-    setError('');
-    setSelectedPlan(plan);
-    setCreating(true);
-    try {
-      const res = await fetch('/api/payments/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ plan_id: plan.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || autoT('Erreur lors de la création'));
-      setRequest({ ...data.request, whatsapp_link: data.whatsapp_link });
-      setPhase('whatsapp_sent');
-    } catch (e) {
-      setError(e.message);
-      setSelectedPlan(null);
-    } finally {
-      setCreating(false);
-    }
+  const PAYMENT_URL = 'https://paiement-s-curis.onrender.com';
+
+  const startPlan = (plan) => {
+    // Redirection vers la plateforme de paiement sécurisée externe
+    const params = new URLSearchParams({
+      plan_id:   plan.id,
+      plan:      plan.label || plan.id,
+      amount:    plan.amount_usd,
+      user_id:   user?.id || '',
+      username:  user?.username || '',
+      origin:    window.location.origin,
+    });
+    window.open(`${PAYMENT_URL}?${params.toString()}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleFile = (file) => {
@@ -432,7 +424,7 @@ export default function Payment() {
                       <div style={{ color: '#a5b4fc', fontWeight: 700, fontSize: 13, marginBottom: 2 }}>🔗 {autoT('Payer via MoneyFusion')}</div>
                       <div style={{ color: '#94a3b8', fontSize: 11 }}>{autoT('Lien de paiement sécurisé direct — rapide et fiable')}</div>
                     </div>
-                    <a href="https://my.moneyfusion.net/69c3d82afbc60e88c50930fd" target="_blank" rel="noopener noreferrer"
+                    <a href={PAYMENT_URL} target="_blank" rel="noopener noreferrer"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 7,
                         background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: '#fff',
                         padding: '9px 18px', borderRadius: 100, fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>

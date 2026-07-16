@@ -3832,8 +3832,29 @@ function AdminPanel() {
     { value: '52', label: '#52 — 🏦 Double Line' },
     { value: '53', label: '#53 — 💎 Diamant Court' },
     { value: '54', label: '#54 — 🚀 Fusée Futur' },
-    { value: '55', label: '#55 — 🌊 Cascade Pro' },
-    { value: '76', label: '#76 — 💠 Cartes Signature' },
+      { value: '55', label: '#55 — 🌊 Cascade Pro' },
+   { value: '56', label: '#56 — 🎴 Enseigne Pro' },
+   { value: '57', label: '#57 — 💫 Suit VIP' },
+   { value: '58', label: '#58 — 💪 Suit Bold' },
+   { value: '59', label: '#59 — 📡 Suit Signal' },
+   { value: '60', label: '#60 — ░ Suit Dark' },
+   { value: '61', label: '#61 — ✨ Suit Gold' },
+   { value: '62', label: '#62 — ⚡ Suit Compact' },
+   { value: '63', label: '#63 — 🚨 Suit Alert' },
+   { value: '64', label: '#64 — 💎 Crystal Suit' },
+   { value: '65', label: '#65 — 【】 Suit Block' },
+   { value: '66', label: '#66 — ⭐ Multi-Pro' },
+   { value: '67', label: '#67 — 📡 Total Signal' },
+   { value: '68', label: '#68 — 💎 Full VIP' },
+   { value: '69', label: '#69 — ⚡ Pro Compact' },
+   { value: '70', label: '#70 — 🏅 Elite Plus' },
+   { value: '71', label: '#71 — 💎 Diamond Pro' },
+   { value: '72', label: '#72 — 👑 Crown Multi' },
+   { value: '73', label: '#73 — 🐯 Tiger Multi' },
+   { value: '74', label: '#74 — ⚡ Flash Multi' },
+   { value: '75', label: '#75 — 🌟 Ultra Pro' },
+   { value: '76', label: '#76 — 💠 Cartes Signature' },
+   { value: '77', label: '#77 — 🌈 Absence Victoire' }
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -3857,7 +3878,7 @@ function AdminPanel() {
     // Durée de prédiction (0 = illimitée, sinon minutes)
     pred_duration_minutes: 0,
     // Filtre d'attente (universel — tous les modes)
-    attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur',
+    attente_enabled: false, attente_option: 1, attente_n: 3, attente_ecart: 1, attente_main: 'joueur', hist_sub_enabled: false, hist_sub_n: 3, hist_sub_rules: [],
     attente1_mapping: null, attente2_mapping: null, attente3_mapping: null,
     // Relance sur perte
     relance_sur_perte: false, relance_sur_perte_max: 3,
@@ -5099,7 +5120,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], nul_rules: s.nul_rules || [], numero_costume_list: s.numero_costume_list || [], numero_costume_ecart: s.numero_costume_ecart ?? 2, numero_costume_raw: '', numero_costume_hand: s.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur', B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand === 'banquier' ? 'banquier' : 'joueur', cc_combinations: s.cc_combinations || [], cc_limit: s.cc_limit ?? 0 });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, hist_sub_enabled: s.hist_sub_enabled ?? false, hist_sub_n: s.hist_sub_n ?? 3, hist_sub_rules: s.hist_sub_rules || [], relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], nul_rules: s.nul_rules || [], numero_costume_list: s.numero_costume_list || [], numero_costume_ecart: s.numero_costume_ecart ?? 2, numero_costume_raw: '', numero_costume_hand: s.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur', B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand === 'banquier' ? 'banquier' : 'joueur', cc_combinations: s.cc_combinations || [], cc_limit: s.cc_limit ?? 0 });
     setStratOpen(true);
   };
 
@@ -11640,6 +11661,169 @@ function AdminPanel() {
                   </div>
                 )}
               </div>
+
+              {/* ── Section hist_sub — Substitution basée sur l'historique ── */}
+              {(() => {
+                const HIST_SOURCES = [
+                  { value: '♠', label: '♠️ Pique',               hand: true  },
+                  { value: '♥', label: '❤️ Cœur',                hand: true  },
+                  { value: '♦', label: '♦️ Carreau',              hand: true  },
+                  { value: '♣', label: '♣️ Trèfle',              hand: true  },
+                  { value: 'pair',   label: '🟢 Pair',            hand: true  },
+                  { value: 'impair', label: '🔴 Impair',          hand: true  },
+                  { value: 'WIN_P',  label: '👤 Victoire Joueur', hand: false },
+                  { value: 'WIN_B',  label: '🏦 Victoire Banquier',hand: false},
+                  { value: 'deux',   label: '2️⃣ 2 cartes',       hand: true  },
+                  { value: 'trois',  label: '3️⃣ 3 cartes',       hand: true  },
+                ];
+                const HIST_TARGETS = HIST_SOURCES;
+                const hsRules = stratForm.hist_sub_rules || [];
+                const getRule = src => hsRules.find(r => r.source === src) || null;
+                const setRule = (src, patch) => {
+                  setStratForm(p => {
+                    const rules = [...(p.hist_sub_rules || [])];
+                    const idx = rules.findIndex(r => r.source === src);
+                    if (patch === null) {
+                      if (idx >= 0) rules.splice(idx, 1);
+                    } else if (idx >= 0) {
+                      rules[idx] = { ...rules[idx], ...patch };
+                    } else {
+                      rules.push({ source: src, hand: 'joueur', targets: [], order: 'aleatoire', ...patch });
+                    }
+                    return { ...p, hist_sub_rules: rules };
+                  });
+                };
+                return (
+                  <div style={{ gridColumn: '1 / -1', marginTop: 20, padding: '16px 18px', borderRadius: 12, background: 'rgba(16,185,129,0.04)', border: `1px solid ${stratForm.hist_sub_enabled ? 'rgba(16,185,129,0.5)' : 'rgba(16,185,129,0.18)'}`, transition: 'border-color 0.2s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 20 }}>🔄</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#34d399', letterSpacing: 0.3 }}>Substitution historique — Jeux passés</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.5 }}>Si le costume prédit est apparu dans les N derniers jeux terminés (main configurée par règle), le remplace automatiquement par l'un des costumes cibles définis. Compatible tous modes.</div>
+                      </div>
+                      <button type="button"
+                        onClick={() => setStratForm(p => ({ ...p, hist_sub_enabled: !p.hist_sub_enabled }))}
+                        style={{ padding: '6px 16px', borderRadius: 20, cursor: 'pointer', fontWeight: 700, fontSize: 12, transition: 'all 0.2s', border: stratForm.hist_sub_enabled ? '2px solid #10b981' : '1px solid rgba(16,185,129,0.35)', background: stratForm.hist_sub_enabled ? 'rgba(16,185,129,0.22)' : 'rgba(16,185,129,0.06)', color: stratForm.hist_sub_enabled ? '#34d399' : '#64748b' }}>
+                        {stratForm.hist_sub_enabled ? '● Activé' : '○ Désactivé'}
+                      </button>
+                    </div>
+
+                    {stratForm.hist_sub_enabled && (
+                      <div style={{ marginTop: 14 }}>
+                        {/* N — Nombre de jeux à analyser */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                          <div>
+                            <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 4, fontWeight: 700, textTransform: 'uppercase' }}>N — Jeux à analyser</label>
+                            <input type="number" min="1" max="20" value={stratForm.hist_sub_n ?? 3}
+                              onChange={e => setStratForm(p => ({ ...p, hist_sub_n: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+                              style={{ width: 80, padding: '7px 10px', background: '#0f172a', border: '2px solid rgba(16,185,129,0.5)', borderRadius: 8, color: '#34d399', fontSize: 16, fontWeight: 800, textAlign: 'center' }} />
+                          </div>
+                          <div style={{ flex: 1, fontSize: 11, color: '#6ee7b7', lineHeight: 1.6 }}>
+                            🕐 Quand le signal est détecté au jeu <strong>#X</strong>, le moteur vérifie les <strong>{stratForm.hist_sub_n ?? 3}</strong> jeux précédents (#{'{'}X−{stratForm.hist_sub_n ?? 3}{'}'} à #{'{'}X−1{'}'}).
+                            Si le costume à prédire est apparu dans <strong>au moins 1</strong> de ces jeux → substitution activée.
+                          </div>
+                        </div>
+
+                        {/* Liste des règles par costume source */}
+                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+                          Règles de substitution — cliquez sur un costume pour configurer
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {HIST_SOURCES.map(src => {
+                            const rule = getRule(src.value);
+                            const isActive = !!rule && Array.isArray(rule.targets) && rule.targets.length > 0;
+                            return (
+                              <div key={src.value} style={{ borderRadius: 10, border: `1px solid ${isActive ? 'rgba(16,185,129,0.45)' : 'rgba(255,255,255,0.07)'}`, background: isActive ? 'rgba(16,185,129,0.07)' : 'rgba(255,255,255,0.02)', overflow: 'hidden', transition: 'all 0.2s' }}>
+                                {/* En-tête de la règle */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: isActive ? '1px solid rgba(16,185,129,0.2)' : 'none' }}>
+                                  <span style={{ fontSize: 15, minWidth: 24 }}>{src.label.split(' ')[0]}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: isActive ? '#6ee7b7' : '#64748b', flex: 1 }}>{src.label}</span>
+                                  {isActive && rule && (
+                                    <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(16,185,129,0.15)', padding: '2px 7px', borderRadius: 4 }}>
+                                      → {rule.targets.map(t => { const f = HIST_TARGETS.find(x => x.value === t); return f ? f.label.split(' ')[0] : t; }).join(' ')}
+                                    </span>
+                                  )}
+                                  <button type="button"
+                                    onClick={() => setRule(src.value, isActive ? null : { hand: 'joueur', targets: [], order: 'aleatoire' })}
+                                    style={{ padding: '3px 9px', borderRadius: 10, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${isActive ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`, background: isActive ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.1)', color: isActive ? '#f87171' : '#34d399', transition: 'all 0.15s' }}>
+                                    {isActive ? '✕ Retirer' : '+ Ajouter'}
+                                  </button>
+                                </div>
+
+                                {/* Configuration détaillée si active */}
+                                {isActive && rule && (
+                                  <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    {/* Main à vérifier (seulement si pertinent) */}
+                                    {src.hand && (
+                                      <div>
+                                        <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Main vérifiée dans l'historique</div>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                          {[['joueur','👤 Joueur'],['banquier','🏦 Banquier']].map(([v, lbl]) => (
+                                            <button key={v} type="button" onClick={() => setRule(src.value, { hand: v })}
+                                              style={{ flex: 1, padding: '5px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 600, border: `1px solid ${(rule.hand || 'joueur') === v ? '#10b981' : 'rgba(255,255,255,0.1)'}`, background: (rule.hand || 'joueur') === v ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.03)', color: (rule.hand || 'joueur') === v ? '#6ee7b7' : '#64748b', transition: 'all 0.12s' }}>
+                                              {lbl}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Costumes cibles */}
+                                    <div>
+                                      <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Si présent → prédire</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                        {HIST_TARGETS.filter(t => t.value !== src.value).map(t => {
+                                          const sel = Array.isArray(rule.targets) && rule.targets.includes(t.value);
+                                          return (
+                                            <button key={t.value} type="button"
+                                              onClick={() => {
+                                                const cur = Array.isArray(rule.targets) ? rule.targets : [];
+                                                const next = sel ? cur.filter(x => x !== t.value) : [...cur, t.value];
+                                                setRule(src.value, { targets: next });
+                                              }}
+                                              style={{ padding: '4px 9px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: sel ? 700 : 400, border: `1px solid ${sel ? '#10b981' : 'rgba(255,255,255,0.1)'}`, background: sel ? 'rgba(16,185,129,0.22)' : 'rgba(255,255,255,0.03)', color: sel ? '#6ee7b7' : '#64748b', transition: 'all 0.12s' }}>
+                                              {t.label.split(' ')[0]} <span style={{ fontSize: 9 }}>{t.label.split(' ').slice(1).join(' ')}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      {(!Array.isArray(rule.targets) || rule.targets.length === 0) && (
+                                        <div style={{ fontSize: 10, color: '#fbbf24', marginTop: 4 }}>⚠️ Sélectionnez au moins un costume cible</div>
+                                      )}
+                                    </div>
+
+                                    {/* Ordre de tirage */}
+                                    {Array.isArray(rule.targets) && rule.targets.length > 1 && (
+                                      <div>
+                                        <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Ordre de tirage</div>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                          {[['aleatoire','🎲 Aléatoire'],['sequence','🔁 Séquence']].map(([v, lbl]) => (
+                                            <button key={v} type="button" onClick={() => setRule(src.value, { order: v })}
+                                              style={{ flex: 1, padding: '5px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 600, border: `1px solid ${(rule.order || 'aleatoire') === v ? '#10b981' : 'rgba(255,255,255,0.1)'}`, background: (rule.order || 'aleatoire') === v ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.03)', color: (rule.order || 'aleatoire') === v ? '#6ee7b7' : '#64748b', transition: 'all 0.12s' }}>
+                                              {lbl}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Résumé */}
+                        {hsRules.filter(r => Array.isArray(r.targets) && r.targets.length > 0).length > 0 && (
+                          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.15)', fontSize: 11, color: '#6ee7b7', lineHeight: 1.7 }}>
+                            🔄 <strong>{hsRules.filter(r => Array.isArray(r.targets) && r.targets.length > 0).length} règle(s) active(s)</strong> — Si le costume prédit figure dans les <strong>{stratForm.hist_sub_n ?? 3}</strong> derniers jeux, il sera remplacé selon la règle correspondante.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* ── Boutons d'action ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, paddingTop: 16, borderTop: '1px solid rgba(168,85,247,0.15)' }}>
