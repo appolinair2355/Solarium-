@@ -109,8 +109,10 @@ function countValidCards(cards) {
 // TROIS_TROIS (combinaisons de comptage), TIE (match nul).
 function classifyNulCategories(pCards, bCards, winner) {
   const cats = new Set();
-  const pCount = countValidCards(pCards);
-  const bCount = countValidCards(bCards);
+  // Utiliser la longueur brute du tableau (pas countValidCards) pour ne pas
+  // rater les mains à 2/3 cartes quand un c.S vaut '?' (costume non reconnu).
+  const pCount = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+  const bCount = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
   if (pCount === 2 && bCount === 2) cats.add('distrib');
   if (pCount === 2) cats.add('P_DEUX');
   if (bCount === 2) cats.add('B_DEUX');
@@ -1828,7 +1830,7 @@ class Engine {
       // ── Résolution spéciale mode Distribution ──────────────────────────
       if (ps === 'distrib') {
         const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
-          && countValidCards(pCards) === 2 && countValidCards(bCards) === 2;
+          && pCards.filter(c => c != null).length === 2 && bCards.filter(c => c != null).length === 2;
         if (isNatural) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
@@ -1918,7 +1920,8 @@ class Engine {
       } else if (ps === 'P_DEUX' || ps === 'B_DEUX' || ps === 'P_TROIS' || ps === 'B_TROIS') {
         const isPlayer = ps === 'P_DEUX' || ps === 'P_TROIS';
         const targetCount = (ps === 'P_DEUX' || ps === 'B_DEUX') ? 2 : 3;
-        const cnt = countValidCards(isPlayer ? pCards : bCards);
+        const _handArr = isPlayer ? pCards : bCards;
+        const cnt = Array.isArray(_handArr) ? _handArr.filter(c => c != null).length : 0;
         if (cnt === targetCount) {
           const rattrapage = gn - pgNum;
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -2540,12 +2543,13 @@ class Engine {
       ? (cfg.numero_costume_hand || 'joueur')
       : (cfg.hand || 'joueur');
     const stratTgOpts = {
-      formatId:  cfg.tg_format   || null,
-      hand:      _ncEffectiveHand,
-      maxR:      stratMaxRForResolve,
-      siteUrl:   cfg.tg_site_url || '',
-      stratName: cfg.name        || '',
-      mode:      cfg.mode        || '',
+      formatId:    cfg.tg_format    || null,
+      tg_template: cfg.tg_template  || null,
+      hand:        _ncEffectiveHand,
+      maxR:        stratMaxRForResolve,
+      siteUrl:     cfg.tg_site_url  || '',
+      stratName:   cfg.name         || '',
+      mode:        cfg.mode         || '',
     };
 
     // ── Exception mi-vol : decalage_suit_check ────────────────────────────────
@@ -5242,7 +5246,10 @@ class Engine {
         // T001 : ignorer les jeux dont la main n'est pas encore complète
         // (min 2 cartes joueur + 2 cartes banquier = main minimale valide en Baccarat)
         if (game.player_cards.length < 2 || game.banker_cards.length < 2) continue;
-        if (!suits.length && !bSuits.length) continue;
+        // Ne sauter que si aucun costume ET aucun vainqueur (jeu vraiment vide).
+        // Si winner est connu (Tie/Player/Banker), le mode nul_pattern doit pouvoir
+        // traiter le jeu même quand les costumes ne sont pas reconnus.
+        if (!suits.length && !bSuits.length && !game.winner) continue;
 
         // ── Détection jeu #1 → reset complet (nouveau jour / minuit) ─────────
         // CRITIQUE : cette détection est VOLONTAIREMENT hors du bloc
