@@ -385,18 +385,20 @@ async function initDB() {
         sort_order INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-      -- Seed des 10 paliers (idempotent via ON CONFLICT)
+      -- Seed des paliers de soutien en FCFA (idempotent via ON CONFLICT)
       INSERT INTO support_packs (amount_usd, label, sort_order) VALUES
-        (10,  '☕ Café',            1),
-        (15,  '🍕 Pizza',           2),
-        (20,  '🎮 Joueur',          3),
-        (25,  '⭐ Supporter',       4),
-        (30,  '💪 Solide',          5),
-        (40,  '🔥 Motivé',          6),
-        (50,  '💎 Premium',         7),
-        (60,  '🥇 Champion',        8),
-        (70,  '🚀 Pro',             9),
-        (100, '👑 VIP',            10)
+        (200,     '☕ Café — 200 FCFA',            1),
+        (500,     '🍕 Pizza — 500 FCFA',            2),
+        (1000,    '🎮 Joueur — 1 000 FCFA',         3),
+        (2000,    '⭐ Supporter — 2 000 FCFA',       4),
+        (5000,    '💪 Solide — 5 000 FCFA',          5),
+        (10000,   '🔥 Motivé — 10 000 FCFA',         6),
+        (25000,   '💎 Premium — 25 000 FCFA',         7),
+        (50000,   '🥇 Champion — 50 000 FCFA',        8),
+        (100000,  '🚀 Pro — 100 000 FCFA',            9),
+        (200000,  '👑 VIP — 200 000 FCFA',           10),
+        (500000,  '💠 Elite — 500 000 FCFA',         11),
+        (1000000, '🏆 Ultimate — 1 000 000 FCFA',    12)
       ON CONFLICT DO NOTHING;
 
       CREATE TABLE IF NOT EXISTS support_purchases (

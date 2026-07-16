@@ -118,9 +118,19 @@ function classifyNulCategories(pCards, bCards, winner) {
   if (bCount === 2) cats.add('B_DEUX');
   if (pCount === 3) cats.add('P_TROIS');
   if (bCount === 3) cats.add('B_TROIS');
-  if (winner === 'Player') cats.add('WIN_P');
-  if (winner === 'Banker') cats.add('WIN_B');
-  if (winner === 'Tie')    cats.add('TIE');
+  // Si winner absent de l'API (cas fréquent pour match nul), le recalculer
+  // depuis les scores baccarat pour que le déclencheur TIE fonctionne correctement.
+  let effectiveWinner = winner;
+  if (!effectiveWinner && pCount >= 2 && bCount >= 2) {
+    const _pScore = baccaratHandScore(pCards);
+    const _bScore = baccaratHandScore(bCards);
+    if (_pScore !== null && _bScore !== null) {
+      effectiveWinner = _pScore > _bScore ? 'Player' : _bScore > _pScore ? 'Banker' : 'Tie';
+    }
+  }
+  if (effectiveWinner === 'Player') cats.add('WIN_P');
+  if (effectiveWinner === 'Banker') cats.add('WIN_B');
+  if (effectiveWinner === 'Tie')    cats.add('TIE');
   const pScore = baccaratHandScore(pCards);
   if (pScore !== null) cats.add(pScore % 2 === 0 ? 'PAIR_P' : 'IMPAIR_P');
   for (const s of extractSuits(pCards)) cats.add(s);
@@ -1899,7 +1909,14 @@ class Engine {
 
       // ── Résolution spéciale mode Match Nul ─────────────────────────────
       } else if (ps === 'TIE') {
-        if (winner === 'Tie') {
+        // Recalculer winner depuis les scores si absent (match nul souvent manquant dans l'API)
+        let _tieWinner = winner;
+        if (!_tieWinner && Array.isArray(pCards) && Array.isArray(bCards)) {
+          const _ps = baccaratHandScore(pCards);
+          const _bs = baccaratHandScore(bCards);
+          if (_ps !== null && _bs !== null) _tieWinner = _ps > _bs ? 'Player' : _bs > _ps ? 'Banker' : 'Tie';
+        }
+        if (_tieWinner === 'Tie') {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Match Nul] ✅ Tie → gagne (R${rattrapage})`);
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -5299,7 +5316,17 @@ class Engine {
           console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
         }
-        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, game.winner || null);
+        // Calculer le vainqueur depuis les scores baccarat si absent de l'API
+        // (cas fréquent pour les matchs nuls : phase='Tie' sans winner dans ScS)
+        let gameWinner = game.winner || null;
+        if (!gameWinner && game.player_cards.length >= 2 && game.banker_cards.length >= 2) {
+          const _gpS = baccaratHandScore(game.player_cards);
+          const _gbS = baccaratHandScore(game.banker_cards);
+          if (_gpS !== null && _gbS !== null) {
+            gameWinner = _gpS > _gbS ? 'Player' : _gbS > _gpS ? 'Banker' : 'Tie';
+          }
+        }
+        await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, gameWinner);
         // Mise à jour compteurs globaux / écarts : UNE SEULE FOIS par jeu réellement nouveau
         if (isNewGame) {
           // Compteur instantané de costumes (suit-counter-service)

@@ -70,11 +70,10 @@ function buildTgMessage(formatId, {
     };
   }
 
-  // La stratégie Distribution utilise toujours le format 11 (conçu pour elle)
+  // La stratégie Distribution utilise toujours le format 11 (conçu pour elle — affiche les vraies cartes)
   if (suit === 'distrib') formatId = 11;
-  // deux/trois → format 76 par défaut | pair/impair → format 12 par défaut
-  if ((suit === 'deux' || suit === 'trois') && (!formatId || parseInt(formatId) < 12)) formatId = 76;
-  if ((suit === 'pair' || suit === 'impair') && (!formatId || parseInt(formatId) < 12)) formatId = 12;
+  // Tous les autres types (WIN_B, WIN_P, TIE, deux, trois, pair, impair, TWO_THREE, DEUX_TROIS…)
+  // sont gérés nativement dans CHAQUE format via les variables emoji et name.
 
   const emoji   = getSuitEmoji(suit);
   const name    = getSuitName(suit);
@@ -150,10 +149,14 @@ function buildTgMessage(formatId, {
         parse_mode: 'Markdown',
       };
 
-    case 7:
+    case 7: {
+      const isSuit7 = ['♠','♥','♦','♣'].includes(suit);
+      const label7  = isSuit7
+        ? `<b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>`
+        : `${emoji} <b>${name}</b>`;
       return {
         text:
-          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          `<b>#N${gameNumber}</b> — ${label7}\n\n` +
           (status === null
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
@@ -161,17 +164,20 @@ function buildTgMessage(formatId, {
               : `❌`),
         parse_mode: 'HTML',
       };
+    }
 
     case 8: {
-      const isBank      = hand === 'banquier';
+      const isBank8     = hand === 'banquier';
+      const isSuit8     = ['♠','♥','♦','♣'].includes(suit);
+      const ctxLine8    = isSuit8 ? 'Couleur de la carte' : 'Prédiction';
       const statusLine8 = status === null    ? '⌛'
                         : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
                         :                      '❌';
-      if (isBank) {
+      if (isBank8) {
         return {
           text:
-            `🎮 banquier #N${gameNumber}\n` +
-            `⚜️ Couleur de la carte:${emoji}\n` +
+            `🎮 ${isSuit8 ? 'banquier' : name} #N${gameNumber}\n` +
+            `⚜️ ${ctxLine8}: ${emoji} ${name}\n` +
             `🎰 Poursuite  🔰+${maxR} jeux\n` +
             `🗯️ Résultats : ${statusLine8}`,
           parse_mode: null,
@@ -179,8 +185,8 @@ function buildTgMessage(formatId, {
       } else {
         return {
           text:
-            `🤖 joueur #N${gameNumber}\n` +
-            `🔰Couleur de la carte :${emoji}\n` +
+            `🤖 ${isSuit8 ? 'joueur' : name} #N${gameNumber}\n` +
+            `🔰${ctxLine8} : ${emoji} ${name}\n` +
             `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
             `🧨 Résultats : ${statusLine8}`,
           parse_mode: null,
@@ -189,13 +195,14 @@ function buildTgMessage(formatId, {
     }
 
     case 9: {
+      const isSuit9 = ['♠','♥','♦','♣'].includes(suit);
       const sl9 = status === null    ? '⌛'
                 : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
                 :                      '❌';
       return {
         text:
-          `🤖 joueur #N${gameNumber}\n` +
-          `🔰Couleur de la carte :${emoji}\n` +
+          `🤖 ${isSuit9 ? 'joueur' : name} #N${gameNumber}\n` +
+          `🔰${isSuit9 ? 'Couleur de la carte' : 'Prédiction'} : ${emoji} ${name}\n` +
           `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
           `🧨 Résultats : ${sl9}`,
         parse_mode: null,
@@ -203,13 +210,14 @@ function buildTgMessage(formatId, {
     }
 
     case 10: {
+      const isSuit10 = ['♠','♥','♦','♣'].includes(suit);
       const sl10 = status === null    ? '⌛'
                  : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
                  :                      '❌';
       return {
         text:
-          `🎮 banquier #N${gameNumber}\n` +
-          `⚜️ Couleur de la carte:${emoji}\n` +
+          `🎮 ${isSuit10 ? 'banquier' : name} #N${gameNumber}\n` +
+          `⚜️ ${isSuit10 ? 'Couleur de la carte' : 'Prédiction'}: ${emoji} ${name}\n` +
           `🎰 Poursuite  🔰+${maxR} jeux\n` +
           `🗯️ Résultats : ${sl10}`,
         parse_mode: null,
@@ -275,23 +283,33 @@ function buildTgMessage(formatId, {
         };
       }
       // Mode 2 vs 3 cartes
-      const targetCards = suit === 'deux' ? 2 : 3;
-      const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
-      const winMsg   = suit === 'deux'
-        ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 2 cartes confirmées 🎯`
-        : `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} 3 cartes confirmées 🎯`;
-      const lossMsg  = suit === 'deux'
-        ? `❌ Pas de 2 cartes sur ${maxR} jeux`
-        : `❌ Pas de 3 cartes sur ${maxR} jeux`;
+      if (suit === 'deux' || suit === 'trois') {
+        const targetCards = suit === 'deux' ? 2 : 3;
+        const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
+        const winMsg  = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ${targetCards} cartes confirmées 🎯`;
+        const lossMsg = `❌ Pas de ${targetCards} cartes sur ${maxR} jeux`;
+        return {
+          text:
+            `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
+            `📌 Jeu #N${gameNumber}\n` +
+            `━━━━━━━━━━━━━━━\n` +
+            `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
+            (status === null ? `⌛ En cours de vérification...` : status === 'gagne' ? winMsg : lossMsg),
+          parse_mode: null,
+        };
+      }
+      // ── Fallback universel — WIN_B, WIN_P, TIE, TWO_THREE, DEUX_TROIS, etc. ──
       return {
         text:
-          `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
+          `${emoji} PRÉDICTION — ${name.toUpperCase()}\n` +
           `📌 Jeu #N${gameNumber}\n` +
           `━━━━━━━━━━━━━━━\n` +
-          `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
+          `🎯 Prédit : ${emoji} ${name}\n` +
           (status === null
             ? `⌛ En cours de vérification...`
-            : status === 'gagne' ? winMsg : lossMsg),
+            : status === 'gagne'
+              ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ${name} confirmé 🎯`
+              : `❌ Non confirmé sur ${maxR} jeux`),
         parse_mode: null,
       };
     }
@@ -844,18 +862,20 @@ function buildTgMessage(formatId, {
     // ── Format 76 : Cartes Signature ────────────────────────────────────────
     case 76: {
       const h76 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      const ct76 = suit === 'deux' ? '2 cartes'
-                 : suit === 'trois' ? '3 cartes'
-                 : suit === 'pair' ? 'Pair'
+      const isCard76 = ['♠','♥','♦','♣','deux','trois','pair','impair'].includes(suit);
+      const ct76 = suit === 'deux'   ? '2 cartes'
+                 : suit === 'trois'  ? '3 cartes'
+                 : suit === 'pair'   ? 'Pair'
                  : suit === 'impair' ? 'Impair'
-                 : name;
+                 : ['♠','♥','♦','♣'].includes(suit) ? name
+                 : `${emoji} ${name}`;
       const sl76 = status === null    ? '⌛'
                  : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
                  :                      '❌';
       return {
         text:
           `💠Jeux №${gameNumber}\n` +
-          `🎯${h76} recevra ${ct76}\n` +
+          (isCard76 ? `🎯${h76} recevra ${ct76}` : `🎯${ct76}`) + `\n` +
           `🌤 Rattrapages +${maxR}\n` +
           `🗯️Résultats : ${sl76}`,
         parse_mode: null,
