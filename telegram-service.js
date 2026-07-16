@@ -723,10 +723,12 @@ async function startBot() {
     // ── Commandes admin distantes ──────────────────────────────────────
     // Ces commandes ne fonctionnent que si l'expéditeur est l'admin bot configuré.
     if (text.startsWith('/setformat') || text.startsWith('/setmaxr') || text.startsWith('/botcmd')) {
+      // Accepte ADMIN_TG_ID (1190237801) OU le bot_admin_tg_id configuré en DB
       let adminId = '';
       try { adminId = (await db.getSetting('bot_admin_tg_id') || '').trim(); } catch {}
-      if (!adminId || userId !== adminId) {
-        try { await bot.sendMessage(chatId, '⛔ Accès refusé. Configurez votre ID Telegram admin dans le panneau d\'administration.'); } catch {}
+      const isAdminCmd = (userId === ADMIN_TG_ID) || (!!adminId && userId === adminId);
+      if (!isAdminCmd) {
+        try { await bot.sendMessage(chatId, '⛔ Accès refusé. ID admin: ' + ADMIN_TG_ID); } catch {}
         return;
       }
 
