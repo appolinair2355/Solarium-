@@ -11731,27 +11731,30 @@ function AdminPanel() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                           {HIST_SOURCES.map(src => {
                             const rule = getRule(src.value);
+                            // hasRule = la règle existe (même si targets vide)
+                            // isActive = règle configurée avec au moins une cible
+                            const hasRule = !!rule;
                             const isActive = !!rule && Array.isArray(rule.targets) && rule.targets.length > 0;
                             return (
-                              <div key={src.value} style={{ borderRadius: 10, border: `1px solid ${isActive ? 'rgba(16,185,129,0.45)' : 'rgba(255,255,255,0.07)'}`, background: isActive ? 'rgba(16,185,129,0.07)' : 'rgba(255,255,255,0.02)', overflow: 'hidden', transition: 'all 0.2s' }}>
+                              <div key={src.value} style={{ borderRadius: 10, border: `1px solid ${hasRule ? 'rgba(16,185,129,0.45)' : 'rgba(255,255,255,0.07)'}`, background: hasRule ? 'rgba(16,185,129,0.07)' : 'rgba(255,255,255,0.02)', overflow: 'hidden', transition: 'all 0.2s' }}>
                                 {/* En-tête de la règle */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: isActive ? '1px solid rgba(16,185,129,0.2)' : 'none' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: hasRule ? '1px solid rgba(16,185,129,0.2)' : 'none' }}>
                                   <span style={{ fontSize: 15, minWidth: 24 }}>{src.label.split(' ')[0]}</span>
-                                  <span style={{ fontSize: 12, fontWeight: 700, color: isActive ? '#6ee7b7' : '#64748b', flex: 1 }}>{src.label}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: hasRule ? '#6ee7b7' : '#64748b', flex: 1 }}>{src.label}</span>
                                   {isActive && rule && (
                                     <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(16,185,129,0.15)', padding: '2px 7px', borderRadius: 4 }}>
                                       → {rule.targets.map(t => { const f = HIST_TARGETS.find(x => x.value === t); return f ? f.label.split(' ')[0] : t; }).join(' ')}
                                     </span>
                                   )}
                                   <button type="button"
-                                    onClick={() => setRule(src.value, isActive ? null : { hand: 'joueur', targets: [], order: 'aleatoire' })}
-                                    style={{ padding: '3px 9px', borderRadius: 10, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${isActive ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`, background: isActive ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.1)', color: isActive ? '#f87171' : '#34d399', transition: 'all 0.15s' }}>
-                                    {isActive ? '✕ Retirer' : '+ Ajouter'}
+                                    onClick={() => setRule(src.value, hasRule ? null : { hand: 'joueur', targets: [], order: 'aleatoire' })}
+                                    style={{ padding: '3px 9px', borderRadius: 10, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${hasRule ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`, background: hasRule ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.1)', color: hasRule ? '#f87171' : '#34d399', transition: 'all 0.15s' }}>
+                                    {hasRule ? '✕ Retirer' : '+ Ajouter'}
                                   </button>
                                 </div>
 
-                                {/* Configuration détaillée si active */}
-                                {isActive && rule && (
+                                {/* Configuration détaillée — visible dès que la règle existe (même sans cible) */}
+                                {hasRule && (
                                   <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                                     {/* Main à vérifier (seulement si pertinent) */}
                                     {src.hand && (
