@@ -9602,6 +9602,28 @@ function AdminPanel() {
                       });
                     };
                     const addCombo = () => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { pos1: '♠', pos2: '♥', predict_suits: ['♦'], predict_mode: 'ordre', predict_counts: [] }] }));
+                    const addComboSpec = () => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { trigger_specs: [{ rank: '6', suit: '♣' }], predict_nul: '♣', predict_mode: 'ordre', predict_suits: [], predict_counts: [] }] }));
+                    const CC_RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+                    const CC_SUITS_ALL = ['♠','♥','♦','♣'];
+                    const NUL_CATS_CC = [
+                      ['distrib','⚖️ Distrib (2v2)'],['P_DEUX','👤 Joueur 2c'],['B_DEUX','🏦 Banquier 2c'],
+                      ['P_TROIS','👤 Joueur 3c'],['B_TROIS','🏦 Banquier 3c'],
+                      ['WIN_P','🏆 Victoire Joueur'],['WIN_B','🏆 Victoire Banquier'],['TIE','🤝 Match Nul'],
+                      ['PAIR_P','🟢 Pair (J)'],['IMPAIR_P','🔴 Impair (J)'],
+                      ['♠','♠ Pique'],['♥','♥ Cœur'],['♦','♦ Carreau'],['♣','♣ Trèfle'],
+                      ['DEUX_TROIS','2️⃣3️⃣ J:2 B:3'],['TROIS_DEUX','3️⃣2️⃣ J:3 B:2'],['TROIS_TROIS','3️⃣3️⃣ J:3 B:3'],
+                    ];
+                    const nlCatLabel = (v) => (NUL_CATS_CC.find(c => c[0] === v) || [v, v])[1];
+                    const updateSpec = (cIdx, sIdx, patch) => {
+                      const arr = [...(p.cc_combinations || [])];  // will be re-scoped below
+                      setStratForm(p => {
+                        const arr2 = [...(p.cc_combinations || [])];
+                        const specs2 = [...(arr2[cIdx].trigger_specs || [])];
+                        specs2[sIdx] = { ...specs2[sIdx], ...patch };
+                        arr2[cIdx] = { ...arr2[cIdx], trigger_specs: specs2 };
+                        return { ...p, cc_combinations: arr2 };
+                      });
+                    };
                     const removeCombo = (idx) => setStratForm(p => ({ ...p, cc_combinations: (p.cc_combinations || []).filter((_, i) => i !== idx) }));
                     const addPredictSuit = (idx) => {
                       const c = combos[idx];
@@ -9653,6 +9675,64 @@ function AdminPanel() {
                           </div>
                         )}
                         {combos.map((c, idx) => {
+                          // ── Nouveau style : trigger_specs ──────────────────────────────────
+                          if (Array.isArray(c.trigger_specs)) {
+                            const specLabel = (s) => `${s.rank || ''}${s.suit || ''}` || '?';
+                            return (
+                              <div key={idx} style={{ marginBottom: 12, padding: '12px', borderRadius: 10, background: 'rgba(15,10,35,0.75)', border: '2px solid rgba(99,240,180,0.35)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: '#6ee7b7' }}>🃏 Valeur+Costume #{idx + 1}</span>
+                                  <button type="button" onClick={() => removeCombo(idx)} style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.55)', background: 'rgba(239,68,68,0.25)', color: '#fca5a5', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>✕</button>
+                                </div>
+                                {/* Trigger specs */}
+                                <div style={{ marginBottom: 10 }}>
+                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>🔍 Déclencheur (toutes ces cartes doivent être présentes)</div>
+                                  {(c.trigger_specs || []).map((spec, sIdx) => (
+                                    <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                      <span style={{ fontSize: 11, color: '#64748b', minWidth: 20 }}>#{sIdx+1}</span>
+                                      <select value={spec.rank || ''}
+                                        onChange={e => { setStratForm(p => { const a=[...p.cc_combinations]; const sp=[...(a[idx].trigger_specs||[])]; sp[sIdx]={...sp[sIdx], rank: e.target.value||undefined}; a[idx]={...a[idx],trigger_specs:sp}; return {...p,cc_combinations:a}; }); }}
+                                        style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(99,240,180,0.35)', background: '#0f172a', color: '#6ee7b7', fontSize: 12 }}>
+                                        <option value="">— Valeur (tout) —</option>
+                                        {CC_RANKS.map(r => <option key={r} value={r}>{r}</option>)}
+                                      </select>
+                                      <select value={spec.suit || ''}
+                                        onChange={e => { setStratForm(p => { const a=[...p.cc_combinations]; const sp=[...(a[idx].trigger_specs||[])]; sp[sIdx]={...sp[sIdx], suit: e.target.value||undefined}; a[idx]={...a[idx],trigger_specs:sp}; return {...p,cc_combinations:a}; }); }}
+                                        style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(99,240,180,0.35)', background: '#0f172a', color: '#6ee7b7', fontSize: 14 }}>
+                                        <option value="">— Costume (tout) —</option>
+                                        {CC_SUITS_ALL.map(s => <option key={s} value={s}>{s}</option>)}
+                                      </select>
+                                      <button type="button"
+                                        onClick={() => { setStratForm(p => { const a=[...p.cc_combinations]; a[idx]={...a[idx],trigger_specs:(a[idx].trigger_specs||[]).filter((_,i)=>i!==sIdx)}; return {...p,cc_combinations:a}; }); }}
+                                        style={{ padding: '4px 8px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>×</button>
+                                    </div>
+                                  ))}
+                                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                                    <button type="button"
+                                      onClick={() => { setStratForm(p => { const a=[...p.cc_combinations]; a[idx]={...a[idx],trigger_specs:[...(a[idx].trigger_specs||[]),{rank:'',suit:''}]}; return {...p,cc_combinations:a}; }); }}
+                                      style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(99,240,180,0.4)', background: 'rgba(99,240,180,0.1)', color: '#6ee7b7', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                                      + Ajouter une carte
+                                    </button>
+                                    {c.trigger_specs.length > 0 && (
+                                      <span style={{ fontSize: 11, color: '#64748b', padding: '5px 0', fontStyle: 'italic' }}>
+                                        = {c.trigger_specs.filter(s=>s.rank||s.suit).map(specLabel).join(' + ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* Prédiction */}
+                                <div>
+                                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>🎯 Prédiction (catégorie à émettre)</div>
+                                  <select value={c.predict_nul || '♣'}
+                                    onChange={e => updateCombo(idx, { predict_nul: e.target.value })}
+                                    style={{ width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(99,240,180,0.45)', background: '#0f172a', color: '#6ee7b7', fontSize: 12 }}>
+                                    {NUL_CATS_CC.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                            );
+                          }
+                          // ── Ancien style : pos1/pos2 ────────────────────────────────────────
                           const suits = c.predict_suits || [];
                           const mode = c.predict_mode || 'ordre';
                           return (
@@ -9715,9 +9795,14 @@ function AdminPanel() {
                             </div>
                           );
                         })}
-                        <button type="button" onClick={addCombo} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px dashed rgba(56,189,248,0.55)', background: 'rgba(56,189,248,0.09)', color: '#bae6fd', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                          + Ajouter une combinaison
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button type="button" onClick={addComboSpec} style={{ flex: 1, padding: '10px', borderRadius: 8, border: '2px dashed rgba(99,240,180,0.5)', background: 'rgba(99,240,180,0.07)', color: '#6ee7b7', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                            🃏 + Valeur+Costume
+                          </button>
+                          <button type="button" onClick={addCombo} style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px dashed rgba(56,189,248,0.55)', background: 'rgba(56,189,248,0.09)', color: '#bae6fd', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                            + Pos1+Pos2 (costumes)
+                          </button>
+                        </div>
                         <div style={{ marginTop: 14 }}>
                           <label style={{ display: 'block', color: '#bae6fd', fontSize: 11, marginBottom: 4, fontWeight: 700 }}>Jeu à prédire — combien de parties après (limite de victoires consécutives avant pause de 1 jeu, 0 = désactivé)</label>
                           <input type="number" min="0" max="50" value={stratForm.cc_limit ?? 0}
@@ -9754,7 +9839,7 @@ function AdminPanel() {
                       });
                     };
                     const addRule = () => {
-                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', targets: [], ordre: 'aleatoire', hand: null }] }));
+                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', conditions: [], hand: null }] }));
                       setNulActiveRuleIdx(rules.length);
                     };
                     const removeRule = (idx) => {
@@ -9782,13 +9867,22 @@ function AdminPanel() {
                             <div key={idx} style={{ marginBottom: 10, borderRadius: 10, border: `1px solid ${isActive ? 'rgba(129,140,248,0.5)' : 'rgba(255,255,255,0.08)'}`, background: isActive ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.02)' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer' }}
                                 onClick={() => setNulActiveRuleIdx(isActive ? null : idx)}>
-                                <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+                                <div style={{ fontSize: 12, color: '#e2e8f0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
                                   <strong style={{ color: '#818cf8' }}>{catLabel(rule.trigger)}</strong>
-                                  <span style={{ color: '#475569', margin: '0 6px' }}>→</span>
-                                  {rule.targets.length > 0 ? rule.targets.map(catLabel).join(', ') : <span style={{ color: '#64748b' }}>(aucune cible)</span>}
-                                  {rule.targets.some(t => ['♠','♥','♦','♣'].includes(t)) && rule.hand && (
-                                    <span style={{ marginLeft: 8, fontSize: 10, color: '#6366f1', background: 'rgba(99,102,241,0.15)', padding: '2px 6px', borderRadius: 4 }}>
-                                      {rule.hand === 'joueur' ? '👤 Joueur' : '🏦 Banquier'}
+                                  <span style={{ color: '#475569', margin: '0 4px' }}>→</span>
+                                  {(Array.isArray(rule.conditions) && rule.conditions.length > 0)
+                                    ? rule.conditions.map((c, ci) => (
+                                        <span key={ci} style={{ fontSize: 10, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 4, padding: '1px 5px', color: '#a5b4fc' }}>
+                                          {c.when === '*' ? '★' : catLabel(c.when)} → {catLabel(c.predict)}
+                                        </span>
+                                      ))
+                                    : (Array.isArray(rule.targets) && rule.targets.length > 0)
+                                      ? <span style={{ color: '#94a3b8', fontSize: 11 }}>{rule.targets.map(catLabel).join(', ')}</span>
+                                      : <span style={{ color: '#64748b' }}>(aucune condition)</span>
+                                  }
+                                  {rule.hand && (
+                                    <span style={{ marginLeft: 4, fontSize: 10, color: '#6366f1', background: 'rgba(99,102,241,0.15)', padding: '1px 5px', borderRadius: 4 }}>
+                                      {rule.hand === 'joueur' ? '👤' : '🏦'}
                                     </span>
                                   )}
                                 </div>
@@ -9800,53 +9894,74 @@ function AdminPanel() {
 
                               {isActive && (
                                 <div style={{ padding: '0 14px 14px' }}>
-                                  <div style={{ marginBottom: 10 }}>
+                                  {/* ── Déclencheur ── */}
+                                  <div style={{ marginBottom: 12 }}>
                                     <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Déclencheur (forme de la main terminée)</div>
                                     <select value={rule.trigger} onChange={e => updateRule(idx, { trigger: e.target.value })}
                                       style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#c7d2fe', fontSize: 12 }}>
                                       {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                                     </select>
                                   </div>
-                                  <div style={{ marginBottom: 10 }}>
-                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Cibles à prédire (1 à 10)</div>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                      {NUL_CATS.map(([v, l]) => {
-                                        const isOn = rule.targets.includes(v);
-                                        return (
-                                          <button key={v} type="button"
-                                            onClick={() => {
-                                              const cur = rule.targets || [];
-                                              const next = isOn ? cur.filter(x => x !== v) : (cur.length < 10 ? [...cur, v] : cur);
-                                              updateRule(idx, { targets: next });
-                                            }}
-                                            style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${isOn ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isOn ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: isOn ? '#c7d2fe' : '#64748b', fontSize: 11, fontWeight: isOn ? 700 : 500, cursor: 'pointer' }}>
-                                            {l}
-                                          </button>
-                                        );
-                                      })}
+
+                                  {/* ── Conditions Si → Prédit ── */}
+                                  <div style={{ marginBottom: 12 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Conditions (Si → Prédit)</div>
+                                      <button type="button"
+                                        onClick={() => {
+                                          const conds = [...(rule.conditions || [])];
+                                          conds.push({ when: '*', predict: 'distrib' });
+                                          updateRule(idx, { conditions: conds });
+                                        }}
+                                        style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#c7d2fe', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
+                                        + Ajouter
+                                      </button>
                                     </div>
-                                  </div>
-                                  <div>
-                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Ordre de tirage des cibles</div>
-                                    <div style={{ display: 'flex', gap: 8 }}>
-                                      {[['aleatoire','🎲 Aléatoire'],['sequence','🔁 Séquence']].map(([val, lbl]) => (
-                                        <button key={val} type="button" onClick={() => updateRule(idx, { ordre: val })}
-                                          style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${(rule.ordre || 'aleatoire') === val ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: (rule.ordre || 'aleatoire') === val ? 'rgba(99,102,241,0.2)' : 'transparent', color: (rule.ordre || 'aleatoire') === val ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                                          {lbl}
+
+                                    {(!rule.conditions || rule.conditions.length === 0) && (
+                                      <div style={{ fontSize: 11, color: '#64748b', padding: '8px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 6 }}>
+                                        ⚠️ Ajoutez au moins une condition Si → Prédit
+                                      </div>
+                                    )}
+
+                                    {(rule.conditions || []).map((cond, cIdx) => (
+                                      <div key={cIdx} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, padding: '7px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                        <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', minWidth: 14 }}>Si</span>
+                                        <select value={cond.when || '*'}
+                                          onChange={e => { const conds = [...(rule.conditions || [])]; conds[cIdx] = { ...conds[cIdx], when: e.target.value }; updateRule(idx, { conditions: conds }); }}
+                                          style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: '#0f172a', color: '#a5b4fc', fontSize: 11, minWidth: 0 }}>
+                                          <option value="*">★ Toujours (défaut)</option>
+                                          {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                        </select>
+                                        <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>→</span>
+                                        <select value={cond.predict || 'distrib'}
+                                          onChange={e => { const conds = [...(rule.conditions || [])]; conds[cIdx] = { ...conds[cIdx], predict: e.target.value }; updateRule(idx, { conditions: conds }); }}
+                                          style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.35)', background: '#0f172a', color: '#86efac', fontSize: 11, minWidth: 0 }}>
+                                          {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                        </select>
+                                        <button type="button"
+                                          onClick={() => updateRule(idx, { conditions: (rule.conditions || []).filter((_, i) => i !== cIdx) })}
+                                          style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+                                          ×
                                         </button>
-                                      ))}
+                                      </div>
+                                    ))}
+
+                                    <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
+                                      Vérifiées dans l'ordre — la première correspondance déclenche la prédiction. ★ Toujours = correspond toujours (placez-le en dernier comme défaut).
                                     </div>
                                   </div>
-                                  {/* Main à vérifier — visible uniquement si la règle cible des costumes (♠♥♦♣) */}
-                                  {rule.targets.some(t => ['♠','♥','♦','♣'].includes(t)) && (
-                                    <div style={{ marginTop: 10 }}>
-                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Main à vérifier (costumes ♠♥♦♣)</div>
+
+                                  {/* ── Main à vérifier — si un predict est un costume ── */}
+                                  {(rule.conditions || []).some(c => ['♠','♥','♦','♣'].includes(c.predict)) && (
+                                    <div style={{ marginBottom: 12 }}>
+                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Main à vérifier (pour costumes ♠♥♦♣)</div>
                                       <div style={{ display: 'flex', gap: 8 }}>
                                         {[['joueur','👤 Joueur'],['banquier','🏦 Banquier'],[null,'♠+♥ Les deux']].map(([val, lbl]) => {
-                                          const isActive = (rule.hand ?? null) === val;
+                                          const _on = (rule.hand ?? null) === val;
                                           return (
                                             <button key={String(val)} type="button" onClick={() => updateRule(idx, { hand: val })}
-                                              style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${isActive ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: isActive ? 'rgba(99,102,241,0.2)' : 'transparent', color: isActive ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                              style={{ flex: 1, padding: '8px', borderRadius: 8, border: `1px solid ${_on ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, background: _on ? 'rgba(99,102,241,0.2)' : 'transparent', color: _on ? '#c7d2fe' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                                               {lbl}
                                             </button>
                                           );
