@@ -1892,8 +1892,9 @@ class Engine {
 
       // ── Résolution spéciale mode Écart 2/3 ─────────────────────────────
       } else if (ps === 'TWO_THREE') {
-        const isMixed = Array.isArray(pCards) && Array.isArray(bCards) &&
-          ((pCards.length === 2 && bCards.length === 3) || (pCards.length === 3 && bCards.length === 2));
+        const _pLen2 = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+        const _bLen2 = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
+        const isMixed = (_pLen2 === 2 && _bLen2 === 3) || (_pLen2 === 3 && _bLen2 === 2);
         if (isMixed) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Écart 2/3] ✅ Jeu mixte → gagne (R${rattrapage})`);
@@ -1970,11 +1971,14 @@ class Engine {
       // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
       } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
         const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
+        // Utiliser la longueur filtrée (sans null) pour correspondre à classifyNulCategories
+        const _pLenC = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+        const _bLenC = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
         const isMatch = ps === 'DEUX_TROIS'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 2 && bCards.length === 3)
+          ? (_pLenC === 2 && _bLenC === 3)
           : ps === 'TROIS_DEUX'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 2)
-          : (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 3);
+          ? (_pLenC === 3 && _bLenC === 2)
+          : (_pLenC === 3 && _bLenC === 3);
         if (isMatch) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [${combLabel}] ✅ Combinaison confirmée → gagne (R${rattrapage})`);
@@ -3407,64 +3411,99 @@ class Engine {
       }
 
     } else if (mode === 'combine_carte') {
-      // ── MODE COMBINÉ CARTE ── Positions 1+2 de la main choisie ───────────
-      // Lit le costume pos 1 (index 0) et pos 2 (index 1) de cc_hand.
-      // Cherche dans cc_combinations la règle { pos1, pos2, predict }.
-      // Si trouvée → prédit le costume configuré. Pas de seuil B ni mapping.
-      // cc_limit : tracking intégré dans le callback _resolvePending commun.
+      // ── MODE COMBINÉ CARTE ── ─────────────────────────────────────────────
+      // Deux sous-modes coexistent dans cc_combinations :
+      //   • Nouveau  — trigger_specs[] : combinaison libre rang/costume
+      //                predict_nul     : toute catégorie NUL (costumes, distrib…)
+      //   • Héritage — pos1/pos2       : costumes exacts cartes 1 et 2 uniquement
+      //                predict_suits   : liste de costumes en rotation
+      // La première règle trigger_specs qui correspond gagne et court-circuite
+      // la vérification héritage. cc_limit reste commun aux deux.
       // ─────────────────────────────────────────────────────────────────────
 
-      // ── Vérifier si on est en mode pause (skip 1 jeu) ──────────────────
       if (state._ccSkipNext) {
         state._ccSkipNext = false;
         console.log(`[${channelId}] [Combiné Carte] ⏭ Jeu sauté (pause après limite) — prochaine prédiction reprise`);
       } else {
         const ccCards  = (cfg.cc_hand === 'banquier' ? bCards : pCards) || [];
-        const ccCard1  = ccCards[0];
-        const ccCard2  = ccCards[1];
-        if (ccCard1 && ccCard2) {
-          const ccS1 = normalizeSuit(ccCard1.S || '');
-          const ccS2 = normalizeSuit(ccCard2.S || '');
-          if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
-            const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
-            const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
-            if (ccMatch) {
-              // Support multi-suit mode (predict_suits) + legacy single predict field
-              const ccSuits = Array.isArray(ccMatch.predict_suits) && ccMatch.predict_suits.length > 0
-                ? ccMatch.predict_suits.filter(s => ALL_SUITS.includes(s))
-                : (ALL_SUITS.includes(ccMatch.predict) ? [ccMatch.predict] : []);
-              if (ccSuits.length > 0) {
-                const ccMode     = ccMatch.predict_mode || 'ordre';
-                const comboKey   = `${ccMatch.pos1}_${ccMatch.pos2}`;
-                if (!state._ccOrderState) state._ccOrderState = {};
-                if (!state._ccOrderState[comboKey]) state._ccOrderState[comboKey] = { idx: 0, counts: null };
-                const cState = state._ccOrderState[comboKey];
-                let chosenRaw;
-                if (ccMode === 'aleatoire') {
-                  // Tirage aléatoire parmi les costumes définis
-                  chosenRaw = ccSuits[Math.floor(Math.random() * ccSuits.length)];
-                } else if (ccMode === 'nombre_fois') {
-                  // Chaque costume prédit N fois avant passage au suivant
-                  const defCounts = Array.isArray(ccMatch.predict_counts) && ccMatch.predict_counts.length === ccSuits.length
-                    ? ccMatch.predict_counts.map(c => Math.max(1, parseInt(c) || 1))
-                    : ccSuits.map(() => 1);
-                  if (!Array.isArray(cState.counts) || cState.counts.length !== ccSuits.length) {
-                    cState.counts = [...defCounts];
+        const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
+
+        // ── NOUVEAU : trigger_specs (rang + costume libres) ─────────────────
+        // Construit des ensembles pour matching O(1)
+        const _tRanks    = new Set(ccCards.map(cd => normalizeRank(cd?.R ?? '')).filter(r => r));
+        const _tSuits    = new Set(ccCards.map(cd => normalizeSuit(cd?.S ?? '')).filter(s => ALL_SUITS.includes(s)));
+        const _tSpecific = new Set(ccCards.map(cd => {
+          const r = normalizeRank(cd?.R ?? '');
+          const s = normalizeSuit(cd?.S ?? '');
+          return (r && ALL_SUITS.includes(s)) ? `${r}|${s}` : null;
+        }).filter(Boolean));
+
+        let _specEmitted = false;
+        for (const _c of ccCombos) {
+          if (!Array.isArray(_c.trigger_specs) || _c.trigger_specs.length === 0) continue;
+          if (!_c.predict_nul) continue;
+          const _allMatch = _c.trigger_specs.every(spec => {
+            if (!spec) return false;
+            const sr = spec.rank, ss = spec.suit;
+            if (sr && ss) return _tSpecific.has(`${sr}|${ss}`);
+            if (sr)       return _tRanks.has(sr);
+            if (ss)       return _tSuits.has(ss);
+            return false;
+          });
+          if (_allMatch) {
+            const _predicted  = _c.predict_nul;
+            const _ccPs       = resolvePredictedSuit(_predicted) || _predicted;
+            const _specLabel  = _c.trigger_specs.map(s => `${s.rank || ''}${s.suit || ''}`).join('+');
+            console.log(`[${channelId}] [Combiné Carte+] Trigger [${_specLabel}] → prédit "${_predicted}" pour #${gn + offset}`);
+            await emitPrediction(gn + offset, _ccPs, _predicted);
+            _specEmitted = true;
+            break; // première correspondance gagne
+          }
+        }
+
+        // ── HÉRITAGE : pos1/pos2 (costumes cartes 1 et 2 uniquement) ───────
+        if (!_specEmitted) {
+          const ccCard1  = ccCards[0];
+          const ccCard2  = ccCards[1];
+          if (ccCard1 && ccCard2) {
+            const ccS1 = normalizeSuit(ccCard1.S || '');
+            const ccS2 = normalizeSuit(ccCard2.S || '');
+            if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
+              const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
+              if (ccMatch) {
+                const ccSuits = Array.isArray(ccMatch.predict_suits) && ccMatch.predict_suits.length > 0
+                  ? ccMatch.predict_suits.filter(s => ALL_SUITS.includes(s))
+                  : (ALL_SUITS.includes(ccMatch.predict) ? [ccMatch.predict] : []);
+                if (ccSuits.length > 0) {
+                  const ccMode   = ccMatch.predict_mode || 'ordre';
+                  const comboKey = `${ccMatch.pos1}_${ccMatch.pos2}`;
+                  if (!state._ccOrderState) state._ccOrderState = {};
+                  if (!state._ccOrderState[comboKey]) state._ccOrderState[comboKey] = { idx: 0, counts: null };
+                  const cState = state._ccOrderState[comboKey];
+                  let chosenRaw;
+                  if (ccMode === 'aleatoire') {
+                    chosenRaw = ccSuits[Math.floor(Math.random() * ccSuits.length)];
+                  } else if (ccMode === 'nombre_fois') {
+                    const defCounts = Array.isArray(ccMatch.predict_counts) && ccMatch.predict_counts.length === ccSuits.length
+                      ? ccMatch.predict_counts.map(c => Math.max(1, parseInt(c) || 1))
+                      : ccSuits.map(() => 1);
+                    if (!Array.isArray(cState.counts) || cState.counts.length !== ccSuits.length) {
+                      cState.counts = [...defCounts];
+                    }
+                    let foundIdx = cState.counts.findIndex(c => c > 0);
+                    if (foundIdx === -1) { cState.counts = [...defCounts]; foundIdx = 0; }
+                    chosenRaw = ccSuits[foundIdx];
+                    cState.counts[foundIdx]--;
+                  } else {
+                    const idx = (cState.idx || 0) % ccSuits.length;
+                    chosenRaw = ccSuits[idx];
+                    cState.idx = (idx + 1) % ccSuits.length;
                   }
-                  let foundIdx = cState.counts.findIndex(c => c > 0);
-                  if (foundIdx === -1) { cState.counts = [...defCounts]; foundIdx = 0; }
-                  chosenRaw = ccSuits[foundIdx];
-                  cState.counts[foundIdx]--;
-                } else {
-                  // Par ordre (défaut) : rotation séquentielle
-                  const idx = (cState.idx || 0) % ccSuits.length;
-                  chosenRaw = ccSuits[idx];
-                  cState.idx = (idx + 1) % ccSuits.length;
-                }
-                const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
-                if (ccPs) {
-                  console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
-                  await emitPrediction(gn + offset, ccPs, chosenRaw);
+                  const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
+                  if (ccPs) {
+                    console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
+                    await emitPrediction(gn + offset, ccPs, chosenRaw);
+                  }
                 }
               }
             }
@@ -4458,28 +4497,52 @@ class Engine {
         for (let rIdx = 0; rIdx < nulRules.length; rIdx++) {
           const rule = nulRules[rIdx];
           if (!rule || !rule.trigger || !handCats.has(rule.trigger)) continue;
-          if (!Array.isArray(rule.targets) || rule.targets.length === 0) continue;
 
-          const targetGn = gn + offset;
+          // ── Vérification : la règle a des conditions OU (compat) des cibles ──
+          const _conditions = Array.isArray(rule.conditions) ? rule.conditions.filter(c => c && c.predict) : [];
+          const _hasConditions = _conditions.length > 0;
+          const _hasTargets    = Array.isArray(rule.targets) && rule.targets.length > 0;
+          if (!_hasConditions && !_hasTargets) continue;
+
+          const targetGn  = gn + offset;
           const triggerKey = `${gn}_i${rIdx}_${rule.trigger}`;
           if (state.nulTriggered.has(triggerKey)) continue;
           if (state.pending[String(targetGn)]) continue;
 
-          // Calcul du choix SANS muter l'état — l'état n'est avancé qu'après confirmation
-          // de l'émission (évite de perdre un tour de séquence si emitPrediction est bloqué).
-          let chosen;
+          // ── Détermination de la cible ──────────────────────────────────────
+          let chosen = null;
           let _seqKey, _nextSeqIdx;
-          if (rule.ordre === 'sequence') {
+
+          if (_hasConditions) {
+            // Nouveau système : parcours des conditions dans l'ordre
+            // • when === '*' : condition par défaut, correspond toujours
+            // • when === une catégorie NUL : correspond si handCats.has(when)
+            for (const cond of _conditions) {
+              if (!cond.predict) continue;
+              if (cond.when === '*' || handCats.has(cond.when)) {
+                chosen = cond.predict;
+                const whenLabel = cond.when === '*' ? '★ Toujours' : cond.when;
+                console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | Si "${whenLabel}" → prédit "${chosen}" pour #${targetGn}`);
+                break;
+              }
+            }
+            if (!chosen) {
+              console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | aucune condition ne correspond — pas de prédiction`);
+              continue; // Aucune condition ne matche → pas d'émission
+            }
+          } else if (rule.ordre === 'sequence') {
+            // Compat ancien système targets[] + séquence
             _seqKey = `r${rIdx}_${rule.trigger}`;
             const idx = (state.nulSeqIdx[_seqKey] || 0) % rule.targets.length;
             chosen = rule.targets[idx];
             _nextSeqIdx = idx + 1;
           } else {
+            // Compat ancien système targets[] + aléatoire
             chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
           }
 
-          const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
-          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → tente "${chosen}" pour #${targetGn}`);
+          const _modeLabel = _hasConditions ? 'conditions' : (rule.ordre === 'sequence' ? 'séquence' : 'aléatoire');
+          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} trigger="${rule.trigger}" | ${_modeLabel} → tente "${chosen}" pour #${targetGn}`);
           // Passe rule.trigger comme suit déclencheur réel (pas chosen) pour que les
           // exceptions évaluent le bon costume/catégorie déclencheur.
           // Passe rule.hand pour que la résolution costume vérifie uniquement

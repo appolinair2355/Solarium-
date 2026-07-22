@@ -789,24 +789,48 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         ? { threshold: 0, mode: 'combine_carte', mappings: null,
             cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
             cc_limit: Math.max(0, parseInt(req.body.cc_limit) || 0),
-            cc_combinations: Array.isArray(req.body.cc_combinations)
-              ? req.body.cc_combinations.filter(c => c && ['♠','♥','♦','♣'].includes(c.pos1) && ['♠','♥','♦','♣'].includes(c.pos2)).map(c => {
-                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (['♠','♥','♦','♣'].includes(c.predict) ? [c.predict] : []))
-                    .filter(s => ['♠','♥','♦','♣'].includes(s)).slice(0, 4);
+            cc_combinations: (() => {
+              const _suits = ['♠','♥','♦','♣'];
+              const _ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+              return (Array.isArray(req.body.cc_combinations) ? req.body.cc_combinations : [])
+                .map(c => {
+                  if (!c) return null;
+                  // ── Nouveau style : trigger_specs ──────────────────────────
+                  if (Array.isArray(c.trigger_specs) && c.trigger_specs.length > 0) {
+                    const specs = c.trigger_specs
+                      .map(s => { if (!s) return null; const o = {}; if (_ranks.includes(s.rank)) o.rank = s.rank; if (_suits.includes(s.suit)) o.suit = s.suit; return (o.rank || o.suit) ? o : null; })
+                      .filter(Boolean).slice(0, 10);
+                    if (specs.length === 0 || !NUL_CATEGORY_VALUES.includes(c.predict_nul)) return null;
+                    return { trigger_specs: specs, predict_nul: c.predict_nul, predict_mode: 'ordre', predict_suits: [], predict_counts: [] };
+                  }
+                  // ── Ancien style : pos1/pos2 ───────────────────────────────
+                  if (!_suits.includes(c.pos1) || !_suits.includes(c.pos2)) return null;
+                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (_suits.includes(c.predict) ? [c.predict] : []))
+                    .filter(s => _suits.includes(s)).slice(0, 4);
+                  if (predictSuits.length === 0) return null;
                   const predictMode = ['ordre','aleatoire','nombre_fois'].includes(c.predict_mode) ? c.predict_mode : 'ordre';
-                  const predictCounts = Array.isArray(c.predict_counts)
-                    ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length)
-                    : [];
+                  const predictCounts = Array.isArray(c.predict_counts) ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length) : [];
                   return { pos1: c.pos1, pos2: c.pos2, predict: predictSuits[0] || null, predict_suits: predictSuits, predict_mode: predictMode, predict_counts: predictCounts };
-                }).filter(c => c.predict_suits.length > 0)
-              : [] }
+                })
+                .filter(Boolean);
+            })() }
         : isNulPattern
         ? { threshold: 0, mode: 'nul_pattern', mappings: null,
-            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => ({
-              trigger: NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-              targets: (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
-              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-            })).filter(r => r.trigger && r.targets.length > 0) }
+            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => {
+              const _conds = Array.isArray(r.conditions)
+                ? r.conditions
+                    .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
+                    .filter(c => c.when && c.predict)
+                : [];
+              return {
+                trigger:    NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
+                conditions: _conds,
+                // Compat héritage — conservés pour anciennes stratégies
+                targets:    (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
+                ordre:      r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+                hand:       (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+              };
+            }).filter(r => r.trigger && (r.conditions.length > 0 || r.targets.length > 0)) }
         : isNumeroCostume
         ? { threshold: 0, mode: 'numero_costume', mappings: null,
             numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),
@@ -1154,24 +1178,45 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         ? { threshold: 0, mode: 'combine_carte', mappings: null,
             cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
             cc_limit: Math.max(0, parseInt(req.body.cc_limit) || 0),
-            cc_combinations: Array.isArray(req.body.cc_combinations)
-              ? req.body.cc_combinations.filter(c => c && ['♠','♥','♦','♣'].includes(c.pos1) && ['♠','♥','♦','♣'].includes(c.pos2)).map(c => {
-                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (['♠','♥','♦','♣'].includes(c.predict) ? [c.predict] : []))
-                    .filter(s => ['♠','♥','♦','♣'].includes(s)).slice(0, 4);
+            cc_combinations: (() => {
+              const _suits = ['♠','♥','♦','♣'];
+              const _ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+              return (Array.isArray(req.body.cc_combinations) ? req.body.cc_combinations : [])
+                .map(c => {
+                  if (!c) return null;
+                  if (Array.isArray(c.trigger_specs) && c.trigger_specs.length > 0) {
+                    const specs = c.trigger_specs
+                      .map(s => { if (!s) return null; const o = {}; if (_ranks.includes(s.rank)) o.rank = s.rank; if (_suits.includes(s.suit)) o.suit = s.suit; return (o.rank || o.suit) ? o : null; })
+                      .filter(Boolean).slice(0, 10);
+                    if (specs.length === 0 || !NUL_CATEGORY_VALUES.includes(c.predict_nul)) return null;
+                    return { trigger_specs: specs, predict_nul: c.predict_nul, predict_mode: 'ordre', predict_suits: [], predict_counts: [] };
+                  }
+                  if (!_suits.includes(c.pos1) || !_suits.includes(c.pos2)) return null;
+                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (_suits.includes(c.predict) ? [c.predict] : []))
+                    .filter(s => _suits.includes(s)).slice(0, 4);
+                  if (predictSuits.length === 0) return null;
                   const predictMode = ['ordre','aleatoire','nombre_fois'].includes(c.predict_mode) ? c.predict_mode : 'ordre';
-                  const predictCounts = Array.isArray(c.predict_counts)
-                    ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length)
-                    : [];
+                  const predictCounts = Array.isArray(c.predict_counts) ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length) : [];
                   return { pos1: c.pos1, pos2: c.pos2, predict: predictSuits[0] || null, predict_suits: predictSuits, predict_mode: predictMode, predict_counts: predictCounts };
-                }).filter(c => c.predict_suits.length > 0)
-              : [] }
+                })
+                .filter(Boolean);
+            })() }
         : isNulPattern
         ? { threshold: 0, mode: 'nul_pattern', mappings: null,
-            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => ({
-              trigger: NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-              targets: (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
-              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-            })).filter(r => r.trigger && r.targets.length > 0) }
+            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => {
+              const _conds = Array.isArray(r.conditions)
+                ? r.conditions
+                    .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
+                    .filter(c => c.when && c.predict)
+                : [];
+              return {
+                trigger:    NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
+                conditions: _conds,
+                targets:    (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
+                ordre:      r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+                hand:       (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+              };
+            }).filter(r => r.trigger && (r.conditions.length > 0 || r.targets.length > 0)) }
         : isNumeroCostume
         ? { threshold: 0, mode: 'numero_costume', mappings: null,
             numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),

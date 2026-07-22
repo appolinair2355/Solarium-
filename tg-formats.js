@@ -1,5 +1,5 @@
-// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°77)
-// Fichier dédié aux 77 formats de prédiction — aucun saut de numéro.
+// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°87)
+// Fichier dédié aux 87 formats de prédiction — aucun saut de numéro.
 // Importer avec : const { buildTgMessage, buildPredictionMsg, buildResultMsg, ... } = require('./tg-formats');
 
 'use strict';
@@ -896,6 +896,163 @@ function buildTgMessage(formatId, {
       }
       return {
         text: `🌈 Jeux № ${gameNumber} 🔹 Prediction: ${v77} 🌹Statut :${sl77}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 78 : Distribution Royale (⚜) ─────────────────────────────
+    case 78: {
+      const pred78 = suit === 'distrib' ? '⚜Distribution oui⚜'
+        : suit === 'TROIS_TROIS'        ? '⚜J:3 B:3⚜'
+        : suit === 'DEUX_TROIS'         ? '⚜J:2 B:3⚜'
+        : suit === 'TROIS_DEUX'         ? '⚜J:3 B:2⚜'
+        : suit === 'WIN_P'              ? '⚜Victoire Joueur⚜'
+        : suit === 'WIN_B'              ? '⚜Victoire Banquier⚜'
+        : suit === 'TIE'                ? '⚜Match Nul⚜'
+        : `⚜${name}⚜`;
+      const pur78 = status === null    ? `poursuite:(+${maxR})🔰`
+        : status === 'gagne'           ? `victoire ✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
+        :                                `perdu ❌ (+${maxR})`;
+      return {
+        text:
+          `${pred78}\n` +
+          `┌ № ${gameNumber}\n` +
+          `└ 👤 ${pur78}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 79 : Arc-en-Ciel Compact (🌈 une ligne) ──────────────────
+    case 79: {
+      const v79 = suit === 'WIN_P' ? 'V1' : suit === 'WIN_B' ? 'V2' : suit === 'TIE' ? 'Ég.' : suit === 'distrib' ? '2v2' : suit === 'TROIS_TROIS' ? '3/3' : suit === 'DEUX_TROIS' ? '2/3' : suit === 'TROIS_DEUX' ? '3/2' : name;
+      let sl79;
+      if (status === null) sl79 = `⏳ 💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque)`;
+      else if (status === 'gagne') sl79 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage} 💧 Poursuite ${maxR}!! (🔰+ ${rattrapage}Risque)`;
+      else sl79 = `❌ 💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque)`;
+      return { text: `🌈 Jeux № ${gameNumber} 🔹 Prediction: ${v79} 🌹Statut :${sl79}`, parse_mode: null };
+    }
+
+    // ── Format 80 : Arc-en-Ciel Étendu (🌈 multi-lignes) ────────────────
+    case 80: {
+      const v80 = suit === 'WIN_P' ? 'V1' : suit === 'WIN_B' ? 'V2' : suit === 'TIE' ? 'Ég.' : suit === 'distrib' ? '2v2' : suit === 'TROIS_TROIS' ? '3/3' : suit === 'DEUX_TROIS' ? '2/3' : suit === 'TROIS_DEUX' ? '3/2' : name;
+      let sl80;
+      if (status === null) sl80 = `⏳ ${RATR_EMOJI[0]}`;
+      else if (status === 'gagne') sl80 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else sl80 = '❌';
+      const pur80 = status === null ? `Poursuite ${maxR}!! (🔰+ ${maxR}Risque )` : status === 'gagne' ? `Poursuite ${maxR}!! (🔰+ ${rattrapage}Risque )` : `Perdu après ${maxR} essais`;
+      return {
+        text:
+          `🌈 Jeux № ${gameNumber}\n` +
+          `🔹 Prediction: ${v80}\n` +
+          `🌹Statut :${sl80}\n` +
+          `💧 ${pur80}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 81 : Saphir Cartes (💠) ──────────────────────────────────
+    case 81: {
+      const h81 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const isCard81 = ['♠','♥','♦','♣','deux','trois','pair','impair','P_DEUX','B_DEUX','P_TROIS','B_TROIS'].includes(suit);
+      let ct81;
+      if (suit === 'P_DEUX' || suit === 'B_DEUX') ct81 = `${suit.startsWith('P') ? h81 : (hand === 'banquier' ? 'Joueur' : 'Banquier')} recevra 2 cartes`;
+      else if (suit === 'P_TROIS' || suit === 'B_TROIS') ct81 = `${suit.startsWith('P') ? h81 : (hand === 'banquier' ? 'Joueur' : 'Banquier')} recevra 3 cartes`;
+      else if (suit === 'deux') ct81 = `${h81} recevra 2 cartes`;
+      else if (suit === 'trois') ct81 = `${h81} recevra 3 cartes`;
+      else if (suit === 'TROIS_TROIS') ct81 = 'Joueur + Banquier : 3 cartes chacun';
+      else if (suit === 'DEUX_TROIS') ct81 = 'Joueur 2 cartes — Banquier 3 cartes';
+      else if (suit === 'TROIS_DEUX') ct81 = 'Joueur 3 cartes — Banquier 2 cartes';
+      else if (suit === 'distrib') ct81 = 'Distribution 2v2';
+      else if (suit === 'pair') ct81 = `${h81} score pair`;
+      else if (suit === 'impair') ct81 = `${h81} score impair`;
+      else ct81 = `${emoji} ${name}`;
+      const sl81 = status === null ? `⏳` : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
+      return {
+        text:
+          `💠Jeux №${gameNumber}\n` +
+          `🎯${ct81}\n` +
+          `🌤 Rattrapages +${maxR}\n` +
+          `🗯️Résultats : ${sl81}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 82 : Porte-bonheur (🍀) ──────────────────────────────────
+    case 82: {
+      const v82 = suit === 'WIN_P' ? '👤 Joueur' : suit === 'WIN_B' ? '🏦 Banquier' : suit === 'TIE' ? '🤝 Nul' : suit === 'distrib' ? '⚖️ 2v2' : suit === 'TROIS_TROIS' ? '3️⃣3️⃣ 3/3' : suit === 'DEUX_TROIS' ? '2️⃣3️⃣' : suit === 'TROIS_DEUX' ? '3️⃣2️⃣' : `${emoji} ${name}`;
+      const sl82 = status === null ? '⌛ En attente...' : status === 'gagne' ? `✅ Gagné ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌ Perdu';
+      return {
+        text:
+          `🍀 Jeux № ${gameNumber}\n` +
+          `🎯 Prédiction : ${v82}\n` +
+          `🔰 Poursuite : +${maxR}\n` +
+          `📊 Résultat : ${sl82}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 83 : Double Ligne Court ──────────────────────────────────
+    case 83: {
+      const pred83 = suit === 'WIN_P' ? '🏆V1' : suit === 'WIN_B' ? '🏆V2' : suit === 'TIE' ? '🤝X' : suit === 'distrib' ? '⚖️2v2' : `${emoji}`;
+      const sl83 = status === null ? `⏳+${maxR}` : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌`;
+      return { text: `🔮 №${gameNumber} ${pred83}\n🔰Risque +${maxR} │ ${sl83}`, parse_mode: null };
+    }
+
+    // ── Format 84 : Télégraphe Classique ────────────────────────────────
+    case 84: {
+      const v84 = suit === 'WIN_P' ? 'JOUEUR' : suit === 'WIN_B' ? 'BANQUIER' : suit === 'TIE' ? 'NUL' : suit === 'distrib' ? 'DISTRIB 2v2' : suit === 'TROIS_TROIS' ? 'J3/B3' : suit === 'DEUX_TROIS' ? 'J2/B3' : suit === 'TROIS_DEUX' ? 'J3/B2' : name.toUpperCase();
+      const sl84 = status === null ? `⏳ POURSUITE +${maxR}` : status === 'gagne' ? `✅ GAGNE ${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌ PERDU`;
+      return {
+        text:
+          `📡 BACCARAT №${gameNumber}\n` +
+          `▶ ${v84}\n` +
+          `▶ ${sl84}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 85 : Feu d'Artifice (🎆) ─────────────────────────────────
+    case 85: {
+      const v85 = suit === 'WIN_P' ? 'V1 🏆Joueur' : suit === 'WIN_B' ? 'V2 🏆Banquier' : suit === 'TIE' ? '🤝Égalité' : suit === 'distrib' ? '⚖️Distribution' : suit === 'TROIS_TROIS' ? '3️⃣✖️3️⃣' : suit === 'DEUX_TROIS' ? '2️⃣✖️3️⃣' : suit === 'TROIS_DEUX' ? '3️⃣✖️2️⃣' : `${emoji}${name}`;
+      let sl85;
+      if (status === null) sl85 = `⏳\n💧 Poursuite ${maxR} (🔰+${maxR})`;
+      else if (status === 'gagne') sl85 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}\n💧 Confirmé (🔰+${rattrapage})`;
+      else sl85 = `❌\n💧 Échoué après ${maxR} essais`;
+      return {
+        text:
+          `🎆 Jeux № ${gameNumber}\n` +
+          `✨ ${v85}\n` +
+          `${sl85}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 86 : Signal Pro ──────────────────────────────────────────
+    case 86: {
+      const h86 = hand === 'banquier' ? '🏦' : '👤';
+      const v86 = suit === 'WIN_P' ? '👤 Victoire J' : suit === 'WIN_B' ? '🏦 Victoire B' : suit === 'TIE' ? '🤝 Match Nul' : suit === 'distrib' ? '⚖️ 2+2' : suit === 'TROIS_TROIS' ? '3️⃣+3️⃣' : suit === 'DEUX_TROIS' ? '2️⃣+3️⃣' : suit === 'TROIS_DEUX' ? '3️⃣+2️⃣' : `${h86} ${emoji}${name}`;
+      const sl86 = status === null ? `⌛` : status === 'gagne' ? `✅ (R${rattrapage})` : `❌`;
+      return {
+        text:
+          `📶 SIGNAL #${gameNumber}\n` +
+          `🎯 ${v86}\n` +
+          `🔰 Max : +${maxR}   ${sl86}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 87 : Cristal (🔷) ─────────────────────────────────────────
+    case 87: {
+      const v87 = suit === 'WIN_P' ? 'V1 — Victoire Joueur' : suit === 'WIN_B' ? 'V2 — Victoire Banquier' : suit === 'TIE' ? 'Match Nul' : suit === 'distrib' ? 'Distribution 2+2' : suit === 'TROIS_TROIS' ? 'J:3 cartes + B:3 cartes' : suit === 'DEUX_TROIS' ? 'J:2 cartes + B:3 cartes' : suit === 'TROIS_DEUX' ? 'J:3 cartes + B:2 cartes' : name;
+      let sl87;
+      if (status === null) sl87 = `🕐 En cours  🔰 Poursuite ×${maxR}`;
+      else if (status === 'gagne') sl87 = `✅ Confirmé  ${RATR_EMOJI[rattrapage] ?? rattrapage}  (Rattrapage ${rattrapage})`;
+      else sl87 = `❌ Non confirmé  (max ${maxR} atteint)`;
+      return {
+        text:
+          `🔷 Jeux № ${gameNumber}\n` +
+          `┌ 🎯 ${v87}\n` +
+          `└ ${sl87}`,
         parse_mode: null,
       };
     }
