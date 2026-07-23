@@ -9815,20 +9815,66 @@ function AdminPanel() {
                   {stratForm.mode === 'nul_pattern' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)', fontSize: 12, color: '#c7d2fe', lineHeight: 1.7 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🤝 Mode Match Nul (Motifs)</div>
-                      <div>Déclenche sur la <strong>forme</strong> de la main qui vient de se terminer (distribution, 2/3 cartes, victoire, pair/impair, costume, combinaisons, match nul).</div>
-                      <div style={{ marginTop: 6 }}>Pour chaque règle, choisissez le <strong>déclencheur</strong> puis 1 à 10 <strong>cibles</strong> (les mêmes catégories) — la cible peut être identique au déclencheur.</div>
-                      <div style={{ marginTop: 6 }}>La prédiction est émise pour le jeu <strong>N+Décalage</strong> (champ Décalage ci-dessous), en tirant la cible au hasard ou en séquence fixe.</div>
+                      <div>Déclenche sur la <strong>forme</strong> de la main terminée. Pour chaque règle : choisissez le <strong>déclencheur</strong>, une <strong>condition</strong> (catégorie Comptages), puis les prédictions <strong>SI vrai ✅</strong> et <strong>SI NON ❌</strong>.</div>
+                      <div style={{ marginTop: 6, color: '#94a3b8' }}>Les catégories à paramètre (Points &gt; N, Score Exact N) nécessitent de définir la valeur N. Si plusieurs prédictions sont sélectionnées, une est tirée au hasard.</div>
                     </div>
                   )}
                   {stratForm.mode === 'nul_pattern' && (() => {
                     const NUL_CATS = [
-                      ['distrib', '⚖️ Distribution (2v2)'], ['P_DEUX', '👤 Joueur 2 cartes'], ['B_DEUX', '🏦 Banquier 2 cartes'],
-                      ['P_TROIS', '👤 Joueur 3 cartes'], ['B_TROIS', '🏦 Banquier 3 cartes'],
-                      ['WIN_P', '🏆 Victoire Joueur'], ['WIN_B', '🏆 Victoire Banquier'], ['TIE', '🤝 Match Nul'],
-                      ['PAIR_P', '🟢 Pair (Joueur)'], ['IMPAIR_P', '🔴 Impair (Joueur)'],
+                      ['distrib', '⚖️ 2v2'], ['P_DEUX', '👤 J:2k'], ['B_DEUX', '🏦 B:2k'],
+                      ['P_TROIS', '👤 J:3k'], ['B_TROIS', '🏦 B:3k'],
+                      ['WIN_P', '🏆 Vict. Joueur'], ['WIN_B', '🏆 Vict. Banquier'], ['TIE', '🤝 Match Nul'],
+                      ['PAIR_P', '🟢 Pair J'], ['IMPAIR_P', '🔴 Impair J'],
                       ['♠', '♠ Pique'], ['♥', '♥ Cœur'], ['♦', '♦ Carreau'], ['♣', '♣ Trèfle'],
-                      ['DEUX_TROIS', '2️⃣3️⃣ J:2 B:3'], ['TROIS_DEUX', '3️⃣2️⃣ J:3 B:2'], ['TROIS_TROIS', '3️⃣3️⃣ J:3 B:3'],
+                      ['DEUX_TROIS', '2/3 J:2 B:3'], ['TROIS_DEUX', '3/2 J:3 B:2'], ['TROIS_TROIS', '3/3 J:3 B:3'],
                     ];
+                    const COND_GROUPS = [
+                      { group: '🃏 Costume Joueur', items: [
+                        { key: 'suit_p_heart', label: '❤️ Cœur Joueur' }, { key: 'suit_p_club', label: '♣️ Trèfle Joueur' },
+                        { key: 'suit_p_spade', label: '♠️ Pique Joueur' }, { key: 'suit_p_diamond', label: '♦️ Carreau Joueur' },
+                      ]},
+                      { group: '🃏 Costume Banquier', items: [
+                        { key: 'suit_b_heart', label: '❤️ Cœur Banquier' }, { key: 'suit_b_club', label: '♣️ Trèfle Banquier' },
+                        { key: 'suit_b_spade', label: '♠️ Pique Banquier' }, { key: 'suit_b_diamond', label: '♦️ Carreau Banquier' },
+                      ]},
+                      { group: '🏆 Victoire', items: [
+                        { key: 'win_player', label: 'Joueur gagne' }, { key: 'win_banker', label: 'Banquier gagne' }, { key: 'win_tie', label: 'Égalité (Tie)' },
+                      ]},
+                      { group: '⚖️ Parité (score gagnant)', items: [
+                        { key: 'parite_pair', label: 'Score gagnant Pair' }, { key: 'parite_imp', label: 'Score gagnant Impair' },
+                      ]},
+                      { group: '⚖️ Parité Joueur', items: [
+                        { key: 'pt_p_pair', label: 'Score Joueur Pair' }, { key: 'pt_p_imp', label: 'Score Joueur Impair' },
+                      ]},
+                      { group: '⚖️ Parité Banquier', items: [
+                        { key: 'pt_b_pair', label: 'Score Banquier Pair' }, { key: 'pt_b_imp', label: 'Score Banquier Impair' },
+                      ]},
+                      { group: '🎴 Série de cartes', items: [
+                        { key: 'dist_2_2', label: '2/2 (J:2 B:2)' }, { key: 'dist_2_3', label: '2/3 (J:2 B:3)' },
+                        { key: 'dist_3_2', label: '3/2 (J:3 B:2)' }, { key: 'dist_3_3', label: '3/3 (J:3 B:3)' },
+                      ]},
+                      { group: '🃎 Cartes Joueur', items: [
+                        { key: 'nbk_p2', label: 'Joueur 2 cartes' }, { key: 'nbk_p3', label: 'Joueur 3 cartes' },
+                      ]},
+                      { group: '🃎 Cartes Banquier', items: [
+                        { key: 'nbk_b2', label: 'Banquier 2 cartes' }, { key: 'nbk_b3', label: 'Banquier 3 cartes' },
+                      ]},
+                      { group: '📊 Points Joueur (seuil N, 0-9)', items: [
+                        { key: 'pt_p_high', label: 'Score Joueur > N', needsParam: true, paramMin: 0, paramMax: 9 },
+                        { key: 'pt_p_low',  label: 'Score Joueur < N', needsParam: true, paramMin: 0, paramMax: 9 },
+                      ]},
+                      { group: '📊 Points Banquier (seuil N, 0-9)', items: [
+                        { key: 'pt_b_high', label: 'Score Banquier > N', needsParam: true, paramMin: 0, paramMax: 9 },
+                        { key: 'pt_b_low',  label: 'Score Banquier < N', needsParam: true, paramMin: 0, paramMax: 9 },
+                      ]},
+                      { group: '🔢 Score Exact J+B (= N, 0-18)', items: [
+                        { key: 'score_exact', label: 'Total J+B = N', needsParam: true, paramMin: 0, paramMax: 18 },
+                      ]},
+                      { group: '🂡 Valeurs Joueur', items: ['A','2','3','4','5','6','7','8','9','10','J','Q','K'].map(v => ({ key: `cv_p_${v}`, label: `${v} (Joueur)` })) },
+                      { group: '🂡 Valeurs Banquier', items: ['A','2','3','4','5','6','7','8','9','10','J','Q','K'].map(v => ({ key: `cv_b_${v}`, label: `${v} (Banquier)` })) },
+                    ];
+                    const allCondItems = COND_GROUPS.flatMap(g => g.items.map(i => ({ ...i, group: g.group })));
+                    const getCondInfo  = (key) => allCondItems.find(c => c.key === key) || null;
                     const catLabel = (v) => (NUL_CATS.find(c => c[0] === v) || [v, v])[1];
                     const rules = stratForm.nul_rules || [];
                     const updateRule = (idx, patch) => {
@@ -9839,17 +9885,25 @@ function AdminPanel() {
                       });
                     };
                     const addRule = () => {
-                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', conditions: [], hand: null }] }));
+                      setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'distrib', cond_cat: '', cond_param: null, predict_si: [], predict_sinon: [], hand: null }] }));
                       setNulActiveRuleIdx(rules.length);
                     };
                     const removeRule = (idx) => {
                       setStratForm(p => ({ ...p, nul_rules: (p.nul_rules || []).filter((_, i) => i !== idx) }));
                       if (nulActiveRuleIdx === idx) setNulActiveRuleIdx(null);
                     };
+                    const togglePredict = (rIdx, field, val) => {
+                      setStratForm(p => {
+                        const arr = [...(p.nul_rules || [])];
+                        const cur = arr[rIdx][field] || [];
+                        arr[rIdx] = { ...arr[rIdx], [field]: cur.includes(val) ? cur.filter(v => v !== val) : [...cur, val] };
+                        return { ...p, nul_rules: arr };
+                      });
+                    };
                     return (
                       <div style={{ marginTop: 12, padding: '16px', borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase' }}>🤝 Règles Déclencheur → Cibles</div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: '#a5b4fc', letterSpacing: 1.2, textTransform: 'uppercase' }}>🤝 Règles Déclencheur → Condition → Prédiction</div>
                           <button type="button" onClick={addRule} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.15)', color: '#c7d2fe', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                             + Ajouter une règle
                           </button>
@@ -9863,27 +9917,29 @@ function AdminPanel() {
 
                         {rules.map((rule, idx) => {
                           const isActive = nulActiveRuleIdx === idx;
+                          const condInfo = getCondInfo(rule.cond_cat);
+                          const siCount = (rule.predict_si || []).length;
+                          const sinonCount = (rule.predict_sinon || []).length;
                           return (
                             <div key={idx} style={{ marginBottom: 10, borderRadius: 10, border: `1px solid ${isActive ? 'rgba(129,140,248,0.5)' : 'rgba(255,255,255,0.08)'}`, background: isActive ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.02)' }}>
+                              {/* ── En-tête résumé ── */}
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer' }}
                                 onClick={() => setNulActiveRuleIdx(isActive ? null : idx)}>
-                                <div style={{ fontSize: 12, color: '#e2e8f0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
-                                  <strong style={{ color: '#818cf8' }}>{catLabel(rule.trigger)}</strong>
-                                  <span style={{ color: '#475569', margin: '0 4px' }}>→</span>
-                                  {(Array.isArray(rule.conditions) && rule.conditions.length > 0)
-                                    ? rule.conditions.map((c, ci) => (
-                                        <span key={ci} style={{ fontSize: 10, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 4, padding: '1px 5px', color: '#a5b4fc' }}>
-                                          {c.when === '*' ? '★' : catLabel(c.when)} → {catLabel(c.predict)}
-                                        </span>
-                                      ))
-                                    : (Array.isArray(rule.targets) && rule.targets.length > 0)
-                                      ? <span style={{ color: '#94a3b8', fontSize: 11 }}>{rule.targets.map(catLabel).join(', ')}</span>
-                                      : <span style={{ color: '#64748b' }}>(aucune condition)</span>
-                                  }
-                                  {rule.hand && (
-                                    <span style={{ marginLeft: 4, fontSize: 10, color: '#6366f1', background: 'rgba(99,102,241,0.15)', padding: '1px 5px', borderRadius: 4 }}>
-                                      {rule.hand === 'joueur' ? '👤' : '🏦'}
-                                    </span>
+                                <div style={{ fontSize: 12, color: '#e2e8f0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: 4, padding: '1px 6px', color: '#a5b4fc', fontWeight: 700, fontSize: 11 }}>
+                                    {catLabel(rule.trigger)}
+                                  </span>
+                                  {rule.cond_cat ? (
+                                    <>
+                                      <span style={{ color: '#475569', fontSize: 11 }}>si</span>
+                                      <span style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 4, padding: '1px 6px', color: '#fbbf24', fontSize: 11 }}>
+                                        {condInfo ? condInfo.label : rule.cond_cat}{condInfo?.needsParam && rule.cond_param !== null && rule.cond_param !== '' ? ` (N=${rule.cond_param})` : ''}
+                                      </span>
+                                      <span style={{ color: '#22c55e', fontSize: 11 }}>✅ {siCount}</span>
+                                      <span style={{ color: '#ef4444', fontSize: 11 }}>❌ {sinonCount}</span>
+                                    </>
+                                  ) : (
+                                    <span style={{ color: '#64748b', fontSize: 11 }}>⚠️ Condition non définie</span>
                                   )}
                                 </div>
                                 <button type="button" onClick={(e) => { e.stopPropagation(); removeRule(idx); }}
@@ -9893,69 +9949,88 @@ function AdminPanel() {
                               </div>
 
                               {isActive && (
-                                <div style={{ padding: '0 14px 14px' }}>
-                                  {/* ── Déclencheur ── */}
-                                  <div style={{ marginBottom: 12 }}>
-                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Déclencheur (forme de la main terminée)</div>
+                                <div style={{ padding: '0 14px 16px' }}>
+
+                                  {/* ── ① Déclencheur ── */}
+                                  <div style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>① Déclencheur</div>
                                     <select value={rule.trigger} onChange={e => updateRule(idx, { trigger: e.target.value })}
                                       style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.4)', background: '#0f172a', color: '#c7d2fe', fontSize: 12 }}>
                                       {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                                     </select>
                                   </div>
 
-                                  {/* ── Conditions Si → Prédit ── */}
-                                  <div style={{ marginBottom: 12 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Conditions (Si → Prédit)</div>
-                                      <button type="button"
-                                        onClick={() => {
-                                          const conds = [...(rule.conditions || [])];
-                                          conds.push({ when: '*', predict: 'distrib' });
-                                          updateRule(idx, { conditions: conds });
-                                        }}
-                                        style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)', color: '#c7d2fe', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
-                                        + Ajouter
-                                      </button>
-                                    </div>
-
-                                    {(!rule.conditions || rule.conditions.length === 0) && (
-                                      <div style={{ fontSize: 11, color: '#64748b', padding: '8px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 6 }}>
-                                        ⚠️ Ajoutez au moins une condition Si → Prédit
+                                  {/* ── ② Condition (catégorie Comptages) ── */}
+                                  <div style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>② Condition (catégorie Comptages)</div>
+                                    <select value={rule.cond_cat || ''} onChange={e => updateRule(idx, { cond_cat: e.target.value, cond_param: null })}
+                                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: '#0f172a', color: '#fbbf24', fontSize: 12 }}>
+                                      <option value="">— Choisir une condition —</option>
+                                      {COND_GROUPS.map(g => (
+                                        <optgroup key={g.group} label={g.group}>
+                                          {g.items.map(it => (
+                                            <option key={it.key} value={it.key}>{it.label}</option>
+                                          ))}
+                                        </optgroup>
+                                      ))}
+                                    </select>
+                                    {/* Valeur N pour les conditions à paramètre */}
+                                    {condInfo?.needsParam && (
+                                      <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.25)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                                        <span style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700 }}>Valeur N :</span>
+                                        <input type="number"
+                                          min={condInfo.paramMin ?? 0} max={condInfo.paramMax ?? 18} step={1}
+                                          value={rule.cond_param ?? ''}
+                                          onChange={e => updateRule(idx, { cond_param: e.target.value === '' ? null : Number(e.target.value) })}
+                                          style={{ width: 80, padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.5)', background: '#0f172a', color: '#fbbf24', fontSize: 16, fontWeight: 700, textAlign: 'center' }}
+                                        />
+                                        <span style={{ fontSize: 11, color: '#64748b' }}>(min {condInfo.paramMin ?? 0} — max {condInfo.paramMax ?? 18})</span>
                                       </div>
                                     )}
+                                  </div>
 
-                                    {(rule.conditions || []).map((cond, cIdx) => (
-                                      <div key={cIdx} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, padding: '7px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                                        <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', minWidth: 14 }}>Si</span>
-                                        <select value={cond.when || '*'}
-                                          onChange={e => { const conds = [...(rule.conditions || [])]; conds[cIdx] = { ...conds[cIdx], when: e.target.value }; updateRule(idx, { conditions: conds }); }}
-                                          style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: '#0f172a', color: '#a5b4fc', fontSize: 11, minWidth: 0 }}>
-                                          <option value="*">★ Toujours (défaut)</option>
-                                          {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                                        </select>
-                                        <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>→</span>
-                                        <select value={cond.predict || 'distrib'}
-                                          onChange={e => { const conds = [...(rule.conditions || [])]; conds[cIdx] = { ...conds[cIdx], predict: e.target.value }; updateRule(idx, { conditions: conds }); }}
-                                          style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.35)', background: '#0f172a', color: '#86efac', fontSize: 11, minWidth: 0 }}>
-                                          {NUL_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                                        </select>
-                                        <button type="button"
-                                          onClick={() => updateRule(idx, { conditions: (rule.conditions || []).filter((_, i) => i !== cIdx) })}
-                                          style={{ padding: '3px 8px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#f87171', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
-                                          ×
-                                        </button>
-                                      </div>
-                                    ))}
+                                  {/* ── ③ Prédit SI vrai ── */}
+                                  <div style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>③ Prédit SI ✅ vrai</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                      {NUL_CATS.map(([v, l]) => {
+                                        const on = (rule.predict_si || []).includes(v);
+                                        return (
+                                          <button key={v} type="button" onClick={() => togglePredict(idx, 'predict_si', v)}
+                                            style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${on ? 'rgba(34,197,94,0.7)' : 'rgba(255,255,255,0.1)'}`, background: on ? 'rgba(34,197,94,0.18)' : 'transparent', color: on ? '#86efac' : '#64748b', fontSize: 11, fontWeight: on ? 700 : 400, cursor: 'pointer' }}>
+                                            {l}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    {(rule.predict_si || []).length === 0 && (
+                                      <div style={{ marginTop: 6, fontSize: 11, color: '#ef4444' }}>⚠️ Sélectionnez au moins une prédiction pour SI vrai</div>
+                                    )}
+                                  </div>
 
-                                    <div style={{ fontSize: 10, color: '#475569', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
-                                      Vérifiées dans l'ordre — la première correspondance déclenche la prédiction. ★ Toujours = correspond toujours (placez-le en dernier comme défaut).
+                                  {/* ── ④ Prédit SI NON ── */}
+                                  <div style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>④ Prédit SI NON ❌</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                      {NUL_CATS.map(([v, l]) => {
+                                        const on = (rule.predict_sinon || []).includes(v);
+                                        return (
+                                          <button key={v} type="button" onClick={() => togglePredict(idx, 'predict_sinon', v)}
+                                            style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${on ? 'rgba(239,68,68,0.7)' : 'rgba(255,255,255,0.1)'}`, background: on ? 'rgba(239,68,68,0.18)' : 'transparent', color: on ? '#fca5a5' : '#64748b', fontSize: 11, fontWeight: on ? 700 : 400, cursor: 'pointer' }}>
+                                            {l}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <div style={{ marginTop: 6, fontSize: 11, color: '#475569', fontStyle: 'italic' }}>
+                                      Laissez vide pour ne rien prédire quand la condition est fausse.
                                     </div>
                                   </div>
 
-                                  {/* ── Main à vérifier — si un predict est un costume ── */}
-                                  {(rule.conditions || []).some(c => ['♠','♥','♦','♣'].includes(c.predict)) && (
-                                    <div style={{ marginBottom: 12 }}>
-                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Main à vérifier (pour costumes ♠♥♦♣)</div>
+                                  {/* ── Main à vérifier (costumes) ── */}
+                                  {([...(rule.predict_si || []), ...(rule.predict_sinon || [])].some(v => ['♠','♥','♦','♣'].includes(v))) && (
+                                    <div>
+                                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Main à vérifier (pour costumes ♠♥♦♣ prédits)</div>
                                       <div style={{ display: 'flex', gap: 8 }}>
                                         {[['joueur','👤 Joueur'],['banquier','🏦 Banquier'],[null,'♠+♥ Les deux']].map(([val, lbl]) => {
                                           const _on = (rule.hand ?? null) === val;
