@@ -142,6 +142,136 @@ function classifyNulCategories(pCards, bCards, winner) {
 }
 const NUL_CATEGORY_KEYS = ['distrib','P_DEUX','B_DEUX','P_TROIS','B_TROIS','WIN_P','WIN_B','PAIR_P','IMPAIR_P','♠','♥','♦','♣','DEUX_TROIS','TROIS_DEUX','TROIS_TROIS','TIE'];
 
+// ── Évaluation de conditions "Comptages" pour le mode nul_pattern ─────────
+// Reproduit la logique de comptages.js : mêmes groupes, mêmes clés de catégorie.
+// Utilisé pour évaluer cond_cat/cond_param d'une règle nul_pattern.
+function _normRankCptg(r) {
+  if (r === undefined || r === null) return null;
+  const s = String(r).toUpperCase().trim();
+  if (s === 'A' || s === '1' || s === '14') return 'A';
+  if (s === 'T' || s === '10') return '10';
+  if (s === 'J' || s === '11') return 'J';
+  if (s === 'Q' || s === '12') return 'Q';
+  if (s === 'K' || s === '13') return 'K';
+  if (['2','3','4','5','6','7','8','9'].includes(s)) return s;
+  const n = parseInt(s, 10);
+  if (!isNaN(n) && n >= 2 && n <= 9) return String(n);
+  return null;
+}
+function buildComptagesCtx(pCards, bCards, winnerIn) {
+  function suitsOf(cards) {
+    const out = new Set();
+    for (const c of (cards || [])) {
+      const n = normalizeSuit(c?.S || '');
+      if (ALL_SUITS.includes(n)) out.add(n);
+    }
+    return out;
+  }
+  function ranksOf(cards) {
+    const out = new Set();
+    for (const c of (cards || [])) {
+      const r = _normRankCptg(c?.R);
+      if (r) out.add(r);
+    }
+    return out;
+  }
+  const suitsP = suitsOf(pCards);
+  const suitsB = suitsOf(bCards);
+  const ranksP = ranksOf(pCards);
+  const ranksB = ranksOf(bCards);
+  const np = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+  const nb = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
+  const ps = baccaratHandScore(pCards);
+  const bs = baccaratHandScore(bCards);
+  let winner = winnerIn;
+  if (!winner && ps !== null && bs !== null) {
+    winner = ps > bs ? 'Player' : bs > ps ? 'Banker' : 'Tie';
+  }
+  let winnerScore = null;
+  if (winner === 'Player' && ps !== null) winnerScore = ps;
+  else if (winner === 'Banker' && bs !== null) winnerScore = bs;
+  else if (winner === 'Tie' && ps !== null) winnerScore = ps;
+  return { suitsP, suitsB, ranksP, ranksB, np, nb, ps, bs, winner, winnerScore };
+}
+function evalComptagesCond(condCat, condParam, ctx) {
+  if (!condCat) return null;
+  const { suitsP, suitsB, ranksP, ranksB, np, nb, ps, bs, winner, winnerScore } = ctx;
+  const N = (condParam !== undefined && condParam !== null && condParam !== '') ? Number(condParam) : null;
+  switch (condCat) {
+    // Costume Joueur
+    case 'suit_p_heart':   return suitsP.has('♥');
+    case 'suit_p_club':    return suitsP.has('♣');
+    case 'suit_p_spade':   return suitsP.has('♠');
+    case 'suit_p_diamond': return suitsP.has('♦');
+    // Costume Banquier
+    case 'suit_b_heart':   return suitsB.has('♥');
+    case 'suit_b_club':    return suitsB.has('♣');
+    case 'suit_b_spade':   return suitsB.has('♠');
+    case 'suit_b_diamond': return suitsB.has('♦');
+    // Victoire
+    case 'win_player': return winner === 'Player';
+    case 'win_banker': return winner === 'Banker';
+    case 'win_tie':    return winner === 'Tie';
+    // Parité score gagnant
+    case 'parite_pair': return winnerScore !== null && winnerScore % 2 === 0;
+    case 'parite_imp':  return winnerScore !== null && winnerScore % 2 === 1;
+    // Parité joueur
+    case 'pt_p_pair': return ps !== null && ps % 2 === 0;
+    case 'pt_p_imp':  return ps !== null && ps % 2 === 1;
+    // Parité banquier
+    case 'pt_b_pair': return bs !== null && bs % 2 === 0;
+    case 'pt_b_imp':  return bs !== null && bs % 2 === 1;
+    // Série de cartes
+    case 'dist_2_2': return np === 2 && nb === 2;
+    case 'dist_2_3': return np === 2 && nb === 3;
+    case 'dist_3_2': return np === 3 && nb === 2;
+    case 'dist_3_3': return np === 3 && nb === 3;
+    // Cartes Joueur
+    case 'nbk_p2': return np === 2;
+    case 'nbk_p3': return np === 3;
+    // Cartes Banquier
+    case 'nbk_b2': return nb === 2;
+    case 'nbk_b3': return nb === 3;
+    // Points Joueur (seuil N)
+    case 'pt_p_high': return ps !== null && N !== null && ps > N;
+    case 'pt_p_low':  return ps !== null && N !== null && ps < N;
+    // Points Banquier (seuil N)
+    case 'pt_b_high': return bs !== null && N !== null && bs > N;
+    case 'pt_b_low':  return bs !== null && N !== null && bs < N;
+    // Valeurs Joueur
+    case 'cv_p_A': return ranksP.has('A');
+    case 'cv_p_2': return ranksP.has('2');
+    case 'cv_p_3': return ranksP.has('3');
+    case 'cv_p_4': return ranksP.has('4');
+    case 'cv_p_5': return ranksP.has('5');
+    case 'cv_p_6': return ranksP.has('6');
+    case 'cv_p_7': return ranksP.has('7');
+    case 'cv_p_8': return ranksP.has('8');
+    case 'cv_p_9': return ranksP.has('9');
+    case 'cv_p_10': return ranksP.has('10');
+    case 'cv_p_J':  return ranksP.has('J');
+    case 'cv_p_Q':  return ranksP.has('Q');
+    case 'cv_p_K':  return ranksP.has('K');
+    // Valeurs Banquier
+    case 'cv_b_A': return ranksB.has('A');
+    case 'cv_b_2': return ranksB.has('2');
+    case 'cv_b_3': return ranksB.has('3');
+    case 'cv_b_4': return ranksB.has('4');
+    case 'cv_b_5': return ranksB.has('5');
+    case 'cv_b_6': return ranksB.has('6');
+    case 'cv_b_7': return ranksB.has('7');
+    case 'cv_b_8': return ranksB.has('8');
+    case 'cv_b_9': return ranksB.has('9');
+    case 'cv_b_10': return ranksB.has('10');
+    case 'cv_b_J':  return ranksB.has('J');
+    case 'cv_b_Q':  return ranksB.has('Q');
+    case 'cv_b_K':  return ranksB.has('K');
+    // Score exact J+B (= N)
+    case 'score_exact': return ps !== null && bs !== null && N !== null && (ps + bs) === N;
+    default: return null;
+  }
+}
+
 // ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
 async function canEmitNewPrediction(stratId) {
   try {
@@ -4498,11 +4628,15 @@ class Engine {
           const rule = nulRules[rIdx];
           if (!rule || !rule.trigger || !handCats.has(rule.trigger)) continue;
 
-          // ── Vérification : la règle a des conditions OU (compat) des cibles ──
+          // ── Vérification : la règle a une condition cond_cat, des conditions[] ou des cibles ──
           const _conditions = Array.isArray(rule.conditions) ? rule.conditions.filter(c => c && c.predict) : [];
           const _hasConditions = _conditions.length > 0;
           const _hasTargets    = Array.isArray(rule.targets) && rule.targets.length > 0;
-          if (!_hasConditions && !_hasTargets) continue;
+          const _hasCondCat    = !!rule.cond_cat && (
+            (Array.isArray(rule.predict_si) && rule.predict_si.length > 0) ||
+            (Array.isArray(rule.predict_sinon) && rule.predict_sinon.length > 0)
+          );
+          if (!_hasCondCat && !_hasConditions && !_hasTargets) continue;
 
           const targetGn  = gn + offset;
           const triggerKey = `${gn}_i${rIdx}_${rule.trigger}`;
@@ -4513,10 +4647,21 @@ class Engine {
           let chosen = null;
           let _seqKey, _nextSeqIdx;
 
-          if (_hasConditions) {
-            // Nouveau système : parcours des conditions dans l'ordre
-            // • when === '*' : condition par défaut, correspond toujours
-            // • when === une catégorie NUL : correspond si handCats.has(when)
+          if (_hasCondCat) {
+            // ── Système Condition Comptages (cond_cat + SI / SI NON) ──────────
+            const _ctx = buildComptagesCtx(pCards, bCards, winner);
+            const _condResult = evalComptagesCond(rule.cond_cat, rule.cond_param, _ctx);
+            const _pool = _condResult ? (rule.predict_si || []) : (rule.predict_sinon || []);
+            if (_pool.length > 0) {
+              chosen = _pool[Math.floor(Math.random() * _pool.length)];
+              const _branche = _condResult ? 'SI ✅' : 'SI NON ❌';
+              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} (${_branche}) → prédit "${chosen}" pour #${targetGn}`);
+            } else {
+              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} → pool vide (${_condResult ? 'SI' : 'SI NON'}) → pas de prédiction`);
+              continue;
+            }
+          } else if (_hasConditions) {
+            // ── Compat : conditions[] (Si catégorie NUL → prédit catégorie NUL) ──
             for (const cond of _conditions) {
               if (!cond.predict) continue;
               if (cond.when === '*' || handCats.has(cond.when)) {
@@ -4528,7 +4673,7 @@ class Engine {
             }
             if (!chosen) {
               console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | aucune condition ne correspond — pas de prédiction`);
-              continue; // Aucune condition ne matche → pas d'émission
+              continue;
             }
           } else if (rule.ordre === 'sequence') {
             // Compat ancien système targets[] + séquence
