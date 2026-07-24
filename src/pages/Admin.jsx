@@ -667,7 +667,7 @@ const preStyle = { background: '#0f172a', padding: 8, borderRadius: 6, color: '#
 function ComptagesPanel() {
   const [data, setData]       = React.useState(null);
   const [loading, setLoading] = React.useState(true);
-  const [cfg, setCfg]         = React.useState({ bot_token: '', channel_id: '', enabled: false });
+  const [cfg, setCfg]         = React.useState({ bot_token: '', channel_id: '', enabled: false, per_game: false });
   const [tokenDirty, setTokenDirty] = React.useState(false);
   const [savingCfg, setSavingCfg]   = React.useState(false);
   const [busy, setBusy]       = React.useState('');
@@ -709,6 +709,7 @@ function ComptagesPanel() {
           bot_token:  d.config?.bot_token  || '',
           channel_id: d.config?.channel_id || '',
           enabled:    !!d.config?.enabled,
+          per_game:   !!d.config?.per_game,
         });
         setExtraChannels(Array.isArray(d.extraChannels) ? d.extraChannels : []);
         setTokenDirty(false);
@@ -745,6 +746,7 @@ function ComptagesPanel() {
     try {
       const body = {
         channel_id: cfg.channel_id,
+        per_game: !!cfg.per_game,
         // On laisse le backend décider de l'activation : si token+channel sont remplis,
         // il active automatiquement (sauf si on envoie explicitement enabled:false).
       };
@@ -851,7 +853,7 @@ function ComptagesPanel() {
   const startEditChannel = (ch) => {
     setEditingChannel(ch
       ? { ...ch, _tokenDirty: false }
-      : { id: '', label: '', bot_token: '', channel_id: '', enabled: true, _tokenDirty: true });
+      : { id: '', label: '', bot_token: '', channel_id: '', enabled: true, per_game: false, _tokenDirty: true });
     setShowChannelsPanel(true);
   };
   const cancelEditChannel = () => setEditingChannel(null);
@@ -865,6 +867,7 @@ function ComptagesPanel() {
         label: editingChannel.label || '',
         channel_id: editingChannel.channel_id || '',
         enabled: !!editingChannel.enabled,
+        per_game: !!editingChannel.per_game,
       };
       if (editingChannel._tokenDirty) body.bot_token = editingChannel.bot_token || '';
       const r = await fetch('/api/admin/comptages/extra-channels', {
@@ -3854,7 +3857,27 @@ function AdminPanel() {
    { value: '74', label: '#74 — ⚡ Flash Multi' },
    { value: '75', label: '#75 — 🌟 Ultra Pro' },
    { value: '76', label: '#76 — 💠 Cartes Signature' },
-   { value: '77', label: '#77 — 🌈 Absence Victoire' }
+   { value: '77', label: '#77 — 🌈 Absence Victoire' },
+   { value: '78', label: '#78 — ⚜ Distribution Royale' },
+   { value: '79', label: '#79 — 🌈 Arc-en-Ciel Compact' },
+   { value: '80', label: '#80 — 🌈 Arc-en-Ciel Étendu' },
+   { value: '81', label: '#81 — 💠 Saphir Cartes' },
+   { value: '82', label: '#82 — 🍀 Porte-bonheur' },
+   { value: '83', label: '#83 — ▬ Double Ligne Court' },
+   { value: '84', label: '#84 — 📟 Télégraphe Classique' },
+   { value: '85', label: "#85 — 🎆 Feu d'Artifice" },
+   { value: '86', label: '#86 — 📡 Signal Pro' },
+   { value: '87', label: '#87 — 🔷 Cristal' },
+   { value: '88', label: '#88 — ⭐ Étoile Dorée' },
+   { value: '89', label: '#89 — 👑 Couronne' },
+   { value: '90', label: '#90 — 🛡️ Bouclier' },
+   { value: '91', label: '#91 — 💎 Diamant Pro' },
+   { value: '92', label: '#92 — 🌈 Arc-en-Ciel Détaillé' },
+   { value: '93', label: '#93 — ⚡ Flash Compact' },
+   { value: '94', label: '#94 — 🌙 Croissant' },
+   { value: '95', label: '#95 — 🔥 Feu' },
+   { value: '96', label: '#96 — 🔮 Cristal Pro' },
+   { value: '97', label: '#97 — 📣 Signal Pro Ultra' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -9859,16 +9882,20 @@ function AdminPanel() {
                       { group: '🃎 Cartes Banquier', items: [
                         { key: 'nbk_b2', label: 'Banquier 2 cartes' }, { key: 'nbk_b3', label: 'Banquier 3 cartes' },
                       ]},
-                      { group: '📊 Points Joueur (seuil N, 0-9)', items: [
-                        { key: 'pt_p_high', label: 'Score Joueur > N', needsParam: true, paramMin: 0, paramMax: 9 },
-                        { key: 'pt_p_low',  label: 'Score Joueur < N', needsParam: true, paramMin: 0, paramMax: 9 },
+                      { group: '📊 Points Joueur seul (0-9)', items: [
+                        { key: 'pt_p_high', label: 'Score Joueur', signLabel: '>', needsParam: true, needsSign: true, signGroup: 'pt_p', signType: 'gt', paramMin: 0, paramMax: 9 },
+                        { key: 'pt_p_low',  label: 'Score Joueur', signLabel: '<', needsParam: true, needsSign: true, signGroup: 'pt_p', signType: 'lt', paramMin: 0, paramMax: 9 },
+                        { key: 'pt_p_eq',   label: 'Score Joueur', signLabel: '=', needsParam: true, needsSign: true, signGroup: 'pt_p', signType: 'eq', paramMin: 0, paramMax: 9 },
                       ]},
-                      { group: '📊 Points Banquier (seuil N, 0-9)', items: [
-                        { key: 'pt_b_high', label: 'Score Banquier > N', needsParam: true, paramMin: 0, paramMax: 9 },
-                        { key: 'pt_b_low',  label: 'Score Banquier < N', needsParam: true, paramMin: 0, paramMax: 9 },
+                      { group: '📊 Points Banquier seul (0-9)', items: [
+                        { key: 'pt_b_high', label: 'Score Banquier', signLabel: '>', needsParam: true, needsSign: true, signGroup: 'pt_b', signType: 'gt', paramMin: 0, paramMax: 9 },
+                        { key: 'pt_b_low',  label: 'Score Banquier', signLabel: '<', needsParam: true, needsSign: true, signGroup: 'pt_b', signType: 'lt', paramMin: 0, paramMax: 9 },
+                        { key: 'pt_b_eq',   label: 'Score Banquier', signLabel: '=', needsParam: true, needsSign: true, signGroup: 'pt_b', signType: 'eq', paramMin: 0, paramMax: 9 },
                       ]},
-                      { group: '🔢 Score Exact J+B (= N, 0-18)', items: [
-                        { key: 'score_exact', label: 'Total J+B = N', needsParam: true, paramMin: 0, paramMax: 18 },
+                      { group: '🔢 Total Points J+B (0-18)', items: [
+                        { key: 'pt_total_gt', label: 'Total J+B', signLabel: '>', needsParam: true, needsSign: true, signGroup: 'pt_total', signType: 'gt', paramMin: 0, paramMax: 18 },
+                        { key: 'pt_total_lt', label: 'Total J+B', signLabel: '<', needsParam: true, needsSign: true, signGroup: 'pt_total', signType: 'lt', paramMin: 0, paramMax: 18 },
+                        { key: 'score_exact', label: 'Total J+B', signLabel: '=', needsParam: true, needsSign: true, signGroup: 'pt_total', signType: 'eq', paramMin: 0, paramMax: 18 },
                       ]},
                       { group: '🂡 Valeurs Joueur', items: ['A','2','3','4','5','6','7','8','9','10','J','Q','K'].map(v => ({ key: `cv_p_${v}`, label: `${v} (Joueur)` })) },
                       { group: '🂡 Valeurs Banquier', items: ['A','2','3','4','5','6','7','8','9','10','J','Q','K'].map(v => ({ key: `cv_b_${v}`, label: `${v} (Banquier)` })) },
@@ -9931,9 +9958,9 @@ function AdminPanel() {
                                   </span>
                                   {rule.cond_cat ? (
                                     <>
-                                      <span style={{ color: '#475569', fontSize: 11 }}>si</span>
+                                      <span style={{ color: '#475569', fontSize: 11 }}>🔀 si condition</span>
                                       <span style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 4, padding: '1px 6px', color: '#fbbf24', fontSize: 11 }}>
-                                        {condInfo ? condInfo.label : rule.cond_cat}{condInfo?.needsParam && rule.cond_param !== null && rule.cond_param !== '' ? ` (N=${rule.cond_param})` : ''}
+                                        {condInfo ? (condInfo.needsSign ? `${condInfo.label} ${condInfo.signLabel || ''} ${rule.cond_param !== null && rule.cond_param !== '' ? rule.cond_param : 'N'}` : condInfo.label + (condInfo.needsParam && rule.cond_param !== null && rule.cond_param !== '' ? ` (N=${rule.cond_param})` : '')) : rule.cond_cat}
                                       </span>
                                       <span style={{ color: '#22c55e', fontSize: 11 }}>✅ {siCount}</span>
                                       <span style={{ color: '#ef4444', fontSize: 11 }}>❌ {sinonCount}</span>
@@ -9963,19 +9990,82 @@ function AdminPanel() {
                                   {/* ── ② Condition (catégorie Comptages) ── */}
                                   <div style={{ marginBottom: 14 }}>
                                     <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>② Condition (catégorie Comptages)</div>
-                                    <select value={rule.cond_cat || ''} onChange={e => updateRule(idx, { cond_cat: e.target.value, cond_param: null })}
+                                    <select
+                                      value={condInfo?.signGroup
+                                        ? allCondItems.find(it => it.signGroup === condInfo.signGroup && it.signType === 'gt')?.key || rule.cond_cat
+                                        : rule.cond_cat || ''}
+                                      onChange={e => {
+                                        const chosen = allCondItems.find(it => it.key === e.target.value);
+                                        // Si c'est un representant signGroup → sélectionner le "gt" par défaut
+                                        if (chosen?.signGroup) {
+                                          const gt = allCondItems.find(it => it.signGroup === chosen.signGroup && it.signType === 'gt');
+                                          updateRule(idx, { cond_cat: gt ? gt.key : e.target.value, cond_param: null });
+                                        } else {
+                                          updateRule(idx, { cond_cat: e.target.value, cond_param: null });
+                                        }
+                                      }}
                                       style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.4)', background: '#0f172a', color: '#fbbf24', fontSize: 12 }}>
                                       <option value="">— Choisir une condition —</option>
-                                      {COND_GROUPS.map(g => (
-                                        <optgroup key={g.group} label={g.group}>
-                                          {g.items.map(it => (
-                                            <option key={it.key} value={it.key}>{it.label}</option>
-                                          ))}
-                                        </optgroup>
-                                      ))}
+                                      {COND_GROUPS.map(g => {
+                                        // N'afficher qu'une seule entrée par signGroup (le représentant "gt")
+                                        const seenGroups = new Set();
+                                        const filtered = g.items.filter(it => {
+                                          if (!it.signGroup) return true;
+                                          if (seenGroups.has(it.signGroup)) return false;
+                                          seenGroups.add(it.signGroup);
+                                          return true;
+                                        });
+                                        return (
+                                          <optgroup key={g.group} label={g.group}>
+                                            {filtered.map(it => (
+                                              <option key={it.key} value={it.key}>
+                                                {it.needsSign ? `${it.label}  (>, <, =)` : it.label}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        );
+                                      })}
                                     </select>
-                                    {/* Valeur N pour les conditions à paramètre */}
-                                    {condInfo?.needsParam && (
+                                    {/* Signe + Valeur pour les conditions à paramètre */}
+                                    {condInfo?.needsSign && (() => {
+                                      const siblings = allCondItems.filter(it => it.signGroup === condInfo.signGroup);
+                                      return (
+                                        <div style={{ marginTop: 10, padding: '12px 14px', borderRadius: 10, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                                          <div style={{ marginBottom: 8, fontSize: 12, color: '#a5b4fc', fontWeight: 700 }}>
+                                            📐 {condInfo.label} est…
+                                          </div>
+                                          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                                            {siblings.map(it => {
+                                              const isActive = rule.cond_cat === it.key;
+                                              const signLabel = it.signType === 'gt' ? '> Supérieur à' : it.signType === 'lt' ? '< Inférieur à' : '= Égal à';
+                                              return (
+                                                <button key={it.key} type="button"
+                                                  onClick={() => updateRule(idx, { cond_cat: it.key })}
+                                                  style={{ flex: 1, padding: '8px 6px', borderRadius: 8, border: `2px solid ${isActive ? '#818cf8' : 'rgba(255,255,255,0.12)'}`, background: isActive ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.03)', color: isActive ? '#e0e7ff' : '#64748b', fontSize: 12, fontWeight: isActive ? 800 : 500, cursor: 'pointer', textAlign: 'center' }}>
+                                                  {signLabel}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                            <span style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700 }}>Valeur :</span>
+                                            <input type="number"
+                                              min={condInfo.paramMin ?? 0} max={condInfo.paramMax ?? 18} step={1}
+                                              value={rule.cond_param ?? ''}
+                                              onChange={e => updateRule(idx, { cond_param: e.target.value === '' ? null : Number(e.target.value) })}
+                                              style={{ width: 90, padding: '8px 12px', borderRadius: 8, border: '2px solid rgba(251,191,36,0.5)', background: '#0f172a', color: '#fbbf24', fontSize: 20, fontWeight: 700, textAlign: 'center' }}
+                                            />
+                                            <span style={{ fontSize: 11, color: '#64748b' }}>({condInfo.paramMin ?? 0} – {condInfo.paramMax ?? 18})</span>
+                                          </div>
+                                          {rule.cond_param !== null && rule.cond_param !== '' && (
+                                            <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 12, color: '#86efac' }}>
+                                              ✅ Condition : <strong>{condInfo.label} {condInfo.signLabel} {rule.cond_param}</strong> → si vrai → prédit catégories ③ · si faux → catégories ④
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+                                    {condInfo?.needsParam && !condInfo?.needsSign && (
                                       <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.25)', display: 'flex', alignItems: 'center', gap: 12 }}>
                                         <span style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700 }}>Valeur N :</span>
                                         <input type="number"
@@ -9991,7 +10081,15 @@ function AdminPanel() {
 
                                   {/* ── ③ Prédit SI vrai ── */}
                                   <div style={{ marginBottom: 14 }}>
-                                    <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>③ Prédit SI ✅ vrai</div>
+                                    <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, marginBottom: 8 }}>
+                                      ✅ ③ Prédit SI{rule.cond_cat && condInfo ? (
+                                        condInfo.needsSign && rule.cond_param !== null && rule.cond_param !== ''
+                                          ? ` — ${condInfo.label} ${condInfo.signLabel} ${rule.cond_param}`
+                                          : condInfo.needsSign
+                                            ? ` — ${condInfo.label} ${condInfo.signLabel} N`
+                                            : ` — ${condInfo.label}`
+                                      ) : ' la condition est vraie'}
+                                    </div>
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                       {NUL_CATS.map(([v, l]) => {
                                         const on = (rule.predict_si || []).includes(v);
@@ -10010,7 +10108,15 @@ function AdminPanel() {
 
                                   {/* ── ④ Prédit SI NON ── */}
                                   <div style={{ marginBottom: 14 }}>
-                                    <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>④ Prédit SI NON ❌</div>
+                                    <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 8 }}>
+                                      ❌ ④ Prédit SI NON{rule.cond_cat && condInfo ? (
+                                        condInfo.needsSign && rule.cond_param !== null && rule.cond_param !== ''
+                                          ? ` — ${condInfo.label} ${condInfo.signLabel === '>' ? '≤' : condInfo.signLabel === '<' ? '≥' : '≠'} ${rule.cond_param}`
+                                          : condInfo.needsSign
+                                            ? ` — condition inverse`
+                                            : ` — pas ${condInfo.label}`
+                                      ) : ''}
+                                    </div>
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                       {NUL_CATS.map(([v, l]) => {
                                         const on = (rule.predict_sinon || []).includes(v);
