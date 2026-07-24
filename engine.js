@@ -148,7 +148,7 @@ const NUL_CATEGORY_KEYS = ['distrib','P_DEUX','B_DEUX','P_TROIS','B_TROIS','WIN_
 function _normRankCptg(r) {
   if (r === undefined || r === null) return null;
   const s = String(r).toUpperCase().trim();
-  if (s === 'A' || s === '1' || s === '14') return 'A';
+  if (s === 'A' || s === '0' || s === '1' || s === '14') return 'A';
   if (s === 'T' || s === '10') return '10';
   if (s === 'J' || s === '11') return 'J';
   if (s === 'Q' || s === '12') return 'Q';
@@ -268,6 +268,20 @@ function evalComptagesCond(condCat, condParam, ctx) {
     case 'cv_b_K':  return ranksB.has('K');
     // Score exact J+B (= N)
     case 'score_exact': return ps !== null && bs !== null && N !== null && (ps + bs) === N;
+    // Score exact Joueur (= N, 0-9)
+    case 'pt_p_eq': return ps !== null && N !== null && ps === N;
+    // Score exact Banquier (= N, 0-9)
+    case 'pt_b_eq': return bs !== null && N !== null && bs === N;
+    // Total J+B avec signe (> < =)
+    case 'pt_total_gt': return ps !== null && bs !== null && N !== null && (ps + bs) > N;
+    case 'pt_total_lt': return ps !== null && bs !== null && N !== null && (ps + bs) < N;
+    case 'pt_total_eq': return ps !== null && bs !== null && N !== null && (ps + bs) === N;
+    // Points Joueur avec signe (renommage clair)
+    case 'pt_p_gt': return ps !== null && N !== null && ps > N;
+    case 'pt_p_lt': return ps !== null && N !== null && ps < N;
+    // Points Banquier avec signe (renommage clair)
+    case 'pt_b_gt': return bs !== null && N !== null && bs > N;
+    case 'pt_b_lt': return bs !== null && N !== null && bs < N;
     default: return null;
   }
 }

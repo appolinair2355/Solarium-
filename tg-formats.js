@@ -1057,6 +1057,172 @@ function buildTgMessage(formatId, {
       };
     }
 
+    // ── Format 88 : Étoile Dorée (⭐) ────────────────────────────────────
+    case 88: {
+      const v88 = suit === 'WIN_P' ? '🏆 Joueur' : suit === 'WIN_B' ? '🏆 Banquier' : suit === 'TIE' ? '🤝 Égalité' : suit === 'distrib' ? '⚖️ 2v2' : `${emoji} ${name}`;
+      let sl88;
+      if (status === null) sl88 = `⏳ Poursuite +${maxR}`;
+      else if (status === 'gagne') sl88 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} (${rattrapage} rattrapage${rattrapage > 1 ? 's' : ''})`;
+      else sl88 = `❌ Perdu (max +${maxR} atteint)`;
+      return {
+        text:
+          `⭐ Jeux № ${gameNumber}\n` +
+          `🎯 Prédiction : ${v88}\n` +
+          `🔰 Risque max : +${maxR}\n` +
+          `📊 ${sl88}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 89 : Couronne (👑) ─────────────────────────────────────────
+    case 89: {
+      const v89 = suit === 'WIN_P' ? 'V1 — Joueur' : suit === 'WIN_B' ? 'V2 — Banquier' : suit === 'TIE' ? 'X — Nul' : suit === 'distrib' ? '⚖️ 2v2' : suit === 'TROIS_TROIS' ? '3/3' : suit === 'DEUX_TROIS' ? '2/3' : suit === 'TROIS_DEUX' ? '3/2' : name;
+      const sl89 = status === null ? `⏳ +${maxR}` : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌`;
+      return {
+        text:
+          `👑 BACCARAT № ${gameNumber}\n` +
+          `┌ 🎯 ${v89}\n` +
+          `├ 🔰 Risque : +${maxR}\n` +
+          `└ 📣 ${sl89}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 90 : Bouclier (🛡️) ────────────────────────────────────────
+    case 90: {
+      const v90 = suit === 'WIN_P' ? '👤 JOUEUR' : suit === 'WIN_B' ? '🏦 BANQUIER' : suit === 'TIE' ? '🤝 NUL' : suit === 'distrib' ? '⚖️ 2+2' : suit === 'TROIS_TROIS' ? '3+3' : suit === 'DEUX_TROIS' ? '2+3' : suit === 'TROIS_DEUX' ? '3+2' : `${emoji} ${name.toUpperCase()}`;
+      let sl90;
+      if (status === null) sl90 = `⌛ EN ATTENTE — +${maxR}`;
+      else if (status === 'gagne') sl90 = `✅ CONFIRMÉ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else sl90 = `❌ RATÉ`;
+      return {
+        text:
+          `🛡️ N°${gameNumber} | ${v90}\n` +
+          `📊 Statut : ${sl90}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 91 : Diamant Pro (💎) ──────────────────────────────────────
+    case 91: {
+      const v91 = suit === 'WIN_P' ? 'V1 Joueur' : suit === 'WIN_B' ? 'V2 Banquier' : suit === 'TIE' ? 'Égalité 🤝' : suit === 'distrib' ? '2v2 ⚖️' : `${emoji} ${name}`;
+      let sl91;
+      if (status === null) sl91 = `⏳ Attente  💧 Poursuite ${maxR} (🔰+${maxR}Risque)`;
+      else if (status === 'gagne') sl91 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage}  💧 Confirmé (🔰+${rattrapage}Risque)`;
+      else sl91 = `❌ Échoué  💧 Poursuite ${maxR} (🔰+${maxR}Risque)`;
+      return {
+        text:
+          `💎 Jeux № ${gameNumber}\n` +
+          `🔹 Prediction: ${v91}\n` +
+          `🌹 Statut : ${sl91}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 92 : Arc-en-Ciel Détaillé (🌈+) ───────────────────────────
+    case 92: {
+      const v92 = suit === 'WIN_P' ? 'V1' : suit === 'WIN_B' ? 'V2' : suit === 'TIE' ? 'Ég.' : suit === 'distrib' ? '2v2' : suit === 'TROIS_TROIS' ? '3/3' : suit === 'DEUX_TROIS' ? '2/3' : suit === 'TROIS_DEUX' ? '3/2' : name;
+      let sl92;
+      if (status === null) sl92 = `⏳ 💧 Poursuite ${maxR}!! (🔰+${maxR}Risque)`;
+      else if (status === 'gagne') sl92 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage} 💧 Poursuite ${maxR}!! (🔰+${rattrapage}Risque)`;
+      else sl92 = `❌ 💧 Poursuite ${maxR}!! (🔰+${maxR}Risque)`;
+      return {
+        text:
+          `🌈 Jeux № ${gameNumber}\n` +
+          `🔹 Prediction: ${v92}\n` +
+          `🌹 Statut : ${sl92}\n` +
+          `🔰 Risque total : +${maxR}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 93 : Flash Compact (⚡) ────────────────────────────────────
+    case 93: {
+      const v93 = suit === 'WIN_P' ? '👤V1' : suit === 'WIN_B' ? '🏦V2' : suit === 'TIE' ? '🤝X' : suit === 'distrib' ? '⚖️' : `${emoji}`;
+      const sl93 = status === null ? `⏳+${maxR}` : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌`;
+      return { text: `⚡ №${gameNumber} ${v93} │ Risque+${maxR} │ ${sl93}`, parse_mode: null };
+    }
+
+    // ── Format 94 : Croissant (🌙) ────────────────────────────────────────
+    case 94: {
+      const isCard94 = ['♠','♥','♦','♣','deux','trois','P_DEUX','B_DEUX','P_TROIS','B_TROIS'].includes(suit);
+      const h94 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      let ct94;
+      if (suit === 'P_DEUX' || suit === 'B_DEUX') ct94 = `${suit.startsWith('P') ? 'Joueur' : 'Banquier'} 2 cartes`;
+      else if (suit === 'P_TROIS' || suit === 'B_TROIS') ct94 = `${suit.startsWith('P') ? 'Joueur' : 'Banquier'} 3 cartes`;
+      else if (suit === 'deux') ct94 = `${h94} 2 cartes`;
+      else if (suit === 'trois') ct94 = `${h94} 3 cartes`;
+      else if (suit === 'WIN_P') ct94 = '🏆 Victoire Joueur';
+      else if (suit === 'WIN_B') ct94 = '🏆 Victoire Banquier';
+      else if (suit === 'TIE') ct94 = '🤝 Match Nul';
+      else if (suit === 'distrib') ct94 = '⚖️ Distribution 2v2';
+      else ct94 = `${emoji} ${name}`;
+      const sl94 = status === null ? `⏳` : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌`;
+      return {
+        text:
+          `🌙 Jeux №${gameNumber}\n` +
+          `🎯 ${ct94}\n` +
+          `🌤 Rattrapages +${maxR}\n` +
+          `🗯️ Résultats : ${sl94}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 95 : Feu (🔥) ──────────────────────────────────────────────
+    case 95: {
+      const v95 = suit === 'WIN_P' ? '👤 Joueur' : suit === 'WIN_B' ? '🏦 Banquier' : suit === 'TIE' ? '🤝 Nul' : suit === 'distrib' ? '⚖️ 2v2' : `${emoji}${name}`;
+      let sl95;
+      if (status === null) sl95 = `⌛ +${maxR}`;
+      else if (status === 'gagne') sl95 = `✅ Gagné ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else sl95 = `❌ Perdu`;
+      return {
+        text:
+          `🔥 N°${gameNumber} — ${v95}\n` +
+          `🔰 Poursuite : +${maxR} | 📊 ${sl95}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 96 : Cristal Pro (🔮) ──────────────────────────────────────
+    case 96: {
+      const pred96 = suit === 'distrib'     ? '⚜Distribution oui⚜'
+        : suit === 'TROIS_TROIS'            ? '⚜J:3 B:3⚜'
+        : suit === 'DEUX_TROIS'             ? '⚜J:2 B:3⚜'
+        : suit === 'TROIS_DEUX'             ? '⚜J:3 B:2⚜'
+        : suit === 'WIN_P'                  ? '⚜Victoire Joueur⚜'
+        : suit === 'WIN_B'                  ? '⚜Victoire Banquier⚜'
+        : suit === 'TIE'                    ? '⚜Match Nul⚜'
+        : `⚜${name}⚜`;
+      let sl96;
+      if (status === null) sl96 = `poursuite:(+${maxR})🔰`;
+      else if (status === 'gagne') sl96 = `victoire ✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else sl96 = `perdu ❌`;
+      return {
+        text:
+          `${pred96}\n` +
+          `┌ № ${gameNumber}\n` +
+          `├ 🔰 Risque max : +${maxR}\n` +
+          `└ 👤 ${sl96}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 97 : Signal Pro (📣) ───────────────────────────────────────
+    case 97: {
+      const v97 = suit === 'WIN_P' ? 'V1 — Victoire Joueur' : suit === 'WIN_B' ? 'V2 — Victoire Banquier' : suit === 'TIE' ? '🤝 Match Nul' : suit === 'distrib' ? 'Distribution 2+2' : suit === 'TROIS_TROIS' ? 'J:3 + B:3' : suit === 'DEUX_TROIS' ? 'J:2 + B:3' : suit === 'TROIS_DEUX' ? 'J:3 + B:2' : `${emoji} ${name}`;
+      let sl97;
+      if (status === null) sl97 = `⌛ En cours  🔰 Poursuite ×${maxR}`;
+      else if (status === 'gagne') sl97 = `✅ Signal confirmé  ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else sl97 = `❌ Signal raté  (max ×${maxR})`;
+      return {
+        text:
+          `📣 Signal Jeux № ${gameNumber}\n` +
+          `┌ 🎯 ${v97}\n` +
+          `└ ${sl97}`,
+        parse_mode: null,
+      };
+    }
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {
@@ -1070,6 +1236,7 @@ function buildTgMessage(formatId, {
   }
 }
 
+// ── Fin des formats intégrés (N°1 à N°97) ─────────────────────────────────
 // Compat shims for existing callers
 function buildPredictionMsg(formatId, data) {
   return buildTgMessage(formatId, { ...data, maxR: data.maxRattrapage ?? data.maxR ?? 2, status: null });

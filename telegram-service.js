@@ -738,7 +738,7 @@ async function startBot() {
         // Cas: /setformat S5 3  (stratégie S5, format 3)
         if (parts.length >= 2 && /^[sS]\d+$/.test(parts[0])) {
           const stratId = parseInt(parts[0].slice(1));
-          const fmtId   = Math.max(1, Math.min(77, parseInt(parts[1]) || 1));
+          const fmtId   = Math.max(1, Math.min(97, parseInt(parts[1]) || 1));
           try {
             const strats = await db.getStrategies();
             const idx = strats.findIndex(s => s.id === stratId);
@@ -753,7 +753,7 @@ async function startBot() {
           } catch (e) { try { await bot.sendMessage(chatId, `❌ Erreur: ${e.message}`); } catch {} }
         } else if (parts.length >= 1 && /^\d+$/.test(parts[0])) {
           // Cas: /setformat 3  (format global)
-          const fmtId = Math.max(1, Math.min(77, parseInt(parts[0]) || 1));
+          const fmtId = Math.max(1, Math.min(97, parseInt(parts[0]) || 1));
           await saveFormat(fmtId);
           try { await bot.sendMessage(chatId, `✅ Format global → <b>${fmtId}</b>`, { parse_mode: 'HTML' }); } catch {}
         } else {
@@ -785,7 +785,7 @@ async function startBot() {
           const msgs = [];
           for (const b of blocks) {
             if (b.type === 'format') {
-              const fmtId = Math.max(1, Math.min(77, parseInt(b.data?.format_id) || 1));
+              const fmtId = Math.max(1, Math.min(97, parseInt(b.data?.format_id) || 1));
               await saveFormat(fmtId);
               msgs.push(`✅ format global → ${fmtId}`);
             } else if (b.type === 'maxr' || b.type === 'max_rattrapage') {
@@ -955,7 +955,7 @@ function updateUserVisibleSet(userId, channelDbIds) {
 
 // ── Message formatting (unified) ───────────────────────────────────
 
-// ── Formats Telegram (1-77) — fichier dédié tg-formats.js ────────────────
+// ── Formats Telegram (1-97) — fichier dédié tg-formats.js ────────────────
 const {
   SUIT_EMOJI_MAP, SUIT_NAME_FR, SUPERSCRIPT, RATR_EMOJI,
   SUIT_EMOJI, SUIT_NAME,
