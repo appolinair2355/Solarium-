@@ -3599,7 +3599,7 @@ class Engine {
             const _ccPs       = resolvePredictedSuit(_predicted) || _predicted;
             const _specLabel  = _c.trigger_specs.map(s => `${s.rank || ''}${s.suit || ''}`).join('+');
             console.log(`[${channelId}] [Combiné Carte+] Trigger [${_specLabel}] → prédit "${_predicted}" pour #${gn + offset}`);
-            await emitPrediction(gn + offset, _ccPs, _predicted);
+            await emitPrediction(gn + offset, _ccPs, _predicted, { force: true });
             _specEmitted = true;
             break; // première correspondance gagne
           }
@@ -3646,7 +3646,7 @@ class Engine {
                   const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
                   if (ccPs) {
                     console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
-                    await emitPrediction(gn + offset, ccPs, chosenRaw);
+                    await emitPrediction(gn + offset, ccPs, chosenRaw, { force: true });
                   }
                 }
               }

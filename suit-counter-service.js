@@ -128,9 +128,12 @@ function _makeState() {
 
 // ─── S'assure qu'un état existe pour chaque compteur ──────────────────────────
 function _ensureStates() {
+  const _nowMs = Date.now();
   for (const c of _countersList) {
     if (!_countersState[c.id]) {
-      _countersState[c.id] = _makeState();
+      const _s = _makeState();
+      _s.lastScheduleSentMs = _nowMs; // évite le déclenchement immédiat au démarrage ou à la création
+      _countersState[c.id] = _s;
     }
   }
   // Nettoie les états orphelins

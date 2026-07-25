@@ -3833,7 +3833,48 @@ function AdminPanel() {
     { value: '53', label: '#53 — 💎 Diamant Court' },
     { value: '54', label: '#54 — 🚀 Fusée Futur' },
     { value: '55', label: '#55 — 🌊 Cascade Pro' },
+    { value: '56', label: '#56 — 🎴 Enseigne Pro' },
+    { value: '57', label: '#57 — ♠ Suit VIP' },
+    { value: '58', label: '#58 — 🃏 Suit Bold' },
+    { value: '59', label: '#59 — 📡 Suit Signal' },
+    { value: '60', label: '#60 — ░ Suit Dark' },
+    { value: '61', label: '#61 — ✨ Suit Gold' },
+    { value: '62', label: '#62 — ♠ Suit Compact' },
+    { value: '63', label: '#63 — 🚨 Suit Alert' },
+    { value: '64', label: '#64 — 💎 Suit Crystal' },
+    { value: '65', label: '#65 — 【 Suit Block】' },
+    { value: '66', label: '#66 — ⭐ Multi-Pro' },
+    { value: '67', label: '#67 — 📡 Total Signal' },
+    { value: '68', label: '#68 — 💎 Full VIP' },
+    { value: '69', label: '#69 — ⚡ Pro Compact' },
+    { value: '70', label: '#70 — 🏅 Elite Plus' },
+    { value: '71', label: '#71 — 💎 Diamond Pro' },
+    { value: '72', label: '#72 — 👑 Crown Multi' },
+    { value: '73', label: '#73 — 🐯 Tiger Multi' },
+    { value: '74', label: '#74 — ⚡ Flash Multi' },
+    { value: '75', label: '#75 — 🌟 Ultra Pro' },
     { value: '76', label: '#76 — 💠 Cartes Signature' },
+    { value: '77', label: '#77 — 🌈 Absence Victoire' },
+    { value: '78', label: '#78 — ⚜ Distribution Royale' },
+    { value: '79', label: '#79 — 🌈 Arc-en-Ciel Compact' },
+    { value: '80', label: '#80 — 🌈 Arc-en-Ciel Étendu' },
+    { value: '81', label: '#81 — 💠 Saphir Cartes' },
+    { value: '82', label: '#82 — 🍀 Porte-bonheur' },
+    { value: '83', label: '#83 — 🔮 Double Ligne Court' },
+    { value: '84', label: '#84 — 📡 Télégraphe Classique' },
+    { value: '85', label: "#85 — 🎆 Feu d'Artifice" },
+    { value: '86', label: '#86 — 📶 Signal Pro' },
+    { value: '87', label: '#87 — 🔷 Cristal' },
+    { value: '88', label: '#88 — ⭐ Étoile Dorée' },
+    { value: '89', label: '#89 — 👑 Couronne' },
+    { value: '90', label: '#90 — 🛡️ Bouclier' },
+    { value: '91', label: '#91 — 💎 Diamant Pro' },
+    { value: '92', label: '#92 — 🌈 Arc-en-Ciel Détaillé' },
+    { value: '93', label: '#93 — ⚡ Flash Compact' },
+    { value: '94', label: '#94 — 🌙 Croissant' },
+    { value: '95', label: '#95 — 🔥 Feu' },
+    { value: '96', label: '#96 — 🔮 Cristal Pro' },
+    { value: '97', label: '#97 — 📣 Signal Pro Final' },
   ];
 
   // stratType: 'simple' = prédiction locale seulement; 'telegram' = envoie vers canal TG custom
@@ -3867,6 +3908,8 @@ function AdminPanel() {
     B_joueur: 5, B_banquier: 8,
     // Mode combine_carte (positions 1+2)
     cc_hand: 'joueur', cc_combinations: [],
+    // Mode nul_pattern (règles match nul motifs)
+    nul_rules: [],
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -5091,7 +5134,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], nul_rules: s.nul_rules || [] });
     setStratOpen(true);
   };
 
@@ -5108,7 +5151,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], nul_rules: s.nul_rules || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -5151,7 +5194,7 @@ function AdminPanel() {
       return;
     }
     const SUITS_CHECK = ['♠','♥','♦','♣'];
-    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k','fin_numero'];
+    const NO_MAP_MODES = ['absence_apparition','distribution','carte_3_vers_2','carte_2_vers_3','taux_miroir','aleatoire','victoire_adverse','abs_3_vers_2','abs_3_vers_3','absence_victoire','lecture_passee','intelligent_cartes','carte_valeur','union_enseignes','comptages_ecart','intersection','annonce_sequence','first_card_plus6','surveillance_perte','gestion_banque','2k-3k','fin_numero','nul_pattern'];
     if (!NO_MAP_MODES.includes(stratForm.mode) && stratForm.strategy_type !== 'combinaison') {
       for (const s of SUITS_CHECK) {
         const pool = Array.isArray(stratForm.mappings?.[s]) ? stratForm.mappings[s] : (stratForm.mappings?.[s] ? [stratForm.mappings[s]] : []);
@@ -9285,6 +9328,7 @@ function AdminPanel() {
                     <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
                     <option value="fin_numero">🎯 Fin de Numéro (règles par dernier chiffre du tour cible)</option>
+                    <option value="nul_pattern">🤝 Match Nul Motifs (règles déclencheur → cibles)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -9664,6 +9708,14 @@ function AdminPanel() {
                       Compteur Banquier : dès qu'il atteint <em>B Banquier</em> → <strong>WIN_B prédit immédiatement</strong>, compteur Banquier remis à 0.<br/>
                       Compteur Joueur : dès qu'il atteint <em>B Joueur</em> → <strong>WIN_P prédit immédiatement</strong>, compteur Joueur remis à 0.<br/>
                       Égalité → reset des deux compteurs. Pas de mapping.
+                    </div>
+                  )}
+                  {stratForm.mode === 'nul_pattern' && (
+                    <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.3)', fontSize: 12, color: '#d8b4fe', lineHeight: 1.7 }}>
+                      🤝 <strong>Match Nul Motifs</strong> — prédit lorsqu'un <strong>événement déclencheur</strong> se produit dans la main observée.<br/>
+                      Chaque règle définit un déclencheur (ex : Victoire Banquier) et une ou plusieurs cibles à prédire (ex : ♠, TIE).<br/>
+                      Mode <em>Séquence</em> : tourne dans l'ordre des cibles. Mode <em>Aléatoire</em> : tirage au sort à chaque déclenchement.<br/>
+                      Aucun seuil B ni mapping — tout est défini dans les règles ci-dessous.
                     </div>
                   )}
                   {stratForm.mode === 'combine_carte' && (
@@ -10312,6 +10364,85 @@ function AdminPanel() {
                     </div>
                   </div>
                 )}
+
+                {stratForm.mode === 'nul_pattern' && (() => {
+                  const NUL_CATS_UI = [
+                    { value: 'WIN_B',       label: '🏦 Victoire Banquier' },
+                    { value: 'WIN_P',       label: '👤 Victoire Joueur' },
+                    { value: 'TIE',         label: '🤝 Égalité' },
+                    { value: 'distrib',     label: '⚖️ 2v2 Naturelle' },
+                    { value: 'P_DEUX',      label: '👤2️⃣ Joueur 2 cartes' },
+                    { value: 'B_DEUX',      label: '🏦2️⃣ Banquier 2 cartes' },
+                    { value: 'P_TROIS',     label: '👤3️⃣ Joueur 3 cartes' },
+                    { value: 'B_TROIS',     label: '🏦3️⃣ Banquier 3 cartes' },
+                    { value: '♠',           label: '♠️ Pique' },
+                    { value: '♥',           label: '♥️ Cœur' },
+                    { value: '♦',           label: '♦️ Carreau' },
+                    { value: '♣',           label: '♣️ Trèfle' },
+                    { value: 'PAIR_P',      label: '🟢 Pair Joueur' },
+                    { value: 'IMPAIR_P',    label: '🔴 Impair Joueur' },
+                    { value: 'DEUX_TROIS',  label: '2️⃣3️⃣ J:2 B:3' },
+                    { value: 'TROIS_DEUX',  label: '3️⃣2️⃣ J:3 B:2' },
+                    { value: 'TROIS_TROIS', label: '3️⃣3️⃣ J:3 B:3' },
+                  ];
+                  return (
+                    <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.25)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#c084fc', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🤝 Règles Match Nul — Déclencheur → Cibles prédites</div>
+                      {(stratForm.nul_rules || []).length === 0 && (
+                        <div style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', padding: '8px 0' }}>Aucune règle — ajoutez-en ci-dessous.</div>
+                      )}
+                      {(stratForm.nul_rules || []).map((rule, idx) => (
+                        <div key={idx} style={{ marginBottom: 12, padding: '10px 12px', background: 'rgba(168,85,247,0.06)', borderRadius: 8, border: '1px solid rgba(168,85,247,0.2)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: '#64748b', minWidth: 28 }}>#{idx + 1}</span>
+                            <span style={{ color: '#c084fc', fontSize: 12, fontWeight: 700 }}>Déclencheur :</span>
+                            <select value={rule.trigger || ''} onChange={e => setStratForm(p => { const r = [...(p.nul_rules || [])]; r[idx] = { ...r[idx], trigger: e.target.value }; return { ...p, nul_rules: r }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 6, color: '#c084fc', fontSize: 13 }}>
+                              <option value="">— Sélectionner —</option>
+                              {NUL_CATS_UI.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                            </select>
+                            <span style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700 }}>Ordre :</span>
+                            <select value={rule.ordre || 'aleatoire'} onChange={e => setStratForm(p => { const r = [...(p.nul_rules || [])]; r[idx] = { ...r[idx], ordre: e.target.value }; return { ...p, nul_rules: r }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, color: '#a78bfa', fontSize: 12 }}>
+                              <option value="aleatoire">🎲 Aléatoire</option>
+                              <option value="sequence">🔁 Séquence</option>
+                            </select>
+                            <button type="button" onClick={() => setStratForm(p => ({ ...p, nul_rules: (p.nul_rules || []).filter((_, i) => i !== idx) }))}
+                              style={{ marginLeft: 'auto', padding: '4px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6, fontWeight: 600 }}>Cibles prédites (une ou plusieurs) :</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {NUL_CATS_UI.map(c => {
+                              const isSel = Array.isArray(rule.targets) && rule.targets.includes(c.value);
+                              return (
+                                <button key={c.value} type="button"
+                                  onClick={() => setStratForm(p => {
+                                    const r = [...(p.nul_rules || [])];
+                                    const cur = Array.isArray(r[idx].targets) ? [...r[idx].targets] : [];
+                                    r[idx] = { ...r[idx], targets: isSel ? cur.filter(t => t !== c.value) : [...cur, c.value] };
+                                    return { ...p, nul_rules: r };
+                                  })}
+                                  style={{ padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                                    border: isSel ? '1px solid rgba(168,85,247,0.8)' : '1px solid rgba(255,255,255,0.1)',
+                                    background: isSel ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.04)',
+                                    color: isSel ? '#c084fc' : '#64748b' }}>
+                                  {c.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'WIN_B', targets: [], ordre: 'aleatoire' }] }))}
+                        style={{ padding: '8px 16px', background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.4)', borderRadius: 8, color: '#c084fc', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                        ＋ Ajouter une règle
+                      </button>
+                      <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(168,85,247,0.07)', borderRadius: 7, fontSize: 10, color: '#a78bfa' }}>
+                        💡 Chaque règle : quand le déclencheur se produit → prédit une des cibles configurées. Séquence = rotation dans l'ordre. Aléatoire = tirage au sort.
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* ── Paires fixes — MODE MIROIR UNIQUEMENT ── */}
                 {stratForm.mode === 'taux_miroir' && (
