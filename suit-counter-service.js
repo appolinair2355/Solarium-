@@ -96,10 +96,8 @@ function _makeId() {
 // ─── État global ────────────────────────────────────────────────────────────────
 let _countersList   = [];   // array of counter config objects
 let _countersState  = {};   // { [id]: { suitCounters, groupeJoueur, ..., gameCount, lastGameNumber, lastScheduleSent, lastSentTimes } }
-let _schedulerInterval  = null;
-let _configLoaded       = false;
-let _lastConfigReloadMs = 0;  // timestamp du dernier rechargement depuis la DB
-let _schedulerRunning   = false;  // verrou anti-reentrancy
+let _schedulerInterval = null;
+let _configLoaded   = false;
 
 // ─── Fabrique d'état vierge pour un compteur ──────────────────────────────────
 function _makeState() {
@@ -128,12 +126,9 @@ function _makeState() {
 
 // ─── S'assure qu'un état existe pour chaque compteur ──────────────────────────
 function _ensureStates() {
-  const _nowMs = Date.now();
   for (const c of _countersList) {
     if (!_countersState[c.id]) {
-      const _s = _makeState();
-      _s.lastScheduleSentMs = _nowMs; // évite le déclenchement immédiat au démarrage ou à la création
-      _countersState[c.id] = _s;
+      _countersState[c.id] = _makeState();
     }
   }
   // Nettoie les états orphelins
@@ -647,29 +642,28 @@ async function sendCounterById(id) {
 }
 
 // ─── Planificateur ────────────────────────────────────────────────────────────
-// L'intervalle est basé sur le temps écoulé depuis le dernier reset.
-//   interval=30 → reset (et envoi si Telegram configuré) si >= 30 min écoulées
-//   interval=60 → reset (et envoi si Telegram configuré) si >= 60 min écoulées
-
-// Vérifie si l'heure de reset par intervalle est atteinte (sans condition Telegram)
-function _shouldTriggerByInterval(counter, now) {
+// L'intervalle est aligné sur l'horloge :
+//   interval=30 → envoi à H:00 et H:30
+//   interval=60 → envoi à H:00 uniquement
+function _shouldSendByInterval(counter, now) {
   if (!counter.enabled) return false;
+  if (!counter.bot_token || !counter.channel_id) return false;
   const s = _countersState[counter.id];
   if (!s) return false;
   const interval = parseInt(counter.interval) || 30;
+  const mins     = now.getMinutes();
   const hhmm     = _getHHMM(now);
 
-  // Vérifier que l'intervalle (en minutes) s'est écoulé depuis le dernier reset
-  const msSinceLastReset = now.getTime() - (s.lastScheduleSentMs || 0);
-  if (msSinceLastReset < interval * 60 * 1000) return false;
+  // Vérifier que la minute courante est un multiple de l'intervalle
+  if (mins % interval !== 0) return false;
 
-  // Anti-doublon : ne pas déclencher deux fois dans la même minute
+  // Anti-doublon : ne pas envoyer deux fois dans la même minute
   return s.lastScheduleSent !== hhmm;
 }
 
-// Vérifie si une heure fixe de reset est atteinte (sans condition Telegram)
-function _shouldTriggerByFixedTime(counter, now) {
+function _shouldSendByFixedTime(counter, now) {
   if (!counter.enabled) return false;
+  if (!counter.bot_token || !counter.channel_id) return false;
   const s     = _countersState[counter.id];
   if (!s)     return false;
   const times = Array.isArray(counter.send_times) ? counter.send_times : [];
@@ -678,80 +672,57 @@ function _shouldTriggerByFixedTime(counter, now) {
   return times.includes(hhmm) && !s.lastSentTimes[hhmm];
 }
 
-// Garde-fous rétrocompat (utilisés uniquement pour l'envoi Telegram)
-function _shouldSendByInterval(counter, now) {
-  if (!counter.bot_token || !counter.channel_id) return false;
-  return _shouldTriggerByInterval(counter, now);
-}
-
-function _shouldSendByFixedTime(counter, now) {
-  if (!counter.bot_token || !counter.channel_id) return false;
-  return _shouldTriggerByFixedTime(counter, now);
-}
-
 function startScheduler() {
   if (_schedulerInterval) clearInterval(_schedulerInterval);
   loadConfig().catch(() => {});
   _schedulerInterval = setInterval(async () => {
-    // Verrou anti-reentrancy : si le cycle précédent est encore en cours, on saute
-    if (_schedulerRunning) return;
-    _schedulerRunning = true;
     try {
+      if (!_configLoaded) await loadConfig();
       const now  = new Date();
       const hhmm = _getHHMM(now);
-
-      // Rechargement de la config depuis la DB toutes les 5 min
-      // pour prendre en compte les modifications faites via le panneau admin
-      if (!_configLoaded || now.getTime() - _lastConfigReloadMs > 5 * 60 * 1000) {
-        await loadConfig();
-        _lastConfigReloadMs = now.getTime();
-      }
 
       for (const counter of _countersList) {
         if (!counter.enabled) continue;
         const s = _countersState[counter.id];
         if (!s) continue;
 
-        const hasTelegram = !!(counter.bot_token && counter.channel_id);
+        let sent = false;
 
-        // Détecter si c'est l'heure de déclencher (indépendamment de Telegram)
-        // L'intervalle est prioritaire sur l'heure fixe pour éviter un double reset.
-        const triggerByInterval  = _shouldTriggerByInterval(counter, now);
-        const triggerByFixedTime = !triggerByInterval && _shouldTriggerByFixedTime(counter, now);
-        const triggered = triggerByInterval || triggerByFixedTime;
-
-        if (triggered) {
-          // Mémoriser le déclenchement pour l'anti-doublon et le prochain calcul d'intervalle
+        if (_shouldSendByInterval(counter, now)) {
           s.lastScheduleSent   = hhmm;
           s.lastScheduleSentMs = now.getTime();
-          if (triggerByFixedTime) s.lastSentTimes[hhmm] = true;
-
-          // Envoi Telegram uniquement si configuré
-          if (hasTelegram) {
-            try {
-              await _sendCounter(counter);
-              const mode = triggerByInterval ? `intervalle ${counter.interval}min` : 'heure fixe';
-              console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi ${mode} — ${hhmm}`);
-            } catch (e) {
-              console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi Telegram: ${e.message}`);
-            }
+          try {
+            await _sendCounter(counter);
+            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi intervalle ${counter.interval}min — ${hhmm}`);
+            sent = true;
+          } catch (e) {
+            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi intervalle: ${e.message}`);
           }
+        }
 
-          // Remise à zéro uniquement si reset_after_send !== false
+        if (_shouldSendByFixedTime(counter, now)) {
+          try {
+            await _sendCounter(counter);
+            console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi heure fixe — ${hhmm}`);
+            s.lastSentTimes[hhmm] = true;  // marqué seulement après succès
+            sent = true;
+          } catch (e) {
+            console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi heure fixe: ${e.message}`);
+          }
+        }
+
+        if (sent) {
+          // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
-          if (counter.reset_after_send !== false) {
-            const prevSentMs    = s.lastScheduleSentMs;
-            const prevSentHhmm  = s.lastScheduleSent;
-            const prevSentTimes = { ...s.lastSentTimes };
-            const newState = _makeState();
-            newState.lastScheduleSentMs = prevSentMs;
-            newState.lastScheduleSent   = prevSentHhmm;
-            newState.lastSentTimes      = prevSentTimes;
-            _countersState[counter.id] = newState;
-            console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
-          } else {
-            console.log(`[SuitCounter] 📊 [${counter.label||counter.id}] Envoi planifié sans reset (reset_after_send=false) — ${hhmm}`);
-          }
+          const prevSentMs    = s.lastScheduleSentMs || now.getTime();
+          const prevSentHhmm  = s.lastScheduleSent   || hhmm;
+          const prevSentTimes = { ...s.lastSentTimes };
+          const newState = _makeState();
+          newState.lastScheduleSentMs = prevSentMs;
+          newState.lastScheduleSent   = prevSentHhmm;
+          newState.lastSentTimes      = prevSentTimes;
+          _countersState[counter.id] = newState;
+          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}`);
         }
 
         // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
@@ -761,8 +732,6 @@ function startScheduler() {
       }
     } catch (e) {
       console.warn('[SuitCounter] Erreur scheduler:', e.message);
-    } finally {
-      _schedulerRunning = false;
     }
   }, 60 * 1000);
   console.log('[SuitCounter] ⏱ Scheduler v2 démarré (vérif. toutes les 60s)');
