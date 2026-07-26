@@ -56,20 +56,12 @@ const GROUPE_BANQUIER_CATEGORIES = [
 // ─── Helpers cartes ────────────────────────────────────────────────────────────
 function _getCardRank(card) {
   if (!card || typeof card !== 'object') return null;
-  const raw = (card.R !== null && card.R !== undefined) ? card.R
-            : (card.r !== null && card.r !== undefined) ? card.r
-            : card.rang;
-  if (raw === null || raw === undefined) return null;
-  const r = String(raw).toUpperCase().trim();
+  let r = String(card.R || card.r || card.rang || '').toUpperCase().trim();
   if (!r) return null;
-  if (r === 'A' || r === '1' || r === '14') return 'A';
-  if (r === 'T' || r === '10')              return '10';
-  if (r === 'J' || r === '11')              return 'J';
-  if (r === 'Q' || r === '12')              return 'Q';
-  if (r === 'K' || r === '13')              return 'K';
-  if (['2','3','4','5','6','7','8','9'].includes(r)) return r;
-  const n = parseInt(r, 10);
-  if (!isNaN(n) && n >= 2 && n <= 9) return String(n);
+  if (r === 'T' || r === '10') return '10';
+  const numMap = { '1': 'A', '11': 'J', '12': 'Q', '13': 'K', '0': '10' };
+  if (numMap[r]) return numMap[r];
+  if (CARD_RANKS.includes(r)) return r;
   return null;
 }
 function _baccaratCardValue(rank) {
@@ -297,169 +289,14 @@ function onGameFinished(gn, pSuits, bSuits, pCards, bCards, winner) {
     else if (np===3&&nb===2) s.groupeBanquier.dist_32++;
     else if (np===3&&nb===3) s.groupeBanquier.dist_33++;
 
-    // Envoi après chaque jeu (si activé pour ce compteur) — format SIMPLE, pas de reset
+    // Envoi après chaque jeu (si activé pour ce compteur)
     if (counter.enabled && counter.send_on_game_end && counter.bot_token && counter.channel_id) {
-      _sendCounter(counter, false).catch(() => {});
+      _sendCounter(counter).catch(() => {});
     }
   }
 }
 
-// ─── Bilan visuel (format enrichi pour les envois planifiés) ─────────────────
-const SUIT_BILAN_CONFIG = {
-  '♠': { header: '🖤 ♠️ PIQUE',   filled: '⬛', empty: '⬜' },
-  '♥': { header: '❤️ ♥️ CŒUR',   filled: '🟥', empty: '⬜' },
-  '♦': { header: '🧡 ♦️ CARREAU', filled: '🔶', empty: '⬜' },
-  '♣': { header: '💚 ♣️ TRÈFLE',  filled: '🟩', empty: '⬜' },
-};
-
-function _makeBar(pct, filled, empty, total = 10) {
-  const n = Math.max(0, Math.min(total, Math.round((pct / 100) * total)));
-  return filled.repeat(n) + empty.repeat(total - n);
-}
-
-const COUNTER_TYPE_LABELS = {
-  taux_miroir:      '🃏 Taux Miroir (Couleurs)',
-  valeur_joueur:    '🔢 Valeur — Joueur',
-  valeur_banquier:  '🔢 Valeur — Banquier',
-  parite:           '⚖️ Parité (Joueur + Banquier)',
-  parite_joueur:    '⚖️ Parité — Joueur',
-  parite_banquier:  '⚖️ Parité — Banquier',
-  score_joueur:     '🎯 Score — Joueur',
-  score_banquier:   '🎯 Score — Banquier',
-  score_exact:      '🔢 Score Exact (J+B)',
-  groupe_joueur:    '📂 Groupe — Joueur',
-  groupe_banquier:  '📂 Groupe — Banquier',
-};
-
-function _buildBilanFooter(s, counter) {
-  const info = _getNextResetInfo(counter);
-  const line = `⏭ Prochain reset dans ${info.timeStr}  (${info.label})`;
-  return `\n━━━━━━━━━━━━━━━━━━━━\n${line}`;
-}
-
-function buildBilanMessage(counter) {
-  const s = _countersState[counter.id];
-  if (!s) return '❌ État introuvable';
-  const ct       = counter.counter_type || 'taux_miroir';
-  const label    = counter.label || 'Compteur';
-  const typeLabel = COUNTER_TYPE_LABELS[ct] || ct;
-  const now      = new Date();
-  const hhmm     = _getHHMM(now);
-  const headerLine = `╔════════════════════╗\n📊 Bilan — ${label}\n🔖 Type : ${typeLabel}\n╚════════════════════╝\n⏰ ${hhmm}  |  🎮 Jeu #${s.lastGameNumber || '—'}  |  📊 ${s.gameCount} jeu(x)`;
-
-  if (ct === 'taux_miroir') {
-    const sides = [
-      { sideLabel: '👤 Joueur',  data: s.suitCounters.joueur },
-      { sideLabel: '🏦 Banquier', data: s.suitCounters.banquier },
-    ];
-    const parts = [headerLine];
-    for (const { sideLabel, data } of sides) {
-      const total = ALL_SUITS.reduce((a, suit) => a + (data[suit] || 0), 0);
-      parts.push(`\n${sideLabel}`);
-      for (const suit of ALL_SUITS) {
-        const cfg = SUIT_BILAN_CONFIG[suit];
-        const cnt = data[suit] || 0;
-        const pct = total > 0 ? (cnt / total) * 100 : 0;
-        const bar = _makeBar(pct, cfg.filled, cfg.empty);
-        parts.push(`\n${cfg.header}\n├─ Compteur: ${cnt} cartes\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-      }
-      parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} cartes\n━━━━━━━━━━━━━━━━━━━━`);
-    }
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  if (ct === 'valeur_joueur' || ct === 'valeur_banquier') {
-    const vals  = ct === 'valeur_joueur' ? s.valeurJoueur : s.valeurBanquier;
-    const side  = ct === 'valeur_joueur' ? '👤 Joueur' : '🏦 Banquier';
-    const total = CARD_RANKS.reduce((a, r) => a + (vals[r] || 0), 0);
-    const parts = [headerLine, `\n${side}`];
-    for (const r of CARD_RANKS) {
-      const cnt = vals[r] || 0;
-      const pct = total > 0 ? (cnt / total) * 100 : 0;
-      const bar = _makeBar(pct, '🟦', '⬜');
-      parts.push(`\n🃏 ${r}\n├─ Compteur: ${cnt} cartes\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-    }
-    parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} cartes\n━━━━━━━━━━━━━━━━━━━━`);
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  if (ct === 'parite' || ct === 'parite_joueur' || ct === 'parite_banquier') {
-    const isDouble = ct === 'parite';
-    const pairs = isDouble
-      ? [['👤 Joueur', s.pariteJoueur], ['🏦 Banquier', s.pariteBanquier]]
-      : [[ct === 'parite_joueur' ? '👤 Joueur' : '🏦 Banquier',
-          ct === 'parite_joueur' ? s.pariteJoueur : s.pariteBanquier]];
-    const parts = [headerLine];
-    for (const [sideLabel, par] of pairs) {
-      const total = (par.pair || 0) + (par.impair || 0);
-      parts.push(`\n${sideLabel}`);
-      for (const [key, emoji, fillEmoji] of [['pair', '🔵', '🟦'], ['impair', '🔴', '🟥']]) {
-        const cnt = par[key] || 0;
-        const pct = total > 0 ? (cnt / total) * 100 : 0;
-        const bar = _makeBar(pct, fillEmoji, '⬜');
-        parts.push(`\n${emoji} ${key === 'pair' ? 'Pair' : 'Impair'}\n├─ Compteur: ${cnt} jeux\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-      }
-      parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} jeux\n━━━━━━━━━━━━━━━━━━━━`);
-    }
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  if (ct === 'score_joueur' || ct === 'score_banquier') {
-    const scores = ct === 'score_joueur' ? s.scoreJoueur : s.scoreBanquier;
-    const side   = ct === 'score_joueur' ? '👤 Joueur' : '🏦 Banquier';
-    const total  = Object.values(scores).reduce((a, v) => a + v, 0);
-    const parts  = [headerLine, `\n${side}`];
-    for (let i = 0; i <= 9; i++) {
-      const cnt = scores[i] || 0;
-      const pct = total > 0 ? (cnt / total) * 100 : 0;
-      const bar = _makeBar(pct, '🟦', '⬜');
-      parts.push(`\n🎯 Score ${i}\n├─ Compteur: ${cnt} jeux\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-    }
-    parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} jeux\n━━━━━━━━━━━━━━━━━━━━`);
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  if (ct === 'score_exact') {
-    const scores = s.scoreExact || {};
-    const total  = Object.values(scores).reduce((a, v) => a + v, 0);
-    const parts  = [headerLine, '\n🔢 Score Exact (J+B)'];
-    for (let i = 0; i <= 18; i++) {
-      const cnt = scores[i] || 0;
-      const pct = total > 0 ? (cnt / total) * 100 : 0;
-      const bar = _makeBar(pct, '🟦', '⬜');
-      parts.push(`\nScore ${i}\n├─ Compteur: ${cnt} jeux\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-    }
-    parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} jeux\n━━━━━━━━━━━━━━━━━━━━`);
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  if (ct === 'groupe_joueur' || ct === 'groupe_banquier') {
-    const isJ   = ct === 'groupe_joueur';
-    const cats  = isJ ? GROUPE_JOUEUR_CATEGORIES : GROUPE_BANQUIER_CATEGORIES;
-    const grp   = isJ ? s.groupeJoueur : s.groupeBanquier;
-    const side  = isJ ? '👤 Joueur' : '🏦 Banquier';
-    const total = cats.reduce((a, c) => a + (grp[c.key] || 0), 0);
-    const parts = [headerLine, `\n${side}`];
-    for (const cat of cats) {
-      const cnt = grp[cat.key] || 0;
-      const pct = total > 0 ? (cnt / total) * 100 : 0;
-      const bar = _makeBar(pct, '🟦', '⬜');
-      parts.push(`\n${cat.label}\n├─ Compteur: ${cnt} jeux\n├─ Pourcentage: ${pct.toFixed(1)}%\n└─ ${bar}`);
-    }
-    parts.push(`\n━━━━━━━━━━━━━━━━━━━━\n📌 Total: ${total} jeux\n━━━━━━━━━━━━━━━━━━━━`);
-    parts.push(_buildBilanFooter(s, counter));
-    return parts.join('\n');
-  }
-
-  return buildMessage(counter);
-}
-
-// ─── Construction du message (format compact — aperçu manuel) ─────────────────
+// ─── Construction du message ──────────────────────────────────────────────────
 function buildMessage(counter) {
   const s = _countersState[counter.id];
   if (!s) return '❌ État introuvable';
@@ -561,8 +398,12 @@ function buildMessage(counter) {
 function _buildFooter(s, counter) {
   const lines = [];
   if (s.lastGameNumber) lines.push(`🎮 Jeu #${s.lastGameNumber}  |  📊 ${s.gameCount} jeu(x) depuis dernier reset`);
-  const info = _getNextResetInfo(counter);
-  lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
+  if (counter.reset_after_send !== false) {
+    const info = _getNextResetInfo(counter);
+    lines.push(`⏭ Reset dans ${info.timeStr}  (${info.label})`);
+  } else {
+    lines.push('♾️ Pas de reset automatique');
+  }
   return `\n━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}`;
 }
 
@@ -596,43 +437,20 @@ function _getNextResetInfo(counter) {
 }
 
 // ─── Envoi Telegram pour un compteur ─────────────────────────────────────────
-async function _tgSend(bot_token, channel_id, text) {
-  const url = `https://api.telegram.org/bot${bot_token}/sendMessage`;
-  const r   = await fetch(url, {
+async function _sendCounter(counter) {
+  if (!counter.bot_token || !counter.channel_id) {
+    throw new Error(`Compteur "${counter.label || counter.id}" : bot_token ou channel_id manquant`);
+  }
+  const text = buildMessage(counter);
+  const url  = `https://api.telegram.org/bot${counter.bot_token}/sendMessage`;
+  const r    = await fetch(url, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ chat_id: String(channel_id), text }),
+    body:    JSON.stringify({ chat_id: String(counter.channel_id), text }),
   });
   const d = await r.json();
   if (!d.ok) throw new Error(d.description || 'Erreur Telegram');
   return d;
-}
-
-async function _sendCounter(counter, useBilan = true) {
-  if (!counter.bot_token || !counter.channel_id) {
-    throw new Error(`Compteur "${counter.label || counter.id}" : bot_token ou channel_id manquant`);
-  }
-  const text = useBilan ? buildBilanMessage(counter) : buildMessage(counter);
-  const MAX  = 4000;
-  if (text.length <= MAX) {
-    return _tgSend(counter.bot_token, counter.channel_id, text);
-  }
-  // Texte trop long → couper sur les lignes vides
-  const lines  = text.split('\n');
-  const chunks = [];
-  let cur      = '';
-  for (const line of lines) {
-    if (cur.length + line.length + 1 > MAX && cur.length > 0) {
-      chunks.push(cur);
-      cur = line;
-    } else {
-      cur = cur ? cur + '\n' + line : line;
-    }
-  }
-  if (cur) chunks.push(cur);
-  let last;
-  for (const chunk of chunks) last = await _tgSend(counter.bot_token, counter.channel_id, chunk);
-  return last;
 }
 
 async function sendCounterById(id) {
@@ -642,23 +460,18 @@ async function sendCounterById(id) {
 }
 
 // ─── Planificateur ────────────────────────────────────────────────────────────
-// L'intervalle est aligné sur l'horloge :
-//   interval=30 → envoi à H:00 et H:30
-//   interval=60 → envoi à H:00 uniquement
 function _shouldSendByInterval(counter, now) {
   if (!counter.enabled) return false;
   if (!counter.bot_token || !counter.channel_id) return false;
   const s = _countersState[counter.id];
   if (!s) return false;
   const interval = parseInt(counter.interval) || 30;
-  const mins     = now.getMinutes();
-  const hhmm     = _getHHMM(now);
-
-  // Vérifier que la minute courante est un multiple de l'intervalle
-  if (mins % interval !== 0) return false;
-
+  const nowMs    = now.getTime();
+  const lastMs   = s.lastScheduleSentMs || 0;
+  // Vérifier que l'intervalle configuré s'est écoulé depuis le dernier envoi
+  if (nowMs - lastMs < interval * 60 * 1000) return false;
   // Anti-doublon : ne pas envoyer deux fois dans la même minute
-  return s.lastScheduleSent !== hhmm;
+  return s.lastScheduleSent !== _getHHMM(now);
 }
 
 function _shouldSendByFixedTime(counter, now) {
@@ -701,18 +514,17 @@ function startScheduler() {
         }
 
         if (_shouldSendByFixedTime(counter, now)) {
+          s.lastSentTimes[hhmm] = true;
           try {
             await _sendCounter(counter);
             console.log(`[SuitCounter] ⏰ [${counter.label||counter.id}] Envoi heure fixe — ${hhmm}`);
-            s.lastSentTimes[hhmm] = true;  // marqué seulement après succès
             sent = true;
           } catch (e) {
             console.warn(`[SuitCounter] ⚠️ [${counter.label||counter.id}] Erreur envoi heure fixe: ${e.message}`);
           }
         }
 
-        if (sent) {
-          // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
+        if (sent && counter.reset_after_send !== false) {
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
           const prevSentMs    = s.lastScheduleSentMs || now.getTime();
           const prevSentHhmm  = s.lastScheduleSent   || hhmm;
@@ -725,9 +537,9 @@ function startScheduler() {
           console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}`);
         }
 
-        // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
+        // Reset des heures déjà envoyées à minuit
         if (now.getHours() === 0 && now.getMinutes() === 0) {
-          _countersState[counter.id].lastSentTimes = {};
+          s.lastSentTimes = {};
         }
       }
     } catch (e) {
