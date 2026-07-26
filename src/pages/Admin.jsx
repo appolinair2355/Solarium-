@@ -9638,7 +9638,6 @@ function AdminPanel() {
                     ];
                     const nlCatLabel = (v) => (NUL_CATS_CC.find(c => c[0] === v) || [v, v])[1];
                     const updateSpec = (cIdx, sIdx, patch) => {
-                      const arr = [...(p.cc_combinations || [])];  // will be re-scoped below
                       setStratForm(p => {
                         const arr2 = [...(p.cc_combinations || [])];
                         const specs2 = [...(arr2[cIdx].trigger_specs || [])];
