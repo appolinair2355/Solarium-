@@ -822,15 +822,30 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
                     .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
                     .filter(c => c.when && c.predict)
                 : [];
+              const _targets = (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              // Compat format ancien UI (cond_cat / predict_si / predict_sinon)
+              const _predict_si    = (Array.isArray(r.predict_si)    ? r.predict_si    : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              const _predict_sinon = (Array.isArray(r.predict_sinon) ? r.predict_sinon : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              const _cond_cat      = typeof r.cond_cat === 'string' ? r.cond_cat : '';
+              const _cond_param    = (r.cond_param !== undefined && r.cond_param !== null && r.cond_param !== '') ? Number(r.cond_param) : null;
               return {
-                trigger:    NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-                conditions: _conds,
-                // Compat héritage — conservés pour anciennes stratégies
-                targets:    (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
-                ordre:      r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-                hand:       (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+                trigger:       NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
+                conditions:    _conds,
+                targets:       _targets,
+                // Champs format ancien UI — conservés pour le moteur
+                cond_cat:      _cond_cat,
+                cond_param:    _cond_param,
+                predict_si:    _predict_si,
+                predict_sinon: _predict_sinon,
+                ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+                hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
               };
-            }).filter(r => r.trigger && (r.conditions.length > 0 || r.targets.length > 0)) }
+            }).filter(r => r.trigger && (
+              r.conditions.length > 0 ||
+              r.targets.length > 0 ||
+              r.predict_si.length > 0 ||
+              r.predict_sinon.length > 0
+            )) }
         : isNumeroCostume
         ? { threshold: 0, mode: 'numero_costume', mappings: null,
             numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),
@@ -1209,14 +1224,30 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
                     .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
                     .filter(c => c.when && c.predict)
                 : [];
+              const _targets = (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              // Compat format ancien UI (cond_cat / predict_si / predict_sinon)
+              const _predict_si    = (Array.isArray(r.predict_si)    ? r.predict_si    : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              const _predict_sinon = (Array.isArray(r.predict_sinon) ? r.predict_sinon : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
+              const _cond_cat      = typeof r.cond_cat === 'string' ? r.cond_cat : '';
+              const _cond_param    = (r.cond_param !== undefined && r.cond_param !== null && r.cond_param !== '') ? Number(r.cond_param) : null;
               return {
-                trigger:    NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-                conditions: _conds,
-                targets:    (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10),
-                ordre:      r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-                hand:       (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+                trigger:       NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
+                conditions:    _conds,
+                targets:       _targets,
+                // Champs format ancien UI — conservés pour le moteur
+                cond_cat:      _cond_cat,
+                cond_param:    _cond_param,
+                predict_si:    _predict_si,
+                predict_sinon: _predict_sinon,
+                ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
+                hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
               };
-            }).filter(r => r.trigger && (r.conditions.length > 0 || r.targets.length > 0)) }
+            }).filter(r => r.trigger && (
+              r.conditions.length > 0 ||
+              r.targets.length > 0 ||
+              r.predict_si.length > 0 ||
+              r.predict_sinon.length > 0
+            )) }
         : isNumeroCostume
         ? { threshold: 0, mode: 'numero_costume', mappings: null,
             numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),
@@ -1981,7 +2012,7 @@ async function applyUpdateBlock(type, data) {
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
-    if (!id || id < 1 || id > 25) { result.errors.push(`format_id invalide (1–25)`); return result; }
+    if (!id || id < 1 || id > 97) { result.errors.push(`format_id invalide (1–97)`); return result; }
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
     result.applied = 1;

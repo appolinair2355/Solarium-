@@ -737,18 +737,21 @@ function startScheduler() {
             }
           }
 
-          // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
-          // (qu'un envoi Telegram ait eu lieu ou non)
+          // Remise à zéro uniquement si reset_after_send !== false
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
-          const prevSentMs    = s.lastScheduleSentMs;
-          const prevSentHhmm  = s.lastScheduleSent;
-          const prevSentTimes = { ...s.lastSentTimes };
-          const newState = _makeState();
-          newState.lastScheduleSentMs = prevSentMs;
-          newState.lastScheduleSent   = prevSentHhmm;
-          newState.lastSentTimes      = prevSentTimes;
-          _countersState[counter.id] = newState;
-          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
+          if (counter.reset_after_send !== false) {
+            const prevSentMs    = s.lastScheduleSentMs;
+            const prevSentHhmm  = s.lastScheduleSent;
+            const prevSentTimes = { ...s.lastSentTimes };
+            const newState = _makeState();
+            newState.lastScheduleSentMs = prevSentMs;
+            newState.lastScheduleSent   = prevSentHhmm;
+            newState.lastSentTimes      = prevSentTimes;
+            _countersState[counter.id] = newState;
+            console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
+          } else {
+            console.log(`[SuitCounter] 📊 [${counter.label||counter.id}] Envoi planifié sans reset (reset_after_send=false) — ${hhmm}`);
+          }
         }
 
         // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
