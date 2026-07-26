@@ -128,12 +128,9 @@ function _makeState() {
 
 // ─── S'assure qu'un état existe pour chaque compteur ──────────────────────────
 function _ensureStates() {
-  const _nowMs = Date.now();
   for (const c of _countersList) {
     if (!_countersState[c.id]) {
-      const _s = _makeState();
-      _s.lastScheduleSentMs = _nowMs; // évite le déclenchement immédiat au démarrage ou à la création
-      _countersState[c.id] = _s;
+      _countersState[c.id] = _makeState();
     }
   }
   // Nettoie les états orphelins
@@ -737,21 +734,18 @@ function startScheduler() {
             }
           }
 
-          // Remise à zéro uniquement si reset_after_send !== false
+          // Le bilan aux heures planifiées remet TOUJOURS le compteur à zéro
+          // (qu'un envoi Telegram ait eu lieu ou non)
           // Préserver les timestamps d'envoi pour que l'intervalle ne reparte pas de zéro
-          if (counter.reset_after_send !== false) {
-            const prevSentMs    = s.lastScheduleSentMs;
-            const prevSentHhmm  = s.lastScheduleSent;
-            const prevSentTimes = { ...s.lastSentTimes };
-            const newState = _makeState();
-            newState.lastScheduleSentMs = prevSentMs;
-            newState.lastScheduleSent   = prevSentHhmm;
-            newState.lastSentTimes      = prevSentTimes;
-            _countersState[counter.id] = newState;
-            console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
-          } else {
-            console.log(`[SuitCounter] 📊 [${counter.label||counter.id}] Envoi planifié sans reset (reset_after_send=false) — ${hhmm}`);
-          }
+          const prevSentMs    = s.lastScheduleSentMs;
+          const prevSentHhmm  = s.lastScheduleSent;
+          const prevSentTimes = { ...s.lastSentTimes };
+          const newState = _makeState();
+          newState.lastScheduleSentMs = prevSentMs;
+          newState.lastScheduleSent   = prevSentHhmm;
+          newState.lastSentTimes      = prevSentTimes;
+          _countersState[counter.id] = newState;
+          console.log(`[SuitCounter] 🔄 [${counter.label||counter.id}] Remise à zéro — ${hhmm}${hasTelegram ? '' : ' (sans Telegram)'}`);
         }
 
         // Reset des heures déjà envoyées à minuit — opérer sur l'état LIVE
