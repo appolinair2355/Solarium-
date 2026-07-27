@@ -2,49 +2,163 @@ const express = require('express');
 const fetch = require('node-fetch');
 const router = express.Router();
 
-// Paramètres corrects extraits du bundle JS officiel 1xbet
-// L'endpoint LiveFeed/GetChampZip attend champId (et NON champs/sports/gr)
-const CHAMP_ID   = process.env.XBET_CHAMP_ID   || '2050671';
-const XBET_LNG   = process.env.XBET_LNG         || 'fr';
+// ── Endpoints principaux (1xBet + miroirs régionaux) ─────────────────────────
+// Les miroirs partagent la même infrastructure backend — même données, IPs différentes
+// ce qui offre une redondance naturelle quand le nœud principal est lent ou bloqué.
+const CHAMP_PATH   = '/LiveFeed/GetChampZip';
+const CHAMP_PARAMS_STR = 'champ=2050671';
+const CHAMP_API_URL  = 'https://1xbet.com' + CHAMP_PATH;
+const CHAMP_API_PARAMS = new URLSearchParams({ champ: 2050671 });
 
-// Domaines miroir — on essaie chacun jusqu'à obtenir des données
-const API_DOMAINS = (process.env.XBET_DOMAINS || 'https://1xbet.cd,https://1xbet.cm,https://1xbet.ng')
-  .split(',').map(d => d.trim()).filter(Boolean);
+// Miroirs régionaux 1xBet (même API, nœuds CDN différents)
+const MIRROR_HOSTS = [
+  'https://1xbet-africa.com',
+  'https://1xbet.cm',
+  'https://1xbet.ng',
+  'https://1xbet.gh',
+  'https://1xbet.cd',
+];
 
-function buildApiUrl(domain) {
-  // Noms de paramètres extraits du bundle JS officiel 1xbet :
-  //   kn = G({key:"champId", apiKey:"champ"})   → param API = "champ"
-  //   me = G({key:"lng",     apiKey:"lng"})      → param API = "lng"
-  const p = new URLSearchParams({
-    champ:         CHAMP_ID,   // PAS champId ni champs — le vrai nom est "champ"
-    lng:           XBET_LNG,
-    groupChamps:   'true',
-    virtualSports: 'true',
-    countryOnly:   'false',
-  });
-  return `${domain}/service-api/LiveFeed/GetChampZip?${p}`;
-}
+// ── Endpoint confirmé non-bloqué : 1xbet.cd service-api ──────────────────────
+const CD_RESCUE_URL    = 'https://1xbet.cd/service-api/LiveFeed/GetChampZip';
+const CD_RESCUE_PARAMS = new URLSearchParams({
+  champ: 2050671, lng: 'en', country: 96, groupChamps: 'true',
+});
+const CD_RESCUE_HEADERS = {
+  'accept': 'application/json, text/plain, */*',
+  'accept-language': 'fr-FR,fr;q=0.9,en-US;q=0.8',
+  'content-type': 'application/json',
+  'is-srv': 'false',
+  'x-app-n': 'BETTING_APP',
+  'x-requested-with': 'XMLHttpRequest',
+  'x-svc-source': 'BETTING_APP',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0',
+  'origin': 'https://1xbet.cd',
+  'referer': 'https://1xbet.cd/fr/live/baccarat/2050671-baccara/726599901-player-banker',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+};
 
-function buildHeaders(domain) {
-  return {
-    'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept':          'application/json, text/plain, */*',
-    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Origin':          domain,
-    'Referer':         `${domain}/fr/live/baccarat/${CHAMP_ID}-baccara`,
-    'Sec-Fetch-Dest':  'empty',
-    'Sec-Fetch-Mode':  'cors',
-    'Sec-Fetch-Site':  'same-origin',
-    'Connection':      'keep-alive',
-  };
-}
+// ── Ancien endpoint de secours (GetSportsShortZip) ───────────────────────────
+const API_URL = 'https://1xbet.com/service-api/LiveFeed/GetSportsShortZip';
+const API_PARAMS = new URLSearchParams({
+  sports: 236, champs: 2050671, lng: 'en', gr: 285,
+  country: 96, virtualSports: 'true', groupChamps: 'true',
+});
+
+// ── API secours live renforcée (service-api/LiveFeed/GetChampZip) ─────────────
+// Chemin alternatif avec headers enrichis (x-app-n, x-hd, x-svc-source, etc.)
+const RESCUE_CHAMP_URL    = 'https://1xbet.com/service-api/LiveFeed/GetChampZip';
+const RESCUE_CHAMP_PARAMS = new URLSearchParams({
+  champ: 2050671, lng: 'en', country: 96, groupChamps: 'true',
+});
+const RESCUE_CHAMP_HEADERS = {
+  'accept': 'application/json, text/plain, */*',
+  'accept-language': 'en-GB,en;q=0.9,en-US;q=0.8',
+  'content-type': 'application/json',
+  'is-srv': 'false',
+  'priority': 'u=1, i',
+  'referer': 'https://1xbet.com/en/live/baccarat/2050671-baccara/716400636-player-banker',
+  'sec-ch-ua': '"Microsoft Edge";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0',
+  'x-app-n': 'BETTING_APP',
+  'x-mobile-project-id': '0',
+  'x-requested-with': 'XMLHttpRequest',
+  'x-svc-source': 'BETTING_APP',
+};
+
+const API_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Origin': 'https://1xbet.com',
+  'Referer': 'https://1xbet.com/fr/live/baccarat',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+  'Connection': 'keep-alive',
+};
 
 const SUIT_MAP = { 0: '♠️', 1: '♣️', 2: '♦️', 3: '♥️' };
 let gamesCache     = [];
 let lastFetch      = 0;
 let lastClientPush = 0;
 let lastFingerprint = '';
-const CACHE_TTL    = 1500;
+const CACHE_TTL    = 800;
+let lastDataSource = 'server'; // 'server' (1xBet direct) | 'kouame' | 'proxy'
+
+// ── Détection de gap (jeu sauté) ─────────────────────────────────────────────
+// On trace le plus grand game_number vu jusqu'ici.
+// Si l'API passe de N à N+2 sans passer par N+1, on déclenche des refetch rapides.
+let _lastMaxGn = 0;
+let _gapRetryTimer = null;
+const GAP_RETRY_ATTEMPTS = 4;  // nombre de tentatives pour récupérer le jeu manquant
+const GAP_RETRY_INTERVAL = 800; // ms entre chaque tentative
+
+function _detectAndHandleGap(parsed) {
+  const maxGn = parsed.reduce((m, g) => Math.max(m, g.game_number || 0), 0);
+  if (maxGn === 0) return;
+
+  if (_lastMaxGn > 0 && maxGn > _lastMaxGn + 1) {
+    const missing = [];
+    for (let gn = _lastMaxGn + 1; gn < maxGn; gn++) missing.push(gn);
+    if (missing.length > 0 && missing.length <= 3) {
+      console.log(`[Games] ⚠️ Gap détecté : jeu(x) #${missing.join(',')} absent(s) → refetch rapide`);
+      _triggerGapRefetch(missing);
+    }
+  }
+
+  _lastMaxGn = Math.max(_lastMaxGn, maxGn);
+}
+
+function _triggerGapRefetch(missingGns) {
+  if (_gapRetryTimer) return; // déjà en cours
+  let attempt = 0;
+  _gapRetryTimer = setInterval(async () => {
+    attempt++;
+    try {
+      const fresh = await fetchGamesForce();
+      const foundAll = missingGns.every(gn => fresh.some(g => g.game_number === gn));
+      if (foundAll) {
+        console.log(`[Games] ✅ Gap comblé après ${attempt} tentative(s) — jeu(x) #${missingGns.join(',')}`);
+        clearInterval(_gapRetryTimer);
+        _gapRetryTimer = null;
+        return;
+      }
+    } catch {}
+    if (attempt >= GAP_RETRY_ATTEMPTS) {
+      console.log(`[Games] ℹ️ Gap #${missingGns.join(',')} non comblé après ${attempt} tentatives — jeu probablement trop court`);
+      clearInterval(_gapRetryTimer);
+      _gapRetryTimer = null;
+    }
+  }, GAP_RETRY_INTERVAL);
+}
+
+// ── Polling serveur autonome ──────────────────────────────────────────────────
+// Interroge l'API 1xBet toutes les 1.5s côté serveur, indépendamment des
+// client-push. Garantit que les jeux arrivent même quand aucun navigateur
+// n'est connecté (ex : nuit, perte de connexion côté client).
+const SERVER_POLL_INTERVAL = 1500; // ms
+let _serverPollActive = false;
+
+function startServerPoll() {
+  if (_serverPollActive) return;
+  _serverPollActive = true;
+  console.log('[Games] 🔄 Polling serveur démarré (toutes les 1.5s)');
+
+  setInterval(async () => {
+    try {
+      await fetchGames();
+    } catch {}
+  }, SERVER_POLL_INTERVAL);
+}
 
 // ── SSE Broadcaster ──────────────────────────────────────────────────────────
 // Tous les clients SSE connectés sont stockés ici.
@@ -71,16 +185,28 @@ function broadcastGames(games) {
 function updateCache(parsed, source) {
   const fp = gamesFingerprint(parsed);
   if (fp === lastFingerprint) return false; // rien de nouveau
+
+  // Détecter un éventuel saut de numéro AVANT d'écraser le cache
+  _detectAndHandleGap(parsed);
+
   gamesCache      = parsed;
   lastFetch       = Date.now();
   lastFingerprint = fp;
   if (source === 'push') lastClientPush = Date.now();
+  if (source && source !== 'push') lastDataSource = source;
   broadcastGames(gamesCache); // push immédiat à tous les clients SSE
   // Diffusion live vers les canaux Telegram configurés (sans bloquer)
   try {
     require('./live-broadcast').onGamesUpdate(gamesCache).catch(e =>
       console.warn('[LiveBroadcast] hook error:', e.message));
   } catch (e) { /* module absent — ignoré */ }
+  // Notifier le wallet des jeux terminés (pour résolution persistante des mises)
+  try {
+    const { notifyGameResult } = require('./baccara-wallet-route');
+    if (typeof notifyGameResult === 'function') {
+      for (const g of gamesCache) if (g.is_finished && g.winner) notifyGameResult(g);
+    }
+  } catch(_) {}
   return true;
 }
 
@@ -130,52 +256,259 @@ function isGameFinished(game, scSList) {
   return false;
 }
 
-async function fetchGames() {
-  const now = Date.now();
-  if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
+// Services proxy pour contourner le blocage IP de 1xBet
+const PROXY_SERVICES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+];
 
-  // Essayer chaque domaine dans l'ordre jusqu'à obtenir des données
-  for (const domain of API_DOMAINS) {
+let _lastProxyAttempt = 0;
+const PROXY_COOLDOWN = 1000; // 1s entre deux séries de tentatives proxy
+let _directApiWarned = false; // logguer le blocage API directe une seule fois
+
+async function fetchGamesViaProxy() {
+  const now = Date.now();
+  if (now - _lastProxyAttempt < PROXY_COOLDOWN) return gamesCache;
+  _lastProxyAttempt = now;
+
+  // ⭐ service-api/GetChampZip est le meilleur endpoint confirmé — priorité absolue
+  const rescueUrl = `${RESCUE_CHAMP_URL}?${RESCUE_CHAMP_PARAMS}`;
+  const champUrl  = `${CHAMP_API_URL}?${CHAMP_API_PARAMS}`;
+  const oldUrl    = `${API_URL}?${API_PARAMS}`;
+
+  const tryProxy = async (proxyFn, targetUrl, parserFn) => {
     try {
-      const url  = buildApiUrl(domain);
-      const resp = await fetch(url, { headers: buildHeaders(domain), timeout: 8000 });
-      if (!resp.ok) {
-        console.warn(`[Games] ${domain} → HTTP ${resp.status}`);
-        continue;
-      }
-      const data   = await resp.json();
-      const parsed = parseRawData(data);
-      if (parsed && parsed.length > 0) {
-        updateCache(parsed, 'server');
-        return gamesCache;
-      }
-      // Value null ou liste vide : aucun jeu en cours sur ce domaine, on log une seule fois
-      if (!parsed) {
-        // Pas de jeux live en ce moment (normal hors des créneaux de diffusion)
-        lastFetch = now; // éviter de re-requêter trop vite
-      }
-    } catch (err) {
-      console.warn(`[Games] ${domain} fetch error: ${err.message}`);
+      const resp = await fetch(proxyFn(targetUrl), { timeout: 3000 });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      const parsed = parserFn(data);
+      return (parsed && parsed.length > 0) ? parsed : null;
+    } catch { return null; }
+  };
+
+  // Phase 1 ⭐ : service-api/GetChampZip — race sur les 4 proxies en parallèle
+  const rescueResults = await Promise.all(
+    PROXY_SERVICES.map(fn => tryProxy(fn, rescueUrl, parseChampData))
+  );
+  for (const parsed of rescueResults) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données service-api/GetChampZip via proxy (prioritaire)');
+      return gamesCache;
+    }
+  }
+
+  // Phase 2 : GetChampZip (chemin standard) — race 4 proxies en parallèle
+  const champResults = await Promise.all(
+    PROXY_SERVICES.map(fn => tryProxy(fn, champUrl, parseChampData))
+  );
+  for (const parsed of champResults) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données GetChampZip via proxy');
+      return gamesCache;
+    }
+  }
+
+  // Phase 3 : GetSportsShortZip — race 4 proxies en parallèle
+  const oldResults = await Promise.all(
+    PROXY_SERVICES.map(fn => tryProxy(fn, oldUrl, parseRawData))
+  );
+  for (const parsed of oldResults) {
+    if (parsed) {
+      updateCache(parsed, 'server');
+      console.log('[Games] ✅ Données GetSportsShortZip via proxy');
+      return gamesCache;
     }
   }
   return gamesCache;
 }
 
-function parseRawData(data) {
-  if (!data?.Value) return null;
+// ── Fetch depuis un hôte spécifique (principal ou miroir) ────────────────────
+async function _fetchFromHost(host, timeoutMs = 3500) {
+  const url = `${host}${CHAMP_PATH}?${CHAMP_PARAMS_STR}`;
+  const headers = { ...API_HEADERS, Origin: host, Referer: `${host}/fr/live/baccarat` };
+  const resp = await fetch(url, { headers, timeout: timeoutMs });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const parsed = parseChampData(data);
+  if (!parsed || parsed.length === 0) throw new Error('Pas de données');
+  return parsed;
+}
 
-  // ── Format 1 : GetChampZip (un seul championnat)
-  //   data.Value = { G: [...], SI: 236, L: "Baccara", LI: 2050671, … }
-  if (!Array.isArray(data.Value) && Array.isArray(data.Value?.G)) {
-    const champ = data.Value;
-    const champName = champ.L || champ.LR || champ.LE || '';
-    const results = [];
-    for (const game of champ.G) {
+// ── Race entre hôte principal + miroirs régionaux ────────────────────────────
+// Tous lancés simultanément ; le premier qui répond avec des données valides gagne.
+// Si le principal répond en 0–200 ms on l'utilisera presque toujours ;
+// si bloqué, un miroir prend le relais sans délai supplémentaire.
+async function _fetchRaceMirrors() {
+  const allHosts = ['https://1xbet.com', ...MIRROR_HOSTS];
+  const promises = allHosts.map((host, idx) =>
+    _fetchFromHost(host, 3500).then(data => ({ data, host, idx }))
+  );
+  // Promise.any : résout dès qu'un succeed, rejeté si tous échouent
+  try {
+    const winner = await Promise.any(promises);
+    if (winner.host !== 'https://1xbet.com') {
+      console.log(`[Games] 🔀 Miroir utilisé : ${winner.host}`);
+    }
+    return winner.data;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGames() {
+  const now = Date.now();
+
+  // ── API Kouamé — remplace 1xBet quand activée ───────────────────────────
+  try {
+    const kouame = require('./kouame-api');
+    if (kouame.isEnabled()) {
+      const kg = kouame.getGames();
+      if (kg.length > 0) updateCache(kg, 'kouame');
+      return gamesCache;
+    }
+  } catch { /* module absent — ignoré */ }
+
+  if (now - lastFetch < CACHE_TTL && gamesCache.length > 0) return gamesCache;
+
+  // 0. ⭐ Priorité absolue : 1xbet.cd/service-api — confirmé non-bloqué sur ce serveur
+  try {
+    const resp = await fetch(`${CD_RESCUE_URL}?${CD_RESCUE_PARAMS}`, {
+      headers: CD_RESCUE_HEADERS, timeout: 4000,
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const parsed = parseChampData(data);
+      if (parsed && parsed.length > 0) {
+        updateCache(parsed, 'server');
+        return gamesCache;
+      }
+    }
+  } catch { /* silencieux — on continue vers fallbacks */ }
+
+  // 1. Race principal + miroirs simultanément (le plus rapide/disponible gagne)
+  try {
+    const parsed = await _fetchRaceMirrors();
+    if (parsed && parsed.length > 0) {
+      updateCache(parsed, 'server');
+      return gamesCache;
+    }
+    if (!_directApiWarned) { _directApiWarned = true; console.log('[Games] ⚠️ API directe 1xBet bloquée (IP serveur) — proxy utilisé en permanent'); }
+  } catch (e) {
+    if (!_directApiWarned) { _directApiWarned = true; console.log(`[Games] ⚠️ API directe inaccessible (${e.message}) — proxy activé`); }
+  }
+
+  // 2. ⭐ Meilleur endpoint confirmé : service-api/GetChampZip (headers enrichis)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(`${RESCUE_CHAMP_URL}?${RESCUE_CHAMP_PARAMS}`, {
+        headers: RESCUE_CHAMP_HEADERS, timeout: 4000,
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseChampData(data);
+        if (parsed && parsed.length > 0) {
+          updateCache(parsed, 'server');
+          console.log('[Games] ✅ service-api/GetChampZip (prioritaire) OK');
+          return gamesCache;
+        }
+      }
+    } catch {}
+    if (attempt < 3) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 3. Fallback : GetChampZip chemin standard
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const parsed = await _fetchRaceMirrors();
+      if (parsed && parsed.length > 0) {
+        updateCache(parsed, 'server');
+        console.log('[Games] ⚠️ Fallback GetChampZip standard utilisé');
+        return gamesCache;
+      }
+    } catch {}
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 4. Fallback : GetSportsShortZip
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await fetch(`${API_URL}?${API_PARAMS}`, { headers: API_HEADERS, timeout: 4000 });
+      if (resp.ok) {
+        const data = await resp.json();
+        const parsed = parseRawData(data);
+        if (parsed && parsed.length > 0) {
+          updateCache(parsed, 'server');
+          console.log('[Games] ⚠️ Fallback GetSportsShortZip utilisé');
+          return gamesCache;
+        }
+      }
+    } catch {}
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 5. Dernier recours : services proxy
+  return fetchGamesViaProxy();
+}
+
+// Force fetch : bypass le cache TTL et relance immédiatement 3 essais directs + proxies.
+// Utilisé par le moteur pour tenter de récupérer un jeu manquant après détection de gap.
+async function fetchGamesForce() {
+  lastFetch = 0;
+  return fetchGames();
+}
+
+// ── Parser pour le nouvel endpoint GetChampZip ────────────────────────────────
+// Structure : data.Value.G = [game1, game2, ...]
+function parseChampData(data) {
+  const val = data?.Value;
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  const games = val.G;
+  if (!Array.isArray(games) || games.length === 0) return null;
+  const champName = val.LE || val.L || val.SE || 'Baccarat';
+  const results = [];
+  for (const game of games) {
+    if (!game.DI) continue;
+    const gn = parseInt(game.DI);
+    if (!Number.isFinite(gn) || gn <= 0) continue;
+    const sc  = game.SC || {};
+    const scS = sc.S  || [];
+    const { player, banker } = parseCards(scS);
+    results.push({
+      game_number:  gn,
+      player_cards: player, banker_cards: banker,
+      winner:       parseWinner(scS),
+      is_finished:  isGameFinished(game, scS),
+      phase:        parsePhase(scS),
+      score:        sc.FS || {},
+      championship: champName,
+      status_label: sc.I || sc.SLS || '',
+    });
+  }
+  results.sort((a, b) => b.game_number - a.game_number);
+  return results.length > 0 ? results : null;
+}
+
+// ── Parser pour l'ancien endpoint GetSportsShortZip ───────────────────────────
+// Structure : data.Value = [sport, ...] → sport.L = [champ, ...] → champ.G = [game, ...]
+function parseRawData(data) {
+  if (!data?.Value || !Array.isArray(data.Value)) return null;
+  let baccaratSport = null;
+  for (const sport of data.Value) {
+    if ((sport.N === 'Baccarat' || sport.I === 236) && sport.L) { baccaratSport = sport; break; }
+  }
+  if (!baccaratSport) return null;
+  const results = [];
+  for (const champ of baccaratSport.L || []) {
+    for (const game of champ.G || []) {
       if (!game.DI) continue;
       const gn = parseInt(game.DI);
       if (!Number.isFinite(gn) || gn <= 0) continue;
       const sc  = game.SC || {};
-      const scS = sc.S   || [];
+      const scS = sc.S  || [];
       const { player, banker } = parseCards(scS);
       results.push({
         game_number:  gn,
@@ -184,59 +517,36 @@ function parseRawData(data) {
         is_finished:  isGameFinished(game, scS),
         phase:        parsePhase(scS),
         score:        sc.FS || {},
-        championship: champName,
+        championship: champ.L || champ.N || '',
         status_label: sc.SLS || '',
       });
     }
-    results.sort((a, b) => b.game_number - a.game_number);
-    return results;
   }
-
-  // ── Format 2 (legacy) : tableau de sports
-  //   data.Value = [{ N: 'Baccarat', I: 236, L: [{ G: [...] }] }]
-  if (Array.isArray(data.Value)) {
-    let baccaratSport = null;
-    for (const sport of data.Value) {
-      if ((sport.N === 'Baccarat' || sport.I === 236) && sport.L) { baccaratSport = sport; break; }
-    }
-    if (!baccaratSport) return null;
-    const results = [];
-    for (const champ of baccaratSport.L || []) {
-      for (const game of champ.G || []) {
-        if (!game.DI) continue;
-        const gn = parseInt(game.DI);
-        if (!Number.isFinite(gn) || gn <= 0) continue;
-        const sc  = game.SC || {};
-        const scS = sc.S   || [];
-        const { player, banker } = parseCards(scS);
-        results.push({
-          game_number:  gn,
-          player_cards: player, banker_cards: banker,
-          winner:       parseWinner(scS),
-          is_finished:  isGameFinished(game, scS),
-          phase:        parsePhase(scS),
-          score:        sc.FS || {},
-          championship: champ.L || champ.N || '',
-          status_label: sc.SLS || '',
-        });
-      }
-    }
-    results.sort((a, b) => b.game_number - a.game_number);
-    return results;
-  }
-
-  return null;
+  results.sort((a, b) => b.game_number - a.game_number);
+  return results;
 }
 
 // POST /api/games/client-push — le navigateur envoie les données brutes de 1xBet
+// Accepte les deux formats : GetChampZip (Value.G) et GetSportsShortZip (Value[])
 // Déclenche immédiatement un broadcast SSE si les données ont changé
 router.post('/client-push', async (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
-    const parsed = parseRawData(req.body);
+    // Tente d'abord le nouveau format GetChampZip, puis l'ancien
+    const parsed = parseChampData(req.body) || parseRawData(req.body);
     if (!parsed) return res.status(400).json({ error: 'Données invalides' });
     const changed = updateCache(parsed, 'push');
     res.json({ ok: true, count: parsed.length, changed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/games/trigger-fetch — le navigateur demande au serveur de récupérer les données
+// Le serveur essaie fetch direct + proxies de secours, puis broadcast SSE
+router.get('/trigger-fetch', async (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Non connecté' });
+  try {
+    const games = await fetchGames();
+    res.json({ ok: true, count: games.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -259,13 +569,28 @@ async function requireActiveSub(req, res, next) {
   }
 }
 
+// ── Helper : attache l'attenteQueue au premier élément du résultat ─────────
+// Garantit que tous les modes (y compris FC6, Intersection, etc.) exposent la
+// file d'attente même si getAbsences ne l'a pas encore attachée.
+function _injectAttenteQueue(result, engine, channel) {
+  if (!result || result.length === 0) return;
+  if (result[0].attenteQueue) return; // déjà présente (modes ALL_SUITS)
+  if (!channel.startsWith('S')) return;
+  const state = engine.getStrategyState ? engine.getStrategyState(channel) : null;
+  if (state?.attenteQueue?.length > 0) {
+    result[0].attenteQueue = state.attenteQueue.map(x => ({ ...x }));
+  }
+}
+
 router.get('/absences', requireActiveSub, async (req, res) => {
   const channel = req.query.channel || 'C1';
   const engine  = require('./engine');
 
   // Admin : accès total
   if (req.session.isAdmin) {
-    return res.json(engine.getAbsences(channel) || []);
+    const result = engine.getAbsences(channel) || [];
+    _injectAttenteQueue(result, engine, channel);
+    return res.json(result);
   }
 
   // Recharge le user depuis la DB pour avoir les permissions à jour
@@ -288,7 +613,9 @@ router.get('/absences', requireActiveSub, async (req, res) => {
     if (!Array.isArray(showCounters) || !showCounters.includes(channel)) {
       return res.status(403).json({ error: 'Compteur non autorisé pour ce canal' });
     }
-    return res.json(engine.getAbsences(channel) || []);
+    const result = engine.getAbsences(channel) || [];
+    _injectAttenteQueue(result, engine, channel);
+    return res.json(result);
   }
 
   // Pro : autorisé sur ses propres stratégies (canal S5001…S5100)
@@ -299,7 +626,9 @@ router.get('/absences', requireActiveSub, async (req, res) => {
       if (metaRaw) {
         const meta = JSON.parse(metaRaw);
         if (meta.owner_user_id === req.session.userId) {
-          return res.json(engine.getAbsences(channel) || []);
+          const result = engine.getAbsences(channel) || [];
+          _injectAttenteQueue(result, engine, channel);
+          return res.json(result);
         }
       }
     } catch {}
@@ -366,6 +695,19 @@ router.get('/loss-streaks', requireActiveSub, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/games/source — source actuelle des données (1xbet ou kouame)
+router.get('/source', requireActiveSub, (req, res) => {
+  try {
+    let source = lastDataSource;
+    // Vérifier en temps réel si Kouamé API est active
+    try {
+      const kouame = require('./kouame-api');
+      if (kouame.isEnabled()) source = 'kouame';
+    } catch {}
+    res.json({ source });
+  } catch (e) { res.status(500).json({ source: 'server' }); }
+});
+
 router.get('/live', requireActiveSub, async (req, res) => {
   try {
     const games = await fetchGames();
@@ -384,13 +726,11 @@ router.get('/stream', requireActiveSub, (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  // Envoyer les données actuelles immédiatement à la connexion
-  if (gamesCache.length > 0) {
-    try {
-      res.write(`data: ${JSON.stringify(gamesCache)}\n\n`);
-      if (res.flush) res.flush();
-    } catch {}
-  }
+  // Envoyer les données actuelles immédiatement à la connexion (même vides)
+  try {
+    res.write(`data: ${JSON.stringify(gamesCache)}\n\n`);
+    if (res.flush) res.flush();
+  } catch {}
 
   sseClients.add(res);
 
@@ -410,4 +750,4 @@ router.get('/stream', requireActiveSub, (req, res) => {
 
 function getGamesCache() { return gamesCache; }
 
-module.exports = { router, fetchGames, getGamesCache };
+module.exports = { router, fetchGames, fetchGamesForce, getGamesCache, startServerPoll };

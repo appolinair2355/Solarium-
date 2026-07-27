@@ -107,6 +107,18 @@ const CATEGORIES = [
   { key: 'cv_b_J',  group: '🂡 Valeurs Banquier', label: 'J',      match: c => c.ranksB.has('J')  },
   { key: 'cv_b_Q',  group: '🂡 Valeurs Banquier', label: 'Q',      match: c => c.ranksB.has('Q')  },
   { key: 'cv_b_K',  group: '🂡 Valeurs Banquier', label: 'K',      match: c => c.ranksB.has('K')  },
+
+  // ── Score Exact combiné (Joueur + Banquier, 0-18) ──────────────────────
+  // Événement : le score exact (ps + bs) est égal à la valeur cible.
+  // Les valeurs extrêmes (0, 1, 17, 18) sont très rares → les écarts peuvent être longs.
+  ...Array.from({ length: 19 }, (_, n) => ({
+    key:   `score_exact_${n}`,
+    group: '🔢 Score Exact (J+B)',
+    label: `Score ${n}`,
+    match: (function(target) {
+      return c => c.ps !== null && c.bs !== null && (c.ps + c.bs) === target;
+    }(n)),
+  })),
 ];
 
 // ── Score baccarat ─────────────────────────────────────────────────────────
@@ -180,7 +192,7 @@ function ranksOf(cards) {
 // ── État en mémoire ────────────────────────────────────────────────────────
 
 const state = {
-  config: { bot_token: '', channel_id: '', enabled: false, per_game: false },
+  config: { bot_token: '', channel_id: '', enabled: false, per_game: false, reset_interval: 'hourly' },
   extraChannels: [],    // [{ id, label, bot_token, channel_id, enabled, per_game }]
   streaks: {},          // key → { cur, maxAll, maxPeriod }
   processed: new Set(), // game_numbers déjà comptés
@@ -429,7 +441,7 @@ function buildReportText(now, summary, prevSummary) {
     const newRecord = row.maxAll > prevMaxAll;
     const tag = newRecord ? '  🔥' : '';
     lines.push(
-      `   ▸  ${escapeHtml(row.label)}  —  Absence C : <b>${row.maxPeriod}</b>  ·  max : <b>${row.maxAll}</b>${tag}`
+      `   ▸  ${escapeHtml(row.label)}  —  actuel : <b>${row.cur}</b>  ·  max période : <b>${row.maxPeriod}</b>  ·  max : <b>${row.maxAll}</b>${tag}`
     );
   }
 
@@ -466,6 +478,28 @@ async function sendOne(bot_token, channel_id, text) {
   return resp.json();
 }
 
+// Envoie un texte potentiellement long en le découpant en morceaux ≤ 4000 chars
+// Le découpage se fait sur les limites de groupes (lignes vides) pour préserver la lisibilité
+async function sendSplit(bot_token, channel_id, text) {
+  const MAX = 4000;
+  if (text.length <= MAX) return sendOne(bot_token, channel_id, text);
+  const lines  = text.split('\n');
+  const chunks = [];
+  let cur      = '';
+  for (const line of lines) {
+    if (cur.length + line.length + 1 > MAX && cur.length > 0) {
+      chunks.push(cur);
+      cur = line;
+    } else {
+      cur = cur ? cur + '\n' + line : line;
+    }
+  }
+  if (cur) chunks.push(cur);
+  let last;
+  for (const chunk of chunks) last = await sendOne(bot_token, channel_id, chunk);
+  return last;
+}
+
 // Envoie le bilan sur tous les canaux actifs (principal + extras).
 // Retourne la liste des résultats par canal.
 async function sendToAllChannels(text) {
@@ -481,7 +515,7 @@ async function sendToAllChannels(text) {
   }
   const results = [];
   for (const t of targets) {
-    try { await sendOne(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
+    try { await sendSplit(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
     catch (e) { results.push({ id: t.id, label: t.label, sent: false, error: e.message }); }
   }
   return results;
@@ -502,7 +536,7 @@ async function sendToPerGameChannels(text) {
   if (targets.length === 0) return [];
   const results = [];
   for (const t of targets) {
-    try { await sendOne(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
+    try { await sendSplit(t.bot_token, t.channel_id, text); results.push({ id: t.id, label: t.label, sent: true }); }
     catch (e) { results.push({ id: t.id, label: t.label, sent: false, error: e.message }); }
   }
   return results;
@@ -564,7 +598,9 @@ async function sendPerGameReport(game) {
 
 async function runReport(forced = false) {
   const now = new Date();
-  const hourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}`;
+  const isHalfHourly = (state.config || {}).reset_interval === 'half-hourly';
+  const half = (isHalfHourly && now.getMinutes() >= 30) ? '30' : '00';
+  const hourKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${half}`;
   if (!forced && state.lastReportHourKey === hourKey) return { skipped: true, reason: 'already-sent' };
 
   const summary = buildSummary();
@@ -596,16 +632,17 @@ async function runReport(forced = false) {
   return { skipped: false, sent, error: sendError, text };
 }
 
-// ── Scheduler : déclenchement à chaque heure pile ──────────────────────────
+// ── Scheduler : déclenchement à H00 (et H30 si reset_interval = half-hourly) ─
 
 let _schedTimer = null;
 function startScheduler() {
   if (_schedTimer) return;
-  // tick toutes les minutes : si on est à minute 0 et qu'on n'a pas encore
-  // envoyé pour cette heure, on déclenche le bilan.
   _schedTimer = setInterval(() => {
     const now = new Date();
-    if (now.getMinutes() !== 0) return;
+    const mins = now.getMinutes();
+    const isHalfHourly = (state.config || {}).reset_interval === 'half-hourly';
+    const shouldTrigger = mins === 0 || (isHalfHourly && mins === 30);
+    if (!shouldTrigger) return;
     runReport(false).catch(e => console.warn('[Comptages] runReport error:', e.message));
   }, 60_000);
 }
@@ -618,12 +655,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// Lecture seule — accessible aux comptes admin / Pro / Premium
+// Lecture seule — accessible aux comptes admin / Pro / Premium / Partenaire
 function requireViewer(req, res, next) {
   if (!req.session?.userId)
     return res.status(401).json({ error: 'Non connecté' });
-  if (req.session.isAdmin || req.session.isPro || req.session.isPremium) return next();
-  return res.status(403).json({ error: 'Accès réservé aux comptes Premium / Pro / Admin' });
+  if (req.session.isAdmin || req.session.isPro || req.session.isPremium || req.session.accountType === 'partenaire') return next();
+  return res.status(403).json({ error: 'Accès réservé aux comptes Premium / Pro / Admin / Partenaire' });
 }
 
 // Vue publique (lecture seule, sans config ni token) — admin / pro / premium
@@ -650,11 +687,16 @@ function listActiveChannelsPublic() {
   return out;
 }
 
-// Calcule la prochaine heure pile (à laquelle le bilan sera envoyé automatiquement)
+// Calcule le prochain déclenchement automatique (H00 ou H30 selon config)
 function nextHourSchedule() {
   const now = new Date();
+  const isHalfHourly = (state.config || {}).reset_interval === 'half-hourly';
   const next = new Date(now);
-  next.setHours(next.getHours() + 1, 0, 0, 0);
+  if (isHalfHourly && now.getMinutes() < 30) {
+    next.setMinutes(30, 0, 0);
+  } else {
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+  }
   return next.toISOString();
 }
 
@@ -688,7 +730,7 @@ router.get('/preview', requireAdmin, (req, res) => {
 
 router.post('/config', requireAdmin, async (req, res) => {
   try {
-    const { bot_token, channel_id, enabled, per_game } = req.body || {};
+    const { bot_token, channel_id, enabled, per_game, reset_interval } = req.body || {};
     // Si bot_token est vide ou masqué (••••XXXX), on conserve l'ancien
     const newToken = (typeof bot_token === 'string' && bot_token && !bot_token.startsWith('••••'))
       ? bot_token.trim() : state.config.bot_token;
@@ -701,11 +743,15 @@ router.post('/config', requireAdmin, async (req, res) => {
     const finalPerGame = (typeof per_game === 'boolean')
       ? per_game
       : !!state.config.per_game;
+    const finalResetInterval = ['hourly', 'half-hourly'].includes(reset_interval)
+      ? reset_interval
+      : (state.config.reset_interval || 'hourly');
     state.config = {
       bot_token: newToken,
       channel_id: newChannelId,
       enabled: !!finalEnabled,
       per_game: !!finalPerGame,
+      reset_interval: finalResetInterval,
     };
     await db.setSetting('comptages_config', JSON.stringify(state.config));
 
@@ -828,7 +874,7 @@ router.post('/extra-channels/:id/test', requireAdmin, async (req, res) => {
     const now = new Date();
     const summary = buildSummary();
     const text = '🧪 <b>Test de canal Comptages</b>\n\n' + buildReportText(now, summary, null);
-    await sendOne(target.bot_token, target.channel_id, text);
+    await sendSplit(target.bot_token, target.channel_id, text);
     res.json({ ok: true, label: target.label || target.channel_id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -657,7 +657,7 @@ async function callGroqVision(base64Image, mimeType, prompt) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(60_000, () => { req.destroy(); reject(new Error('Timeout Groq Vision (60s)')); });
+    req.setTimeout(25_000, () => { req.destroy(); reject(new Error('Timeout Groq Vision (25s)')); });
     req.write(body);
     req.end();
   });
@@ -720,7 +720,7 @@ async function callGeminiVision(base64Image, mimeType, prompt) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(60_000, () => { req.destroy(); reject(new Error('Timeout Vision (60s)')); });
+    req.setTimeout(20_000, () => { req.destroy(); reject(new Error('Timeout Vision (20s)')); });
     req.write(bodyStr);
     req.end();
   });

@@ -2,14 +2,15 @@
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
-// Uniquement via la variable d'environnement DATABASE_URL.
-// Si elle n'est pas définie → mode JSON local (aucune connexion PostgreSQL tentée).
+// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
+// l'environnement (variable Render / Replit), il prend priorité.
+const DEFAULT_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a/bonjour';
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
+const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
 
 require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || '';
+const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
 let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -315,6 +316,7 @@ async function initDB() {
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE strategy_ideas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
         id                 SERIAL PRIMARY KEY,
@@ -374,15 +376,15 @@ async function initDB() {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
     `);
-    // Compte admin secondaire : buzzinfluence (admin_level=2)
+    // Compte buzzinfluence : compte standard (non-admin)
     {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-         VALUES ($1, $2, $3, TRUE, TRUE, 2)
-         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
-        ['buzzinfluence', 'admin@baccarat.pro', hash]
+         VALUES ($1, $2, $3, FALSE, TRUE, 0)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = FALSE, is_approved = TRUE, admin_level = 0`,
+        ['buzzinfluence', 'buzz@baccarat.pro', hash]
       );
     }
     // Compte super admin : sossoukouam (admin_level=1)
@@ -396,7 +398,7 @@ async function initDB() {
         ['sossoukouam', 'sossoukouam@gmail.com', hash]
       );
     }
-    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
+    console.log('✅ Comptes initialisés (buzzinfluence=standard, sossoukouam=super-admin)');
     // ── Initialisation de la base de données des cartes ─────────────────
     if (USE_CARDS_PG && pgPoolCards) {
       try {
@@ -483,9 +485,9 @@ async function reinitAdmins() {
     const h2 = await bcrypt.hash('arrow2026', 10);
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-       VALUES ($1,$2,$3,TRUE,TRUE,2)
-       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
-      ['buzzinfluence', 'admin@baccarat.pro', h1]
+       VALUES ($1,$2,$3,FALSE,TRUE,0)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=FALSE, is_approved=TRUE, admin_level=0`,
+      ['buzzinfluence', 'buzz@baccarat.pro', h1]
     );
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
@@ -1064,8 +1066,31 @@ async function deleteAllPredictions() {
   }
   const data = require('./jsondb');
   let count = 0;
-  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
+  if (data.d) {
+    count = (data.d().predictions || []).length;
+    data.d().predictions = [];
+    try { data._persist(); } catch {}
+  }
   return count;
+}
+
+async function deleteResolvedPredictions() {
+  if (USE_PG) {
+    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy IN (
+      SELECT DISTINCT strategy FROM predictions WHERE status IN ('gagne','perdu','expire')
+    )`).catch(() => {});
+    const r = await pgPool.query(`DELETE FROM predictions WHERE status IN ('gagne','perdu','expire')`);
+    return r.rowCount;
+  }
+  const data = require('./jsondb');
+  const all = data.d ? (data.d().predictions || []) : [];
+  const before = all.length;
+  const kept = all.filter(p => p.status === 'en_cours');
+  if (data.d) {
+    data.d().predictions = kept;
+    try { data._persist(); } catch {}
+  }
+  return before - kept.length;
 }
 
 async function cleanupOldPredictions(daysOld = 3) {
@@ -1733,7 +1758,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, deleteResolvedPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
