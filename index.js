@@ -22,7 +22,6 @@ const { router: aiRoutes } = require('./ai-route');
 const comptages         = require('./comptages');
 const paymentRoutes     = require('./payment-route');
 const { startAnnonceSequenceScheduler } = require('./annonce-sequence');
-const { startCommandPolling } = require('./telegram-commands');
 
 const app     = express();
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -42,36 +41,20 @@ app.use(cors({ origin: false, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ── Session store adaptatif (MemoryStore par défaut → PostgreSQL si DB OK) ──
-// On utilise un proxy-store pour pouvoir migrer vers PgSession après initDB()
-// sans changer la référence déjà capturée par express-session.
-class AdaptiveStore extends session.Store {
-  constructor() {
-    super();
-    const MemoryStore = require('memorystore')(session);
-    this._store = new MemoryStore({ checkPeriod: 86_400_000 });
-    this._mode  = 'memory';
-  }
-  upgradeToPostgres(pgStore) {
-    this._store = pgStore;
-    this._mode  = 'postgres';
-    console.log('🔑 Sessions migrées vers PostgreSQL');
-  }
-  get(sid, fn)       { return this._store.get(sid, fn); }
-  set(sid, sess, fn) { return this._store.set(sid, sess, fn); }
-  destroy(sid, fn)   { return this._store.destroy(sid, fn); }
-  touch(sid, sess, fn) {
-    if (typeof this._store.touch === 'function') return this._store.touch(sid, sess, fn);
-    fn && fn();
-  }
-  length(fn) { if (typeof this._store.length === 'function') return this._store.length(fn); fn && fn(null, 0); }
-  clear(fn)  { if (typeof this._store.clear  === 'function') return this._store.clear(fn);  fn && fn(); }
+// ── Session store ──────────────────────────────────────────────────
+let sessionStore;
+if (USE_PG && pool) {
+  const PgSession = require('connect-pg-simple')(session);
+  sessionStore = new PgSession({ pool, createTableIfMissing: true });
+  console.log('🔑 Sessions stockées en PostgreSQL');
+} else {
+  const MemoryStore = require('memorystore')(session);
+  sessionStore = new MemoryStore({ checkPeriod: 86_400_000 });
+  console.log('🔑 Sessions en mémoire (JSON mode)');
 }
-const adaptiveStore = new AdaptiveStore();
-console.log('🔑 Sessions en mémoire (démarrage — migration PostgreSQL en attente)');
 
 app.use(session({
-  store: adaptiveStore,
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || 'baccarat-pro-secret-2025',
   resave: false,
   saveUninitialized: false,
@@ -80,7 +63,7 @@ app.use(session({
     secure: IS_PROD,
     httpOnly: true,
     maxAge: 30 * 24 * 60 * 60 * 1000,
-    sameSite: 'lax',
+    sameSite: IS_PROD ? 'none' : 'lax',
   },
 }));
 
@@ -135,16 +118,10 @@ const ideaRoutes       = require('./idea-route');
 const tgAnnounceRoutes = require('./tg-announce-route');
 const { startTgAnnounceScheduler } = require('./tg-announce-scheduler');
 const { startPubScheduler }        = require('./pub-scheduler');
-const tgRelayRoutes    = require('./tg-relay-route');
-const kouameRoutes     = require('./kouame-route');
 app.use('/api/shop',        shopRoutes);
 app.use('/api/license',     licenseRoutes);
 app.use('/api/ideas',       ideaRoutes);
 app.use('/api/tg-announce', tgAnnounceRoutes);
-app.use('/api/admin/tg-relay', tgRelayRoutes);
-app.use('/api/kouame',      kouameRoutes);
-const baccaraWalletRoutes = require('./baccara-wallet-route');
-app.use('/api/baccara-wallet', baccaraWalletRoutes);
 
 // ── Statut admin en ligne ──────────────────────────────────────────
 const db = require('./db');
@@ -457,46 +434,9 @@ async function autoSaveDeployFiles() {
 }
 
 // ── Démarrage ─────────────────────────────────────────────────────
-// ── Seed stratégies au premier démarrage (si DB vide) ────────────────
-async function seedStrategiesIfEmpty() {
-  try {
-    const { getSetting, setSetting } = require('./db');
-    const raw = await getSetting('custom_strategies').catch(() => null);
-    const existing = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(existing) && existing.length > 0) return; // déjà peuplé
-    const seedPath = require('path').join(__dirname, 'data', 'strategies_seed.json');
-    if (!require('fs').existsSync(seedPath)) return;
-    const seed = JSON.parse(require('fs').readFileSync(seedPath, 'utf8'));
-    if (!Array.isArray(seed) || seed.length === 0) return;
-    await setSetting('custom_strategies', JSON.stringify(seed));
-    console.log(`[Seed] ✅ ${seed.length} stratégie(s) importée(s) depuis strategies_seed.json`);
-  } catch (e) {
-    console.warn('[Seed] Import stratégies échoué:', e.message);
-  }
-}
-
 async function main() {
   // ── Phase 1 : init DB (obligatoire avant d'écouter les requêtes) ──
   await initDB();
-  // ── Phase 1a : seed stratégies si la DB est vide (après déploiement ZIP) ──
-  await seedStrategiesIfEmpty();
-
-  // ── Phase 1b : migrer le session store vers PostgreSQL si la DB répond ──
-  {
-    const dbModule = require('./db');
-    if (dbModule.USE_PG && dbModule.pool) {
-      try {
-        await dbModule.pool.query('SELECT 1');
-        const PgSession = require('connect-pg-simple')(session);
-        const pgStore = new PgSession({ pool: dbModule.pool, createTableIfMissing: true });
-        adaptiveStore.upgradeToPostgres(pgStore);
-      } catch (e) {
-        console.warn('[Session] ⚠️ DB inaccessible après initDB — sessions restent en mémoire:', e.message);
-      }
-    } else {
-      console.log('[Session] ℹ️ Mode JSON local — sessions en mémoire');
-    }
-  }
 
   // ── Phase 2 : ouvrir le port IMMÉDIATEMENT pour que Render détecte le port ──
   app.listen(PORT, '0.0.0.0', () => {
@@ -519,9 +459,6 @@ async function initBackgroundServices() {
   await telegramService.loadConfig();
   await comptages.init();
   await engine.start(2000);
-  // Démarrer le polling serveur autonome (1.5s) pour la diffusion live Telegram
-  const { startServerPoll } = require('./games');
-  startServerPoll();
   bilan.scheduleMidnight();
   // Initialiser la table hébergement bots + restaurer bots actifs
   await botHost.initDB();
@@ -530,11 +467,6 @@ async function initBackgroundServices() {
   setInterval(runAnnouncementsScheduler, 60_000);
   // Démarrer le Rotateur Promo (annonce_sequence)
   startAnnonceSequenceScheduler();
-  startCommandPolling().catch(e => console.error('[BotCmd]', e.message));
-  // Initialiser l'API Kouamé (lecture Telegram inversée)
-  require('./kouame-api').init().catch(e => console.warn('[KouaméAPI] Init échouée:', e.message));
-  // Démarrer la vérification périodique des paiements externes (base admin)
-  require('./payment-ext').startPolling(60_000);
 
   // ── Nettoyage automatique des logs en mémoire (toutes les 20 min) ──────────
   const CLEANUP_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
@@ -587,34 +519,7 @@ async function initBackgroundServices() {
   // ── Planificateur annonces Telegram ──────────────────────────────────────
   startTgAnnounceScheduler();
   startPubScheduler();
-  // ── Scheduler compteurs costumes → Telegram ──────────────────────────────
-  try { require('./suit-counter-service').startScheduler(); } catch (e) {
-    console.warn('[SuitCounter] Démarrage échoué (non bloquant):', e.message);
-  }
-  // ── Démarrage du service de relais Telegram ──────────────────────────────
-  try {
-    const tgRelay = require('./tg-relay');
-    await tgRelay.startAll();
-  } catch (e) {
-    console.warn('[TgRelay] Démarrage échoué (non bloquant):', e.message);
-  }
 }
-
-// ── Gestionnaire d'erreurs global Express ──────────────────────────────────
-// Capture toutes les erreurs non gérées (ex: session store DB down, etc.)
-// et renvoie une réponse propre au lieu d'un "Internal Server Error" brut.
-app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
-  const msg = err?.message || String(err);
-  console.error('[Express] ⚠️ Erreur non gérée:', msg);
-  if (res.headersSent) return;
-  if (req.path.startsWith('/api/')) {
-    return res.status(500).json({ error: 'Erreur serveur temporaire', detail: msg });
-  }
-  // Pour les pages non-API : servir l'app React (le frontend affiche l'écran de login)
-  const indexHtml = path.join(__dirname, 'dist', 'index.html');
-  if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
-  res.status(500).send('Erreur serveur — réessayez dans quelques instants.');
-});
 
 main().catch(err => {
   console.error('Erreur démarrage:', err);

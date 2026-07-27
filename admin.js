@@ -26,6 +26,17 @@ async function requireSuperAdmin(req, res, next) {
     return res.status(403).json({ error: 'Accès admin requis' });
   // Admin principal (admin_level=1) : accès complet
   if ((req.session.adminLevel || 2) === 1) return next();
+  // Compte 'buzzinfluence' : pouvoirs étendus identiques au super admin
+  // (cohérent avec l'UI qui lui montre tous les boutons d'action)
+  let uname = req.session.username;
+  if (!uname) {
+    try {
+      const u = await db.getUser(req.session.userId);
+      uname = u?.username;
+      if (uname) req.session.username = uname;
+    } catch {}
+  }
+  if (uname === 'buzzinfluence') return next();
   return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
 }
 
@@ -382,9 +393,6 @@ const renderSync = require('./render-sync');
 
 const SUITS = ['♠', '♥', '♦', '♣'];
 
-// ── Mode "Match Nul (Motifs)" : vocabulaire des 17 catégories (déclencheur/cible) ──
-const NUL_CATEGORY_VALUES = ['distrib','P_DEUX','B_DEUX','P_TROIS','B_TROIS','WIN_P','WIN_B','PAIR_P','IMPAIR_P','♠','♥','♦','♣','DEUX_TROIS','TROIS_DEUX','TROIS_TROIS','TIE'];
-
 async function getStrategies() {
   const v = await db.getSetting('custom_strategies');
   if (!v) return [];
@@ -395,8 +403,6 @@ async function getStrategies() {
   return list.map(s => ({
     pred_duration_minutes:    0,
     pred_duration_started_at: null,
-    relance_sur_perte:        false,
-    relance_sur_perte_max:    3,
     ...s,
   }));
 }
@@ -500,6 +506,12 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'relance') {
+    const rules = Array.isArray(body.relance_rules) ? body.relance_rules : [];
+    if (rules.length < 1) return 'Au moins 1 stratégie source requise pour les séquences de relance';
+    return null;
+  }
+
   if (mode === 'aleatoire') {
     return null;
   }
@@ -512,6 +524,12 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'rattrapage_groupe') {
+    const monitored = Array.isArray(body.monitored_strategies) ? body.monitored_strategies : [];
+    if (monitored.length === 0) return 'Cochez au moins une stratégie à surveiller';
+    return null;
+  }
+
   if (mode === 'compteurs_absences') {
     return null;
   }
@@ -520,32 +538,8 @@ function validateStrategyBody(body) {
     return null;
   }
 
-  if (mode === 'absence_victoire_2') {
-    return null;
-  }
-
-  if (mode === 'combine_carte') {
-    const combos = Array.isArray(body.cc_combinations) ? body.cc_combinations : [];
-    if (combos.length === 0) return 'Mode Combiné Carte : ajoutez au moins une combinaison (Pos1+Pos2→Prédit)';
-    return null;
-  }
-
-  if (mode === 'nul_pattern') {
-    const rules = Array.isArray(body.nul_rules) ? body.nul_rules : [];
-    if (rules.length === 0) return 'Mode Match Nul (Motifs) : ajoutez au moins une règle (déclencheur + cibles)';
-    return null;
-  }
-
-  if (mode === 'numero_costume') {
-    const list = Array.isArray(body.numero_costume_list) ? body.numero_costume_list : [];
-    if (list.length === 0) return 'Mode Numéro + Costume : la liste collée est vide ou invalide';
-    const valid = list.filter(x => x && NUL_CATEGORY_VALUES.includes(x.suit) && !isNaN(parseInt(x.gn)));
-    if (valid.length === 0) return 'Mode Numéro + Costume : aucune entrée valide dans la liste (numéro + code reconnu)';
-    return null;
-  }
-
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'rattrapage_groupe'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -554,10 +548,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'absence_victoire_2', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'combine_carte', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'nul_pattern', 'numero_costume'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'rattrapage_groupe', 'compteur_parite', 'compteurs_absences', 'gestion_banque'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -619,21 +613,6 @@ router.get('/pro-strategies', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Export toutes les stratégies en JSON (admin) ────────────────────────────
-router.get('/strategies/export-json', requireAdmin, async (req, res) => {
-  try {
-    const list = await getStrategies();
-    const payload = {
-      version: '1.0',
-      exported_at: new Date().toISOString(),
-      strategies: list,
-    };
-    res.setHeader('Content-Disposition', `attachment; filename="strategies_${new Date().toISOString().slice(0,10)}.json"`);
-    res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify(payload, null, 2));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 router.get('/strategies', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
   try {
@@ -664,7 +643,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
     if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
-            strategy_type, multi_source_ids, multi_require, loss_type } = req.body;
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
     const exceptions  = parseExceptions(req.body.exceptions);
     const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
@@ -672,6 +651,7 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
     const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee     = mode === 'lecture_passee';
     const isIntelligent       = mode === 'intelligent_cartes';
@@ -682,19 +662,11 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isAnnonceSequence   = mode === 'annonce_sequence';
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
-    const isSurveillancePerte = mode === 'surveillance_perte';
+    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const isPairImpair        = mode === 'pair_impair';
-    const isCarte2v3          = mode === 'carte_2v3';
-    const is2k3k              = mode === '2k-3k';
-    const isFinNumero         = mode === 'fin_numero';
-    const isAbsenceVictoire2  = mode === 'absence_victoire_2';
-    const isCombineCarte      = mode === 'combine_carte';
-    const isNulPattern        = mode === 'nul_pattern';
-    const isNumeroCostume     = mode === 'numero_costume';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume) ? null : normalizeMappings(mappings);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -711,6 +683,27 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
         ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
             multi_require:    multi_require || 'any',
             mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:     String(r.strategy_id),
+                losses_threshold: r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level: rLevels.length === 1 ? rLevels[0] : null, // legacy
+                rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:    cLevels.length ? cLevels : null,
+                combo_level:     cLevels.length === 1 ? cLevels[0] : null, // legacy
+                combo_count:     Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:      r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:     Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:    r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:    r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:  Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
         : isLecturePassee
@@ -755,6 +748,10 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
         : isCostumeManquant
         ? { threshold: 0, mode: 'costume_manquant', mappings: null }
+        : isRattrapageGroupe
+        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
             c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
@@ -762,101 +759,16 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
             c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
             prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
             max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
-        : isFinNumero
-        ? { threshold: 0, mode: 'fin_numero', mappings: null,
-            fn_rules: (Array.isArray(req.body.fn_rules) ? req.body.fn_rules : []).map(r => ({
-              fins: (Array.isArray(r.fins) ? r.fins : []).map(f => parseInt(f)).filter(f => f >= 0 && f <= 9),
-              proche: Math.max(1, parseInt(r.proche) || 1),
-              resultats: (Array.isArray(r.resultats) ? r.resultats : []).filter(v => ['♠','♥','♦','♣','deux','trois','pair','impair','joueur','banquier'].includes(v)),
-              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-            })).filter(r => r.fins.length > 0 && r.resultats.length > 0) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.gb_source_id || req.body.bg_source_strategy_id || ''),
-            bg_lot_size:     Math.max(1,   parseInt(req.body.gb_taille      ?? req.body.bg_lot_size)      || 5),
-            bg_cote:         Math.max(0.1, parseFloat(req.body.gb_cote      ?? req.body.bg_cote)          || 1.9),
-            bg_bank:         Math.max(0,   parseFloat(req.body.gb_banque    ?? req.body.bg_bank)           || 5000),
-            bg_mise_initiale: Math.max(1,  parseFloat(req.body.gb_mise      ?? req.body.bg_mise_initiale)  || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.gb_devise || req.body.bg_currency) ? (req.body.gb_devise || req.body.bg_currency) : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
-        : isAbsenceVictoire2
-        ? { threshold: 0, mode: 'absence_victoire_2', mappings: null,
-            B_joueur:  Math.max(1, parseInt(req.body.B_joueur)  || 5),
-            B_banquier: Math.max(1, parseInt(req.body.B_banquier) || 8) }
-        : isCombineCarte
-        ? { threshold: 0, mode: 'combine_carte', mappings: null,
-            cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
-            cc_limit: Math.max(0, parseInt(req.body.cc_limit) || 0),
-            cc_combinations: (() => {
-              const _suits = ['♠','♥','♦','♣'];
-              const _ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
-              return (Array.isArray(req.body.cc_combinations) ? req.body.cc_combinations : [])
-                .map(c => {
-                  if (!c) return null;
-                  // ── Nouveau style : trigger_specs ──────────────────────────
-                  if (Array.isArray(c.trigger_specs) && c.trigger_specs.length > 0) {
-                    const specs = c.trigger_specs
-                      .map(s => { if (!s) return null; const o = {}; if (_ranks.includes(s.rank)) o.rank = s.rank; if (_suits.includes(s.suit)) o.suit = s.suit; return (o.rank || o.suit) ? o : null; })
-                      .filter(Boolean).slice(0, 10);
-                    if (specs.length === 0 || !NUL_CATEGORY_VALUES.includes(c.predict_nul)) return null;
-                    return { trigger_specs: specs, predict_nul: c.predict_nul, predict_mode: 'ordre', predict_suits: [], predict_counts: [] };
-                  }
-                  // ── Ancien style : pos1/pos2 ───────────────────────────────
-                  if (!_suits.includes(c.pos1) || !_suits.includes(c.pos2)) return null;
-                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (_suits.includes(c.predict) ? [c.predict] : []))
-                    .filter(s => _suits.includes(s)).slice(0, 4);
-                  if (predictSuits.length === 0) return null;
-                  const predictMode = ['ordre','aleatoire','nombre_fois'].includes(c.predict_mode) ? c.predict_mode : 'ordre';
-                  const predictCounts = Array.isArray(c.predict_counts) ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length) : [];
-                  return { pos1: c.pos1, pos2: c.pos2, predict: predictSuits[0] || null, predict_suits: predictSuits, predict_mode: predictMode, predict_counts: predictCounts };
-                })
-                .filter(Boolean);
-            })() }
-        : isNulPattern
-        ? { threshold: 0, mode: 'nul_pattern', mappings: null,
-            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => {
-              const _conds = Array.isArray(r.conditions)
-                ? r.conditions
-                    .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
-                    .filter(c => c.when && c.predict)
-                : [];
-              const _targets = (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              // Compat format ancien UI (cond_cat / predict_si / predict_sinon)
-              const _predict_si    = (Array.isArray(r.predict_si)    ? r.predict_si    : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              const _predict_sinon = (Array.isArray(r.predict_sinon) ? r.predict_sinon : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              const _cond_cat      = typeof r.cond_cat === 'string' ? r.cond_cat : '';
-              const _cond_param    = (r.cond_param !== undefined && r.cond_param !== null && r.cond_param !== '') ? Number(r.cond_param) : null;
-              return {
-                trigger:       NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-                conditions:    _conds,
-                targets:       _targets,
-                // Champs format ancien UI — conservés pour le moteur
-                cond_cat:      _cond_cat,
-                cond_param:    _cond_param,
-                predict_si:    _predict_si,
-                predict_sinon: _predict_sinon,
-                ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-                hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
-              };
-            }).filter(r => r.trigger && (
-              r.conditions.length > 0 ||
-              r.targets.length > 0 ||
-              r.predict_si.length > 0 ||
-              r.predict_sinon.length > 0
-            )) }
-        : isNumeroCostume
-        ? { threshold: 0, mode: 'numero_costume', mappings: null,
-            numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),
-            numero_costume_hand: req.body.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur',
-            numero_costume_list: (Array.isArray(req.body.numero_costume_list) ? req.body.numero_costume_list : [])
-              .map(x => ({ gn: parseInt(x && x.gn), suit: x && NUL_CATEGORY_VALUES.includes(x.suit) ? x.suit : null }))
-              .filter(x => !isNaN(x.gn) && x.gn >= 1 && x.gn <= 1440 && x.suit)
-              .slice(0, 500) }
+            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
+            bg_lot_size:     Math.max(1,   parseInt(req.body.bg_lot_size)      || 5),
+            bg_cote:         Math.max(0.1, parseFloat(req.body.bg_cote)        || 1.9),
+            bg_bank:         Math.max(0,   parseFloat(req.body.bg_bank)        || 5000),
+            bg_mise_initiale: Math.max(1,  parseFloat(req.body.bg_mise_initiale) || 1000),
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
-      mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -871,8 +783,6 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pred_duration_minutes: Math.max(0, parseInt(req.body.pred_duration_minutes) || 0),
       pred_duration_started_at: ((enabled !== false) && (parseInt(req.body.pred_duration_minutes) > 0))
         ? new Date().toISOString() : null,
-      tg_site_url: String(req.body.tg_site_url || ''),
-      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -880,11 +790,6 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       // CM+t paramètres
       cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
-      // 2k-3k : seuil B2 indépendant
-      threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
-      // Relance sur perte
-      relance_sur_perte: req.body.relance_sur_perte === true || req.body.relance_sur_perte === 'true',
-      relance_sur_perte_max: Math.max(1, Math.min(10, parseInt(req.body.relance_sur_perte_max) || 3)),
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -896,46 +801,6 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
-      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
-        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
-            strategy_id: String(r.strategy_id),
-            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
-            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
-            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
-            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-          }))
-        : [],
-      // Filtre d'attente
-      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
-      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
-      attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
-      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
-      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      attente2_mapping: (() => {
-        const m = req.body.attente2_mapping;
-        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
-        if (!m || typeof m !== 'object') return DEF;
-        const out = {};
-        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
-        return out;
-      })(),
-      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      // Lecture des jeux anciens (LJA)
-      lja_enabled: req.body.lja_enabled === true || req.body.lja_enabled === 'true',
-      lja_nb_jeux: Math.max(1, Math.min(20, parseInt(req.body.lja_nb_jeux) || 3)),
-      lja_rules: (() => {
-        const rules = req.body.lja_rules;
-        if (!Array.isArray(rules)) return [];
-        const ALL_S = ['♠','♥','♦','♣'];
-        const ALL_CT = ['costume_joueur','costume_banquier','pair','impair','pair_banquier','impair_banquier','victoire_joueur','victoire_banquier','deux_cartes_joueur','deux_cartes_banquier','trois_cartes_joueur','trois_cartes_banquier'];
-        return rules.filter(r => r && ALL_S.includes(r.suit)).map(r => ({
-          suit:       r.suit,
-          check_type: ALL_CT.includes(r.check_type) ? r.check_type : 'costume_joueur',
-          si_present: Array.isArray(r.si_present) ? r.si_present.filter(s => ALL_S.includes(s)) : (ALL_S.includes(r.si_present) ? [r.si_present] : []),
-          ordre:      ['fixe','aleatoire','sequence'].includes(r.ordre) ? r.ordre : 'fixe',
-        }));
-      })(),
       ...(isPartnerSession(req) ? { partner_owner_id: req.session.userId } : {}),
     };
     list.push(strat);
@@ -1068,7 +933,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const modeErr = await checkPartnerModeAllowed(req, req.body.mode);
     if (modeErr) return res.status(403).json({ error: modeErr });
     const { name, threshold, mode, mappings, visibility, enabled, prediction_offset, hand, max_rattrapage, tg_format,
-            strategy_type, multi_source_ids, multi_require, loss_type } = req.body;
+            strategy_type, multi_source_ids, multi_require, loss_type, relance_rules } = req.body;
     const tg_targets  = parseTgTargets(req.body.tg_targets);
     const exceptions  = parseExceptions(req.body.exceptions);
     const mirror_pairs = mode === 'taux_miroir' && Array.isArray(req.body.mirror_pairs)
@@ -1076,6 +941,7 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
           .map(p => ({ a: p.a, b: p.b, threshold: p.threshold != null ? parseInt(p.threshold) || null : null }))
       : [];
     const isComb      = strategy_type === 'combinaison';
+    const isRelance   = mode === 'relance';
     const isCarteAuto = ['carte_3_vers_2', 'carte_2_vers_3'].includes(mode);
     const isLecturePassee     = mode === 'lecture_passee';
     const isIntelligent       = mode === 'intelligent_cartes';
@@ -1086,19 +952,11 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isAnnonceSequence   = mode === 'annonce_sequence';
     const isFirstCardPlus6    = mode === 'first_card_plus6';
     const isCostumeManquant   = mode === 'costume_manquant';
-    const isSurveillancePerte = mode === 'surveillance_perte';
+    const isRattrapageGroupe  = mode === 'rattrapage_groupe';
     const isCompteurParite    = mode === 'compteur_parite';
     const isCompteurAbsences  = mode === 'compteurs_absences';
     const isGestionBanque     = mode === 'gestion_banque';
-    const isPairImpair        = mode === 'pair_impair';
-    const isCarte2v3          = mode === 'carte_2v3';
-    const is2k3k              = mode === '2k-3k';
-    const isFinNumero         = mode === 'fin_numero';
-    const isAbsenceVictoire2  = mode === 'absence_victoire_2';
-    const isCombineCarte      = mode === 'combine_carte';
-    const isNulPattern        = mode === 'nul_pattern';
-    const isNumeroCostume     = mode === 'numero_costume';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume) ? null : normalizeMappings(mappings);
+    const normalizedMappings = (isComb || isRelance || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isRattrapageGroupe || isCompteurParite || isCompteurAbsences || isGestionBanque) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1115,6 +973,27 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         ? { multi_source_ids: (Array.isArray(multi_source_ids) ? multi_source_ids : []).map(String),
             multi_require:    multi_require || 'any',
             mode: 'multi_strategy', mappings: null, threshold: 0 }
+        : isRelance
+        ? { mode: 'relance', mappings: null, threshold: 0,
+            relance_rules: Array.isArray(relance_rules) ? relance_rules.map(r => {
+              const rLevels = normLevels(r.rattrapage_levels != null ? r.rattrapage_levels : r.rattrapage_level);
+              const cLevels = normLevels(r.combo_levels      != null ? r.combo_levels      : r.combo_level);
+              return {
+                strategy_id:      String(r.strategy_id),
+                losses_threshold:  r.losses_threshold != null ? Math.max(1, parseInt(r.losses_threshold) || 1) : null,
+                rattrapage_levels: rLevels.length ? rLevels : null,
+                rattrapage_level:  rLevels.length === 1 ? rLevels[0] : null,
+                rattrapage_count:  Math.max(1, parseInt(r.rattrapage_count) || 1),
+                combo_levels:      cLevels.length ? cLevels : null,
+                combo_level:       cLevels.length === 1 ? cLevels[0] : null,
+                combo_count:       Math.max(1, parseInt(r.combo_count) || 1),
+                range_from:        r.range_from != null ? Math.max(1, parseInt(r.range_from) || 1) : null,
+                range_count:       Math.max(1, parseInt(r.range_count) || 1),
+                interval_min:      r.interval_min != null ? Math.max(1, parseInt(r.interval_min) || 1) : null,
+                interval_max:      r.interval_max != null ? Math.max(1, parseInt(r.interval_max) || 1) : null,
+                interval_count:    Math.max(1, parseInt(r.interval_count) || 1),
+              };
+            }) : [] }
         : isCarteAuto
         ? { threshold: parseInt(threshold), mode, mappings: null }
         : isLecturePassee
@@ -1159,6 +1038,10 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             fc_ecart: Math.max(1, parseInt(req.body.fc_ecart) || 2) }
         : isCostumeManquant
         ? { threshold: 0, mode: 'costume_manquant', mappings: null }
+        : isRattrapageGroupe
+        ? { threshold: 0, mode: 'rattrapage_groupe', mappings: null,
+            monitored_strategies: Array.isArray(req.body.monitored_strategies) ? req.body.monitored_strategies : [],
+            rg_stop_limit: Math.max(0, parseInt(req.body.rg_stop_limit) || 0) }
         : isCompteurAbsences
         ? { threshold: Math.max(1, parseInt(threshold) || 4), mode: 'compteurs_absences', mappings: null,
             c3_b:             Math.max(1, parseInt(req.body.c3_b)             || 4),
@@ -1166,99 +1049,16 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
             c3_jj:            Math.max(1, parseInt(req.body.c3_jj)            || 2),
             prediction_offset: Math.max(1, parseInt(req.body.prediction_offset) || 1),
             max_rattrapage:    Math.max(0, parseInt(req.body.max_rattrapage)   ?? 20) }
-        : isFinNumero
-        ? { threshold: 0, mode: 'fin_numero', mappings: null,
-            fn_rules: (Array.isArray(req.body.fn_rules) ? req.body.fn_rules : []).map(r => ({
-              fins: (Array.isArray(r.fins) ? r.fins : []).map(f => parseInt(f)).filter(f => f >= 0 && f <= 9),
-              proche: Math.max(1, parseInt(r.proche) || 1),
-              resultats: (Array.isArray(r.resultats) ? r.resultats : []).filter(v => ['♠','♥','♦','♣','deux','trois','pair','impair','joueur','banquier'].includes(v)),
-              ordre: r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-            })).filter(r => r.fins.length > 0 && r.resultats.length > 0) }
         : isGestionBanque
         ? { threshold: 0, mode: 'gestion_banque', mappings: null,
-            bg_source_strategy_id: String(req.body.gb_source_id || req.body.bg_source_strategy_id || ''),
-            bg_lot_size:      Math.max(1,   parseInt(req.body.gb_taille      ?? req.body.bg_lot_size)       || 5),
-            bg_cote:          Math.max(0.1, parseFloat(req.body.gb_cote      ?? req.body.bg_cote)            || 1.9),
-            bg_bank:          Math.max(0,   parseFloat(req.body.gb_banque    ?? req.body.bg_bank)             || 5000),
-            bg_mise_initiale: Math.max(1,   parseFloat(req.body.gb_mise      ?? req.body.bg_mise_initiale)    || 1000),
-            bg_currency: ['f','eur','usd','rub'].includes(req.body.gb_devise || req.body.bg_currency) ? (req.body.gb_devise || req.body.bg_currency) : 'f',
-            bg_max_lots: Math.max(0, parseInt(req.body.gb_max_lots ?? req.body.bg_max_lots) || 0),
-            bg_boutique_name: String(req.body.gb_nom_boutique || req.body.bg_boutique_name || ''),
-            bg_site_url:      String(req.body.gb_url_site     || req.body.bg_site_url      || '') }
-        : isAbsenceVictoire2
-        ? { threshold: 0, mode: 'absence_victoire_2', mappings: null,
-            B_joueur:  Math.max(1, parseInt(req.body.B_joueur)  || 5),
-            B_banquier: Math.max(1, parseInt(req.body.B_banquier) || 8) }
-        : isCombineCarte
-        ? { threshold: 0, mode: 'combine_carte', mappings: null,
-            cc_hand: ['joueur','banquier'].includes(req.body.cc_hand) ? req.body.cc_hand : 'joueur',
-            cc_limit: Math.max(0, parseInt(req.body.cc_limit) || 0),
-            cc_combinations: (() => {
-              const _suits = ['♠','♥','♦','♣'];
-              const _ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
-              return (Array.isArray(req.body.cc_combinations) ? req.body.cc_combinations : [])
-                .map(c => {
-                  if (!c) return null;
-                  if (Array.isArray(c.trigger_specs) && c.trigger_specs.length > 0) {
-                    const specs = c.trigger_specs
-                      .map(s => { if (!s) return null; const o = {}; if (_ranks.includes(s.rank)) o.rank = s.rank; if (_suits.includes(s.suit)) o.suit = s.suit; return (o.rank || o.suit) ? o : null; })
-                      .filter(Boolean).slice(0, 10);
-                    if (specs.length === 0 || !NUL_CATEGORY_VALUES.includes(c.predict_nul)) return null;
-                    return { trigger_specs: specs, predict_nul: c.predict_nul, predict_mode: 'ordre', predict_suits: [], predict_counts: [] };
-                  }
-                  if (!_suits.includes(c.pos1) || !_suits.includes(c.pos2)) return null;
-                  const predictSuits = (Array.isArray(c.predict_suits) ? c.predict_suits : (_suits.includes(c.predict) ? [c.predict] : []))
-                    .filter(s => _suits.includes(s)).slice(0, 4);
-                  if (predictSuits.length === 0) return null;
-                  const predictMode = ['ordre','aleatoire','nombre_fois'].includes(c.predict_mode) ? c.predict_mode : 'ordre';
-                  const predictCounts = Array.isArray(c.predict_counts) ? c.predict_counts.map(n => Math.max(1, parseInt(n) || 1)).slice(0, predictSuits.length) : [];
-                  return { pos1: c.pos1, pos2: c.pos2, predict: predictSuits[0] || null, predict_suits: predictSuits, predict_mode: predictMode, predict_counts: predictCounts };
-                })
-                .filter(Boolean);
-            })() }
-        : isNulPattern
-        ? { threshold: 0, mode: 'nul_pattern', mappings: null,
-            nul_rules: (Array.isArray(req.body.nul_rules) ? req.body.nul_rules : []).map(r => {
-              const _conds = Array.isArray(r.conditions)
-                ? r.conditions
-                    .map(c => ({ when: (c.when === '*' || NUL_CATEGORY_VALUES.includes(c.when)) ? c.when : null, predict: NUL_CATEGORY_VALUES.includes(c.predict) ? c.predict : null }))
-                    .filter(c => c.when && c.predict)
-                : [];
-              const _targets = (Array.isArray(r.targets) ? r.targets : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              // Compat format ancien UI (cond_cat / predict_si / predict_sinon)
-              const _predict_si    = (Array.isArray(r.predict_si)    ? r.predict_si    : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              const _predict_sinon = (Array.isArray(r.predict_sinon) ? r.predict_sinon : []).filter(v => NUL_CATEGORY_VALUES.includes(v)).slice(0, 10);
-              const _cond_cat      = typeof r.cond_cat === 'string' ? r.cond_cat : '';
-              const _cond_param    = (r.cond_param !== undefined && r.cond_param !== null && r.cond_param !== '') ? Number(r.cond_param) : null;
-              return {
-                trigger:       NUL_CATEGORY_VALUES.includes(r.trigger) ? r.trigger : null,
-                conditions:    _conds,
-                targets:       _targets,
-                // Champs format ancien UI — conservés pour le moteur
-                cond_cat:      _cond_cat,
-                cond_param:    _cond_param,
-                predict_si:    _predict_si,
-                predict_sinon: _predict_sinon,
-                ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
-                hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
-              };
-            }).filter(r => r.trigger && (
-              r.conditions.length > 0 ||
-              r.targets.length > 0 ||
-              r.predict_si.length > 0 ||
-              r.predict_sinon.length > 0
-            )) }
-        : isNumeroCostume
-        ? { threshold: 0, mode: 'numero_costume', mappings: null,
-            numero_costume_ecart: Math.max(1, Math.min(50, parseInt(req.body.numero_costume_ecart) || 2)),
-            numero_costume_hand: req.body.numero_costume_hand === 'banquier' ? 'banquier' : 'joueur',
-            numero_costume_list: (Array.isArray(req.body.numero_costume_list) ? req.body.numero_costume_list : [])
-              .map(x => ({ gn: parseInt(x && x.gn), suit: x && NUL_CATEGORY_VALUES.includes(x.suit) ? x.suit : null }))
-              .filter(x => !isNaN(x.gn) && x.gn >= 1 && x.gn <= 1440 && x.suit)
-              .slice(0, 500) }
+            bg_source_strategy_id: String(req.body.bg_source_strategy_id || ''),
+            bg_lot_size:      Math.max(1,   parseInt(req.body.bg_lot_size)       || 5),
+            bg_cote:          Math.max(0.1, parseFloat(req.body.bg_cote)         || 1.9),
+            bg_bank:          Math.max(0,   parseFloat(req.body.bg_bank)         || 5000),
+            bg_mise_initiale: Math.max(1,   parseFloat(req.body.bg_mise_initiale) || 1000),
+            bg_currency: ['f','eur','usd','rub'].includes(req.body.bg_currency) ? req.body.bg_currency : 'f' }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
-      mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
       visibility: visibility || 'admin',
       enabled: enabled !== false,
       tg_targets,
@@ -1279,8 +1079,6 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
         if (oldEnabled && willEnabled) return oldPredDurationStartedAt || new Date().toISOString();
         return oldPredDurationStartedAt;
       })(),
-      tg_site_url: String(req.body.tg_site_url || ''),
-      boutique_name: String(req.body.boutique_name || ''),
       prix: Math.max(0, parseFloat(req.body.prix) || 0),
       annonce_strat: String(req.body.annonce_strat || '').slice(0, 2000),
       vente_enabled:   req.body.vente_enabled   === true || req.body.vente_enabled   === 'true',
@@ -1288,11 +1086,6 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       // CM+t paramètres
       cm_t: Math.max(1, parseInt(req.body.cm_t) || 2),
       cm_check_inverse: req.body.cm_check_inverse === true || req.body.cm_check_inverse === 'true',
-      // 2k-3k : seuil B2 indépendant
-      threshold_b2: is2k3k ? Math.max(1, parseInt(req.body.threshold_b2) || parseInt(req.body.threshold) || 3) : undefined,
-      // Relance sur perte
-      relance_sur_perte: req.body.relance_sur_perte === true || req.body.relance_sur_perte === 'true',
-      relance_sur_perte_max: Math.max(1, Math.min(10, parseInt(req.body.relance_sur_perte_max) || 3)),
       // Planification des prédictions
       pred_schedule_enabled: req.body.pred_schedule_enabled === true || req.body.pred_schedule_enabled === 'true',
       pred_schedule_type: ['hours', 'interval'].includes(req.body.pred_schedule_type) ? req.body.pred_schedule_type : 'hours',
@@ -1304,46 +1097,6 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       pub_enabled: req.body.pub_enabled === true || req.body.pub_enabled === 'true',
       pub_strategies: Array.isArray(req.body.pub_strategies) ? req.body.pub_strategies.map(ps => ({ id: parseInt(ps.id) || 0, price: parseFloat(ps.price) || 0 })) : [],
       pub_interval_minutes: Math.max(1, parseInt(req.body.pub_interval_minutes) || 60),
-      surveillance_rules: isSurveillancePerte && Array.isArray(req.body.surveillance_rules)
-        ? req.body.surveillance_rules.filter(r => r && r.strategy_id).map(r => ({
-            strategy_id: String(r.strategy_id),
-            trigger: ['losses', 'rattrapage', 'both'].includes(r.trigger) ? r.trigger : 'losses',
-            losses_threshold: Math.max(1, parseInt(r.losses_threshold) || 2),
-            rattrapage_min: Math.max(1, parseInt(r.rattrapage_min) || 1),
-            rattrapage_count: Math.max(1, parseInt(r.rattrapage_count) || 1),
-          }))
-        : (list[idx].surveillance_rules || []),
-      // Filtre d'attente
-      attente_enabled: req.body.attente_enabled === true || req.body.attente_enabled === 'true',
-      attente_option:  [1, 2, 3].includes(parseInt(req.body.attente_option)) ? parseInt(req.body.attente_option) : 1,
-      attente_n:       Math.max(1, Math.min(20, parseInt(req.body.attente_n) || 3)),
-      attente_ecart:   Math.max(1, parseInt(req.body.attente_ecart) || 1),
-      attente_main:    ['joueur', 'banquier'].includes(req.body.attente_main) ? req.body.attente_main : 'joueur',
-      attente1_mapping: (() => { const m = req.body.attente1_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      attente2_mapping: (() => {
-        const m = req.body.attente2_mapping;
-        const DEF = { '♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣' };
-        if (!m || typeof m !== 'object') return DEF;
-        const out = {};
-        for (const s of ['♠', '♥', '♦', '♣']) out[s] = ['♠','♥','♦','♣'].includes(m[s]) ? m[s] : s;
-        return out;
-      })(),
-      attente3_mapping: (() => { const m = req.body.attente3_mapping; if (!m || typeof m !== 'object') return null; return m; })(),
-      // Lecture des jeux anciens (LJA)
-      lja_enabled: req.body.lja_enabled === true || req.body.lja_enabled === 'true',
-      lja_nb_jeux: Math.max(1, Math.min(20, parseInt(req.body.lja_nb_jeux) || 3)),
-      lja_rules: (() => {
-        const rules = req.body.lja_rules;
-        if (!Array.isArray(rules)) return [];
-        const ALL_S = ['♠','♥','♦','♣'];
-        const ALL_CT = ['costume_joueur','costume_banquier','pair','impair','pair_banquier','impair_banquier','victoire_joueur','victoire_banquier','deux_cartes_joueur','deux_cartes_banquier','trois_cartes_joueur','trois_cartes_banquier'];
-        return rules.filter(r => r && ALL_S.includes(r.suit)).map(r => ({
-          suit:       r.suit,
-          check_type: ALL_CT.includes(r.check_type) ? r.check_type : 'costume_joueur',
-          si_present: Array.isArray(r.si_present) ? r.si_present.filter(s => ALL_S.includes(s)) : (ALL_S.includes(r.si_present) ? [r.si_present] : []),
-          ordre:      ['fixe','aleatoire','sequence'].includes(r.ordre) ? r.ordre : 'fixe',
-        }));
-      })(),
     };
     await saveStrategies(list);
     require('./engine').reloadCustomStrategies(list);
@@ -1397,7 +1150,12 @@ router.delete('/strategies/:id', requireAdminOrPartner, async (req, res) => {
       return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres stratégies' });
     // Super admin requis pour supprimer les stratégies système (sans partner_owner_id)
     if (!isPartnerSession(req) && (req.session.adminLevel || 2) !== 1) {
-      return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
+      const uname = req.session.username || '';
+      if (uname !== 'buzzinfluence') {
+        const u = await db.getUser(req.session.userId).catch(() => null);
+        if (!u || ((u.admin_level || 2) !== 1 && u.username !== 'buzzinfluence'))
+          return res.status(403).json({ error: 'Accès réservé à l\'administrateur principal' });
+      }
     }
     const before = list.length;
     list = list.filter(s => s.id !== id);
@@ -1449,68 +1207,6 @@ router.get('/strategies/:id/mirror-counts', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── État filtre d'attente (accessible à tous les utilisateurs authentifiés) ──────────────
-router.get('/strategies/:id/attente-state', async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
-    const id = parseInt(req.params.id);
-    const entry = engine.custom?.[id];
-    if (!entry) return res.json({ history: [], lastPs: null, attente_enabled: false });
-    const state = entry.state || {};
-    const cfg   = entry.config || {};
-    const _aN   = Math.max(1, cfg.attente_n || 3);
-    res.json({
-      history:         (state.attenteHistory || []).slice(-_aN),
-      lastPs:          state.lastAttentePs || null,
-      n:               _aN,
-      ecart:           Math.max(1, cfg.attente_ecart || 1),
-      main:            cfg.attente_main || 'joueur',
-      option:          cfg.attente_option || 1,
-      mode:            cfg.mode || '',
-      attente_enabled: cfg.attente_enabled || false,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Compteurs live serpent (pair_impair / carte_2v3) ──────────────
-router.get('/strategies/:id/snake-counts', requireAdmin, (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const entry = engine.custom?.[id];
-    if (!entry) return res.json({ mode: null });
-    const mode = entry.config?.mode || '';
-    const threshold = entry.config?.threshold || 0;
-    if (mode === 'pair_impair') {
-      return res.json({
-        mode,
-        threshold,
-        parityCounts: entry.parityCounts || { pair: 0, impair: 0 },
-        snakeActive: !!entry.snakeActive,
-        snakeSuit: entry.snakeSuit || null,
-      });
-    }
-    if (mode === 'carte_2v3') {
-      return res.json({
-        mode,
-        threshold,
-        c2v3Counts: entry.c2v3Counts || { deux: 0, trois: 0 },
-        snakeActive: !!entry.snakeActive,
-        snakeSuit: entry.snakeSuit || null,
-      });
-    }
-    if (mode === '2k-3k') {
-      const cfg2 = entry.config || {};
-      return res.json({
-        mode,
-        threshold,
-        threshold2: cfg2.threshold2 || threshold,
-        abs2k3k: entry.abs2k3k || { abs_deux: 0, abs_trois: 0 },
-      });
-    }
-    res.json({ mode });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Reset statistiques par stratégie ──────────────────────────────
 // Supprime tout l'historique de prédictions d'une stratégie (C1, C2, C3, DC ou Sn)
 router.post('/strategies/:id/reset-stats', requireAdmin, async (req, res) => {
@@ -1541,16 +1237,6 @@ router.post('/clear-predictions', requireAdmin, async (req, res) => {
     const { deleted, extDeleted } = await eng.fullReset();
     console.log(`[Admin] Reset complet — local: ${deleted}, render: ${extDeleted}`);
     res.json({ ok: true, deleted, extDeleted });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Supprime uniquement les prédictions résolues (gagne/perdu/expire) ──────────
-// Conserve : prédictions 'en_cours', stratégies, configs, users, absences
-router.post('/delete-resolved-predictions', requireAdmin, async (req, res) => {
-  try {
-    const deleted = await db.deleteResolvedPredictions();
-    console.log(`[Admin] Prédictions résolues supprimées : ${deleted}`);
-    res.json({ ok: true, deleted });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2012,7 +1698,7 @@ async function applyUpdateBlock(type, data) {
 
   if (type === 'format') {
     const id = parseInt(data?.format_id);
-    if (!id || id < 1 || id > 97) { result.errors.push(`format_id invalide (1–97)`); return result; }
+    if (!id || id < 1 || id > 25) { result.errors.push(`format_id invalide (1–25)`); return result; }
     const tgService = require('./telegram-service');
     await tgService.saveFormat(id);
     result.applied = 1;
@@ -2041,16 +1727,18 @@ async function applyUpdateBlock(type, data) {
       } else {
         const nextId = list.length > 0 ? Math.max(...list.map(s => s.id)) + 1 : 7;
         const isCombJson    = item.strategy_type === 'combinaison';
+        const isRelanceJson = item.mode === 'relance';
         const isAleatJson   = item.mode === 'aleatoire';
         list.push({
           id: nextId,
           name: item.name.trim(),
           strategy_type: isCombJson ? 'combinaison' : 'simple',
           mode: isCombJson ? 'multi_strategy' : item.mode,
-          threshold: (isAleatJson || isCombJson) ? 0 : (parseInt(item.threshold) || 0),
-          mappings: (isCombJson || isAleatJson) ? null : mappings,
+          threshold: (isAleatJson || isCombJson || isRelanceJson) ? 0 : (parseInt(item.threshold) || 0),
+          mappings: (isCombJson || isRelanceJson || isAleatJson) ? null : mappings,
           multi_source_ids: isCombJson ? (Array.isArray(item.multi_source_ids) ? item.multi_source_ids.map(String) : []) : undefined,
           multi_require: isCombJson ? (item.multi_require || 'any') : undefined,
+          relance_rules: isRelanceJson ? (Array.isArray(item.relance_rules) ? item.relance_rules : []) : undefined,
           visibility: item.visibility || 'admin',
           enabled: item.enabled !== false,
           tg_targets,
@@ -2962,15 +2650,6 @@ router.post('/render-db/reset', requireSuperAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/render-db/import', requireSuperAdmin, async (req, res) => {
-  try {
-    const renderSync = require('./render-sync');
-    if (!renderSync.isConnected()) return res.status(400).json({ error: 'Base Render non connectée' });
-    await renderSync.forceImportFromExternal();
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Reset complet (retour usine) ─────────────────────────────────────────────
 // RÈGLE ABSOLUE : n'efface JAMAIS users, custom_strategies, promo_code,
 // telegram_config, bot_token, tg_msg_format, strategy_channel_routes.
@@ -3831,108 +3510,6 @@ router.post('/stop-render', requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── EOD BACKUP / EXPORT FIN DE JOURNÉE ────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-
-// Lire la config (token masqué)
-router.get('/eod/config', requireAdmin, (req, res) => {
-  try {
-    const jdb       = require('./jsondb');
-    const botToken  = jdb.getSetting('eod_bot_token');
-    const channelId = jdb.getSetting('eod_channel_id');
-    res.json({
-      has_token:     !!botToken,
-      token_preview: botToken ? '●●●●●●●' + botToken.slice(-4) : '',
-      eod_channel_id: channelId || '',
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Sauvegarder la config
-router.post('/eod/config', requireAdmin, (req, res) => {
-  try {
-    const jdb = require('./jsondb');
-    const { eod_bot_token, eod_channel_id } = req.body;
-    if (eod_bot_token && eod_bot_token.trim() && !eod_bot_token.includes('●'))
-      jdb.setSetting('eod_bot_token', eod_bot_token.trim());
-    if (eod_channel_id !== undefined)
-      jdb.setSetting('eod_channel_id', String(eod_channel_id).trim());
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Test — envoie immédiatement (bypass garde journalière)
-router.post('/eod/test', requireAdmin, async (req, res) => {
-  try {
-    const { runExportForce } = require('./end-of-day-export');
-    const msg = await runExportForce();
-    res.json({ ok: true, message: msg });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Import — restaure paramètres + canaux Telegram depuis un fichier backup JSON
-router.post('/eod/import', requireAdmin, (req, res) => {
-  try {
-    const jdb = require('./jsondb');
-    const { data } = req.body;
-    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Données JSON invalides' });
-
-    const imported = { settings: 0, telegram: 0, users: 0 };
-
-    // ── Stratégie d'import : utiliser _raw_db si présent (restauration complète)
-    // Sinon importer champ par champ depuis les sections du backup.
-
-    if (data._raw_db && typeof data._raw_db === 'object') {
-      // Restauration complète via le dump db.json brut
-      const fs     = require('fs');
-      const path   = require('path');
-      const dbPath = path.join(__dirname, 'data', 'db.json');
-      // Fusionner plutôt qu'écraser : préserver meta.next_*_id en prenant le max
-      let current = {};
-      try { current = JSON.parse(fs.readFileSync(dbPath, 'utf8')); } catch {}
-      const merged = Object.assign({}, current, data._raw_db);
-      merged.meta = {
-        next_user_id: Math.max(current.meta?.next_user_id || 1, data._raw_db.meta?.next_user_id || 1),
-        next_pred_id: Math.max(current.meta?.next_pred_id || 1, data._raw_db.meta?.next_pred_id || 1),
-        next_tg_id:   Math.max(current.meta?.next_tg_id   || 1, data._raw_db.meta?.next_tg_id   || 1),
-      };
-      fs.writeFileSync(dbPath, JSON.stringify(merged, null, 2), 'utf8');
-      // Recharger jsondb en mémoire
-      const jdbMod = require.resolve('./jsondb');
-      delete require.cache[jdbMod];
-      const jdb2 = require('./jsondb');
-      imported.settings = Object.keys(merged.settings || {}).length;
-      imported.telegram = (merged.telegram_config || []).length;
-      imported.users    = (merged.users || []).filter(u => !u.is_admin).length;
-    } else {
-      // Import champ par champ (backup sans _raw_db)
-      if (data.settings && typeof data.settings === 'object') {
-        for (const [k, v] of Object.entries(data.settings)) {
-          if (v !== null && v !== undefined && String(v).trim() !== '') {
-            jdb.setSetting(k, String(v));
-            imported.settings++;
-          }
-        }
-      }
-      if (Array.isArray(data.telegram_config)) {
-        for (const cfg of data.telegram_config) {
-          if (cfg.channel_id) {
-            jdb.upsertTelegramConfig({ channel_id: cfg.channel_id, channel_name: cfg.channel_name || cfg.channel_id });
-            imported.telegram++;
-          }
-        }
-      }
-    }
-
-    res.json({
-      ok: true,
-      imported,
-      message: `✅ Import terminé — ${imported.settings} paramètre(s), ${imported.telegram} canal(aux) Telegram, ${imported.users} utilisateur(s) restauré(s).`,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
 // ── HÉBERGEMENT BOTS TELEGRAM ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 const botHost = require('./bot-host');
@@ -4070,87 +3647,6 @@ async function migrateLegacyProConfigOnce() {
   } catch (e) { console.warn('[Pro] migrateLegacyProConfigOnce:', e.message); }
 }
 migrateLegacyProConfigOnce();
-
-// ── Compteurs instantanés → Telegram (v2 multi-compteurs indépendants) ───────
-const suitCounterSvc = require('./suit-counter-service');
-
-// GET  /api/admin/suit-counters  — liste des compteurs + états courants
-router.get('/suit-counters', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.loadConfig();
-    res.json({ counters: suitCounterSvc.getCountersList(), states: suitCounterSvc.getAllStates() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/admin/suit-counters  — sauvegarde la liste complète
-router.post('/suit-counters', requireAdmin, async (req, res) => {
-  try {
-    const { counters } = req.body;
-    if (!Array.isArray(counters)) return res.status(400).json({ error: 'counters doit être un tableau' });
-    const sanitized = counters.map(c => ({
-      id:               String(c.id || suitCounterSvc._makeId()),
-      label:            String(c.label      || '').trim() || 'Compteur',
-      enabled:          !!c.enabled,
-      bot_token:        String(c.bot_token  || '').trim(),
-      channel_id:       String(c.channel_id || '').trim(),
-      counter_type:     suitCounterSvc.VALID_TYPES.includes(c.counter_type) ? c.counter_type : 'taux_miroir',
-      hand:             ['joueur','banquier'].includes(c.hand) ? c.hand : 'joueur',
-      interval:         (Number.isInteger(parseInt(c.interval)) && parseInt(c.interval) >= 1 && parseInt(c.interval) <= 1440) ? parseInt(c.interval) : 30,
-      send_times:       Array.isArray(c.send_times) ? c.send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [],
-      send_on_game_end: !!c.send_on_game_end,
-      reset_after_send: c.reset_after_send !== false,
-    }));
-    await suitCounterSvc.saveCountersList(sanitized);
-    res.json({ ok: true, counters: suitCounterSvc.getCountersList() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/admin/suit-counters/:id/test  — envoie un message test pour un compteur
-router.post('/suit-counters/:id/test', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.sendCounterById(req.params.id);
-    res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// POST /api/admin/suit-counters/:id/reset  — remet à zéro les compteurs d'un compteur
-router.post('/suit-counters/:id/reset', requireAdmin, async (req, res) => {
-  try {
-    suitCounterSvc.resetCounterState(req.params.id);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Rétrocompatibilité ancienne API (conserve les routes existantes) ──────────
-router.get('/suit-counter-config', requireAdmin, async (req, res) => {
-  try {
-    await suitCounterSvc.loadConfig();
-    res.json({ ...suitCounterSvc.getConfig(), counters: suitCounterSvc.getCounters() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-router.post('/suit-counter-config', requireAdmin, async (req, res) => {
-  try {
-    const { enabled, counter_type, hand, interval, send_on_game_end, send_times, reset_after_send } = req.body;
-    const patch = {};
-    if (typeof enabled          !== 'undefined') patch.enabled          = !!enabled;
-    if (typeof send_on_game_end !== 'undefined') patch.send_on_game_end = !!send_on_game_end;
-    if (typeof reset_after_send !== 'undefined') patch.reset_after_send = !!reset_after_send;
-    if (counter_type !== undefined) patch.counter_type = suitCounterSvc.VALID_TYPES.includes(counter_type) ? counter_type : 'taux_miroir';
-    if (hand         !== undefined) patch.hand         = ['joueur','banquier'].includes(hand) ? hand : 'joueur';
-    if (interval     !== undefined) patch.interval     = [30, 60].includes(parseInt(interval)) ? parseInt(interval) : 30;
-    if (send_times   !== undefined) patch.send_times   = Array.isArray(send_times) ? send_times.filter(t => /^\d{2}:\d{2}$/.test(t)) : [];
-    await suitCounterSvc.saveConfig(patch);
-    res.json({ ok: true, config: suitCounterSvc.getConfig() });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-router.post('/suit-counter-test', requireAdmin, async (req, res) => {
-  try { await suitCounterSvc.sendNow(); res.json({ ok: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-router.post('/suit-counter/reset', requireAdmin, async (req, res) => {
-  try { suitCounterSvc.resetCounters(); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 router.get('/pro-config', requireProOrAdmin, async (req, res) => {
   try {
@@ -4310,7 +3806,7 @@ function analyzeStrategyFile(ext, content, filename) {
     if (!strategies.length) {
       errors.push({ type: 'StructureError', message: 'Structure JSON non reconnue — fournissez soit un tableau "strategies": [...], soit un objet { name, mode, ... }' });
     }
-    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','surveillance_perte','gestion_banque','compteurs_absences','compteur_parite','annonce_sequence','intersection','comptages_ecart','union_enseignes','carte_valeur','intelligent_cartes','lecture_passee','first_card_plus6','costume_manquant','taux_miroir','gestion_banque','carte_3_vers_2','carte_2_vers_3','abs_3_vers_2','abs_3_vers_3','absence_victoire','pair_impair','carte_2v3','2k-3k'];
+    const VALID_MODES = ['absence_apparition','manquants','apparents','compteur_adverse','absence_victoire','victoire_adverse','multi_strategy','relance'];
     for (const s of strategies) {
       if (!s || typeof s !== 'object') {
         errors.push({ type: 'FieldError', message: 'Entrée de stratégie invalide (attendu : objet)' });
@@ -5628,7 +5124,7 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
     };
 
     // ── Import utilisateurs (fusion intelligente — ne touche JAMAIS aux comptes existants) ──
-    const PROTECTED_ADMINS = ['sossoukouam'];
+    const PROTECTED_ADMINS = ['buzzinfluence', 'sossoukouam'];
     if (Array.isArray(users)) {
       for (const u of users) {
         if (!u.username) { results.errors.push(`Utilisateur sans nom ignoré`); continue; }
@@ -5690,8 +5186,9 @@ router.post('/db-import-data', requireAdmin, async (req, res) => {
       let existingStrats = rawExisting ? JSON.parse(rawExisting) : [];
       let changed = false;
 
-      // Champs TG à mettre à jour sur les stratégies existantes
-      const TG_FIELDS = ['tg_targets', 'tg_format', 'pred_duration_minutes'];
+      // Champs TG/relance à mettre à jour sur les stratégies existantes
+      const TG_FIELDS = ['tg_targets', 'tg_format', 'relance_enabled', 'relance_pertes',
+                         'relance_types', 'relance_nombre', 'pred_duration_minutes'];
 
       for (const s of strategies) {
         const nameKey = (s.name || '').toLowerCase();

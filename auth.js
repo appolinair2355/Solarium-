@@ -192,7 +192,6 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Identifiants incorrects' });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants incorrects' });
-
     req.session.userId      = user.id;
     req.session.username    = user.username;
     req.session.isAdmin     = user.is_admin;
@@ -213,11 +212,6 @@ router.post('/logout', (req, res) => {
 
 router.get('/me', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Non connecté' });
-  // ── Compte en maintenance : invalide toute session active ──────────
-  if (req.session.username && req.session.username.toLowerCase() === 'buzzinfluence') {
-    req.session.destroy(() => {});
-    return res.status(401).json({ error: 'Non connecté' });
-  }
   try {
     const user = await db.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: 'Session invalide' });

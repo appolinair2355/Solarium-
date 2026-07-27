@@ -19,7 +19,6 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
 const { analyzePaymentScreenshot } = require('./ai-route');
-const tgService = require('./telegram-service');
 
 // ── Helper : envoyer un message système dans la boîte d'un utilisateur ──
 async function sendSystemMessage(userId, text) {
@@ -60,7 +59,7 @@ function fmtDate(d) {
 
 // ── Plans d'abonnement (prix de base = compte SIMPLE) ──────────────
 const BASE_PLANS = {
-  '1j':  { id: '1j',  label: '1 jour',     base_usd: 1,  duration_minutes: 24 * 60 },
+  '1j':  { id: '1j',  label: '1 jour',     base_usd: 2,  duration_minutes: 24 * 60 },
   '1s':  { id: '1s',  label: '1 semaine',  base_usd: 12, duration_minutes: 7 * 24 * 60 },
   '2s':  { id: '2s',  label: '2 semaines', base_usd: 20, duration_minutes: 14 * 24 * 60 },
   '1m':  { id: '1m',  label: '1 mois',     base_usd: 40, duration_minutes: 30 * 24 * 60 },
@@ -247,41 +246,6 @@ router.get('/plans', async (req, res) => {
   });
 });
 
-// ── "Déjà payé ?" — vérifie l'identifiant/mot de passe utilisés lors du
-//    paiement DIRECTEMENT contre la base de paiement externe de l'admin,
-//    liste le bilan des paiements, et crédite automatiquement le compte
-//    Baccarat Pro actuellement connecté selon le motif du paiement. ──────
-router.post('/check-external', requireAuth, async (req, res) => {
-  const { identifiant, mot_de_passe } = req.body || {};
-  if (!identifiant || !mot_de_passe) return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
-  try {
-    const paymentExt = require('./payment-ext');
-    const user = await db.getUser(req.session.userId);
-    if (!user) return res.status(401).json({ error: 'Session invalide' });
-
-    const check = await paymentExt.checkPaymentCredentials(identifiant, mot_de_passe);
-    if (!check.ok) {
-      const messages = {
-        not_configured: 'La vérification des paiements n\'est pas encore configurée par l\'administrateur.',
-        not_found: 'Aucun paiement trouvé pour cet identifiant.',
-        bad_password: 'Mot de passe incorrect.',
-        db_error: 'Vérification impossible pour le moment, réessayez plus tard.',
-      };
-      return res.status(404).json({ error: messages[check.reason] || 'Vérification impossible', reason: check.reason });
-    }
-
-    const results = await paymentExt.creditRowsForUser(check.rows, user);
-    const refreshedUser = await db.getUser(user.id);
-    res.json({ results, user: publicUserSafe(refreshedUser) });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-function publicUserSafe(u) {
-  try { return require('./auth').publicUser(u); } catch { return { id: u.id, username: u.username, subscription_expires_at: u.subscription_expires_at }; }
-}
-
 // ── Créer une demande de paiement (étape 1) ─────────────────────────
 router.post('/request', requireAuth, async (req, res) => {
   const { plan_id } = req.body;
@@ -402,42 +366,54 @@ router.post('/:id/screenshot', requireAuth, async (req, res) => {
       }
     }
 
-    // ── Toujours mettre en attente admin (confirmation obligatoire) ─
-    const u = await db.getUser(pr.user_id);
+    // ── Décision ──────────────────────────────────────────────────
+    // Validation complète si : capture reconnue + confidence ≥ 60
+    const isValid = !!(aiResult && aiResult.is_payment_screenshot && (aiResult.confidence || 0) >= 60);
 
+    // Sauvegarder la capture et l'analyse IA dans tous les cas
     await db.updatePaymentRequest(id, {
       screenshot_data: cleanB64,
       ai_analysis:     aiResult || { error: aiError, is_payment_screenshot: false },
-      status:          'pending_admin',
+      status:          isValid ? 'approved' : 'pending_admin',
       transaction_id:  aiResult?.transaction_id || null,
     });
 
+    // Enregistrer la référence pour éviter les doublons futurs
     if (aiResult?.transaction_id) {
       await db.addPaymentRef(aiResult.transaction_id, pr.user_id, id);
     }
 
-    // ── Notifier l'admin via Telegram (analyse + boutons oui/non) ──
-    try {
-      await tgService.notifyAdminPayment({ paymentId: id, pr, user: u, aiResult, aiError });
-    } catch (tgErr) {
-      console.warn('[Payment] Notification Telegram admin échouée :', tgErr.message);
+    if (isValid) {
+      // ── APPROBATION AUTOMATIQUE COMPLÈTE ──────────────────────
+      const u = await db.getUser(pr.user_id);
+      // Recharger pr après la mise à jour du statut
+      const prUpdated = await db.getPaymentRequest(id);
+      const { newExpiry } = await doApprovePayment(prUpdated, u, { approvedBy: 'ai' });
+
+      res.json({
+        ok:               true,
+        ai_validated:     true,
+        approved:         true,
+        new_expiry:       newExpiry,
+        duration_minutes: pr.duration_minutes,
+        ai_analysis:      aiResult,
+        status:           'approved',
+        message:          `✅ Paiement vérifié et validé automatiquement par l'IA ! Votre abonnement ${pr.plan_label} est maintenant actif jusqu'au ${fmtDate(newExpiry)}.`,
+      });
+    } else {
+      // ── ATTENTE ADMIN ─────────────────────────────────────────
+      const reason = aiResult?.reason || (aiError ? `Erreur IA : ${aiError}` : 'Analyse non concluante');
+      console.log(`[Payment] ⏳ Demande #${id} en attente admin — raison : ${reason}`);
+
+      res.json({
+        ok:           true,
+        ai_validated: false,
+        approved:     false,
+        ai_analysis:  aiResult || { error: aiError },
+        status:       'pending_admin',
+        message:      `📤 Capture reçue. L'IA n'a pas pu valider automatiquement votre paiement (${reason}). Un administrateur va vérifier manuellement dans les plus brefs délais.`,
+      });
     }
-
-    const aiSummary = aiResult
-      ? `${aiResult.is_payment_screenshot ? '✅ Paiement détecté' : '❓ Incertain'} — Confiance ${aiResult.confidence ?? '?'}%${aiResult.amount_detected ? ` — Montant vu : ${aiResult.amount_detected}` : ''}${aiResult.currency_detected ? ` ${aiResult.currency_detected}` : ''}`
-      : aiError ? `⚠️ Analyse IA indisponible` : 'Analyse non disponible';
-
-    console.log(`[Payment] ⏳ Demande #${id} en attente admin — ${aiSummary}`);
-
-    res.json({
-      ok:           true,
-      ai_validated: false,
-      approved:     false,
-      ai_analysis:  aiResult || { error: aiError },
-      status:       'pending_admin',
-      ai_summary:   aiSummary,
-      message:      `📤 Capture reçue et transmise à l'administrateur pour confirmation.\n\n🔍 Analyse IA : ${aiSummary}\n\nL'administrateur va examiner votre capture et répondre par Telegram. Vous serez notifié dès validation.`,
-    });
   } catch (e) {
     console.error('payment/screenshot error:', e);
     res.status(500).json({ error: e.message });
@@ -551,48 +527,7 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support ou soume
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Enregistrer les callbacks Telegram approve/reject ─────────────────────
-// Appelé une seule fois au démarrage (après initialisation du module)
-(function registerBotCallbacks() {
-  try {
-    tgService.registerPaymentHandlers({
-      approve: async (paymentId, opts) => {
-        const pr = await db.getPaymentRequest(paymentId);
-        if (!pr) throw new Error(`Demande #${paymentId} introuvable`);
-        if (pr.status === 'approved') throw new Error(`Déjà approuvé`);
-        const user = await db.getUser(pr.user_id);
-        if (!user) throw new Error(`Utilisateur introuvable`);
-        const { newExpiry } = await doApprovePayment(pr, user, opts || { approvedBy: 'admin_bot' });
-        return { username: user.username, expiry: fmtDate(newExpiry) };
-      },
-      reject: async (paymentId, opts) => {
-        const pr = await db.getPaymentRequest(paymentId);
-        if (!pr) throw new Error(`Demande #${paymentId} introuvable`);
-        const user = await db.getUser(pr.user_id);
-        await db.updatePaymentRequest(paymentId, {
-          status:             'rejected',
-          admin_validated_at: new Date(),
-          admin_note:         `Refusé par admin via bot Telegram`,
-        });
-        // Bloquer sévèrement l'utilisateur
-        await db.updateUser(pr.user_id, {
-          is_approved:             false,
-          is_banned:               true,
-          subscription_expires_at: null,
-        });
-        await sendSystemMessage(pr.user_id,
-`❌ Votre paiement pour le plan ${pr.plan_label} a été rejeté par l'administrateur.\n\nVotre compte a été bloqué. Contactez le support si vous pensez qu'il s'agit d'une erreur.`
-        );
-        return { username: user?.username || `user_${pr.user_id}` };
-      },
-    });
-  } catch (e) {
-    console.warn('[Payment] Impossible d\'enregistrer les callbacks Telegram :', e.message);
-  }
-})();
-
 module.exports = router;
 module.exports.BASE_PLANS = BASE_PLANS;
 module.exports.plansFor = plansFor;
 module.exports.priceForType = priceForType;
-module.exports.doApprovePayment = doApprovePayment;
