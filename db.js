@@ -2,15 +2,14 @@
  * Couche d'accès aux données — PostgreSQL si DATABASE_URL est défini, sinon JSON local.
  */
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
-// Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
-// l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a.oregon-postgres.render.com/bonjour';
+// Uniquement via la variable d'environnement DATABASE_URL.
+// Si elle n'est pas définie → mode JSON local (aucune connexion PostgreSQL tentée).
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
+const CARDS_PG_URL = 'postgresql://les_cartes_user:W67e5gDzArVEgYqTk8eH1j2zacKQX3Jg@dpg-d7phtjegvqtc73a9gbn0-a.singapore-postgres.render.com/les_cartes';
 
 require('dotenv').config();
-const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;
+const DB_URL = process.env.DATABASE_URL || '';
 let USE_PG = !!DB_URL;
 
 // Exporté pour que render-sync puisse détecter les boucles de sync
@@ -316,7 +315,6 @@ async function initDB() {
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
-      ALTER TABLE strategy_ideas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS strategy_idea_purchases (
         id                 SERIAL PRIMARY KEY,
@@ -375,57 +373,16 @@ async function initDB() {
         created_at   TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE UNIQUE INDEX IF NOT EXISTS used_payment_refs_txid_uniq ON used_payment_refs(transaction_id);
-
-      -- ── Soutien développeur : paliers de don ──────────────────────────────
-      CREATE TABLE IF NOT EXISTS support_packs (
-        id         SERIAL PRIMARY KEY,
-        amount_usd NUMERIC(10,2) NOT NULL,
-        label      TEXT NOT NULL DEFAULT '',
-        enabled    BOOLEAN DEFAULT TRUE,
-        sort_order INTEGER DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      -- Seed des paliers de soutien en FCFA (idempotent via ON CONFLICT)
-      INSERT INTO support_packs (amount_usd, label, sort_order) VALUES
-        (200,     '☕ Café — 200 FCFA',            1),
-        (500,     '🍕 Pizza — 500 FCFA',            2),
-        (1000,    '🎮 Joueur — 1 000 FCFA',         3),
-        (2000,    '⭐ Supporter — 2 000 FCFA',       4),
-        (5000,    '💪 Solide — 5 000 FCFA',          5),
-        (10000,   '🔥 Motivé — 10 000 FCFA',         6),
-        (25000,   '💎 Premium — 25 000 FCFA',         7),
-        (50000,   '🥇 Champion — 50 000 FCFA',        8),
-        (100000,  '🚀 Pro — 100 000 FCFA',            9),
-        (200000,  '👑 VIP — 200 000 FCFA',           10),
-        (500000,  '💠 Elite — 500 000 FCFA',         11),
-        (1000000, '🏆 Ultimate — 1 000 000 FCFA',    12)
-      ON CONFLICT DO NOTHING;
-
-      CREATE TABLE IF NOT EXISTS support_purchases (
-        id                 SERIAL PRIMARY KEY,
-        user_id            INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        pack_id            INTEGER REFERENCES support_packs(id) ON DELETE SET NULL,
-        amount_usd         NUMERIC(10,2) NOT NULL,
-        status             TEXT DEFAULT 'awaiting_screenshot',
-        screenshot_data    TEXT,
-        admin_note         TEXT,
-        admin_validated_by INTEGER,
-        admin_validated_at TIMESTAMPTZ,
-        created_at         TIMESTAMPTZ DEFAULT NOW(),
-        updated_at         TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS support_purchases_user_idx   ON support_purchases(user_id);
-      CREATE INDEX IF NOT EXISTS support_purchases_status_idx ON support_purchases(status);
     `);
-    // Compte buzzinfluence : compte standard (non-admin)
+    // Compte admin secondaire : buzzinfluence (admin_level=2)
     {
       const bcrypt = require('bcryptjs');
       const hash = await bcrypt.hash('arrow2025', 10);
       await pgPool.query(
         `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-         VALUES ($1, $2, $3, FALSE, TRUE, 0)
-         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = FALSE, is_approved = TRUE, admin_level = 0`,
-        ['buzzinfluence', 'buzz@baccarat.pro', hash]
+         VALUES ($1, $2, $3, TRUE, TRUE, 2)
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE, is_approved = TRUE, admin_level = 2`,
+        ['buzzinfluence', 'admin@baccarat.pro', hash]
       );
     }
     // Compte super admin : sossoukouam (admin_level=1)
@@ -439,7 +396,7 @@ async function initDB() {
         ['sossoukouam', 'sossoukouam@gmail.com', hash]
       );
     }
-    console.log('✅ Comptes initialisés (buzzinfluence=standard, sossoukouam=super-admin)');
+    console.log('✅ Comptes admin initialisés (buzzinfluence=secondaire, sossoukouam=super)');
     // ── Initialisation de la base de données des cartes ─────────────────
     if (USE_CARDS_PG && pgPoolCards) {
       try {
@@ -526,9 +483,9 @@ async function reinitAdmins() {
     const h2 = await bcrypt.hash('arrow2026', 10);
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
-       VALUES ($1,$2,$3,FALSE,TRUE,0)
-       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=FALSE, is_approved=TRUE, admin_level=0`,
-      ['buzzinfluence', 'buzz@baccarat.pro', h1]
+       VALUES ($1,$2,$3,TRUE,TRUE,2)
+       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, is_admin=TRUE, is_approved=TRUE, admin_level=2`,
+      ['buzzinfluence', 'admin@baccarat.pro', h1]
     );
     await pgPool.query(
       `INSERT INTO users (username, email, password_hash, is_admin, is_approved, admin_level)
@@ -1107,31 +1064,8 @@ async function deleteAllPredictions() {
   }
   const data = require('./jsondb');
   let count = 0;
-  if (data.d) {
-    count = (data.d().predictions || []).length;
-    data.d().predictions = [];
-    try { data._persist(); } catch {}
-  }
+  if (data.d) { count = (data.d().predictions || []).length; data.d().predictions = []; }
   return count;
-}
-
-async function deleteResolvedPredictions() {
-  if (USE_PG) {
-    await pgPool.query(`DELETE FROM tg_pred_messages WHERE strategy IN (
-      SELECT DISTINCT strategy FROM predictions WHERE status IN ('gagne','perdu','expire')
-    )`).catch(() => {});
-    const r = await pgPool.query(`DELETE FROM predictions WHERE status IN ('gagne','perdu','expire')`);
-    return r.rowCount;
-  }
-  const data = require('./jsondb');
-  const all = data.d ? (data.d().predictions || []) : [];
-  const before = all.length;
-  const kept = all.filter(p => p.status === 'en_cours');
-  if (data.d) {
-    data.d().predictions = kept;
-    try { data._persist(); } catch {}
-  }
-  return before - kept.length;
 }
 
 async function cleanupOldPredictions(daysOld = 3) {
@@ -1799,7 +1733,7 @@ module.exports = {
   getStrategyRoutes, getAllStrategyRoutes, setStrategyRoutes,
   saveTgMsgId, getTgMsgIds, deleteTgMsgIds,
   getTgMsgIdsForStrategy, deleteTgMsgIdsForStrategy, expireStrategyPredictions,
-  deleteStrategyPredictions, deleteAllPredictions, deleteResolvedPredictions, cleanupOldPredictions, deleteExpiredPredictions,
+  deleteStrategyPredictions, deleteAllPredictions, cleanupOldPredictions, deleteExpiredPredictions,
   getUserStats,
   getDailyBilanStats, saveBilanSnapshot, getLastBilanSnapshot,
   upsertProjectFile, getAllProjectFiles, getProjectFileMeta, deleteProjectFile, clearProjectFiles,
