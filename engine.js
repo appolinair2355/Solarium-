@@ -109,16 +109,28 @@ function countValidCards(cards) {
 // TROIS_TROIS (combinaisons de comptage), TIE (match nul).
 function classifyNulCategories(pCards, bCards, winner) {
   const cats = new Set();
-  const pCount = countValidCards(pCards);
-  const bCount = countValidCards(bCards);
+  // Utiliser la longueur brute du tableau (pas countValidCards) pour ne pas
+  // rater les mains à 2/3 cartes quand un c.S vaut '?' (costume non reconnu).
+  const pCount = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+  const bCount = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
   if (pCount === 2 && bCount === 2) cats.add('distrib');
   if (pCount === 2) cats.add('P_DEUX');
   if (bCount === 2) cats.add('B_DEUX');
   if (pCount === 3) cats.add('P_TROIS');
   if (bCount === 3) cats.add('B_TROIS');
-  if (winner === 'Player') cats.add('WIN_P');
-  if (winner === 'Banker') cats.add('WIN_B');
-  if (winner === 'Tie')    cats.add('TIE');
+  // Si winner absent de l'API (cas fréquent pour match nul), le recalculer
+  // depuis les scores baccarat pour que le déclencheur TIE fonctionne correctement.
+  let effectiveWinner = winner;
+  if (!effectiveWinner && pCount >= 2 && bCount >= 2) {
+    const _pScore = baccaratHandScore(pCards);
+    const _bScore = baccaratHandScore(bCards);
+    if (_pScore !== null && _bScore !== null) {
+      effectiveWinner = _pScore > _bScore ? 'Player' : _bScore > _pScore ? 'Banker' : 'Tie';
+    }
+  }
+  if (effectiveWinner === 'Player') cats.add('WIN_P');
+  if (effectiveWinner === 'Banker') cats.add('WIN_B');
+  if (effectiveWinner === 'Tie')    cats.add('TIE');
   const pScore = baccaratHandScore(pCards);
   if (pScore !== null) cats.add(pScore % 2 === 0 ? 'PAIR_P' : 'IMPAIR_P');
   for (const s of extractSuits(pCards)) cats.add(s);
@@ -129,6 +141,150 @@ function classifyNulCategories(pCards, bCards, winner) {
   return cats;
 }
 const NUL_CATEGORY_KEYS = ['distrib','P_DEUX','B_DEUX','P_TROIS','B_TROIS','WIN_P','WIN_B','PAIR_P','IMPAIR_P','♠','♥','♦','♣','DEUX_TROIS','TROIS_DEUX','TROIS_TROIS','TIE'];
+
+// ── Évaluation de conditions "Comptages" pour le mode nul_pattern ─────────
+// Reproduit la logique de comptages.js : mêmes groupes, mêmes clés de catégorie.
+// Utilisé pour évaluer cond_cat/cond_param d'une règle nul_pattern.
+function _normRankCptg(r) {
+  if (r === undefined || r === null) return null;
+  const s = String(r).toUpperCase().trim();
+  if (s === 'A' || s === '0' || s === '1' || s === '14') return 'A';
+  if (s === 'T' || s === '10') return '10';
+  if (s === 'J' || s === '11') return 'J';
+  if (s === 'Q' || s === '12') return 'Q';
+  if (s === 'K' || s === '13') return 'K';
+  if (['2','3','4','5','6','7','8','9'].includes(s)) return s;
+  const n = parseInt(s, 10);
+  if (!isNaN(n) && n >= 2 && n <= 9) return String(n);
+  return null;
+}
+function buildComptagesCtx(pCards, bCards, winnerIn) {
+  function suitsOf(cards) {
+    const out = new Set();
+    for (const c of (cards || [])) {
+      const n = normalizeSuit(c?.S || '');
+      if (ALL_SUITS.includes(n)) out.add(n);
+    }
+    return out;
+  }
+  function ranksOf(cards) {
+    const out = new Set();
+    for (const c of (cards || [])) {
+      const r = _normRankCptg(c?.R);
+      if (r) out.add(r);
+    }
+    return out;
+  }
+  const suitsP = suitsOf(pCards);
+  const suitsB = suitsOf(bCards);
+  const ranksP = ranksOf(pCards);
+  const ranksB = ranksOf(bCards);
+  const np = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+  const nb = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
+  const ps = baccaratHandScore(pCards);
+  const bs = baccaratHandScore(bCards);
+  let winner = winnerIn;
+  if (!winner && ps !== null && bs !== null) {
+    winner = ps > bs ? 'Player' : bs > ps ? 'Banker' : 'Tie';
+  }
+  let winnerScore = null;
+  if (winner === 'Player' && ps !== null) winnerScore = ps;
+  else if (winner === 'Banker' && bs !== null) winnerScore = bs;
+  else if (winner === 'Tie' && ps !== null) winnerScore = ps;
+  return { suitsP, suitsB, ranksP, ranksB, np, nb, ps, bs, winner, winnerScore };
+}
+function evalComptagesCond(condCat, condParam, ctx) {
+  if (!condCat) return null;
+  const { suitsP, suitsB, ranksP, ranksB, np, nb, ps, bs, winner, winnerScore } = ctx;
+  const N = (condParam !== undefined && condParam !== null && condParam !== '') ? Number(condParam) : null;
+  switch (condCat) {
+    // Costume Joueur
+    case 'suit_p_heart':   return suitsP.has('♥');
+    case 'suit_p_club':    return suitsP.has('♣');
+    case 'suit_p_spade':   return suitsP.has('♠');
+    case 'suit_p_diamond': return suitsP.has('♦');
+    // Costume Banquier
+    case 'suit_b_heart':   return suitsB.has('♥');
+    case 'suit_b_club':    return suitsB.has('♣');
+    case 'suit_b_spade':   return suitsB.has('♠');
+    case 'suit_b_diamond': return suitsB.has('♦');
+    // Victoire
+    case 'win_player': return winner === 'Player';
+    case 'win_banker': return winner === 'Banker';
+    case 'win_tie':    return winner === 'Tie';
+    // Parité score gagnant
+    case 'parite_pair': return winnerScore !== null && winnerScore % 2 === 0;
+    case 'parite_imp':  return winnerScore !== null && winnerScore % 2 === 1;
+    // Parité joueur
+    case 'pt_p_pair': return ps !== null && ps % 2 === 0;
+    case 'pt_p_imp':  return ps !== null && ps % 2 === 1;
+    // Parité banquier
+    case 'pt_b_pair': return bs !== null && bs % 2 === 0;
+    case 'pt_b_imp':  return bs !== null && bs % 2 === 1;
+    // Série de cartes
+    case 'dist_2_2': return np === 2 && nb === 2;
+    case 'dist_2_3': return np === 2 && nb === 3;
+    case 'dist_3_2': return np === 3 && nb === 2;
+    case 'dist_3_3': return np === 3 && nb === 3;
+    // Cartes Joueur
+    case 'nbk_p2': return np === 2;
+    case 'nbk_p3': return np === 3;
+    // Cartes Banquier
+    case 'nbk_b2': return nb === 2;
+    case 'nbk_b3': return nb === 3;
+    // Points Joueur (seuil N)
+    case 'pt_p_high': return ps !== null && N !== null && ps > N;
+    case 'pt_p_low':  return ps !== null && N !== null && ps < N;
+    // Points Banquier (seuil N)
+    case 'pt_b_high': return bs !== null && N !== null && bs > N;
+    case 'pt_b_low':  return bs !== null && N !== null && bs < N;
+    // Valeurs Joueur
+    case 'cv_p_A': return ranksP.has('A');
+    case 'cv_p_2': return ranksP.has('2');
+    case 'cv_p_3': return ranksP.has('3');
+    case 'cv_p_4': return ranksP.has('4');
+    case 'cv_p_5': return ranksP.has('5');
+    case 'cv_p_6': return ranksP.has('6');
+    case 'cv_p_7': return ranksP.has('7');
+    case 'cv_p_8': return ranksP.has('8');
+    case 'cv_p_9': return ranksP.has('9');
+    case 'cv_p_10': return ranksP.has('10');
+    case 'cv_p_J':  return ranksP.has('J');
+    case 'cv_p_Q':  return ranksP.has('Q');
+    case 'cv_p_K':  return ranksP.has('K');
+    // Valeurs Banquier
+    case 'cv_b_A': return ranksB.has('A');
+    case 'cv_b_2': return ranksB.has('2');
+    case 'cv_b_3': return ranksB.has('3');
+    case 'cv_b_4': return ranksB.has('4');
+    case 'cv_b_5': return ranksB.has('5');
+    case 'cv_b_6': return ranksB.has('6');
+    case 'cv_b_7': return ranksB.has('7');
+    case 'cv_b_8': return ranksB.has('8');
+    case 'cv_b_9': return ranksB.has('9');
+    case 'cv_b_10': return ranksB.has('10');
+    case 'cv_b_J':  return ranksB.has('J');
+    case 'cv_b_Q':  return ranksB.has('Q');
+    case 'cv_b_K':  return ranksB.has('K');
+    // Score exact J+B (= N)
+    case 'score_exact': return ps !== null && bs !== null && N !== null && (ps + bs) === N;
+    // Score exact Joueur (= N, 0-9)
+    case 'pt_p_eq': return ps !== null && N !== null && ps === N;
+    // Score exact Banquier (= N, 0-9)
+    case 'pt_b_eq': return bs !== null && N !== null && bs === N;
+    // Total J+B avec signe (> < =)
+    case 'pt_total_gt': return ps !== null && bs !== null && N !== null && (ps + bs) > N;
+    case 'pt_total_lt': return ps !== null && bs !== null && N !== null && (ps + bs) < N;
+    case 'pt_total_eq': return ps !== null && bs !== null && N !== null && (ps + bs) === N;
+    // Points Joueur avec signe (renommage clair)
+    case 'pt_p_gt': return ps !== null && N !== null && ps > N;
+    case 'pt_p_lt': return ps !== null && N !== null && ps < N;
+    // Points Banquier avec signe (renommage clair)
+    case 'pt_b_gt': return bs !== null && N !== null && bs > N;
+    case 'pt_b_lt': return bs !== null && N !== null && bs < N;
+    default: return null;
+  }
+}
 
 // ── Garde : empêche d'émettre si la dernière prédiction est encore en cours (<10 min) ──
 async function canEmitNewPrediction(stratId) {
@@ -326,7 +482,7 @@ class Engine {
     const mirrorCounts = {};
     const adverseCounts = {}; // pour le mode compteur_adverse
     for (const s of ALL_SUITS) { counts[s] = 0; mappingIndex[s] = 0; mirrorCounts[s] = 0; adverseCounts[s] = 0; }
-    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 }, attenteHistory: [], attenteQueue: [] };
+    return { counts, processed: new Set(), pending: {}, history: [], lastOutcomes: [], predHistory: [], mappingIndex, mirrorCounts, mirrorLastHour: null, adverseCounts, interStartGame: null, confirmPending: {}, cmQueue: {}, rgCounters: {}, parityCounts: { pair: 0, impair: 0 }, parityPending: { pair: false, impair: false }, snakeActive: false, snakeSuit: null, c2v3Counts: { deux: 0, trois: 0 }, attenteHistory: [], attenteQueue: [], histSubSeqIdx: {} };
   }
 
   // ── Bloqueur automatique des mauvaises prédictions ─────────────────────────
@@ -1828,7 +1984,7 @@ class Engine {
       // ── Résolution spéciale mode Distribution ──────────────────────────
       if (ps === 'distrib') {
         const isNatural = Array.isArray(pCards) && Array.isArray(bCards)
-          && countValidCards(pCards) === 2 && countValidCards(bCards) === 2;
+          && pCards.filter(c => c != null).length === 2 && bCards.filter(c => c != null).length === 2;
         if (isNatural) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Distribution] Jeu #${gn} = naturel (2P+2B) → gagne (R${rattrapage})`);
@@ -1880,8 +2036,9 @@ class Engine {
 
       // ── Résolution spéciale mode Écart 2/3 ─────────────────────────────
       } else if (ps === 'TWO_THREE') {
-        const isMixed = Array.isArray(pCards) && Array.isArray(bCards) &&
-          ((pCards.length === 2 && bCards.length === 3) || (pCards.length === 3 && bCards.length === 2));
+        const _pLen2 = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+        const _bLen2 = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
+        const isMixed = (_pLen2 === 2 && _bLen2 === 3) || (_pLen2 === 3 && _bLen2 === 2);
         if (isMixed) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Écart 2/3] ✅ Jeu mixte → gagne (R${rattrapage})`);
@@ -1897,16 +2054,14 @@ class Engine {
 
       // ── Résolution spéciale mode Match Nul ─────────────────────────────
       } else if (ps === 'TIE') {
-        // Filet de sécurité : si winner est null (ex: chemin sans winner passé),
-        // on l'infère depuis les scores des cartes — en Baccarat P=B → Tie.
-        let effectiveWinnerTie = winner;
-        if (!effectiveWinnerTie && pCards && bCards) {
-          const _pSc = baccaratHandScore(pCards);
-          const _bSc = baccaratHandScore(bCards);
-          if (_pSc !== null && _bSc !== null)
-            effectiveWinnerTie = _pSc === _bSc ? 'Tie' : _pSc > _bSc ? 'Player' : 'Banker';
+        // Recalculer winner depuis les scores si absent (match nul souvent manquant dans l'API)
+        let _tieWinner = winner;
+        if (!_tieWinner && Array.isArray(pCards) && Array.isArray(bCards)) {
+          const _ps = baccaratHandScore(pCards);
+          const _bs = baccaratHandScore(bCards);
+          if (_ps !== null && _bs !== null) _tieWinner = _ps > _bs ? 'Player' : _bs > _ps ? 'Banker' : 'Tie';
         }
-        if (effectiveWinnerTie === 'Tie') {
+        if (_tieWinner === 'Tie') {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [Match Nul] ✅ Tie → gagne (R${rattrapage})`);
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -1927,7 +2082,8 @@ class Engine {
       } else if (ps === 'P_DEUX' || ps === 'B_DEUX' || ps === 'P_TROIS' || ps === 'B_TROIS') {
         const isPlayer = ps === 'P_DEUX' || ps === 'P_TROIS';
         const targetCount = (ps === 'P_DEUX' || ps === 'B_DEUX') ? 2 : 3;
-        const cnt = countValidCards(isPlayer ? pCards : bCards);
+        const _handArr = isPlayer ? pCards : bCards;
+        const cnt = Array.isArray(_handArr) ? _handArr.filter(c => c != null).length : 0;
         if (cnt === targetCount) {
           const rattrapage = gn - pgNum;
           await resolvePrediction(strategy, pgNum, ps, 'gagne', rattrapage, pCards, bCards, tgOpts);
@@ -1959,11 +2115,14 @@ class Engine {
       // ── Résolution spéciale combinaisons 2/3 · 3/2 · 3/3 ───────────────
       } else if (ps === 'DEUX_TROIS' || ps === 'TROIS_DEUX' || ps === 'TROIS_TROIS') {
         const combLabel = ps === 'DEUX_TROIS' ? '2/3' : ps === 'TROIS_DEUX' ? '3/2' : '3/3';
+        // Utiliser la longueur filtrée (sans null) pour correspondre à classifyNulCategories
+        const _pLenC = Array.isArray(pCards) ? pCards.filter(c => c != null).length : 0;
+        const _bLenC = Array.isArray(bCards) ? bCards.filter(c => c != null).length : 0;
         const isMatch = ps === 'DEUX_TROIS'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 2 && bCards.length === 3)
+          ? (_pLenC === 2 && _bLenC === 3)
           : ps === 'TROIS_DEUX'
-          ? (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 2)
-          : (Array.isArray(pCards) && Array.isArray(bCards) && pCards.length === 3 && bCards.length === 3);
+          ? (_pLenC === 3 && _bLenC === 2)
+          : (_pLenC === 3 && _bLenC === 3);
         if (isMatch) {
           const rattrapage = gn - pgNum;
           console.log(`[${strategy}] [${combLabel}] ✅ Combinaison confirmée → gagne (R${rattrapage})`);
@@ -2524,78 +2683,6 @@ class Engine {
     return false;
   }
 
-  /**
-   * Lecture des jeux anciens (LJA) — vérifie si le costume à prédire (ps) était
-   * présent dans les N derniers jeux terminés avant gn, et le redirige si oui.
-   * @param {object} cfg   - Config de la stratégie
-   * @param {string} ps    - Costume initialement prédit
-   * @param {object} state - État de la stratégie
-   * @param {number} gn    - Numéro du jeu lanceur (déclencheur)
-   * @returns {string}     - Costume à émettre (peut différer de ps)
-   */
-  _applyLectureJeuxAnciens(cfg, ps, state, gn) {
-    if (!cfg.lja_enabled) return ps;
-    const rules = Array.isArray(cfg.lja_rules) ? cfg.lja_rules : [];
-    if (rules.length === 0) return ps;
-    const rule = rules.find(r => r.suit === ps);
-    if (!rule) return ps;
-    const nb = Math.max(1, parseInt(cfg.lja_nb_jeux) || 3);
-    // Récupère les nb derniers jeux TERMINÉS avant gn dans l'historique d'attente
-    const hist = (state.attenteHistory || []).filter(e => e.gn < gn).slice(-nb);
-    if (hist.length === 0) return ps;
-    // Vérifie si le costume/condition était présent dans AU MOINS UN des jeux
-    const checkType = rule.check_type || 'costume_joueur';
-    const wasPresent = hist.some(e => this._ljaCheckCondition(e, ps, checkType));
-    if (!wasPresent) return ps;
-    // Rediriger vers le costume configuré
-    const siPresent = rule.si_present;
-    if (!siPresent || (Array.isArray(siPresent) && siPresent.length === 0)) return ps;
-    const ALL_SUITS = ['♠','♥','♦','♣'];
-    const candidates = Array.isArray(siPresent)
-      ? siPresent.filter(s => ALL_SUITS.includes(s))
-      : (ALL_SUITS.includes(siPresent) ? [siPresent] : []);
-    if (candidates.length === 0) return ps;
-    const ordre = rule.ordre || 'fixe';
-    let chosen;
-    if (ordre === 'aleatoire') {
-      chosen = candidates[Math.floor(Math.random() * candidates.length)];
-    } else if (ordre === 'sequence') {
-      if (!state.ljaSeqIndex) state.ljaSeqIndex = {};
-      const idx = (state.ljaSeqIndex[ps] || 0) % candidates.length;
-      chosen = candidates[idx];
-      state.ljaSeqIndex[ps] = idx + 1;
-    } else {
-      chosen = candidates[0];
-    }
-    console.log(`[LJA] ${ps} présent dans ${hist.length}/${nb} jeux anciens (check: ${checkType}) → redirigé vers ${chosen} (${ordre})`);
-    return chosen;
-  }
-
-  /**
-   * Vérifie si une condition LJA est remplie pour un jeu e.
-   * @param {object} e         - Entrée attenteHistory
-   * @param {string} suit      - Costume à rechercher (pour check types 'costume_*')
-   * @param {string} checkType - Type de condition
-   * @returns {boolean}
-   */
-  _ljaCheckCondition(e, suit, checkType) {
-    switch (checkType) {
-      case 'costume_joueur':       return (e.pSuits || []).includes(suit);
-      case 'costume_banquier':     return (e.bSuits || []).includes(suit);
-      case 'pair':                 return e.pScore != null && e.pScore % 2 === 0;
-      case 'impair':               return e.pScore != null && e.pScore % 2 !== 0;
-      case 'pair_banquier':        return e.bScore != null && e.bScore % 2 === 0;
-      case 'impair_banquier':      return e.bScore != null && e.bScore % 2 !== 0;
-      case 'victoire_joueur':      return e.winner === 'Player';
-      case 'victoire_banquier':    return e.winner === 'Banker';
-      case 'deux_cartes_joueur':   return e.pCount === 2;
-      case 'deux_cartes_banquier': return e.bCount === 2;
-      case 'trois_cartes_joueur':  return e.pCount === 3;
-      case 'trois_cartes_banquier':return e.bCount === 3;
-      default:                     return (e.pSuits || []).includes(suit);
-    }
-  }
-
   async _processCustomStrategy(id, state, cfg, gn, suits, bSuits, pCards, bCards, winner = null) {
     // Stratégie supprimée entre le début du tick et maintenant → on ignore
     if (!this.custom[id]) return;
@@ -2616,13 +2703,18 @@ class Engine {
         : getCurrentMaxRattrapage();
 
     // Options Telegram propres à cette stratégie (format + main + maxR)
+    // Pour numero_costume : la main visible dans le message est numero_costume_hand, pas cfg.hand.
+    const _ncEffectiveHand = cfg.mode === 'numero_costume'
+      ? (cfg.numero_costume_hand || 'joueur')
+      : (cfg.hand || 'joueur');
     const stratTgOpts = {
-      formatId:  cfg.tg_format   || null,
-      hand:      cfg.hand        || 'joueur',
-      maxR:      stratMaxRForResolve,
-      siteUrl:   cfg.tg_site_url || '',
-      stratName: cfg.name        || '',
-      mode:      cfg.mode        || '',
+      formatId:    cfg.tg_format    || null,
+      tg_template: cfg.tg_template  || null,
+      hand:        _ncEffectiveHand,
+      maxR:        stratMaxRForResolve,
+      siteUrl:     cfg.tg_site_url  || '',
+      stratName:   cfg.name         || '',
+      mode:        cfg.mode         || '',
     };
 
     // ── Exception mi-vol : decalage_suit_check ────────────────────────────────
@@ -2821,11 +2913,14 @@ class Engine {
       pScore: baccaratHandScore(pCards),
       bScore: baccaratHandScore(bCards),
     });
-    if (state.attenteHistory.length > Math.max(20, parseInt(cfg.attente_n) || 5, parseInt(cfg.lja_nb_jeux) || 5)) state.attenteHistory.shift();
+    if (state.attenteHistory.length > Math.max(5, parseInt(cfg.attente_n) || 5, parseInt(cfg.hist_sub_n) || 0)) state.attenteHistory.shift();
 
     const { threshold: B, mode, mappings, tg_targets, name, exceptions, prediction_offset, hand } = cfg;
     const offset = Math.max(1, parseInt(prediction_offset) || 1);
-    const handLabel = hand === 'banquier' ? 'banquier' : 'joueur';
+    // Pour numero_costume : la main logique est numero_costume_hand, pas cfg.hand.
+    const handLabel = (mode === 'numero_costume')
+      ? ((cfg.numero_costume_hand === 'banquier') ? 'banquier' : 'joueur')
+      : (hand === 'banquier' ? 'banquier' : 'joueur');
 
     // ── Durée de prédiction expirée ────────────────────────────────────────
     if (cfg.pred_duration_minutes > 0 && cfg.pred_duration_started_at) {
@@ -2899,8 +2994,21 @@ class Engine {
       // Exception C (pre_emit_suit_inverse) : rediriger vers l'inverse si nécessaire
       if (state._exRedirectSuit) { ps = state._exRedirectSuit; state._exRedirectSuit = null; }
 
-      // ── Lecture des jeux anciens : redirection de costume si nécessaire ──────
-      ps = this._applyLectureJeuxAnciens(cfg, ps, state, gn);
+      // ── Helper partagé : vérifier si un costume est ABSENT dans un jeu d'historique ─
+      const _isAbsent = (e, _ps, _m) => {
+        if (_ps === 'pair' || _ps === 'impair') {
+          const sc = _m === 'banquier' ? e.bScore : e.pScore;
+          const r  = (sc !== null && sc !== undefined) ? (sc % 2 === 0 ? 'pair' : 'impair') : null;
+          return r !== _ps;
+        }
+        if (_ps === 'WIN_P') return e.winner !== 'Player';
+        if (_ps === 'WIN_B') return e.winner !== 'Banker';
+        if (_ps === 'deux')  { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 2; }
+        if (_ps === 'trois') { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 3; }
+        if (_ps === 'distrib') return !(e.pCount === 2 && e.bCount === 2);
+        const s = _m === 'banquier' ? (e.bSuits || []) : (e.pSuits || []);
+        return !s.includes(_ps);
+      };
 
       // ── Filtre d'attente : vérification sur l'historique des N derniers jeux ─
       // Lit les N derniers jeux stockés dans attenteHistory, vérifie si ps était
@@ -2912,21 +3020,6 @@ class Engine {
         const _aMain = cfg.attente_main || cfg.hand || 'joueur';
         const _aOpt  = cfg.attente_option || 1;
         const hist   = (state.attenteHistory || []).slice(-_aN);
-
-        const _isAbsent = (e, _ps, _m) => {
-          if (_ps === 'pair' || _ps === 'impair') {
-            const sc = _m === 'banquier' ? e.bScore : e.pScore;
-            const r  = (sc !== null && sc !== undefined) ? (sc % 2 === 0 ? 'pair' : 'impair') : null;
-            return r !== _ps;
-          }
-          if (_ps === 'WIN_P') return e.winner !== 'Player';
-          if (_ps === 'WIN_B') return e.winner !== 'Banker';
-          if (_ps === 'deux')  { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 2; }
-          if (_ps === 'trois') { const c = _m === 'banquier' ? e.bCount : e.pCount; return c !== 3; }
-          if (_ps === 'distrib') return !(e.pCount === 2 && e.bCount === 2);
-          const s = _m === 'banquier' ? (e.bSuits || []) : (e.pSuits || []);
-          return !s.includes(_ps);
-        };
 
         if (hist.length < _aN) {
           console.log(`[${channelId}] [Attente] ⚠️ Historique insuffisant (${hist.length}/${_aN} jeux) → annulé`);
@@ -2971,6 +3064,42 @@ class Engine {
         if (next > MAX_GAME_NUMBER) {
           console.warn(`[${channelId}] ⛔ Cible attente #${next} dépasse MAX (${MAX_GAME_NUMBER}) → annulé`);
           return;
+        }
+      }
+
+      // ── Substitution historique (hist_sub) ───────────────────────────────────
+      // Si le costume prédit est apparu dans les N derniers jeux (main configurée),
+      // le remplace par l'un des costumes de la liste (aléatoire ou séquence).
+      // Compatible avec tous les modes. S'exécute après le filtre d'attente.
+      if (cfg.hist_sub_enabled && cfg.hist_sub_n > 0
+          && Array.isArray(cfg.hist_sub_rules) && cfg.hist_sub_rules.length > 0) {
+        const _hsN   = Math.max(1, cfg.hist_sub_n);
+        const _hsHist = (state.attenteHistory || []).slice(-_hsN);
+        if (_hsHist.length >= _hsN) {
+          const _hsRule = cfg.hist_sub_rules.find(r => r && r.source === ps);
+          if (_hsRule && Array.isArray(_hsRule.targets) && _hsRule.targets.length > 0) {
+            const _hsHand = _hsRule.hand || cfg.hand || 'joueur';
+            // Vérifie si le costume prédit est apparu dans AU MOINS 1 des derniers jeux
+            const _hsPresent = _hsHist.some(e => !_isAbsent(e, ps, _hsHand));
+            if (_hsPresent) {
+              let _hsNew;
+              if ((_hsRule.order || 'aleatoire') === 'sequence') {
+                if (!state.histSubSeqIdx) state.histSubSeqIdx = {};
+                const _seqK = String(ps);
+                const _seqI = (state.histSubSeqIdx[_seqK] || 0) % _hsRule.targets.length;
+                state.histSubSeqIdx[_seqK] = _seqI + 1;
+                _hsNew = _hsRule.targets[_seqI];
+              } else {
+                _hsNew = _hsRule.targets[Math.floor(Math.random() * _hsRule.targets.length)];
+              }
+              console.log(`[${channelId}] [HistSub] ${SUIT_DISPLAY[ps]||ps} présent dans les ${_hsN} derniers jeux (${_hsHand}) → substitution → ${SUIT_DISPLAY[_hsNew]||_hsNew}`);
+              ps = _hsNew;
+            } else {
+              console.log(`[${channelId}] [HistSub] ${SUIT_DISPLAY[ps]||ps} absent des ${_hsN} derniers jeux → costume conservé`);
+            }
+          }
+        } else {
+          console.log(`[${channelId}] [HistSub] Historique insuffisant (${_hsHist.length}/${_hsN}) → substitution ignorée`);
         }
       }
 
@@ -3426,64 +3555,99 @@ class Engine {
       }
 
     } else if (mode === 'combine_carte') {
-      // ── MODE COMBINÉ CARTE ── Positions 1+2 de la main choisie ───────────
-      // Lit le costume pos 1 (index 0) et pos 2 (index 1) de cc_hand.
-      // Cherche dans cc_combinations la règle { pos1, pos2, predict }.
-      // Si trouvée → prédit le costume configuré. Pas de seuil B ni mapping.
-      // cc_limit : tracking intégré dans le callback _resolvePending commun.
+      // ── MODE COMBINÉ CARTE ── ─────────────────────────────────────────────
+      // Deux sous-modes coexistent dans cc_combinations :
+      //   • Nouveau  — trigger_specs[] : combinaison libre rang/costume
+      //                predict_nul     : toute catégorie NUL (costumes, distrib…)
+      //   • Héritage — pos1/pos2       : costumes exacts cartes 1 et 2 uniquement
+      //                predict_suits   : liste de costumes en rotation
+      // La première règle trigger_specs qui correspond gagne et court-circuite
+      // la vérification héritage. cc_limit reste commun aux deux.
       // ─────────────────────────────────────────────────────────────────────
 
-      // ── Vérifier si on est en mode pause (skip 1 jeu) ──────────────────
       if (state._ccSkipNext) {
         state._ccSkipNext = false;
         console.log(`[${channelId}] [Combiné Carte] ⏭ Jeu sauté (pause après limite) — prochaine prédiction reprise`);
       } else {
         const ccCards  = (cfg.cc_hand === 'banquier' ? bCards : pCards) || [];
-        const ccCard1  = ccCards[0];
-        const ccCard2  = ccCards[1];
-        if (ccCard1 && ccCard2) {
-          const ccS1 = normalizeSuit(ccCard1.S || '');
-          const ccS2 = normalizeSuit(ccCard2.S || '');
-          if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
-            const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
-            const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
-            if (ccMatch) {
-              // Support multi-suit mode (predict_suits) + legacy single predict field
-              const ccSuits = Array.isArray(ccMatch.predict_suits) && ccMatch.predict_suits.length > 0
-                ? ccMatch.predict_suits.filter(s => ALL_SUITS.includes(s))
-                : (ALL_SUITS.includes(ccMatch.predict) ? [ccMatch.predict] : []);
-              if (ccSuits.length > 0) {
-                const ccMode     = ccMatch.predict_mode || 'ordre';
-                const comboKey   = `${ccMatch.pos1}_${ccMatch.pos2}`;
-                if (!state._ccOrderState) state._ccOrderState = {};
-                if (!state._ccOrderState[comboKey]) state._ccOrderState[comboKey] = { idx: 0, counts: null };
-                const cState = state._ccOrderState[comboKey];
-                let chosenRaw;
-                if (ccMode === 'aleatoire') {
-                  // Tirage aléatoire parmi les costumes définis
-                  chosenRaw = ccSuits[Math.floor(Math.random() * ccSuits.length)];
-                } else if (ccMode === 'nombre_fois') {
-                  // Chaque costume prédit N fois avant passage au suivant
-                  const defCounts = Array.isArray(ccMatch.predict_counts) && ccMatch.predict_counts.length === ccSuits.length
-                    ? ccMatch.predict_counts.map(c => Math.max(1, parseInt(c) || 1))
-                    : ccSuits.map(() => 1);
-                  if (!Array.isArray(cState.counts) || cState.counts.length !== ccSuits.length) {
-                    cState.counts = [...defCounts];
+        const ccCombos = Array.isArray(cfg.cc_combinations) ? cfg.cc_combinations : [];
+
+        // ── NOUVEAU : trigger_specs (rang + costume libres) ─────────────────
+        // Construit des ensembles pour matching O(1)
+        const _tRanks    = new Set(ccCards.map(cd => normalizeRank(cd?.R ?? '')).filter(r => r));
+        const _tSuits    = new Set(ccCards.map(cd => normalizeSuit(cd?.S ?? '')).filter(s => ALL_SUITS.includes(s)));
+        const _tSpecific = new Set(ccCards.map(cd => {
+          const r = normalizeRank(cd?.R ?? '');
+          const s = normalizeSuit(cd?.S ?? '');
+          return (r && ALL_SUITS.includes(s)) ? `${r}|${s}` : null;
+        }).filter(Boolean));
+
+        let _specEmitted = false;
+        for (const _c of ccCombos) {
+          if (!Array.isArray(_c.trigger_specs) || _c.trigger_specs.length === 0) continue;
+          if (!_c.predict_nul) continue;
+          const _allMatch = _c.trigger_specs.every(spec => {
+            if (!spec) return false;
+            const sr = spec.rank, ss = spec.suit;
+            if (sr && ss) return _tSpecific.has(`${sr}|${ss}`);
+            if (sr)       return _tRanks.has(sr);
+            if (ss)       return _tSuits.has(ss);
+            return false;
+          });
+          if (_allMatch) {
+            const _predicted  = _c.predict_nul;
+            const _ccPs       = resolvePredictedSuit(_predicted) || _predicted;
+            const _specLabel  = _c.trigger_specs.map(s => `${s.rank || ''}${s.suit || ''}`).join('+');
+            console.log(`[${channelId}] [Combiné Carte+] Trigger [${_specLabel}] → prédit "${_predicted}" pour #${gn + offset}`);
+            await emitPrediction(gn + offset, _ccPs, _predicted, { force: true });
+            _specEmitted = true;
+            break; // première correspondance gagne
+          }
+        }
+
+        // ── HÉRITAGE : pos1/pos2 (costumes cartes 1 et 2 uniquement) ───────
+        if (!_specEmitted) {
+          const ccCard1  = ccCards[0];
+          const ccCard2  = ccCards[1];
+          if (ccCard1 && ccCard2) {
+            const ccS1 = normalizeSuit(ccCard1.S || '');
+            const ccS2 = normalizeSuit(ccCard2.S || '');
+            if (ALL_SUITS.includes(ccS1) && ALL_SUITS.includes(ccS2)) {
+              const ccMatch  = ccCombos.find(c => c.pos1 === ccS1 && c.pos2 === ccS2);
+              if (ccMatch) {
+                const ccSuits = Array.isArray(ccMatch.predict_suits) && ccMatch.predict_suits.length > 0
+                  ? ccMatch.predict_suits.filter(s => ALL_SUITS.includes(s))
+                  : (ALL_SUITS.includes(ccMatch.predict) ? [ccMatch.predict] : []);
+                if (ccSuits.length > 0) {
+                  const ccMode   = ccMatch.predict_mode || 'ordre';
+                  const comboKey = `${ccMatch.pos1}_${ccMatch.pos2}`;
+                  if (!state._ccOrderState) state._ccOrderState = {};
+                  if (!state._ccOrderState[comboKey]) state._ccOrderState[comboKey] = { idx: 0, counts: null };
+                  const cState = state._ccOrderState[comboKey];
+                  let chosenRaw;
+                  if (ccMode === 'aleatoire') {
+                    chosenRaw = ccSuits[Math.floor(Math.random() * ccSuits.length)];
+                  } else if (ccMode === 'nombre_fois') {
+                    const defCounts = Array.isArray(ccMatch.predict_counts) && ccMatch.predict_counts.length === ccSuits.length
+                      ? ccMatch.predict_counts.map(c => Math.max(1, parseInt(c) || 1))
+                      : ccSuits.map(() => 1);
+                    if (!Array.isArray(cState.counts) || cState.counts.length !== ccSuits.length) {
+                      cState.counts = [...defCounts];
+                    }
+                    let foundIdx = cState.counts.findIndex(c => c > 0);
+                    if (foundIdx === -1) { cState.counts = [...defCounts]; foundIdx = 0; }
+                    chosenRaw = ccSuits[foundIdx];
+                    cState.counts[foundIdx]--;
+                  } else {
+                    const idx = (cState.idx || 0) % ccSuits.length;
+                    chosenRaw = ccSuits[idx];
+                    cState.idx = (idx + 1) % ccSuits.length;
                   }
-                  let foundIdx = cState.counts.findIndex(c => c > 0);
-                  if (foundIdx === -1) { cState.counts = [...defCounts]; foundIdx = 0; }
-                  chosenRaw = ccSuits[foundIdx];
-                  cState.counts[foundIdx]--;
-                } else {
-                  // Par ordre (défaut) : rotation séquentielle
-                  const idx = (cState.idx || 0) % ccSuits.length;
-                  chosenRaw = ccSuits[idx];
-                  cState.idx = (idx + 1) % ccSuits.length;
-                }
-                const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
-                if (ccPs) {
-                  console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
-                  await emitPrediction(gn + offset, ccPs, chosenRaw);
+                  const ccPs = resolvePredictedSuit(chosenRaw) || chosenRaw;
+                  if (ccPs) {
+                    console.log(`[${channelId}] [Combiné Carte] Pos1=${ccS1} Pos2=${ccS2} mode=${ccMode} → prédit ${chosenRaw} jeu #${gn + offset}`);
+                    await emitPrediction(gn + offset, ccPs, chosenRaw, { force: true });
+                  }
                 }
               }
             }
@@ -4477,28 +4641,67 @@ class Engine {
         for (let rIdx = 0; rIdx < nulRules.length; rIdx++) {
           const rule = nulRules[rIdx];
           if (!rule || !rule.trigger || !handCats.has(rule.trigger)) continue;
-          if (!Array.isArray(rule.targets) || rule.targets.length === 0) continue;
 
-          const targetGn = gn + offset;
+          // ── Vérification : la règle a une condition cond_cat, des conditions[] ou des cibles ──
+          const _conditions = Array.isArray(rule.conditions) ? rule.conditions.filter(c => c && c.predict) : [];
+          const _hasConditions = _conditions.length > 0;
+          const _hasTargets    = Array.isArray(rule.targets) && rule.targets.length > 0;
+          const _hasCondCat    = !!rule.cond_cat && (
+            (Array.isArray(rule.predict_si) && rule.predict_si.length > 0) ||
+            (Array.isArray(rule.predict_sinon) && rule.predict_sinon.length > 0)
+          );
+          if (!_hasCondCat && !_hasConditions && !_hasTargets) continue;
+
+          const targetGn  = gn + offset;
           const triggerKey = `${gn}_i${rIdx}_${rule.trigger}`;
           if (state.nulTriggered.has(triggerKey)) continue;
           if (state.pending[String(targetGn)]) continue;
 
-          // Calcul du choix SANS muter l'état — l'état n'est avancé qu'après confirmation
-          // de l'émission (évite de perdre un tour de séquence si emitPrediction est bloqué).
-          let chosen;
+          // ── Détermination de la cible ──────────────────────────────────────
+          let chosen = null;
           let _seqKey, _nextSeqIdx;
-          if (rule.ordre === 'sequence') {
+
+          if (_hasCondCat) {
+            // ── Système Condition Comptages (cond_cat + SI / SI NON) ──────────
+            const _ctx = buildComptagesCtx(pCards, bCards, winner);
+            const _condResult = evalComptagesCond(rule.cond_cat, rule.cond_param, _ctx);
+            const _pool = _condResult ? (rule.predict_si || []) : (rule.predict_sinon || []);
+            if (_pool.length > 0) {
+              chosen = _pool[Math.floor(Math.random() * _pool.length)];
+              const _branche = _condResult ? 'SI ✅' : 'SI NON ❌';
+              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} (${_branche}) → prédit "${chosen}" pour #${targetGn}`);
+            } else {
+              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} → pool vide (${_condResult ? 'SI' : 'SI NON'}) → pas de prédiction`);
+              continue;
+            }
+          } else if (_hasConditions) {
+            // ── Compat : conditions[] (Si catégorie NUL → prédit catégorie NUL) ──
+            for (const cond of _conditions) {
+              if (!cond.predict) continue;
+              if (cond.when === '*' || handCats.has(cond.when)) {
+                chosen = cond.predict;
+                const whenLabel = cond.when === '*' ? '★ Toujours' : cond.when;
+                console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | Si "${whenLabel}" → prédit "${chosen}" pour #${targetGn}`);
+                break;
+              }
+            }
+            if (!chosen) {
+              console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | aucune condition ne correspond — pas de prédiction`);
+              continue;
+            }
+          } else if (rule.ordre === 'sequence') {
+            // Compat ancien système targets[] + séquence
             _seqKey = `r${rIdx}_${rule.trigger}`;
             const idx = (state.nulSeqIdx[_seqKey] || 0) % rule.targets.length;
             chosen = rule.targets[idx];
             _nextSeqIdx = idx + 1;
           } else {
+            // Compat ancien système targets[] + aléatoire
             chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
           }
 
-          const ordreLabel = rule.ordre === 'sequence' ? 'séquence' : 'aléatoire';
-          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} déclencheur="${rule.trigger}" | ${ordreLabel} → tente "${chosen}" pour #${targetGn}`);
+          const _modeLabel = _hasConditions ? 'conditions' : (rule.ordre === 'sequence' ? 'séquence' : 'aléatoire');
+          console.log(`[${channelId}] [MatchNul Motifs] Jeu #${gn} trigger="${rule.trigger}" | ${_modeLabel} → tente "${chosen}" pour #${targetGn}`);
           // Passe rule.trigger comme suit déclencheur réel (pas chosen) pour que les
           // exceptions évaluent le bon costume/catégorie déclencheur.
           // Passe rule.hand pour que la résolution costume vérifie uniquement
@@ -5282,21 +5485,10 @@ class Engine {
         // T001 : ignorer les jeux dont la main n'est pas encore complète
         // (min 2 cartes joueur + 2 cartes banquier = main minimale valide en Baccarat)
         if (game.player_cards.length < 2 || game.banker_cards.length < 2) continue;
-        if (!suits.length && !bSuits.length) continue;
-
-        // ── Inférence du gagnant depuis les scores quand l'API ne le fournit pas ──
-        // L'API 1xBet peut terminer un jeu via game.F ou sc.CPS='Match finished' sans
-        // inclure la clé S='Tie'/'Win1'/'Win2' → game.winner serait null.
-        // En Baccarat le gagnant est toujours déductible des scores : P=B → Tie.
-        let gameWinner = game.winner || null;
-        if (!gameWinner) {
-          const _pScore = baccaratHandScore(game.player_cards  || []);
-          const _bScore = baccaratHandScore(game.banker_cards  || []);
-          if (_pScore !== null && _bScore !== null) {
-            if (_pScore === _bScore) gameWinner = 'Tie';
-            else gameWinner = _pScore > _bScore ? 'Player' : 'Banker';
-          }
-        }
+        // Ne sauter que si aucun costume ET aucun vainqueur (jeu vraiment vide).
+        // Si winner est connu (Tie/Player/Banker), le mode nul_pattern doit pouvoir
+        // traiter le jeu même quand les costumes ne sont pas reconnus.
+        if (!suits.length && !bSuits.length && !game.winner) continue;
 
         // ── Détection jeu #1 → reset complet (nouveau jour / minuit) ─────────
         // CRITIQUE : cette détection est VOLONTAIREMENT hors du bloc
@@ -5329,15 +5521,8 @@ class Engine {
                 const rSuits  = extractSuits(rg.player_cards  || []);
                 const rbSuits = extractSuits(rg.banker_cards  || []);
                 if (!rSuits.length && !rbSuits.length) continue;
-                // Inférer le gagnant si absent
-                let rgWinner = rg.winner || null;
-                if (!rgWinner) {
-                  const _rp = baccaratHandScore(rg.player_cards || []);
-                  const _rb = baccaratHandScore(rg.banker_cards || []);
-                  if (_rp !== null && _rb !== null) rgWinner = _rp === _rb ? 'Tie' : _rp > _rb ? 'Player' : 'Banker';
-                }
                 console.log(`[Engine] ✅ [Récupéré] Traitement jeu #${rg.game_number} | P:${rSuits.join(',') || '—'} B:${rbSuits.join(',') || '—'}`);
-                await this.processGame(rg.game_number, rSuits, rbSuits, rg.player_cards, rg.banker_cards, rgWinner);
+                await this.processGame(rg.game_number, rSuits, rbSuits, rg.player_cards, rg.banker_cards, rg.winner || null);
                 if (rg.game_number > (this.maxProcessedGame || 0)) this.maxProcessedGame = rg.game_number;
               }
               // Si le re-fetch a tout récupéré, pas besoin de reset
@@ -5350,15 +5535,25 @@ class Engine {
               this._resetCountersOnGap(fromGn, toGn);
             }
           }
-          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${gameWinner || '?'}`);
+          console.log(`[Engine] ✅ Traitement jeu #${game.game_number} | P:${suits.join(',') || '—'} B:${bSuits.join(',') || '—'} | gagnant: ${game.winner || '?'}`);
           hadNew = true;
+        }
+        // Calculer le vainqueur depuis les scores baccarat si absent de l'API
+        // (cas fréquent pour les matchs nuls : phase='Tie' sans winner dans ScS)
+        let gameWinner = game.winner || null;
+        if (!gameWinner && game.player_cards.length >= 2 && game.banker_cards.length >= 2) {
+          const _gpS = baccaratHandScore(game.player_cards);
+          const _gbS = baccaratHandScore(game.banker_cards);
+          if (_gpS !== null && _gbS !== null) {
+            gameWinner = _gpS > _gbS ? 'Player' : _gbS > _gpS ? 'Banker' : 'Tie';
+          }
         }
         await this.processGame(game.game_number, suits, bSuits, game.player_cards, game.banker_cards, gameWinner);
         // Mise à jour compteurs globaux / écarts : UNE SEULE FOIS par jeu réellement nouveau
         if (isNewGame) {
           // Compteur instantané de costumes (suit-counter-service)
           // extractSuitsAll : sans déduplication → 3 trèfles = +3 (et non +1)
-          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards), game.player_cards || [], game.banker_cards || [], gameWinner); } catch {}
+          try { require('./suit-counter-service').onGameFinished(game.game_number, extractSuitsAll(game.player_cards), extractSuitsAll(game.banker_cards), game.player_cards || [], game.banker_cards || [], game.winner || null); } catch {}
           // Compteurs d'écarts (suits / victoire / parité / distribution / cartes / scores)
           try { require('./comptages').onFinishedGame(game); }
           catch (e) { console.warn(`[Comptages] échec onFinishedGame(#${game.game_number}) : ${e?.message || e}`); }

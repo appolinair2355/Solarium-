@@ -59,7 +59,7 @@ function _onFailure(msg) {
 
 // ── Connexion ────────────────────────────────────────────────────────
 
-const DEFAULT_RENDER_URL = 'postgresql://sossou_user:jpq5vOtf1RwtvT7Znlu41dyFj7JSuBKd@dpg-d7nru8iqqhas7384b3og-a.oregon-postgres.render.com/sossou';
+const DEFAULT_RENDER_URL = process.env.RENDER_SYNC_URL || null;
 
 // ── Pool factory avec gestion d'erreurs robuste ──────────────────────
 function _createPool(url) {
@@ -130,8 +130,10 @@ async function loadRenderUrl() {
     let url = await db.getSetting('render_db_url');
     if (!url || !url.trim()) {
       url = DEFAULT_RENDER_URL;
-      await db.setSetting('render_db_url', url);
-      console.log('[RenderSync] URL par défaut configurée automatiquement');
+      if (url) {
+        await db.setSetting('render_db_url', url);
+        console.log('[RenderSync] URL par défaut configurée automatiquement');
+      }
     }
     if (url && url.trim()) {
       // ── Protection anti-boucle : si l'URL de sync == la DB principale, on désactive ──
@@ -522,10 +524,25 @@ async function syncDeleteStrategy(id) {
 // ── Sync settings clés (messages, bilan, telegram, etc.) ─────────────
 
 const SYNC_SETTINGS_KEYS = [
-  'bilan_last', 'broadcast_message', 'tg_announcements',
-  'user_messages', 'tg_msg_format', 'max_rattrapage',
-  'loss_sequences', 'default_strategies_tg', 'ui_styles', 'custom_css',
-  'bot_token', 'telegram_chat_config',
+  // Telegram & formats
+  'bot_token', 'telegram_chat_config', 'tg_announcements', 'default_strategies_tg',
+  'tg_msg_format', 'user_messages', 'broadcast_message',
+  // Routage & stratégies
+  'strategy_channel_routes', 'loss_sequences', 'strategy_promo_config',
+  // Apparence & UI
+  'ui_styles', 'custom_css',
+  // Diffusion directe (Live Broadcast)
+  'live_broadcast_targets',
+  // API Kouamé
+  'kouame_api_config', 'kouame_feed_key',
+  // Compteurs costumes (Suit Counter)
+  'suit_counter_config',
+  // Module Comptages
+  'comptages_config', 'comptages_extra_channels',
+  // Programmation bots & IA
+  'prog_ai_keys', 'prog_bots',
+  // Divers
+  'bilan_last', 'max_rattrapage', 'engine_absences', 'bot_admin_tg_id',
 ];
 
 async function syncAllSettings() {
@@ -645,7 +662,11 @@ async function handleGameOne(gameNumber) {
   if (gameNumber !== 1) { _gameOneHandled = false; return; }
   if (_gameOneHandled) return;
   _gameOneHandled = true;
-  if (!renderPool) return;
+  // Si le pool Render n'est pas encore disponible, on libère le flag pour réessayer
+  if (!renderPool) {
+    _gameOneHandled = false;
+    return;
+  }
   try {
     const r = await _query('DELETE FROM predictions_export');
     console.log(`[RenderSync] 🔄 RESET — ${r.rowCount} prédiction(s) effacée(s) — utilisateurs/stratégies conservés`);
@@ -707,6 +728,11 @@ async function clearExternalPredictions() {
   }
 }
 
+async function forceImportFromExternal() {
+  if (!renderPool) throw new Error('Base Render non connectée');
+  await _pullFromExternal();
+}
+
 module.exports = {
   loadRenderUrl,
   syncVerifiedPrediction,
@@ -726,4 +752,5 @@ module.exports = {
   testConnection,
   getRenderStats,
   isConnected,
+  forceImportFromExternal,
 };

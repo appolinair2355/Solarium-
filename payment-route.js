@@ -60,7 +60,7 @@ function fmtDate(d) {
 
 // ── Plans d'abonnement (prix de base = compte SIMPLE) ──────────────
 const BASE_PLANS = {
-  '1j':  { id: '1j',  label: '1 jour',     base_usd: 2,  duration_minutes: 24 * 60 },
+  '1j':  { id: '1j',  label: '1 jour',     base_usd: 1,  duration_minutes: 24 * 60 },
   '1s':  { id: '1s',  label: '1 semaine',  base_usd: 12, duration_minutes: 7 * 24 * 60 },
   '2s':  { id: '2s',  label: '2 semaines', base_usd: 20, duration_minutes: 14 * 24 * 60 },
   '1m':  { id: '1m',  label: '1 mois',     base_usd: 40, duration_minutes: 30 * 24 * 60 },
