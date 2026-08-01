@@ -3574,10 +3574,10 @@ class Engine {
 
         // ── NOUVEAU : trigger_specs (rang + costume libres) ─────────────────
         // Construit des ensembles pour matching O(1)
-        const _tRanks    = new Set(ccCards.map(cd => normalizeRank(cd?.R ?? '')).filter(r => r));
+        const _tRanks    = new Set(ccCards.map(cd => _normRankCptg(cd?.R ?? '')).filter(r => r));
         const _tSuits    = new Set(ccCards.map(cd => normalizeSuit(cd?.S ?? '')).filter(s => ALL_SUITS.includes(s)));
         const _tSpecific = new Set(ccCards.map(cd => {
-          const r = normalizeRank(cd?.R ?? '');
+          const r = _normRankCptg(cd?.R ?? '');
           const s = normalizeSuit(cd?.S ?? '');
           return (r && ALL_SUITS.includes(s)) ? `${r}|${s}` : null;
         }).filter(Boolean));

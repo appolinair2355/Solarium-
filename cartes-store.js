@@ -36,10 +36,16 @@ function getPool() {
 
 let initialized = false;
 let initPromise = null;
+let _lastFailAt = 0;
+const INIT_COOLDOWN_MS = 5 * 60 * 1000; // 5 min entre deux tentatives
 
 async function init() {
   if (initialized) return;
   if (initPromise) return initPromise;
+  // Ne pas retenter si le dernier échec date de moins de 5 min
+  if (_lastFailAt && Date.now() - _lastFailAt < INIT_COOLDOWN_MS) {
+    throw new Error('CartesStore indisponible (cooldown après échec — DB cartes inaccessible)');
+  }
 
   initPromise = (async () => {
     const p = getPool();
@@ -78,7 +84,8 @@ async function init() {
     console.log('[CartesStore] ✅ Table cartes_jeu prête (db=baccara/Singapore)');
   })().catch((e) => {
     initPromise = null;
-    console.error('[CartesStore] ❌ init error:', e.message);
+    _lastFailAt = Date.now();
+    console.error('[CartesStore] ❌ init error:', e.message, '— prochaine tentative dans 5 min');
     throw e;
   });
   return initPromise;

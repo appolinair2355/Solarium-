@@ -3869,6 +3869,8 @@ function AdminPanel() {
     B_joueur: 5, B_banquier: 8,
     // Mode combine_carte (positions 1+2)
     cc_hand: 'joueur', cc_combinations: [],
+    // Mode nul_pattern (match nul — motifs)
+    nul_rules: [],
   };
 
   // 6 paires possibles pour le mode taux_miroir
@@ -5093,7 +5095,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], lja_enabled: s.lja_enabled ?? false, lja_nb_jeux: s.lja_nb_jeux ?? 3, lja_rules: s.lja_rules || [] });
+    setStratForm({ name: s.name, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: s.enabled, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], nul_rules: s.nul_rules || [], lja_enabled: s.lja_enabled ?? false, lja_nb_jeux: s.lja_nb_jeux ?? 3, lja_rules: s.lja_rules || [] });
     setStratOpen(true);
   };
 
@@ -5110,7 +5112,7 @@ function AdminPanel() {
       const v = s.mappings?.[suit];
       mappings[suit] = Array.isArray(v) ? [...v] : (v ? [v] : ['♥']);
     }
-    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], lja_enabled: s.lja_enabled ?? false, lja_nb_jeux: s.lja_nb_jeux ?? 3, lja_rules: s.lja_rules || [] });
+    setStratForm({ name: `Copie de ${s.name}`, threshold: s.threshold, mode: s.mode, mappings, visibility: s.visibility, enabled: false, tg_targets, stratType, exceptions, prediction_offset: s.prediction_offset || 1, hand: s.hand === 'banquier' ? 'banquier' : 'joueur', max_rattrapage: s.max_rattrapage ?? 20, tg_format: s.tg_format ?? null, mirror_pairs: normalizeMirrorPairs(s.mirror_pairs), trigger_on: s.trigger_on ?? null, trigger_strategy_id: s.trigger_strategy_id ?? '', trigger_count: s.trigger_count ?? 2, trigger_level: s.trigger_level ?? 3, strategy_type: s.strategy_type || 'simple', multi_source_ids: s.multi_source_ids || [], multi_require: s.multi_require || 'any', loss_type: s.loss_type || 'rattrapage', surveillance_rules: s.surveillance_rules || [], carte_p: s.carte_p ?? 2, carte_h: s.carte_h ?? 32, carte_ecart: s.carte_ecart ?? 5, carte_position: s.carte_position ?? 1, carte_source_hand: s.carte_source_hand || 'joueur', intelligent_window: s.intelligent_window ?? 300, intelligent_pattern: s.intelligent_pattern ?? 3, intelligent_min_count: s.intelligent_min_count ?? 3, intelligent_categories: s.intelligent_categories || [], inter_category: s.inter_category || 'costume', inter_hi: s.inter_hi ?? 2, inter_max_ecart: s.inter_max_ecart ?? 1, comptages_key: s.comptages_key || 'suit_p_heart', annonce_sequence_ids: s.annonce_sequence_ids || [], annonce_text: s.annonce_text || '', annonce_interval: s.annonce_interval ?? 60, annonce_duration: s.annonce_duration ?? 120, pred_duration_minutes: s.pred_duration_minutes ?? 0, proche: s.proche ?? 3, banker_card_count: s.banker_card_count ?? 0, fc_ecart: s.fc_ecart ?? 2, gb_source_id: String(s.gb_source_id || ''), gb_banque: s.gb_banque ?? 5000, gb_mise: s.gb_mise ?? 10, gb_taille: s.gb_taille ?? 5, gb_cote: s.gb_cote ?? 1.9, gb_max_lots: s.gb_max_lots ?? 0, gb_devise: s.gb_devise || 'USD', gb_nom_boutique: s.gb_nom_boutique || '', gb_url_site: s.gb_url_site || '', c3_b: s.c3_b ?? 4, c3_seuil3: s.c3_seuil3 ?? 3, c3_jj: s.c3_jj ?? 2, attente_enabled: s.attente_enabled ?? false, attente_option: s.attente_option ?? 1, attente_n: s.attente_n ?? 3, attente_ecart: s.attente_ecart ?? 1, attente_main: s.attente_main || 'joueur', attente1_mapping: s.attente1_mapping || null, attente2_mapping: s.attente2_mapping || null, attente3_mapping: s.attente3_mapping || null, relance_sur_perte: s.relance_sur_perte ?? false, relance_sur_perte_max: s.relance_sur_perte_max ?? 3, fn_rules: s.fn_rules || [], B_joueur: s.B_joueur ?? 5, B_banquier: s.B_banquier ?? 8, cc_hand: s.cc_hand || 'joueur', cc_combinations: s.cc_combinations || [], nul_rules: s.nul_rules || [], lja_enabled: s.lja_enabled ?? false, lja_nb_jeux: s.lja_nb_jeux ?? 3, lja_rules: s.lja_rules || [] });
     setStratOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -9287,6 +9289,7 @@ function AdminPanel() {
                     <option value="2k-3k">2️⃣3️⃣ 2k-3k Tendance (sans serpent, B1+B2 indépendants)</option>
                     <option value="surveillance_perte">🔍 Surveillance Pertes (copie pred après pertes/rattrapages)</option>
                     <option value="fin_numero">🎯 Fin de Numéro (règles par dernier chiffre du tour cible)</option>
+                    <option value="nul_pattern">🎯 Match Nul — Motifs (déclencheur → condition → prédiction)</option>
                   </select>
                   {stratForm.mode === 'lecture_passee' && (
                     <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', fontSize: 12, color: '#86efac', lineHeight: 1.7 }}>
@@ -9671,9 +9674,15 @@ function AdminPanel() {
                   {stratForm.mode === 'combine_carte' && (
                     <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(99,211,255,0.08)', border: '1px solid rgba(99,211,255,0.3)', fontSize: 12, color: '#7dd3fc', lineHeight: 1.7 }}>
                       🃏 <strong>Combiné Carte</strong> — suit les <strong>positions 1 et 2</strong> des cartes de la main choisie.<br/>
-                      Chaque jeu : les costumes de la carte #1 et de la carte #2 sont lus, puis comparés aux combinaisons configurées.<br/>
-                      Si une règle <em>Pos1 + Pos2 → costume prédit</em> correspond → prédiction émise pour le jeu suivant (+ décalage).<br/>
-                      Pas de seuil B ni de mapping — tout est défini dans les combinaisons ci-dessous.
+                      <strong>Section Costume :</strong> Pos 1 + Pos 2 (costumes) → costume prédit.<br/>
+                      <strong>Section Valeur :</strong> carte A, K, Q, J dans la main → costume prédit.
+                    </div>
+                  )}
+                  {stratForm.mode === 'nul_pattern' && (
+                    <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 8, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.35)', fontSize: 12, color: '#fde68a', lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🎯 Mode Match Nul — Motifs</div>
+                      <div>Chaque jeu terminé est analysé. Pour chaque <strong>règle</strong> dont le <strong>déclencheur</strong> correspond à la forme de la main (ex. TIE, WIN_B, P_DEUX…), une prédiction est émise pour le jeu suivant.</div>
+                      <div style={{ marginTop: 6 }}>Flux : <strong>Déclencheur trouvé</strong> → vérifier <strong>Condition (si/sinon)</strong> → émettre la <strong>Prédiction</strong>.</div>
                     </div>
                   )}
                   {stratForm.mode === 'absence_apparition' && (
@@ -10263,10 +10272,11 @@ function AdminPanel() {
                 {/* ── Combinaisons — MODE COMBINÉ CARTE ── */}
                 {stratForm.mode === 'combine_carte' && (
                   <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(99,211,255,0.05)', border: '1px solid rgba(99,211,255,0.25)' }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: '#22d3ee', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons — Pos 1 + Pos 2 → Prédiction</div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#22d3ee', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🃏 Combinaisons de Cartes</div>
 
+                    {/* Main */}
                     <div style={{ marginBottom: 14 }}>
-                      <label style={{ display: 'block', color: '#67e8f9', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🎯 Main à lire (cartes positions 1 et 2)</label>
+                      <label style={{ display: 'block', color: '#67e8f9', fontSize: 11, marginBottom: 6, fontWeight: 700 }}>🎯 Main à lire</label>
                       <div style={{ display: 'flex', gap: 8 }}>
                         {['joueur','banquier'].map(h => (
                           <button key={h} onClick={() => setStratForm(p => ({ ...p, cc_hand: h }))}
@@ -10277,40 +10287,157 @@ function AdminPanel() {
                       </div>
                     </div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      {(stratForm.cc_combinations || []).length === 0 && (
-                        <div style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', padding: '8px 0' }}>Aucune combinaison — ajoutez-en ci-dessous.</div>
+                    {/* ── SECTION VALEUR : A, K, Q, J ── */}
+                    <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(251,191,36,0.07)', borderRadius: 10, border: '1px solid rgba(251,191,36,0.3)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>🂡 Combinaisons Valeur (A / K / Q / J)</div>
+                      <div style={{ fontSize: 11, color: '#fde68a', marginBottom: 10 }}>Si la main contient une carte de cette valeur → prédiction émise.</div>
+                      {(stratForm.cc_combinations || []).filter(c => c.trigger_specs).length === 0 && (
+                        <div style={{ color: '#64748b', fontSize: 12, fontStyle: 'italic', padding: '4px 0 8px' }}>Aucune règle valeur.</div>
                       )}
-                      {(stratForm.cc_combinations || []).map((combo, idx) => (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 10px', background: 'rgba(34,211,238,0.06)', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11, color: '#64748b', minWidth: 28 }}>#{idx + 1}</span>
-                          <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 1 :</span>
-                          <select value={combo.pos1} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos1: e.target.value }; return { ...p, cc_combinations: c }; })}
-                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
-                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                          <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 2 :</span>
-                          <select value={combo.pos2} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos2: e.target.value }; return { ...p, cc_combinations: c }; })}
-                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
-                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                          <span style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700 }}>→ Prédit :</span>
-                          <select value={combo.predict} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], predict: e.target.value }; return { ...p, cc_combinations: c }; })}
-                            style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(167,139,250,0.4)', borderRadius: 6, color: '#a78bfa', fontSize: 14, fontWeight: 700 }}>
-                            {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                          <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: p.cc_combinations.filter((_, i) => i !== idx) }))}
-                            style={{ marginLeft: 'auto', padding: '4px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 12 }}>✕</button>
-                        </div>
-                      ))}
+                      {(stratForm.cc_combinations || []).map((combo, idx) => {
+                        if (!combo.trigger_specs) return null;
+                        const spec = Array.isArray(combo.trigger_specs) && combo.trigger_specs[0] ? combo.trigger_specs[0] : { rank: 'A' };
+                        return (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 10px', background: 'rgba(251,191,36,0.08)', borderRadius: 8, border: '1px solid rgba(251,191,36,0.25)', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: '#92400e', minWidth: 24 }}>V{idx+1}</span>
+                            <span style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>Valeur :</span>
+                            <select value={spec.rank || 'A'} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], trigger_specs: [{ rank: e.target.value }] }; return { ...p, cc_combinations: c }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(251,191,36,0.5)', borderRadius: 6, color: '#fbbf24', fontSize: 14, fontWeight: 700 }}>
+                              {['A','K','Q','J','10','9','8','7','6','5','4','3','2'].map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                            <span style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700 }}>→ Prédit :</span>
+                            <select value={combo.predict_nul || '♠'} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], predict_nul: e.target.value }; return { ...p, cc_combinations: c }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(167,139,250,0.4)', borderRadius: 6, color: '#a78bfa', fontSize: 14, fontWeight: 700 }}>
+                              {['♠','♥','♦','♣','WIN_P','WIN_B','TIE','P_DEUX','B_DEUX','P_TROIS','B_TROIS'].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: p.cc_combinations.filter((_, i) => i !== idx) }))}
+                              style={{ marginLeft: 'auto', padding: '4px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                          </div>
+                        );
+                      })}
+                      <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { trigger_specs: [{ rank: 'A' }], predict_nul: '♠' }] }))}
+                        style={{ padding: '7px 14px', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 8, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                        ＋ Ajouter règle Valeur
+                      </button>
                     </div>
 
-                    <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { pos1: '♠', pos2: '♥', predict: '♦' }] }))}
-                      style={{ padding: '8px 16px', background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 8, color: '#22d3ee', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                      ＋ Ajouter une combinaison
+                    {/* ── SECTION COSTUME : Pos 1 + Pos 2 ── */}
+                    <div style={{ padding: '12px 14px', background: 'rgba(34,211,238,0.04)', borderRadius: 10, border: '1px solid rgba(34,211,238,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#22d3ee', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>🃏 Combinaisons Costume (Pos 1 + Pos 2)</div>
+                      <div style={{ fontSize: 11, color: '#7dd3fc', marginBottom: 10 }}>Costumes des cartes 1 et 2 → prédiction émise.</div>
+                      {(stratForm.cc_combinations || []).filter(c => !c.trigger_specs).length === 0 && (
+                        <div style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', padding: '4px 0 8px' }}>Aucune combinaison costume.</div>
+                      )}
+                      {(stratForm.cc_combinations || []).map((combo, idx) => {
+                        if (combo.trigger_specs) return null;
+                        return (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 10px', background: 'rgba(34,211,238,0.06)', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: '#64748b', minWidth: 28 }}>#{idx+1}</span>
+                            <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 1 :</span>
+                            <select value={combo.pos1 || '♠'} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos1: e.target.value }; return { ...p, cc_combinations: c }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
+                              {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>Pos 2 :</span>
+                            <select value={combo.pos2 || '♥'} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], pos2: e.target.value }; return { ...p, cc_combinations: c }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
+                              {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <span style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700 }}>→ Prédit :</span>
+                            <select value={combo.predict || '♦'} onChange={e => setStratForm(p => { const c = [...p.cc_combinations]; c[idx] = { ...c[idx], predict: e.target.value }; return { ...p, cc_combinations: c }; })}
+                              style={{ padding: '5px 8px', background: '#0f172a', border: '1px solid rgba(167,139,250,0.4)', borderRadius: 6, color: '#a78bfa', fontSize: 14, fontWeight: 700 }}>
+                              {['♠','♥','♦','♣'].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: p.cc_combinations.filter((_, i) => i !== idx) }))}
+                              style={{ marginLeft: 'auto', padding: '4px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                          </div>
+                        );
+                      })}
+                      <button onClick={() => setStratForm(p => ({ ...p, cc_combinations: [...(p.cc_combinations || []), { pos1: '♠', pos2: '♥', predict: '♦' }] }))}
+                        style={{ padding: '7px 14px', background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.4)', borderRadius: 8, color: '#22d3ee', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                        ＋ Ajouter règle Costume
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Mode nul_pattern : Match Nul — Motifs ── */}
+                {stratForm.mode === 'nul_pattern' && (
+                  <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 12, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.3)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 }}>🎯 Règles Déclencheur → Prédiction</div>
+                    {(stratForm.nul_rules || []).length === 0 && (
+                      <div style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', padding: '8px 0 12px' }}>Aucune règle — ajoutez-en ci-dessous.</div>
+                    )}
+                    {(stratForm.nul_rules || []).map((rule, rIdx) => (
+                      <div key={rIdx} style={{ marginBottom: 12, padding: '12px 14px', background: 'rgba(251,191,36,0.06)', borderRadius: 10, border: '1px solid rgba(251,191,36,0.25)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                          <span style={{ fontSize: 11, color: '#92400e', fontWeight: 700 }}>Règle {rIdx+1}</span>
+                          <button onClick={() => setStratForm(p => ({ ...p, nul_rules: p.nul_rules.filter((_, i) => i !== rIdx) }))}
+                            style={{ marginLeft: 'auto', padding: '3px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 11 }}>✕ Supprimer</button>
+                        </div>
+                        {/* Trigger */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                          <span style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, minWidth: 110 }}>⚡ Déclencheur :</span>
+                          <select value={rule.trigger || 'TIE'} onChange={e => setStratForm(p => { const r = [...p.nul_rules]; r[rIdx] = { ...r[rIdx], trigger: e.target.value }; return { ...p, nul_rules: r }; })}
+                            style={{ padding: '6px 10px', background: '#0f172a', border: '1px solid rgba(251,191,36,0.5)', borderRadius: 6, color: '#fbbf24', fontSize: 13, fontWeight: 700 }}>
+                            <option value="TIE">TIE — Match nul</option>
+                            <option value="WIN_P">WIN_P — Joueur gagne</option>
+                            <option value="WIN_B">WIN_B — Banquier gagne</option>
+                            <option value="distrib">distrib — Distribution 2v2</option>
+                            <option value="P_DEUX">P_DEUX — Joueur 2 cartes</option>
+                            <option value="B_DEUX">B_DEUX — Banquier 2 cartes</option>
+                            <option value="P_TROIS">P_TROIS — Joueur 3 cartes</option>
+                            <option value="B_TROIS">B_TROIS — Banquier 3 cartes</option>
+                            <option value="DEUX_TROIS">DEUX_TROIS — J2/B3</option>
+                            <option value="TROIS_DEUX">TROIS_DEUX — J3/B2</option>
+                            <option value="TROIS_TROIS">TROIS_TROIS — J3/B3</option>
+                            <option value="PAIR_P">PAIR_P — Score J pair</option>
+                            <option value="IMPAIR_P">IMPAIR_P — Score J impair</option>
+                            <option value="♠">♠ — Pique présent</option>
+                            <option value="♥">♥ — Cœur présent</option>
+                            <option value="♦">♦ — Carreau présent</option>
+                            <option value="♣">♣ — Trèfle présent</option>
+                          </select>
+                        </div>
+                        {/* Targets */}
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ color: '#a78bfa', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>🎯 Prédiction(s) — cliquez pour activer :</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {['♠','♥','♦','♣','WIN_P','WIN_B','TIE','P_DEUX','B_DEUX','P_TROIS','B_TROIS','distrib'].map(cat => {
+                              const targets = Array.isArray(rule.targets) ? rule.targets : [];
+                              const isAct = targets.includes(cat);
+                              return (
+                                <button key={cat} onClick={() => setStratForm(p => {
+                                  const r = [...p.nul_rules];
+                                  const cur = Array.isArray(r[rIdx].targets) ? [...r[rIdx].targets] : [];
+                                  r[rIdx] = { ...r[rIdx], targets: isAct ? cur.filter(t => t !== cat) : [...cur, cat] };
+                                  return { ...p, nul_rules: r };
+                                })}
+                                  style={{ padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, border: isAct ? '2px solid rgba(167,139,250,0.8)' : '1px solid rgba(167,139,250,0.25)', background: isAct ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.03)', color: isAct ? '#a78bfa' : '#64748b' }}>
+                                  {cat}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {/* Ordre */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ color: '#67e8f9', fontSize: 12, fontWeight: 700 }}>🔄 Ordre :</span>
+                          {['sequence','aleatoire'].map(o => (
+                            <button key={o} onClick={() => setStratForm(p => { const r = [...p.nul_rules]; r[rIdx] = { ...r[rIdx], ordre: o }; return { ...p, nul_rules: r }; })}
+                              style={{ padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: (rule.ordre || 'aleatoire') === o ? '2px solid rgba(34,211,238,0.8)' : '1px solid rgba(34,211,238,0.2)', background: (rule.ordre || 'aleatoire') === o ? 'rgba(34,211,238,0.15)' : 'rgba(255,255,255,0.02)', color: (rule.ordre || 'aleatoire') === o ? '#22d3ee' : '#475569' }}>
+                              {o === 'sequence' ? '🔢 Séquence' : '🎲 Aléatoire'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={() => setStratForm(p => ({ ...p, nul_rules: [...(p.nul_rules || []), { trigger: 'TIE', targets: ['♠'], ordre: 'aleatoire' }] }))}
+                      style={{ padding: '8px 16px', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 8, color: '#fbbf24', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                      ＋ Ajouter une règle
                     </button>
-                    <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(34,211,238,0.07)', borderRadius: 7, fontSize: 10, color: '#67e8f9' }}>
-                      💡 Ex : Pos1=♣ + Pos2=♥ → ♠ · Pos1=♦ + Pos2=♦ → ♠. Les positions sont fixes (carte 1 et carte 2 de la main choisie à chaque jeu).
+                    <div style={{ marginTop: 10, padding: '7px 10px', background: 'rgba(251,191,36,0.07)', borderRadius: 7, fontSize: 10, color: '#fde68a' }}>
+                      💡 Le déclencheur est vérifié sur chaque jeu terminé. Quand il correspond, la prédiction choisie est émise pour le jeu +Décalage.
                     </div>
                   </div>
                 )}

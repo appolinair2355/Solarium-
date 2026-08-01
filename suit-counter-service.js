@@ -101,6 +101,12 @@ let _configLoaded       = false;
 let _lastConfigReloadMs = 0;  // timestamp du dernier rechargement depuis la DB
 let _schedulerRunning   = false;  // verrou anti-reentrancy
 
+// ─── Compteur global des jeux traités (indépendant de la configuration) ──────
+// Permet d'afficher "N jeux traités depuis le démarrage" même si aucun
+// compteur n'est configuré dans la DB.
+let _globalGameCount   = 0;
+let _globalLastGameGn  = null;
+
 // ─── Fabrique d'état vierge pour un compteur ──────────────────────────────────
 function _makeState() {
   const scoreKeys = {};
@@ -238,6 +244,10 @@ function onGameFinished(gn, pSuits, bSuits, pCards, bCards, winner) {
   const np = _countCards(pCards);
   const nb = _countCards(bCards);
   const w  = winner || '';
+
+  // Compteur global — toujours incrémenté, même si aucun compteur configuré
+  _globalGameCount++;
+  _globalLastGameGn = gn;
 
   for (const counter of _countersList) {
     const s = _countersState[counter.id];
@@ -792,7 +802,8 @@ function getCounters() {
       valeur_joueur: {}, valeur_banquier: {},
       parite_joueur: { pair: 0, impair: 0 }, parite_banquier: { pair: 0, impair: 0 },
       score_joueur: {}, score_banquier: {},
-      meta: { game_count: 0, last_game_number: null },
+      // Utilise le compteur global si aucun compteur n'est configuré
+      meta: { game_count: _globalGameCount, last_game_number: _globalLastGameGn },
     };
   }
   const s = _countersState[firstId];
