@@ -7,7 +7,7 @@
 const DEFAULT_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a/bonjour';
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
-const CARDS_PG_URL = 'postgresql://baccara_user:SwE1EncEYjsdeIxn2qYoLqJAEMEnY5kX@dpg-d8f2cnuq1p3s73dfj3c0-a.singapore-postgres.render.com/baccara';
+const CARDS_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a.oregon-postgres.render.com/bonjour';
 
 require('dotenv').config();
 const DB_URL = process.env.DATABASE_URL || DEFAULT_PG_URL;

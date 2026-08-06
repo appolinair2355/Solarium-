@@ -57,6 +57,8 @@ const _MODE_EMOJIS_WIN = {
   union_enseignes:     '🤗',
   intersection:        '🫡',
   proche:              '🆒',
+  nul_pattern:         '🎯',
+  combine_carte:       '🃏',
 };
 const _MODE_EMOJIS_LOSS = {
   manquants:           '😢',
@@ -90,6 +92,8 @@ const _MODE_EMOJIS_LOSS = {
   union_enseignes:     '💊',
   intersection:        '😘',
   proche:              '😡',
+  nul_pattern:         '🤕',
+  combine_carte:       '😤',
 };
 
 // Pool pour les stratégies — UNIQUEMENT emojis Telegram valides

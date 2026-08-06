@@ -4652,10 +4652,9 @@ class Engine {
           );
           if (!_hasCondCat && !_hasConditions && !_hasTargets) continue;
 
-          const targetGn  = gn + offset;
+          let targetGn  = gn + offset;
           const triggerKey = `${gn}_i${rIdx}_${rule.trigger}`;
           if (state.nulTriggered.has(triggerKey)) continue;
-          if (state.pending[String(targetGn)]) continue;
 
           // ── Détermination de la cible ──────────────────────────────────────
           let chosen = null;
@@ -4663,41 +4662,52 @@ class Engine {
 
           if (_hasCondCat) {
             // ── Système Condition Comptages (cond_cat + SI / SI NON) ──────────
+            // Le pending check est fait APRÈS calcul du targetGn par branche
             const _ctx = buildComptagesCtx(pCards, bCards, winner);
             const _condResult = evalComptagesCond(rule.cond_cat, rule.cond_param, _ctx);
+            // ── Décalage par branche : offset_si (condition vraie) / offset_sinon (fausse) ──
+            const _branchOff = _condResult
+              ? Math.max(1, parseInt(rule.offset_si)    || offset)
+              : Math.max(1, parseInt(rule.offset_sinon) || offset);
+            targetGn = gn + _branchOff;
+            if (state.pending[String(targetGn)]) continue;
             const _pool = _condResult ? (rule.predict_si || []) : (rule.predict_sinon || []);
             if (_pool.length > 0) {
               chosen = _pool[Math.floor(Math.random() * _pool.length)];
               const _branche = _condResult ? 'SI ✅' : 'SI NON ❌';
-              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} (${_branche}) → prédit "${chosen}" pour #${targetGn}`);
+              console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} (${_branche}) | +${_branchOff} → prédit "${chosen}" pour #${targetGn}`);
             } else {
               console.log(`[${channelId}] [MatchNul CondCat] Jeu #${gn} trigger="${rule.trigger}" | cond="${rule.cond_cat}"=${_condResult} → pool vide (${_condResult ? 'SI' : 'SI NON'}) → pas de prédiction`);
               continue;
             }
-          } else if (_hasConditions) {
-            // ── Compat : conditions[] (Si catégorie NUL → prédit catégorie NUL) ──
-            for (const cond of _conditions) {
-              if (!cond.predict) continue;
-              if (cond.when === '*' || handCats.has(cond.when)) {
-                chosen = cond.predict;
-                const whenLabel = cond.when === '*' ? '★ Toujours' : cond.when;
-                console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | Si "${whenLabel}" → prédit "${chosen}" pour #${targetGn}`);
-                break;
-              }
-            }
-            if (!chosen) {
-              console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | aucune condition ne correspond — pas de prédiction`);
-              continue;
-            }
-          } else if (rule.ordre === 'sequence') {
-            // Compat ancien système targets[] + séquence
-            _seqKey = `r${rIdx}_${rule.trigger}`;
-            const idx = (state.nulSeqIdx[_seqKey] || 0) % rule.targets.length;
-            chosen = rule.targets[idx];
-            _nextSeqIdx = idx + 1;
           } else {
-            // Compat ancien système targets[] + aléatoire
-            chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
+            // Pour les modes non-condCat (conditions[], targets[]) : pending check avec targetGn par défaut
+            if (state.pending[String(targetGn)]) continue;
+            if (_hasConditions) {
+              // ── Compat : conditions[] (Si catégorie NUL → prédit catégorie NUL) ──
+              for (const cond of _conditions) {
+                if (!cond.predict) continue;
+                if (cond.when === '*' || handCats.has(cond.when)) {
+                  chosen = cond.predict;
+                  const whenLabel = cond.when === '*' ? '★ Toujours' : cond.when;
+                  console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | Si "${whenLabel}" → prédit "${chosen}" pour #${targetGn}`);
+                  break;
+                }
+              }
+              if (!chosen) {
+                console.log(`[${channelId}] [MatchNul Condition] Jeu #${gn} trigger="${rule.trigger}" | aucune condition ne correspond — pas de prédiction`);
+                continue;
+              }
+            } else if (rule.ordre === 'sequence') {
+              // Compat ancien système targets[] + séquence
+              _seqKey = `r${rIdx}_${rule.trigger}`;
+              const idx = (state.nulSeqIdx[_seqKey] || 0) % rule.targets.length;
+              chosen = rule.targets[idx];
+              _nextSeqIdx = idx + 1;
+            } else {
+              // Compat ancien système targets[] + aléatoire
+              chosen = rule.targets[Math.floor(Math.random() * rule.targets.length)];
+            }
           }
 
           const _modeLabel = _hasConditions ? 'conditions' : (rule.ordre === 'sequence' ? 'séquence' : 'aléatoire');
@@ -4720,6 +4730,59 @@ class Engine {
           if (rule.ordre === 'sequence') {
             state.nulSeqIdx[_seqKey] = _nextSeqIdx;
           }
+        }
+      }
+
+    } else if (mode === 'serie_numerotee') {
+      // ── MODE SÉRIE NUMÉROTÉE ────────────────────────────────────────────────────
+      // Chaque costume a un numéro de départ et un pas (intervalle fixe).
+      // Quand le live arrive à (cible - 2), on émet la prédiction pour la cible.
+      // Formule : cible = start + n × step
+      //   → vérifier si (gn + 2 - start) % step === 0  et  gn + 2 >= start
+      // Option serie_num_mode :
+      //   'sequential' → attend que la vérification en cours se termine avant la suivante
+      //   'all'        → prédit tous les costumes simultanément si plusieurs coïncident
+      //
+      // serie_num_items : [{ suit: '♠', start: 2, step: 3 }, ...]
+      // serie_num_mode  : 'sequential' | 'all'
+      // ────────────────────────────────────────────────────────────────────────────
+      const snItems = Array.isArray(cfg.serie_num_items) ? cfg.serie_num_items : [];
+      const snMode  = cfg.serie_num_mode || 'sequential';
+
+      if (snItems.length > 0) {
+        if (!state.snFired) state.snFired = new Set();
+
+        for (const item of snItems) {
+          if (!item || !item.suit) continue;
+          const snStart = parseInt(item.depart ?? item.start);
+          const snStep  = Math.max(1, parseInt(item.pas ?? item.step) || 3);
+          if (isNaN(snStart) || snStart < 1) continue;
+
+          const target = gn + 2;
+          if (target < snStart) continue;
+          if ((target - snStart) % snStep !== 0) continue;
+
+          // Ce costume est attendu au jeu target
+          const snKey = `${target}_${item.suit}`;
+          if (state.snFired.has(snKey)) continue;
+
+          // Mode séquentiel : bloquer si une prédiction est déjà en attente
+          if (snMode === 'sequential' && Object.keys(state.pending).length > 0) {
+            console.log(`[${channelId}] [SérieNum] #${gn} → cible #${target} ${item.suit} | bloquée (séquentiel, attente en cours)`);
+            continue;
+          }
+
+          if (state.pending[String(target)]) continue;
+
+          state.snFired.add(snKey);
+          console.log(`[${channelId}] [SérieNum] Live #${gn} → cible #${target} | ${item.suit} | départ=${snStart} pas=${snStep}`);
+          await emitPrediction(target, item.suit, item.suit, { force: snMode === 'all' });
+        }
+
+        // Nettoyage du Set si trop grand
+        if (state.snFired.size > 500) {
+          const arr = [...state.snFired];
+          state.snFired = new Set(arr.slice(arr.length - 250));
         }
       }
 

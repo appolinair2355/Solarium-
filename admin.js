@@ -544,8 +544,14 @@ function validateStrategyBody(body) {
     return null;
   }
 
+  if (mode === 'serie_numerotee') {
+    const items = Array.isArray(body.serie_num_items) ? body.serie_num_items : [];
+    if (items.length === 0) return 'Mode Série Numérotée : configurez au moins une ligne costume (départ + pas)';
+    return null;
+  }
+
   // Modes qui n'utilisent pas de seuil B — seul le mode + les paramètres dédiés comptent
-  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume'];
+  const NO_THRESHOLD_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'costume_manquant', 'surveillance_perte', 'gestion_banque', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume', 'serie_numerotee'];
 
   const CARTE_AUTO_MODES = ['carte_3_vers_2', 'carte_2_vers_3'];
   const isCarteAuto = CARTE_AUTO_MODES.includes(mode);
@@ -554,10 +560,10 @@ function validateStrategyBody(body) {
     const B = parseInt(threshold);
     if (isNaN(B) || B < 1 || B > 50) return 'Seuil B invalide (1–50)';
   }
-  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'absence_victoire_2', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'combine_carte', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'nul_pattern', 'numero_costume'];
+  const ALLOWED_MODES = ['manquants', 'apparents', 'absence_apparition', 'apparition_absence', 'absence_confirmee', 'taux_miroir', 'distribution', 'carte_3_vers_2', 'carte_2_vers_3', 'compteur_adverse', 'absence_victoire', 'absence_victoire_2', 'victoire_adverse', 'abs_3_vers_2', 'abs_3_vers_3', 'combine_carte', 'lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'nul_pattern', 'numero_costume', 'serie_numerotee'];
   if (!ALLOWED_MODES.includes(mode)) return 'Mode invalide';
   // Modes "cartes auto" : pas de mappings requis
-  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume'];
+  const NO_MAPPING_MODES = ['lecture_passee', 'intelligent_cartes', 'carte_valeur', 'union_enseignes', 'intersection', 'comptages_ecart', 'annonce_sequence', 'first_card_plus6', 'costume_manquant', 'compteur_parite', 'compteurs_absences', 'gestion_banque', 'surveillance_perte', 'pair_impair', 'carte_2v3', '2k-3k', 'fin_numero', 'absence_victoire_2', 'combine_carte', 'nul_pattern', 'numero_costume', 'serie_numerotee'];
   if (mode !== 'distribution' && !isCarteAuto && !NO_MAPPING_MODES.includes(mode)) {
     const norm = normalizeMappings(mappings);
     if (!norm) return 'Mappings invalides';
@@ -694,7 +700,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
     const isCombineCarte      = mode === 'combine_carte';
     const isNulPattern        = mode === 'nul_pattern';
     const isNumeroCostume     = mode === 'numero_costume';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume) ? null : normalizeMappings(mappings);
+    const isSerieNumerotee    = mode === 'serie_numerotee';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume || isSerieNumerotee) ? null : normalizeMappings(mappings);
     // Helpers pour normaliser les niveaux R en tableau (multi-select)
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
@@ -839,6 +846,8 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
                 predict_sinon: _predict_sinon,
                 ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
                 hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+                offset_si:     (r.offset_si !== undefined && r.offset_si !== null && r.offset_si !== '') ? Math.max(1, parseInt(r.offset_si) || 1) : undefined,
+                offset_sinon:  (r.offset_sinon !== undefined && r.offset_sinon !== null && r.offset_sinon !== '') ? Math.max(1, parseInt(r.offset_sinon) || 1) : undefined,
               };
             }).filter(r => r.trigger && (
               r.conditions.length > 0 ||
@@ -854,6 +863,21 @@ router.post('/strategies', requireAdminOrPartner, async (req, res) => {
               .map(x => ({ gn: parseInt(x && x.gn), suit: x && NUL_CATEGORY_VALUES.includes(x.suit) ? x.suit : null }))
               .filter(x => !isNaN(x.gn) && x.gn >= 1 && x.gn <= 1440 && x.suit)
               .slice(0, 500) }
+        : isSerieNumerotee
+        ? { threshold: 0, mode: 'serie_numerotee', mappings: null,
+            serie_num_mode: ['sequential','all'].includes(req.body.serie_num_mode) ? req.body.serie_num_mode : 'sequential',
+            serie_num_items: (() => {
+              const VALID_SUITS = ['♠','♥','♦','♣'];
+              return (Array.isArray(req.body.serie_num_items) ? req.body.serie_num_items : [])
+                .map(item => {
+                  if (!item || !VALID_SUITS.includes(item.suit)) return null;
+                  const dep = Math.max(1, parseInt(item.depart ?? item.start) || 1);
+                  const pas = Math.max(1, parseInt(item.pas   ?? item.step)   || 3);
+                  return { suit: item.suit, depart: dep, pas };
+                })
+                .filter(Boolean)
+                .slice(0, 4);
+            })() }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
@@ -1098,7 +1122,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
     const isCombineCarte      = mode === 'combine_carte';
     const isNulPattern        = mode === 'nul_pattern';
     const isNumeroCostume     = mode === 'numero_costume';
-    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume) ? null : normalizeMappings(mappings);
+    const isSerieNumerotee    = mode === 'serie_numerotee';
+    const normalizedMappings = (isComb || isCarteAuto || isLecturePassee || isIntelligent || isCarteValeur || isUnionEnseignes || isIntersection || isComptagesEcart || isAnnonceSequence || isFirstCardPlus6 || isCostumeManquant || isSurveillancePerte || isCompteurParite || isCompteurAbsences || isGestionBanque || isPairImpair || isCarte2v3 || is2k3k || isFinNumero || isAbsenceVictoire2 || isCombineCarte || isNulPattern || isNumeroCostume || isSerieNumerotee) ? null : normalizeMappings(mappings);
     const normLevels = (v) => {
       if (Array.isArray(v)) return v.map(n => Math.max(1, parseInt(n) || 1)).filter(n => n >= 1 && n <= 20);
       if (v != null && v !== '') return [Math.max(1, parseInt(v) || 1)];
@@ -1241,6 +1266,8 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
                 predict_sinon: _predict_sinon,
                 ordre:         r.ordre === 'sequence' ? 'sequence' : 'aleatoire',
                 hand:          (r.hand === 'joueur' || r.hand === 'banquier') ? r.hand : null,
+                offset_si:     (r.offset_si !== undefined && r.offset_si !== null && r.offset_si !== '') ? Math.max(1, parseInt(r.offset_si) || 1) : undefined,
+                offset_sinon:  (r.offset_sinon !== undefined && r.offset_sinon !== null && r.offset_sinon !== '') ? Math.max(1, parseInt(r.offset_sinon) || 1) : undefined,
               };
             }).filter(r => r.trigger && (
               r.conditions.length > 0 ||
@@ -1256,6 +1283,21 @@ router.put('/strategies/:id', requireAdminOrPartner, async (req, res) => {
               .map(x => ({ gn: parseInt(x && x.gn), suit: x && NUL_CATEGORY_VALUES.includes(x.suit) ? x.suit : null }))
               .filter(x => !isNaN(x.gn) && x.gn >= 1 && x.gn <= 1440 && x.suit)
               .slice(0, 500) }
+        : isSerieNumerotee
+        ? { threshold: 0, mode: 'serie_numerotee', mappings: null,
+            serie_num_mode: ['sequential','all'].includes(req.body.serie_num_mode) ? req.body.serie_num_mode : 'sequential',
+            serie_num_items: (() => {
+              const VALID_SUITS = ['♠','♥','♦','♣'];
+              return (Array.isArray(req.body.serie_num_items) ? req.body.serie_num_items : [])
+                .map(item => {
+                  if (!item || !VALID_SUITS.includes(item.suit)) return null;
+                  const dep = Math.max(1, parseInt(item.depart ?? item.start) || 1);
+                  const pas = Math.max(1, parseInt(item.pas   ?? item.step)   || 3);
+                  return { suit: item.suit, depart: dep, pas };
+                })
+                .filter(Boolean)
+                .slice(0, 4);
+            })() }
         : { threshold: parseInt(threshold), mode, mappings: normalizedMappings }),
       mirror_pairs,
       mirror_reset_half: req.body.mirror_reset_half === true || req.body.mirror_reset_half === 'true',
