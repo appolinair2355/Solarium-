@@ -4,7 +4,7 @@
 // ─── URL DE LA BASE DE DONNÉES PRINCIPALE ────────────────────────────────────
 // Codée en dur comme valeur par défaut. Si DATABASE_URL est défini dans
 // l'environnement (variable Render / Replit), il prend priorité.
-const DEFAULT_PG_URL = 'postgresql://carriere_user:UEnfn3QJDKcW8TVu0j2CQnNDkq3lcyLI@dpg-d9n6e4rl550s739d2fsg-a/carriere';
+const DEFAULT_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a.oregon-postgres.render.com/bonjour';
 
 // ─── URL DE LA BASE DE DONNÉES DES CARTES (lecture jeu passé) ──────────────
 const CARDS_PG_URL = 'postgresql://bonjour_user:WzeZsFKlKWU180iOFxngBEaThdG1kKUR@dpg-d962464s728c73e8p250-a.oregon-postgres.render.com/bonjour';
